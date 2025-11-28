@@ -1,24 +1,31 @@
-
 "use client";
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { 
   motion, 
-  AnimatePresence, 
-  useMotionValue, 
-  useTransform, 
-  PanInfo, 
-  animate 
+  AnimatePresence 
 } from "framer-motion";
 import { 
-  ChevronRight, X 
+  X,
+  LayoutGrid, Box, ClipboardList, ScanLine, Truck, BarChart3, History, Settings
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import type { DockItemData } from '@/hooks/use-dock';
 
-const ITEM_HEIGHT = 60; // Each row's height
+// --- CONFIG ---
+
+// CSS'teki renk sırası (nth-child mantığı)
+const BG_COLORS = [
+  "#0470fe", // Mavi
+  "#ff7675", // Kırmızımsı
+  "#1582fe", // Açık Mavi
+  "#a29bfe", // Mor
+  "#fd79a8", // Pembe
+  "#ffeaa7", // Sarı
+];
+
 
 // --- HELPERS ---
 
@@ -55,7 +62,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
     <>
       <div className="h-24 pointer-events-none" />
 
-      {/* Floating Trigger Button (Logo) */}
+      {/* FIXED TRIGGER BUTTON (LOGO) */}
       <div className="fixed bottom-8 left-0 right-0 z-40 flex justify-center pointer-events-none">
         <AnimatePresence>
           {!isOpen && (
@@ -69,24 +76,24 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
                 setIsOpen(true);
               }}
               className={cn(
-                "pointer-events-auto w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all",
+                "pointer-events-auto w-20 h-20 rounded-full flex items-center justify-center shadow-2xl transition-all z-50",
                 isDark ? "bg-black border border-white/20" : "bg-white border border-slate-200"
               )}
             >
               <img 
                 src="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG" 
                 alt="Qore" 
-                className="w-10 h-10 object-contain"
+                className="w-12 h-12 object-contain"
               />
             </motion.button>
           )}
         </AnimatePresence>
       </div>
 
-      {/* Fullscreen Overlay & Scroll Wheel */}
+      {/* FULL SCREEN MENU */}
       <AnimatePresence>
         {isOpen && (
-          <WheelOverlay 
+          <FullScreenMenu 
             items={menuItems} 
             onClose={() => setIsOpen(false)} 
             isDark={isDark} 
@@ -97,138 +104,106 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
   );
 }
 
-// --- The Main Wheel Overlay Component ---
-function WheelOverlay({ items, onClose, isDark }: { items: any[], onClose: () => void, isDark: boolean }) {
+// --- MENU IMPLEMENTATION ---
+
+function FullScreenMenu({ items, onClose, isDark }: { items: any[], onClose: () => void, isDark: boolean }) {
   const router = useRouter();
-  
-  // Y-axis motion value for the scrollable list
-  const y = useMotionValue(0);
-  
-  // Snap-to-item logic on pan end
-  const onPanEnd = (e: any, info: PanInfo) => {
-    const currentY = y.get();
-    const velocity = info.velocity.y * 0.2; // Velocity factor
-    const targetY = currentY + velocity;
-    
-    // Round to the nearest item index
-    const snapIndex = Math.round(targetY / ITEM_HEIGHT);
-    
-    // Clamp the index within the list bounds
-    const maxIndex = 0;
-    const minIndex = -(items.length - 1);
-    const clampedIndex = Math.max(minIndex, Math.min(maxIndex, snapIndex));
-    
-    const finalY = clampedIndex * ITEM_HEIGHT;
-
-    // Animate to the final snapped position
-    animate(y, finalY, {
-      type: "spring",
-      stiffness: 200,
-      damping: 30,
-      onComplete: triggerHaptic
-    });
-  };
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-end bg-black/90 backdrop-blur-md"
+      initial={{ opacity: 0, clipPath: "circle(0% at 50% 100%)" }}
+      animate={{ opacity: 1, clipPath: "circle(150% at 50% 100%)" }}
+      exit={{ opacity: 0, clipPath: "circle(0% at 50% 100%)" }}
+      transition={{ type: "spring", stiffness: 120, damping: 20 }}
+      className={cn(
+        "fixed inset-0 z-50 flex flex-col overflow-hidden",
+        isDark ? "bg-[#1a1a1a]" : "bg-[#dcd9cd]"
+      )}
     >
-      {/* Clickable area to close the overlay */}
-      <div className="flex-1 w-full" onClick={onClose} />
-
-      {/* Wheel container */}
-      <div className="relative w-full h-[350px] overflow-hidden flex flex-col items-center justify-center bg-gradient-to-b from-transparent via-black/20 to-transparent">
-        
-        {/* Selection Indicator Arrow */}
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex items-center pointer-events-none">
-            <ChevronRight className={cn("w-8 h-8 animate-pulse", isDark ? "text-cyan-400" : "text-white")} />
-        </div>
-        
-        {/* Center Highlight Bar */}
-        <div className={cn(
-            "absolute w-full h-[60px] top-1/2 -translate-y-1/2 z-0 pointer-events-none border-t border-b",
-            isDark ? "border-white/10 bg-white/5" : "border-white/20 bg-white/10"
-        )} />
-
-        {/* Scrollable List */}
-        <motion.div
-          className="cursor-grab active:cursor-grabbing touch-none z-10 py-[145px]" // Padding = (ContainerHeight - ItemHeight) / 2
-          style={{ y }}
-          onPan={(e, info) => y.set(y.get() + info.delta.y)}
-          onPanEnd={onPanEnd}
+      {/* CLOSE BUTTON */}
+      <div className="absolute top-6 right-6 z-50">
+        <button 
+          onClick={onClose}
+          className={cn(
+            "p-2 rounded-full border transition-colors",
+            isDark ? "border-white/20 text-white" : "border-black/20 text-black"
+          )}
         >
-          {items.map((item, index) => (
-            <WheelItem 
-              key={item.id} 
-              item={item} 
-              index={index} 
-              y={y} 
-              isDark={isDark}
-              onSelect={() => {
-                triggerHaptic();
-                onClose(); 
-                if (item.path) router.push(item.path);
-              }}
-            />
-          ))}
-        </motion.div>
-
+          <X size={32} />
+        </button>
       </div>
 
-      {/* Bottom Action Buttons */}
-      <div className="w-full pb-10 pt-4 flex flex-col items-center gap-4 bg-black">
-         <p className="text-xs text-white/40 font-medium tracking-widest uppercase">
-            Paneli Seçmek İçin Kaydır
-         </p>
-         
-         <button 
-            onClick={onClose}
-            className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/20 transition-all"
-         >
-            <X size={20} />
-         </button>
+      {/* SCROLLABLE LIST AREA */}
+      <div className="flex-1 overflow-y-auto flex flex-col justify-center items-center py-20 relative">
+        <ul className="relative flex flex-col items-center gap-2 w-full">
+          {items.map((item, index) => {
+            const color = BG_COLORS[index % BG_COLORS.length];
+            const isDimmed = activeIndex !== null && activeIndex !== index;
+            const isActive = activeIndex === index;
+
+            return (
+              <li 
+                key={item.id}
+                className="relative w-full text-center py-4"
+                onPointerDown={() => setActiveIndex(index)}
+                onPointerUp={() => setActiveIndex(null)}
+                onPointerLeave={() => setActiveIndex(null)}
+              >
+                <motion.button
+                  onClick={() => {
+                    triggerHaptic();
+                    setTimeout(() => {
+                        onClose();
+                        if (item.href) router.push(item.href);
+                        else if (item.onClick) item.onClick();
+                    }, 100);
+                  }}
+                  className={cn(
+                    "relative z-10 text-5xl font-black tracking-tight transition-all duration-300 px-6 py-2 rounded-xl",
+                    isDark ? "text-white" : "text-[#333]",
+                    isDimmed && "opacity-10 blur-[1px] scale-90"
+                  )}
+                  style={{ fontFamily: "'Cairo', sans-serif" }}
+                >
+                  <span className="relative z-20">{item.label}</span>
+
+                  <AnimatePresence>
+                    {isActive && (
+                      <motion.div
+                        layoutId="active-blob"
+                        initial={{ opacity: 0, scale: 0.5, borderRadius: "50%" }}
+                        animate={{ 
+                            opacity: 1, 
+                            scale: 1.5,
+                            width: "100%",
+                            borderRadius: "100px" 
+                        }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        transition={{ duration: 0.3, type: "spring" }}
+                        className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none overflow-hidden"
+                        style={{ backgroundColor: color }}
+                      >
+                         <span 
+                            className="absolute text-9xl font-black opacity-10 whitespace-nowrap uppercase tracking-[10px]"
+                            style={{ color: "black" }}
+                         >
+                            {item.label}
+                         </span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.button>
+              </li>
+            );
+          })}
+        </ul>
       </div>
-    </motion.div>
-  );
-}
+      
+      <div className="pb-10 flex justify-center opacity-30 pointer-events-none">
+         <img src="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG" alt="Logo" className="w-12 h-12 grayscale" />
+      </div>
 
-// --- Individual Wheel Item ---
-function WheelItem({ item, index, y, isDark, onSelect }: any) {
-  const myOffset = index * ITEM_HEIGHT;
-  
-  // Calculate distance from the center (where y = -myOffset)
-  const distance = useTransform(y, (currentY: number) => {
-    return Math.abs(currentY + myOffset);
-  });
-
-  // Transform properties based on distance from center
-  const scale = useTransform(distance, [0, ITEM_HEIGHT * 2], [1.3, 0.7]);
-  const opacity = useTransform(distance, [0, ITEM_HEIGHT * 2], [1, 0.3]);
-  const color = useTransform(distance, [0, 50], [
-      isDark ? "#22d3ee" : "#ffffff", // Center Color (Cyan / White)
-      "#64748b" // Off-center Color (Gray)
-  ]);
-  const fontWeight = useTransform(distance, [0, 50], [700, 400]);
-
-  return (
-    <motion.div
-      style={{ 
-        height: ITEM_HEIGHT,
-        scale,
-        opacity,
-      }}
-      className="flex items-center justify-center w-screen"
-    >
-      <motion.button
-        onClick={onSelect}
-        style={{ color, fontWeight }}
-        className="text-2xl tracking-wide transition-colors"
-      >
-        {item.label}
-      </motion.button>
     </motion.div>
   );
 }
