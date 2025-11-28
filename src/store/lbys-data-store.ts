@@ -3,18 +3,13 @@
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { collection, getDocs, setDoc, doc, query, where } from 'firebase/firestore';
+import { collection, getDocs, setDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { nanoid } from 'nanoid';
-import { format, parse, parseISO, isValid } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { toDateFromAny } from '@/lib/time';
 
 // --- TYPE DEFINITIONS ---
-
-export interface HospitalDefinition {
-  code: string;
-  name: string;
-}
 
 export interface AggregatedRecord {
   id: string; // Composite key: date|hospitalId|service|testName
@@ -26,7 +21,7 @@ export interface AggregatedRecord {
   testName: string;
   totalTests: number;
   emergencyCount: number; // ACIL == 'E' sayısı
-  patientIds: Set<string>; // Use Set for automatic uniqueness
+  patientIds: Set<string>; 
   rejectedCount: number;
   repeatCount: number;
   totalTatMinutes: number;
@@ -101,7 +96,6 @@ export const useLbysDataStore = create<LbysStore>()(
           await setDoc(doc(db, 'config_hospitals', code), { name });
           const current = get().hospitalDefinitions;
           set({ hospitalDefinitions: { ...current, [code]: name } });
-          // Re-process names in existing data
           const currentData = get().aggregatedData;
           const updatedData = currentData.map(d => {
               if (!d.isAsm && d.hospitalId === code) {
@@ -117,96 +111,123 @@ export const useLbysDataStore = create<LbysStore>()(
       },
 
       processAndUploadExcel: async (excelData) => {
+        console.log("Qore Analyse: Veri işleme başladı...");
         set({ isLoading: true, error: null, processingProgress: { current: 0, total: excelData.length } });
         const { hospitalDefinitions } = get();
 
+        // İLK SATIR KONTROLÜ (Console'dan bak: Sütunlar kaymış mı?)
+        if (excelData.length > 1) {
+            console.log("Örnek Ham Satır (İlk Veri Satırı):", excelData[1]);
+            console.log("Beklenen İndeksler -> D(3): HASTANE_ID, AA(26): CALISMA_TARIHI");
+        }
+
         try {
-          const groups: Map<string, Omit<AggregatedRecord, 'id' | 'patientIds'> & { patientIds: Set<string> }> = new Map();
-          
-          const processChunk = (chunk: any[]) => {
-            chunk.forEach((row) => {
-                if (!row || row.length < 27) return;
+            const groups: Map<string, Omit<AggregatedRecord, 'id' | 'patientIds'> & { patientIds: Set<string> }> = new Map();
+            let skippedCount = 0;
 
-                const resultDateRaw = row[26];
-                if (!resultDateRaw) return;
+            const processChunk = (chunk: any[]) => {
+                chunk.forEach((row, i) => {
+                    const rowIndex = (get().processingProgress.current) + i; // For logging
+                    if (!row || row.length < 27) {
+                        skippedCount++;
+                        return;
+                    }
 
-                const resultDate = toDateFromAny(resultDateRaw);
-                if (!resultDate || !isValid(resultDate)) return;
+                    const rawHospitalId = row[3];
+                    const rawResultDate = row[26];
+                    const rawLabDate = row[24];
+                    
+                    if (!rawHospitalId || !rawResultDate) {
+                        if (rowIndex < 5) console.warn(`Satır ${rowIndex+1} Atlandı: Hastane ID veya Sonuç Tarihi eksik.`);
+                        skippedCount++;
+                        return;
+                    }
 
-                const dateStr = format(resultDate, 'yyyy-MM-dd');
+                    const labDateStr = String(rawLabDate).replace(' ', 'T');
+                    const resDateStr = String(rawResultDate).replace(' ', 'T');
+                    
+                    const labDate = new Date(labDateStr);
+                    const resDate = new Date(resDateStr);
 
-                const hospitalId = String(row[3] || '').trim();
-                const isAsm = hospitalId === '999';
+                    if (isNaN(labDate.getTime()) || isNaN(resDate.getTime())) {
+                       if (rowIndex < 5) console.warn(`Satır ${rowIndex+1} Tarih Hatası:`, {rawLabDate, rawResultDate});
+                       skippedCount++;
+                       return;
+                    }
 
-                let derivedHospitalName = 'Bilinmeyen Kurum';
-                if (isAsm) {
-                    derivedHospitalName = normalize(row[11]);
-                } else {
-                    derivedHospitalName = hospitalDefinitions[hospitalId] || `Hastane (${hospitalId})`;
-                }
+                    const dateStr = format(resDate, 'yyyy-MM-dd');
+                    const tatMin = (resDate.getTime() - labDate.getTime()) / (1000 * 60);
+                    
+                    const hospitalId = String(rawHospitalId).trim();
+                    const isAsm = hospitalId === '999';
+                    
+                    let derivedHospitalName = 'Bilinmeyen Kurum';
+                    if (isAsm) {
+                        derivedHospitalName = normalize(row[11]);
+                    } else {
+                        derivedHospitalName = hospitalDefinitions[hospitalId] || `Hastane (${hospitalId})`;
+                    }
 
-                const testName = normalize(row[7]);
-                const serviceName = normalize(row[11]);
-                const patientId = String(row[1] || `no-id-${Math.random()}`);
-                const isEmergency = String(row[4] || '').toUpperCase() === 'E';
-                const isRepeat = Number(row[14] || 0) > 0;
-                const rejectionReason = String(row[16] || '').trim();
-                const branchName = normalize(row[12]);
-                const labDate = toDateFromAny(row[24]);
-                
-                const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
+                    const testName = normalize(row[7]);
+                    const serviceName = normalize(row[11]);
+                    const patientId = String(row[1] || `no-id-${Math.random()}`);
+                    const isEmergency = String(row[4] || '').toUpperCase() === 'E';
+                    const isRepeat = Number(row[14] || 0) > 0;
+                    const rejectionReason = String(row[16] || '').trim();
+                    const branchName = normalize(row[12]);
 
-                if (!groups.has(key)) {
-                    groups.set(key, {
-                        date: dateStr, hospitalId, hospitalName: derivedHospitalName, isAsm,
-                        service: serviceName, testName,
-                        totalTests: 0, emergencyCount: 0, patientIds: new Set(),
-                        rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {},
-                        branch: branchName
-                    });
-                }
-                
-                const record = groups.get(key)!;
-                record.totalTests++;
-                if (isEmergency) record.emergencyCount++;
-                if (patientId) record.patientIds.add(patientId);
-                if (isRepeat) record.repeatCount++;
-                if (rejectionReason) {
-                    record.rejectedCount++;
-                    record.rejectionReasons[rejectionReason] = (record.rejectionReasons[rejectionReason] || 0) + 1;
-                }
-                
-                if (labDate && isValid(labDate) && resultDate > labDate) {
-                    const diff = (resultDate.getTime() - labDate.getTime()) / (1000 * 60);
-                    if (diff > 0) {
-                        record.totalTatMinutes += diff;
+                    const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
+                    
+                    if (!groups.has(key)) {
+                        groups.set(key, {
+                            date: dateStr, hospitalId, hospitalName: derivedHospitalName, isAsm,
+                            service: serviceName, testName,
+                            totalTests: 0, emergencyCount: 0, patientIds: new Set(),
+                            rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {},
+                            branch: branchName
+                        });
+                    }
+                    
+                    const record = groups.get(key)!;
+                    record.totalTests++;
+                    if (isEmergency) record.emergencyCount++;
+                    if (patientId) record.patientIds.add(patientId);
+                    if (isRepeat) record.repeatCount++;
+                    if (rejectionReason) {
+                        record.rejectedCount++;
+                        record.rejectionReasons[rejectionReason] = (record.rejectionReasons[rejectionReason] || 0) + 1;
+                    }
+                    
+                    if (tatMin > 0) {
+                        record.totalTatMinutes += tatMin;
                         record.tatCount++;
                     }
-                }
-            });
-          };
+                });
+            };
 
-          const chunkSize = 2000;
-          for (let i = 1; i < excelData.length; i += chunkSize) {
-            const chunk = excelData.slice(i, i + chunkSize);
-            processChunk(chunk);
-            set({ processingProgress: { current: i + chunk.length, total: excelData.length } });
-            await new Promise(resolve => setTimeout(resolve, 0));
-          }
-          
-          const finalAggregatedData = Array.from(groups.values()).map(g => ({ ...g, id: nanoid() }));
-
-          set({ aggregatedData: finalAggregatedData });
-          get().applyFilters();
+            const chunkSize = 2000;
+            for (let i = 1; i < excelData.length; i += chunkSize) {
+                const chunk = excelData.slice(i, i + chunkSize);
+                processChunk(chunk);
+                set({ processingProgress: { current: i + chunk.length -1, total: excelData.length } });
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            
+            const finalAggregatedData = Array.from(groups.values()).map(g => ({ ...g, id: nanoid() }));
+            
+            set({ aggregatedData: finalAggregatedData });
+            get().applyFilters();
+            
+            console.log(`Qore Analyse Sonuç: Toplam ${excelData.length - 1} satırdan ${finalAggregatedData.length} tanesi işlendi. ${skippedCount} satır atlandı.`);
 
         } catch (error: any) {
-          set({ error: "Dosya işlenirken bir hata oluştu: " + error.message });
+            set({ error: "Dosya işlenirken bir hata oluştu: " + error.message });
         } finally {
-          set({ isLoading: false, processingProgress: { current: 0, total: 0 } });
+            set({ isLoading: false, processingProgress: { current: 0, total: 0 } });
         }
-      },
+    },
       
-      applyFilters: () => {
+    applyFilters: () => {
         const { aggregatedData, filters } = get();
         const { from, to } = filters.dateRange;
 
@@ -233,29 +254,28 @@ export const useLbysDataStore = create<LbysStore>()(
         });
 
         set({ filteredData: filtered });
-      },
+    },
       
-      setFilters: (newFilters) => {
+    setFilters: (newFilters) => {
         set(state => ({ filters: { ...state.filters, ...newFilters } }));
         get().applyFilters();
-      },
+    },
 
-      resetFilters: () => {
-          const today = new Date();
-          const lastWeek = new Date();
-          lastWeek.setDate(today.getDate() - 7);
-          set({ 
-              filters: { 
-                  dateRange: { from: lastWeek, to: today }, 
-                  selectedHospitals: [], 
-                  selectedAsms: [],
-                  selectedServices: [], 
-                  selectedTests: [], 
-                  selectedBranches: [],
-              } 
-          });
-          get().applyFilters();
-      }
-    })
-  )
+    resetFilters: () => {
+        const today = new Date();
+        const lastWeek = new Date();
+        lastWeek.setDate(today.getDate() - 7);
+        set({ 
+            filters: { 
+                dateRange: { from: lastWeek, to: today }, 
+                selectedHospitals: [], 
+                selectedServices: [], 
+                selectedTests: [], 
+                selectedBranches: [],
+                selectedAsms: [],
+            } 
+        });
+        get().applyFilters();
+    }
+  }))
 );
