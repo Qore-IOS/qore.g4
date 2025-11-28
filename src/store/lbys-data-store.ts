@@ -6,8 +6,7 @@ import { devtools } from 'zustand/middleware';
 import { collection, getDocs, setDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { nanoid } from 'nanoid';
-import { format, parseISO, isValid } from 'date-fns';
-import { toDateFromAny } from '@/lib/time';
+import { format } from 'date-fns';
 
 // --- TYPE DEFINITIONS ---
 
@@ -49,7 +48,7 @@ interface LbysStore {
   error: string | null;
 
   // Actions
-  processAndUploadExcel: (excelData: any[]) => Promise<void>;
+  processAndUploadExcel: (excelData: any[][]) => Promise<void>;
   setFilters: (newFilters: Partial<FilterState>) => void;
   applyFilters: () => void;
   resetFilters: () => void;
@@ -110,7 +109,7 @@ export const useLbysDataStore = create<LbysStore>()(
         }
       },
 
-      processAndUploadExcel: async (excelData) => {
+    processAndUploadExcel: async (excelData) => {
         console.log("Qore Analyse: Veri işleme başladı...");
         set({ isLoading: true, error: null, processingProgress: { current: 0, total: excelData.length } });
         const { hospitalDefinitions } = get();
@@ -127,12 +126,12 @@ export const useLbysDataStore = create<LbysStore>()(
 
             const processChunk = (chunk: any[]) => {
                 chunk.forEach((row, i) => {
-                    const rowIndex = (get().processingProgress.current) + i; // For logging
+                    const rowIndex = (get().processingProgress.current) + i;
                     if (!row || row.length < 27) {
                         skippedCount++;
                         return;
                     }
-
+                    
                     const rawHospitalId = row[3];
                     const rawResultDate = row[26];
                     const rawLabDate = row[24];
@@ -150,7 +149,7 @@ export const useLbysDataStore = create<LbysStore>()(
                     const resDate = new Date(resDateStr);
 
                     if (isNaN(labDate.getTime()) || isNaN(resDate.getTime())) {
-                       if (rowIndex < 5) console.warn(`Satır ${rowIndex+1} Tarih Hatası:`, {rawLabDate, rawResultDate});
+                       if (rowIndex < 5) console.warn(`Satır ${rowIndex+1} Tarih Hatası:`, rawLabDate, rawResultDate);
                        skippedCount++;
                        return;
                     }
@@ -209,7 +208,7 @@ export const useLbysDataStore = create<LbysStore>()(
             for (let i = 1; i < excelData.length; i += chunkSize) {
                 const chunk = excelData.slice(i, i + chunkSize);
                 processChunk(chunk);
-                set({ processingProgress: { current: i + chunk.length -1, total: excelData.length } });
+                set({ processingProgress: { current: i + chunk.length - 1, total: excelData.length } });
                 await new Promise(resolve => setTimeout(resolve, 0));
             }
             
@@ -232,7 +231,7 @@ export const useLbysDataStore = create<LbysStore>()(
         const { from, to } = filters.dateRange;
 
         const filtered = aggregatedData.filter((item) => {
-            const itemDate = parseISO(item.date);
+            const itemDate = new Date(item.date); // Correctly parse date string
             if (from && to && (itemDate < from || itemDate > to)) return false;
 
             const hospitalMatch = filters.selectedHospitals.length === 0 || (!item.isAsm && filters.selectedHospitals.includes(item.hospitalName));
