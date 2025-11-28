@@ -5,7 +5,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
     Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X
 } from 'lucide-react';
-import { subDays, differenceInDays, format } from 'date-fns';
+import { subDays, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
@@ -26,9 +26,8 @@ import {
     DialogTrigger,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Tooltip, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLbysDataStore, AggregatedRecord } from '@/store/lbys-data-store';
 import { useToast } from '@/hooks/use-toast';
@@ -76,7 +75,8 @@ function FilterGroup({ title, options, selected, onChange }: { title: string, op
                 options={options} 
                 selectedValues={selected} 
                 onChange={handleSelectionChange} 
-                placeholder={`${title} Seçiniz`}
+                placeholder={`${title} Seç...`}
+                title={title}
              />
         </div>
     )
@@ -99,7 +99,7 @@ function HospitalSettingsModal({ open, onOpenChange }: { open: boolean, onOpenCh
             toast({ title: 'Hata', description: "Kod ve İsim boş olamaz", variant: 'destructive'});
             return;
         }
-        saveHospitalDefinition(newCode, newName);
+        saveHospitalDefinition(newCode.trim(), newName.trim());
         setNewCode("");
         setNewName("");
         toast({ title: 'Başarılı', description: "Tanım kaydedildi" });
@@ -171,11 +171,7 @@ export default function IsAnaliziPage() {
     const { toast } = useToast();
 
     // Local State
-    const [date, setDate] = useState<{ from: Date; to: Date } | undefined>(() => {
-        const end = new Date();
-        const start = subDays(end, 7);
-        return { from: start, to: end };
-    });
+    const [date, setDate] = useState<{ from: Date | undefined; to: Date | undefined }>(filters.dateRange);
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailModalData, setDetailModalData] = useState<{ title: string; data: Record<string, number>, type: 'service' | 'test' } | null>(null);
     const [rejectionModalOpen, setRejectionModalOpen] = useState(false);
@@ -210,10 +206,10 @@ export default function IsAnaliziPage() {
         });
 
         return {
-            hospitals: Array.from(hospitals).map(v => ({ label: v, value: v })),
-            services: Array.from(services).map(v => ({ label: v, value: v })),
-            tests: Array.from(tests).map(v => ({ label: v, value: v })),
-            asms: Array.from(asms).map(v => ({ label: v, value: v })),
+            hospitals: Array.from(hospitals).sort().map(v => ({ label: v, value: v })),
+            services: Array.from(services).sort().map(v => ({ label: v, value: v })),
+            tests: Array.from(tests).sort().map(v => ({ label: v, value: v })),
+            asms: Array.from(asms).sort().map(v => ({ label: v, value: v })),
         };
     }, [aggregatedData]);
 
@@ -223,7 +219,7 @@ export default function IsAnaliziPage() {
         let totalRepeat = 0;
         let totalTat = 0;
         let tatCount = 0;
-        const uniquePatientIds = new Set<string>();
+        const patientIdSet = new Set<string>();
 
         filteredData.forEach(d => {
             totalTests += d.totalTests;
@@ -231,12 +227,12 @@ export default function IsAnaliziPage() {
             totalRepeat += d.repeatCount;
             totalTat += d.totalTatMinutes;
             tatCount += d.tatCount;
-            d.patientIds.forEach(pid => uniquePatientIds.add(pid));
+            d.patientIds.forEach(pid => patientIdSet.add(pid));
         });
 
         return {
             totalTests,
-            totalSamples: uniquePatientIds.size,
+            totalSamples: patientIdSet.size,
             rejectionRate: totalTests > 0 ? (totalRejected / totalTests) * 100 : 0,
             avgTat: tatCount > 0 ? Math.round(totalTat / tatCount) : 0,
             repeatRate: totalTests > 0 ? (totalRepeat / totalTests) * 100 : 0,
@@ -338,12 +334,8 @@ export default function IsAnaliziPage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-                        <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="gap-2"><Settings className="h-4 w-4" />Ayarlar</Button>
-                        </DialogTrigger>
-                        <HospitalSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
-                    </Dialog>
+                    <HospitalSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+                    <Button onClick={() => setSettingsOpen(true)} variant="ghost" size="sm" className="gap-2"><Settings className="h-4 w-4" />Ayarlar</Button>
                     <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
                         <DialogTrigger asChild>
                             <Button variant="ghost" size="sm" className="gap-2 bg-[#f0f2f5] shadow-[4px_4px_10px_#d1d9e6,-4px_-4px_10px_#ffffff] hover:shadow-[inset_4px_4px_10px_#d1d9e6,inset_-4px_-4px_10px_#ffffff] text-gray-700 rounded-xl transition-all border-none">
@@ -376,7 +368,7 @@ export default function IsAnaliziPage() {
                         <DatePickerWithRange 
                             date={date} 
                             setDate={setDate} 
-                            className="[&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!shadow-sm" 
+                            className="[&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!shadow-sm"
                         />
                     </div>
                      
@@ -394,9 +386,9 @@ export default function IsAnaliziPage() {
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <KpiCard title="Toplam Test" value={kpiData.totalTests.toLocaleString()} icon={Microscope} color="text-blue-600" bg="bg-blue-50" />
                 <KpiCard title="Benzersiz Numune" value={kpiData.totalSamples.toLocaleString()} icon={Users} color="text-purple-600" bg="bg-purple-50" />
-                <KpiCard title="Red Oranı" value={`%${kpiData.rejectionRate.toFixed(2)}`} icon={AlertCircle} color="text-red-600" bg="bg-red-50" onClick={handleRejectionClick} />
+                <KpiCard title="Red Oranı" value={`${kpiData.rejectionRate.toFixed(2)}%`} icon={AlertCircle} color="text-red-600" bg="bg-red-50" onClick={handleRejectionClick} />
                 <KpiCard title="Ort. TAT (Dk)" value={kpiData.avgTat.toString()} icon={Clock} color="text-amber-600" bg="bg-amber-50" />
-                <KpiCard title="Tekrar Oranı" value={`%${kpiData.repeatRate.toFixed(2)}`} icon={RefreshCcw} color="text-cyan-600" bg="bg-cyan-50" />
+                <KpiCard title="Tekrar Oranı" value={`${kpiData.repeatRate.toFixed(2)}%`} icon={RefreshCcw} color="text-cyan-600" bg="bg-cyan-50" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -421,7 +413,7 @@ export default function IsAnaliziPage() {
                                                 <div className="bg-white p-2 border rounded shadow-lg text-xs">
                                                     <p className="font-bold">{d.name}</p>
                                                     <p>Test: {d.tests.toLocaleString()}</p>
-                                                    <p className="text-red-600">Acil: {d.emergency.toLocaleString()} (%{d.emergencyRate.toFixed(1)})</p>
+                                                    <p className="text-red-600">Acil: {d.emergency.toLocaleString()} ({d.emergencyRate.toFixed(1)}%)</p>
                                                 </div>
                                             );
                                         }
@@ -525,7 +517,6 @@ export default function IsAnaliziPage() {
                     </ScrollArea>
                 </DialogContent>
             </Dialog>
-            <HospitalSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
         </div>
     );
 }

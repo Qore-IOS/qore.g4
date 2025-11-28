@@ -5,9 +5,8 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { collection, getDocs, setDoc, doc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { read, utils as XLSXUtils } from 'xlsx';
 import { nanoid } from 'nanoid';
-import { format, parseISO } from 'date-fns';
+import { format, parse, parseISO, isValid } from 'date-fns';
 import { toDateFromAny } from '@/lib/time';
 
 // --- TYPE DEFINITIONS ---
@@ -56,7 +55,6 @@ interface LbysStore {
 
   // Actions
   processAndUploadExcel: (excelData: any[]) => Promise<void>;
-  fetchDataByDateRange: (from: Date, to: Date) => Promise<void>;
   setFilters: (newFilters: Partial<FilterState>) => void;
   applyFilters: () => void;
   resetFilters: () => void;
@@ -65,7 +63,7 @@ interface LbysStore {
 }
 
 // --- HELPERS ---
-const normalize = (str: any) => str?.toString().toLocaleUpperCase('tr-TR').trim() || "BELİRTİLMEMİŞ";
+const normalize = (str: any): string => str?.toString().toLocaleUpperCase('tr-TR').trim() || "BELİRTİLMEMİŞ";
 
 // --- ZUSTAND STORE ---
 export const useLbysDataStore = create<LbysStore>()(
@@ -73,11 +71,11 @@ export const useLbysDataStore = create<LbysStore>()(
     (set, get) => ({
       aggregatedData: [],
       filteredData: [],
-      isLoading: true,
+      isLoading: false,
       processingProgress: { current: 0, total: 0 },
       error: null,
       filters: {
-        dateRange: { from: undefined, to: undefined },
+        dateRange: { from: new Date(new Date().setDate(new Date().getDate() - 7)), to: new Date() },
         selectedHospitals: [],
         selectedAsms: [],
         selectedServices: [],
@@ -98,10 +96,20 @@ export const useLbysDataStore = create<LbysStore>()(
       },
 
       saveHospitalDefinition: async (code, name) => {
+        if (!code || !name) return;
         try {
           await setDoc(doc(db, 'config_hospitals', code), { name });
           const current = get().hospitalDefinitions;
           set({ hospitalDefinitions: { ...current, [code]: name } });
+          // Re-process names in existing data
+          const currentData = get().aggregatedData;
+          const updatedData = currentData.map(d => {
+              if (!d.isAsm && d.hospitalId === code) {
+                  return { ...d, hospitalName: name };
+              }
+              return d;
+          });
+          set({ aggregatedData: updatedData });
           get().applyFilters();
         } catch (e) {
           console.error("Definition could not be saved", e);
@@ -113,38 +121,40 @@ export const useLbysDataStore = create<LbysStore>()(
         const { hospitalDefinitions } = get();
 
         try {
-          const groups: Map<string, Omit<AggregatedRecord, 'id'>> = new Map();
+          const groups: Map<string, Omit<AggregatedRecord, 'id' | 'patientIds'> & { patientIds: Set<string> }> = new Map();
           
           const processChunk = (chunk: any[]) => {
             chunk.forEach((row, rowIndex) => {
-                const calismaTarihiRaw = row['CALISMA_TARIHI']; // Col AA
-                const calismaTarihi = toDateFromAny(calismaTarihiRaw);
-                if (!calismaTarihi) return;
+                const calismaTarihiRaw = row[26];
+                if (!calismaTarihiRaw) return;
 
+                const calismaTarihi = toDateFromAny(calismaTarihiRaw);
+                if (!calismaTarihi || !isValid(calismaTarihi)) return;
+                
                 const dateStr = format(calismaTarihi, 'yyyy-MM-dd');
-                const hastaneId = String(row['HASTANE_ID'] || '').trim(); // Col D
+                const hastaneId = String(row[3] || '').trim();
                 const isAsm = hastaneId === '999';
                 
                 let derivedHospitalName = 'Bilinmeyen Kurum';
                 if (isAsm) {
-                    derivedHospitalName = normalize(row['SERVIS_POL_ADI']); // Col L
+                    derivedHospitalName = normalize(row[11]);
                 } else {
                     derivedHospitalName = hospitalDefinitions[hastaneId] || `Hastane (${hastaneId})`;
                 }
 
-                const testName = normalize(row['TEST_ADI']); // Col H
-                const serviceName = normalize(row['SERVIS_POL_ADI']); // Col L
-                const hastaId = String(row['HASTA_ID'] || `no-id-${rowIndex}`); // Col B
-                const isEmergency = String(row['ACIL'] || '').toUpperCase() === 'E'; // Col E
-                const isRepeat = Number(row['TEKRAR_SAYISI'] || 0) > 0; // Col O
-                const rejectionReason = String(row['RET_NEDENI'] || '').trim(); // Col Q
-                const branchName = normalize(row['DOKTOR_BRANS']);
+                const testName = normalize(row[7]);
+                const serviceName = normalize(row[11]);
+                const hastaId = String(row[1] || `no-id-${rowIndex}`);
+                const isEmergency = String(row[4] || '').toUpperCase() === 'E';
+                const isRepeat = Number(row[14] || 0) > 0;
+                const rejectionReason = String(row[16] || '').trim();
+                const branchName = normalize(row[12]);
 
                 const key = `${dateStr}|${hastaneId}|${serviceName}|${testName}|${branchName}`;
 
                 if (!groups.has(key)) {
                     groups.set(key, {
-                        date: dateStr, hospitalId: hastaneId, hospitalName: derivedHospitalName, isAsm,
+                        date: dateStr, hospitalId, hospitalName: derivedHospitalName, isAsm,
                         service: serviceName, testName,
                         totalTests: 0, emergencyCount: 0, patientIds: new Set(),
                         rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {},
@@ -162,9 +172,10 @@ export const useLbysDataStore = create<LbysStore>()(
                     record.rejectionReasons[rejectionReason] = (record.rejectionReasons[rejectionReason] || 0) + 1;
                 }
 
-                const labKabul = toDateFromAny(row['LABKABUL_TARIHI']); // Col Y
-                if (labKabul && calismaTarihi > labKabul) {
-                    const diff = (calismaTarihi.getTime() - labKabul.getTime()) / (1000 * 60);
+                const labKabul = toDateFromAny(row[24]);
+                const calismaDate = toDateFromAny(row[26]);
+                if (labKabul && calismaDate && calismaDate > labKabul) {
+                    const diff = (calismaDate.getTime() - labKabul.getTime()) / (1000 * 60);
                     if (diff > 0) {
                         record.totalTatMinutes += diff;
                         record.tatCount++;
@@ -174,19 +185,16 @@ export const useLbysDataStore = create<LbysStore>()(
           };
 
           const chunkSize = 2000;
-          for (let i = 0; i < excelData.length; i += chunkSize) {
+          for (let i = 1; i < excelData.length; i += chunkSize) {
             const chunk = excelData.slice(i, i + chunkSize);
             processChunk(chunk);
             set({ processingProgress: { current: i + chunk.length, total: excelData.length } });
             await new Promise(resolve => setTimeout(resolve, 0));
           }
           
-          const finalAggregatedData = Array.from(groups.values()).map(g => ({
-              ...g,
-              id: nanoid(),
-          }));
+          const finalAggregatedData = Array.from(groups.values()).map(g => ({ ...g, id: nanoid() }));
 
-          set({ aggregatedData: finalAggregatedData, filteredData: finalAggregatedData });
+          set({ aggregatedData: finalAggregatedData });
           get().applyFilters();
 
         } catch (error: any) {
@@ -196,8 +204,6 @@ export const useLbysDataStore = create<LbysStore>()(
         }
       },
       
-      fetchDataByDateRange: async (from, to) => { /* This is now handled by processing file directly */ },
-
       applyFilters: () => {
         const { aggregatedData, filters } = get();
         const { from, to } = filters.dateRange;
@@ -212,15 +218,16 @@ export const useLbysDataStore = create<LbysStore>()(
             const testMatch = filters.selectedTests.length === 0 || filters.selectedTests.includes(item.testName);
             const branchMatch = filters.selectedBranches.length === 0 || filters.selectedBranches.includes(item.branch);
             
+            let locationMatch = true;
             if (filters.selectedHospitals.length > 0 && filters.selectedAsms.length > 0) {
-              if(!hospitalMatch && !asmMatch) return false;
+              locationMatch = hospitalMatch || asmMatch;
             } else if (filters.selectedHospitals.length > 0) {
-              if(!hospitalMatch) return false;
+              locationMatch = hospitalMatch;
             } else if (filters.selectedAsms.length > 0) {
-              if(!asmMatch) return false;
+              locationMatch = asmMatch;
             }
 
-            return serviceMatch && testMatch && branchMatch;
+            return locationMatch && serviceMatch && testMatch && branchMatch;
         });
 
         set({ filteredData: filtered });
@@ -232,9 +239,12 @@ export const useLbysDataStore = create<LbysStore>()(
       },
 
       resetFilters: () => {
+          const today = new Date();
+          const lastWeek = new Date();
+          lastWeek.setDate(today.getDate() - 7);
           set({ 
               filters: { 
-                  dateRange: { from: undefined, to: undefined }, 
+                  dateRange: { from: lastWeek, to: today }, 
                   selectedHospitals: [], 
                   selectedAsms: [],
                   selectedServices: [], 
@@ -247,3 +257,5 @@ export const useLbysDataStore = create<LbysStore>()(
     })
   )
 );
+
+    
