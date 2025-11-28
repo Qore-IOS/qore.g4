@@ -1,0 +1,332 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* --- LIGHT MODE: NEUMORPHIC --- */
+    --background: 0 0% 88%; /* #e0e0e0 */
+    --foreground: 0 0% 20%;
+    
+    --card: 0 0% 88%;
+    --card-foreground: 0 0% 20%;
+    
+    --popover: 0 0% 88%;
+    --popover-foreground: 0 0% 20%;
+    
+    --primary: 35 90% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 80%;
+    --secondary-foreground: 0 0% 20%;
+    
+    --muted: 0 0% 80%;
+    --muted-foreground: 0 0% 40%;
+    
+    --accent: 0 0% 85%;
+    --accent-foreground: 0 0% 20%;
+    
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 0 0% 80%;
+    --input: 0 0% 88%;
+    --ring: 35 90% 50%;
+    
+    --radius: 1rem;
+  }
+
+  .dark {
+    /* --- DARK MODE: LIQUID GLASS --- */
+    --background: 0 0% 0%; /* Pure Black for bg */
+    --foreground: 0 0% 98%;
+
+    --card: 0 0% 10%; 
+    --card-foreground: 0 0% 98%;
+
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 35 90% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 65%;
+
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 20%;
+    --input: 0 0% 15%;
+    --ring: 35 90% 50%;
+  }
+
+  body {
+    @apply bg-background text-foreground transition-colors duration-300;
+  }
+}
+
+@layer components {
+    .glass-card {
+        @apply bg-card/60 backdrop-blur-xl border border-white/10;
+    }
+    
+    .text-gradient-primary {
+        @apply bg-gradient-to-r from-primary to-orange-400 text-transparent bg-clip-text;
+    }
+
+    .text-gradient-neon {
+        @apply bg-gradient-to-r from-green-300 via-blue-500 to-purple-600 text-transparent bg-clip-text;
+    }
+
+    .text-gradient-bronze {
+        @apply bg-gradient-to-r from-yellow-200 via-amber-400 to-orange-500 text-transparent bg-clip-text;
+    }
+
+  /* --- UNIVERSAL NEUMORPHIC BUTTON (Light Mode Only) --- */
+  .neu-btn-universal {
+    @apply transition-all duration-200 active:scale-95;
+  }
+
+  /* Apply strict neumorphism only when NOT in dark mode */
+  :root:not(.dark) .neu-btn-universal {
+    background-color: #e0e0e0; /* Match body background */
+    color: var(--foreground);
+    border: none;
+    border-radius: 12px; /* Consistent radius */
+    box-shadow: 6px 6px 12px #bebebe,
+               -6px -6px 12px #ffffff;
+  }
+
+  /* Pressed state for Light Mode */
+  :root:not(.dark) .neu-btn-universal:active,
+  :root:not(.dark) .neu-btn-universal[data-state="on"] {
+    box-shadow: inset 4px 4px 8px #bebebe,
+                inset -4px -4px 8px #ffffff;
+  }
+
+  /* Specific Text Colors for Light Mode Variants (since we removed bg color) */
+  :root:not(.dark) .neu-text-primary { color: #f59e0b; /* Amber/Gold or your primary var */ font-weight: 600; }
+  :root:not(.dark) .neu-text-destructive { color: #ef4444; font-weight: 600; }
+
+  /* --- STOP BUTTON STYLES --- */
+  .btn-wrapper {
+    --width: 100%;
+    --height: 50px;
+    --padding: 6px;
+    --border-radius: 18px;
+    --dot-size: 8px;
+    --btn-color: #e4e4e4;
+    --hue: 0deg; /* Red for STOP */
+    --animation-duration: 1.2s;
+
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--width);
+    height: var(--height);
+    border-radius: var(--border-radius);
+    border: none;
+
+    background-color: #00000008;
+
+    box-shadow:
+      1px 1px 2px 0 #fffd,
+      2px 2px 2px #0001 inset,
+      2px 2px 4px #0001 inset,
+      2px 2px 8px #0001 inset;
+
+    transition: box-shadow 50ms linear;
+
+    perspective: 150px;
+    perspective-origin: center;
+
+    user-select: none;
+    z-index: 1;
+  }
+
+  .dark .btn-wrapper {
+    background-color: #ffffff08;
+  }
+
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: start;
+    gap: 0.25em;
+    text-align: left;
+    padding: 0 var(--height) 0 calc(var(--padding) * 2);
+
+    width: calc(100% - 2 * var(--padding));
+    height: calc(100% - 2 * var(--padding));
+    border-radius: calc(var(--border-radius) - var(--padding));
+    border: none;
+    cursor: pointer;
+
+    background: linear-gradient(#fff2, #0001), var(--btn-color);
+
+    box-shadow:
+      1px 1px 2px -1px #fff inset,
+      0 2px 1px #00000010,
+      0 4px 2px #00000010,
+      0 8px 4px #00000010,
+      0 16px 8px #00000010,
+      0 32px 16px #00000010;
+
+    transition:
+      transform 0.25s cubic-bezier(0.25, 1.5, 0.5, 2.2),
+      box-shadow 0.25s cubic-bezier(0.25, 1.5, 0.5, 1),
+      filter 0.3s cubic-bezier(0.25, 1.5, 0.5, 1);
+    will-change: transform, filter;
+
+    z-index: 2;
+  }
+  
+  .dark .btn {
+      background: linear-gradient(#fff2, #0001), #222;
+      box-shadow:
+      1px 1px 2px -1px #fff4 inset,
+      0 2px 1px #00000050,
+      0 4px 2px #00000050,
+      0 8px 4px #00000050,
+      0 16px 8px #00000050;
+  }
+
+  .btn-txt {
+    display: inline-block;
+    font-size: 16px;
+    font-weight: 500;
+    font-family: "Montserrat", "Manrope", sans-serif;
+    color: #5550;
+    background-image: linear-gradient(#000a, #555);
+    -webkit-background-clip: text;
+    background-clip: text;
+    filter: drop-shadow(0 1px 0px #fff) drop-shadow(0 -1px 0px #0005);
+  }
+  
+  .dark .btn-txt {
+    color: #fff0;
+    background-image: linear-gradient(#fff, #999);
+    filter: drop-shadow(0 1px 0px #000);
+  }
+
+  .dot {
+    position: absolute;
+    top: calc(50% - var(--dot-size) / 2);
+    right: calc(var(--height) / 2 - var(--padding) / 2);
+    width: var(--dot-size);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background-color: hsla(var(--hue), 50%, 50%, 0.1);
+
+    border: 1px solid hsla(var(--hue), 60%, 60%, 0.6);
+    box-sizing: border-box;
+
+    box-shadow:
+      1px 1px 2px -1px #fffe inset,
+      0 2px 1px #00000010,
+      0 4px 2px #00000010,
+      0 8px 4px #00000010;
+
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  .dot::before {
+    content: "";
+    position: absolute;
+    top: calc(var(--padding) / -2);
+    left: calc(var(--padding) / -2);
+    width: calc(100% + var(--padding));
+    height: calc(100% + var(--padding));
+    border-radius: inherit;
+    background-color: #0006;
+    mask-image: radial-gradient(circle at 50% 60%, transparent 50%, black);
+  }
+
+  .dot::after {
+    content: "";
+    position: absolute;
+    top: calc(var(--padding) / -2);
+    left: calc(var(--padding) / -2);
+    width: calc(100% + var(--padding));
+    height: calc(100% + var(--padding));
+    border-radius: inherit;
+    background-color: #0000;
+
+    box-shadow:
+      0 0 10px 2px hsla(var(--hue), 80%, 50%, 0.3),
+      0 0 20px 10px hsla(var(--hue), 80%, 50%, 0.5),
+      0 0 50px 20px hsla(var(--hue), 80%, 50%, 0.5),
+      0 0 16px 1px hsla(var(--hue), 100%, 60%, 0.9) inset;
+
+    opacity: 0;
+  }
+  
+  .btn:active ~ .dot, .btn[data-state="active"] ~ .dot {
+      animation-play-state: running;
+      background-color: hsla(var(--hue), 100%, 50%, 1);
+  }
+  .btn:active ~ .dot::after, .btn[data-state="active"] ~ .dot::after {
+      animation: none;
+      opacity: 1;
+  }
+
+  .pulse.dot {
+    animation: bg-anim var(--animation-duration) ease-in-out infinite;
+  }
+
+  .pulse.dot::after {
+    animation: opacity-anim var(--animation-duration) ease-in-out infinite;
+  }
+
+  @keyframes bg-anim {
+    0%,
+    100% {
+      background-color: hsla(var(--hue), 50%, 50%, 0);
+    }
+    50% {
+      background-color: hsla(var(--hue), 100%, 50%, 1);
+    }
+  }
+
+  @keyframes opacity-anim {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .btn:hover,
+  .btn:focus-visible {
+    filter: drop-shadow(
+      var(--padding) 0 var(--padding) hsla(var(--hue), 70%, 60%, 0.6)
+    );
+    transform: translate3d(0, -2px, 2px);
+  }
+  
+  .btn-wrapper:has(.btn:active) {
+    box-shadow:
+      1px 1px 2px 0 #fff,
+      2px 2px 2px #0001 inset,
+      2px 2px 4px #0001 inset,
+      2px 2px 8px #0001 inset,
+      0 0 32px 2px hsla(var(--hue), 50%, 50%, 0.5) inset;
+  }
+  
+  .btn-wrapper:has(.btn:active) .btn-txt {
+     background-image: none;
+     background-color: hsla(var(--hue), 50%, 50%, 1);
+  }
+}

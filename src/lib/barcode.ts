@@ -1,0 +1,241 @@
+// src/lib/barcode.ts
+import { ExpiryPattern, PositionDef, ProductCode } from './types';
+import { sanitizeGS1 } from './utils';
+import { parseBarcode as legacyRocheParser } from './utils';
+
+type Fields = { reference?: number; lot?: number; expiry?: number; serial?: number; barcodeNumber?: number };
+
+type OldPos = { start: number; length: number };
+type AnyFormat = {
+  id: string;
+  name: string;
+  priority?: number;
+
+  pattern?: string;
+  groups?: Fields;
+  expiryFormat?: ExpiryPattern;
+  parseTarget?: 'reference' | 'barcodeNumber';
+
+  strategy?: 'positional' | 'regex' | 'legacy_roche';
+  totalLength?: number;
+  reference?: OldPos;
+  lot?: OldPos;
+  expiry?: (OldPos & { pattern?: ExpiryPattern }) | undefined;
+  regex?: string;
+  fields?: Fields;
+
+  active?: boolean;
+};
+
+type Compiled = {
+  f: AnyFormat;
+  re: RegExp | null;
+  fields: Fields;
+  expiryPattern?: ExpiryPattern;
+  strategy?: string;
+};
+
+export function normalizeExpiry(raw: string, pattern?: ExpiryPattern): string {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  try {
+    if (pattern === 'YYYYMMDD' && /^\d{8}$/.test(s)) return `${s.slice(6,8)}.${s.slice(4,6)}.${s.slice(0,4)}`;
+    if (pattern === 'YYMMDD' && /^\d{6}$/.test(s)) {
+      const yy = Number(s.slice(0,2));
+      const full = yy >= 70 ? `19${s.slice(0,2)}` : `20${s.slice(0,2)}`;
+      return `${s.slice(4,6)}.${s.slice(2,4)}.${full}`;
+    }
+    if (pattern === 'DDMMYYYY' && /^\d{8}$/.test(s)) return `${s.slice(0,2)}.${s.slice(2,4)}.${s.slice(4,8)}`;
+    if (pattern === 'MMYY' && /^\d{4}$/.test(s)) return `01.${s.slice(0,2)}.20${s.slice(2,4)}`;
+    if (pattern === 'MMYYYY' && /^\d{6}$/.test(s)) return `01.${s.slice(0,2)}.${s.slice(2,6)}`;
+  } catch {}
+  if (/^\d{2}\.\d{2}\.\d{4}$/.test(s)) return s;
+  return s;
+}
+
+export function buildRegexFromPositional(fmt: AnyFormat): { re: RegExp; fields: Fields } {
+  const defs: Array<{ key: keyof Fields; start: number; length: number }> = [];
+  if (fmt.reference) defs.push({ key: 'reference', ...fmt.reference });
+  if (fmt.lot) defs.push({ key: 'lot', ...fmt.lot });
+  if (fmt.expiry) defs.push({ key: 'expiry', start: fmt.expiry.start, length: fmt.expiry.length });
+
+  defs.sort((a,b) => a.start - b.start);
+
+  let pattern = '^';
+  let cursor = 1;
+  const fields: Fields = {};
+  let gi = 1;
+
+  for (const d of defs) {
+    const gap = d.start - cursor;
+    if (gap > 0) pattern += `.{${gap}}`;
+    pattern += `(.{${d.length}})`;
+    fields[d.key] = gi++;
+    cursor = d.start + d.length;
+  }
+  
+  // Always capture the rest of the string as a potential serial number
+  pattern += '(.*)';
+  fields['serial'] = gi;
+  
+  pattern += '$';
+
+  return { re: new RegExp(pattern), fields };
+}
+
+export function inferSerialFromRemainder(
+  fullString: string,
+  takenParts: Array<PositionDef | undefined>
+): string | undefined {
+    const ranges = takenParts
+      .filter((p): p is PositionDef => !!p && p.start > 0 && p.length > 0)
+      .map(p => ({ start: p.start - 1, end: p.start - 1 + p.length }))
+      .sort((a, b) => a.start - b.start);
+  
+    let remainder = '';
+    let lastIndex = 0;
+  
+    for (const range of ranges) {
+      if (range.start > lastIndex) {
+        remainder += fullString.substring(lastIndex, range.start);
+      }
+      lastIndex = range.end;
+    }
+  
+    if (lastIndex < fullString.length) {
+      remainder += fullString.substring(lastIndex);
+    }
+  
+    return remainder.trim() || undefined;
+}
+
+function compileFormat(f: AnyFormat): Compiled {
+  try {
+    // Strip dangerous flags and anchor the pattern
+    const cleanRegex = (source: string): RegExp => {
+        const m = source.match(/^\/(.+)\/([gimsuy]*)$/);
+        const body = m ? m[1] : source;
+        const flags = m ? m[2].replace(/[gy]/g, '') : '';
+        const anchored = body.startsWith('^') ? body : `^${body}`;
+        const final = anchored.endsWith('$') ? anchored : `${anchored}$`;
+        return new RegExp(final, flags);
+    };
+
+    if (f.strategy === 'positional') {
+      const { re, fields } = buildRegexFromPositional(f);
+      return { f, re, fields, expiryPattern: f.expiry?.pattern, strategy: 'positional' };
+    }
+    if (f.strategy === 'regex' && f.regex) {
+      return { f, re: cleanRegex(f.regex), fields: f.fields || {}, expiryPattern: f.expiry?.pattern, strategy: 'regex' };
+    }
+    if (f.strategy === 'legacy_roche') {
+      return { f, re: null, fields: {}, strategy: 'legacy_roche' };
+    }
+  } catch (e) {
+    console.warn('Barcode format could not be compiled:', e, f);
+  }
+  return { f, re: null, fields: {} };
+}
+
+export type ParsedGeneric = {
+  stokKodu?: string;
+  lotNumarasi?: string;
+  miadFormatted?: string;
+  seriNumarasi?: string;
+  barcodeNumber?: string;
+  matchedFormatId?: string;
+  remainder?: string;
+};
+
+export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedGeneric | null {
+  const raw = (rawInput || '').trim();
+  if (!raw) return null;
+
+  const candidates = Array.from(new Set([raw, sanitizeGS1?.(raw) || raw]));
+  const compiled = (formats || []).map(compileFormat);
+
+  const results: ParsedGeneric[] = [];
+  
+  const score = (p: ParsedGeneric | null): number => {
+    if (!p) return -1;
+    let s = 0;
+    if (p.stokKodu || p.barcodeNumber) s += 20;
+    if (p.lotNumarasi) s += 20;
+    if (p.seriNumarasi) s += 25;
+    if (p.miadFormatted) s += 15;
+    if (!p.remainder || p.remainder.length === 0) s += 10;
+    if (p.lotNumarasi && p.seriNumarasi) s += 5;
+    return s;
+  };
+
+  for (const candidate of candidates) {
+    for (const c of compiled) {
+      try {
+        let parsed: ParsedGeneric | null = null;
+        if (c.strategy === 'legacy_roche') {
+          if (/^\d{61}$/.test(candidate)) {
+            const out = legacyRocheParser(candidate);
+            if (out) {
+              parsed = {
+                matchedFormatId: c.f.id,
+                stokKodu: out.refNo,
+                lotNumarasi: out.lotNumarasi,
+                miadFormatted: out.miadFormatted,
+                seriNumarasi: out.seriNumarasi,
+              };
+            }
+          }
+        } else if (c.re) {
+          if (c.strategy === 'positional' && c.f.totalLength && candidate.length !== c.f.totalLength) {
+            continue;
+          }
+          const m = candidate.match(c.re);
+          if (m) {
+            const ref = c.fields.reference ? (m[c.fields.reference] || '').trim() : undefined;
+            const lot = c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
+            const expRaw = c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
+            const miad = expRaw ? normalizeExpiry(expRaw, c.expiryPattern) : undefined;
+            const serialFromRegex = c.fields.serial ? (m[c.fields.serial] || '').trim() : undefined;
+            
+            const takenParts = [c.f.reference, c.f.lot, c.f.expiry].filter(Boolean) as PositionDef[];
+            const inferredSerial = inferSerialFromRemainder(candidate, takenParts);
+            const seriNumarasi = serialFromRegex || inferredSerial;
+
+            const udi = c.fields.barcodeNumber ? (m[c.fields.barcodeNumber] || '').trim() : undefined;
+            
+            parsed = {
+              matchedFormatId: c.f.id,
+              stokKodu: c.f.parseTarget === 'barcodeNumber' ? undefined : (ref || undefined),
+              barcodeNumber: c.f.parseTarget === 'barcodeNumber' ? (udi || ref || undefined) : (udi || undefined),
+              lotNumarasi: lot || undefined,
+              miadFormatted: miad,
+              seriNumarasi: seriNumarasi || undefined,
+            };
+          }
+        }
+        if (parsed) results.push(parsed);
+      } catch (e) {
+        // Silently ignore errors for a single format, so others can run
+        console.warn(`Format error for "${c.f.name}":`, e);
+      }
+    }
+  }
+  
+  if (results.length === 0) return null;
+
+  return results.sort((a,b) => score(b) - score(a))[0];
+}
+
+export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: ProductCode[]) {
+  let product =
+    (parsed.stokKodu ? productCodes.find(p => p.stokKodu === parsed.stokKodu) : undefined) ||
+    (parsed.barcodeNumber ? productCodes.find(p => (p as any).barcodeNumber === parsed.barcodeNumber) : undefined);
+
+  if (!product && parsed.matchedFormatId) {
+    product = productCodes.find(p => (p as any).barcodeFormatId === parsed.matchedFormatId);
+  }
+  return { ...parsed, stokKodu: product?.stokKodu ?? parsed.stokKodu, product };
+}
+
+export type BarcodeFormat = AnyFormat;
+export type { ExpiryPattern, PositionDef };

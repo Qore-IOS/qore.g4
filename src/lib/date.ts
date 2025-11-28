@@ -1,0 +1,121 @@
+// src/lib/date.ts
+import { Timestamp } from "firebase/firestore";
+import type { TimestampLike } from "@/lib/types";
+import { format as formatDateFns } from 'date-fns';
+
+/** Firestore Timestamp gibi toDate() sunan objeler için type guard */
+function hasToDate(v: any): v is { toDate: () => Date } {
+  return v && typeof v === "object" && typeof v.toDate === "function";
+}
+
+/** Metinsel tarihleri olası formatlarda parse eder (YYYY-MM-DD, DD.MM.YYYY, DD/MM/YYYY vb.) */
+function parseStringDate(s: string): Date | null {
+  const str = s.trim();
+  if (!str) return null;
+
+  // ISO / RFC date first
+  const iso = new Date(str);
+  if (!isNaN(iso.getTime())) return iso;
+
+  // DD.MM.YYYY
+  const dmY = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/;
+  const dmYSlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+
+  let m = str.match(dmY);
+  if (!m) m = str.match(dmYSlash);
+  if (m) {
+    const d = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10) - 1;
+    const y = parseInt(m[3], 10);
+    const dt = new Date(y, mo, d);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  // YYYYMMDD
+  const ymd = /^(\d{4})(\d{2})(\d{2})$/;
+  const m2 = str.match(ymd);
+  if (m2) {
+    const y = parseInt(m2[1], 10);
+    const mo = parseInt(m2[2], 10) - 1;
+    const d = parseInt(m2[3], 10);
+    const dt = new Date(y, mo, d);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  return null;
+}
+
+/**
+ * Tüm olası tarih tiplerini güvenle Date'e çevirir.
+ * Kabul ettiği tipler: string | number | Date | Firestore.Timestamp | null | undefined
+ * number değerlerinde saniye/ms farkını otomatik algılar.
+ */
+export function toDateSafe(input: TimestampLike | null | undefined): Date | undefined {
+  if (input == null) return undefined;
+
+  // Date
+  if (input instanceof Date) {
+    return isNaN(input.getTime()) ? undefined : new Date(input);
+  }
+  
+  // Firestore Timestamp
+  if (hasToDate(input)) {
+    const d = input.toDate();
+    return isNaN(d.getTime()) ? undefined : d;
+  }
+
+
+  // number: saniye/ms heuristiği
+  if (typeof input === "number") {
+    // < 10^12 ise genelde saniyedir
+    const ms = input < 1e12 ? input * 1000 : input;
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? undefined : d;
+  }
+
+  // string
+  if (typeof input === "string") {
+    return parseStringDate(input) ?? undefined;
+  }
+
+  // bilinmeyen tip: son çare
+  try {
+    const maybe = new Date(String(input));
+    return isNaN(maybe.getTime()) ? undefined : maybe;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Miad karşılaştırması — null/boş değerler listenin SONUNA gider (yani daha büyük sayılır). */
+export function compareMiadAsc(a: TimestampLike | null | undefined, b: TimestampLike | null | undefined): number {
+  const da = toDateSafe(a);
+  const db = toDateSafe(b);
+  if (!da && !db) return 0;
+  if (!da) return 1; // a boşsa sona
+  if (!db) return -1;
+  return da.getTime() - db.getTime();
+}
+
+/** UI'da miadı güvenli ve tutarlı şekilde gösterir. */
+export function formatMiad(
+  input?: TimestampLike | null,
+  fallback: string = "-"
+): string {
+  const d = toDateSafe(input);
+  if (!d) return fallback;
+  try {
+    return formatDateFns(d, "dd.MM.yyyy");
+  } catch {
+    return fallback;
+  }
+}
+
+// backward compatibility alias
+export const toDateFromAny = (v: TimestampLike) => toDateSafe(v);
+export const formatTimestamp = (value: TimestampLike, fmt = 'dd.MM.yyyy') => {
+    const dt = toDateSafe(value);
+    return dt ? formatDateFns(dt, fmt) : null;
+};
+export const parseMiad = (v: TimestampLike) => toDateSafe(v);
+export const safeCompareByMiad = compareMiadAsc;

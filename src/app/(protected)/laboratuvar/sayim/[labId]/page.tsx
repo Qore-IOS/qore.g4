@@ -1,0 +1,414 @@
+
+// File: /app/(protected)/laboratuvar/sayim/[labId]/page.tsx
+'use client';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useRouter, useParams } from 'next/navigation';
+import { db } from '@/lib/firebase';
+import {
+  collection, doc, getDocs, where, query, Timestamp, writeBatch, getDoc,
+} from 'firebase/firestore';
+import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/hooks/use-toast';
+import { Check, X, Loader2, ListFilter } from 'lucide-react';
+import { cn, playFeedback } from '@/lib/utils';
+import BackButton from '@/components/BackButton';
+import { useLabCountMissingStock } from '@/hooks/useLabCountMissingStock';
+import type { ProductCode, DepoStokItem, ConsumptionRecord } from '@/lib/types';
+import type { BarcodeFormat } from '@/lib/barcode';
+import { Progress } from '@/components/ui/progress';
+import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
+import { saveLabCountSession } from '@/lib/labCount';
+
+interface StockGroup {
+  id: string;
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  miad: string;
+  expectedQty: number;
+  serials: string[];
+  trackingMode: TrackingMode; // Added tracking mode
+  countedQty: number; // Added for non-serial items
+}
+
+export default function LaboratuvarSayimPage() {
+  const params = useParams();
+  const labId = Array.isArray(params?.labId) ? params.labId[0] : (params?.labId as string);
+  const router = useRouter();
+  const { currentUserProfile } = useAuth();
+  const { toast } = useToast();
+
+  const [labName, setLabName] = useState<string>('');
+  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormat[]>([]);
+  const [rawStock, setRawStock] = useState<DepoStokItem[]>([]);
+  const [rows, setRows] = useState<StockGroup[]>([]);
+  const [scanned, setScanned] = useState<Record<string, Set<string>>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [showOnlyUnverified, setShowOnlyUnverified] = useState(false);
+
+
+  const saveSession = async () => {
+    if (!labId || !currentUserProfile) return;
+    setIsLoading(true);
+
+    try {
+        const batch = writeBatch(db);
+
+        // 1. Identify unverified items and prepare for removal
+        const scannedSerialsSet = new Set(Object.values(scanned).flatMap(s => Array.from(s)));
+        const unverifiedItems = rawStock.filter(item => 
+            item.seriNumarasi && !scannedSerialsSet.has(item.seriNumarasi)
+        );
+
+        // 2. Delete unverified items from stock and create consumption records
+        unverifiedItems.forEach(item => {
+            // Delete from depoStok
+            const stockDocRef = doc(db, 'depoStok', item.id);
+            batch.delete(stockDocRef);
+
+            // Create a consumption record for the discrepancy
+            const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                lotNumarasi: item.lotNumarasi || '',
+                miad: item.miad as string || '',
+                seriNumarasi: item.seriNumarasi || '',
+                laboratoryId: labId,
+                laboratoryName: labName,
+                consumptionTimestamp: new Date(),
+                consumptionType: 'sayimdan_dusum', // New type for count discrepancy
+                userId: currentUserProfile.uid,
+                userName: currentUserProfile.name || 'System',
+            };
+            const consumptionDocRef = doc(collection(db, 'tuketimKayitlari'));
+            batch.set(consumptionDocRef, consumptionRecord);
+        });
+
+        // 3. Save the history record of the count session
+        await saveLabCountSession({
+            laboratoryId: labId,
+            laboratoryName: labName,
+            user: { id: currentUserProfile.uid, name: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen' },
+            stockItemsForLab: rawStock, // Pass the original stock for comparison
+            scannedSerials: scannedSerialsSet,
+        });
+
+        // 4. Commit all database operations
+        await batch.commit();
+        
+        toast({ title: 'Başarılı', description: `Sayım kaydedildi ve ${unverifiedItems.length} eksik ürün stoktan düşüldü.` });
+        router.push(`/laboratuvar/sayim/${labId}/history`);
+
+    } catch(err) {
+        console.error('Save session error:', err);
+        toast({ title: 'Hata', description: 'Sayım kaydedilirken hata oluştu.', variant: 'destructive' });
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+
+  useEffect(() => {
+    getDocs(collection(db, 'productCodes')).then(snap => {
+      setProductCodes(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+    });
+    getDocs(collection(db, 'barcodeFormats')).then(snap => {
+      setBarcodeFormats(snap.docs.map(d => ({ id: d.id, ...d.data() } as BarcodeFormat)));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!labId) return;
+    setIsLoading(true);
+    (async () => {
+      try {
+        const labRef = doc(db, 'hospitals', labId as string);
+        const labSnap = await getDoc(labRef);
+        if (!labSnap.exists()) {
+          toast({ title: 'Hata', description: 'Laboratuvar bulunamadı.', variant: 'destructive' });
+          return;
+        }
+        const { name } = labSnap.data() as any;
+        setLabName(name);
+
+        const stockRef = collection(db, 'depoStok');
+        const stockQuery = query(stockRef, where('hedefKurum', '==', name));
+        const snap = await getDocs(stockQuery);
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        setRawStock(docs);
+      } catch (error) {
+        console.error('Error loading lab stock:', error);
+        toast({ title: 'Veri Hatası', description: 'Sayım verileri yüklenemedi.', variant: 'destructive' });
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, [labId, toast]);
+
+  const existingLabSerials = useMemo(() => new Set(rawStock.map(s => s.seriNumarasi || '').filter(Boolean)), [rawStock]);
+
+  const {
+    onScanAndStageIfMissing,
+    commitNewItems,
+    groupRowClass,
+    serialTextClass,
+    newFromCount,
+    isNewSerial,
+  } = useLabCountMissingStock({ labId, labName, existingLabSerials, productCodes, barcodeFormats, toast });
+
+  const allItemsForCount = useMemo(() => {
+    const raw = rawStock.map(s => ({
+      stokKodu: s.stokKodu,
+      stokAdi: s.stokAdi,
+      lotNumarasi: s.lotNumarasi,
+      miad: s.miad,
+      seriNumarasi: s.seriNumarasi || '',
+    }));
+
+    const rawSerials = new Set(raw.map(r => r.seriNumarasi));
+    const stagedButNotPersisted = newFromCount.filter(n => !rawSerials.has(n.seriNumarasi));
+
+    const all = [...raw, ...stagedButNotPersisted];
+
+    const grouped = all.reduce((acc: Record<string, StockGroup>, item: any) => {
+      const key = `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
+      if (!acc[key]) {
+         const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+        acc[key] = {
+          id: key,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          lotNumarasi: item.lotNumarasi,
+          miad: item.miad,
+          expectedQty: 0,
+          serials: [],
+          trackingMode: product ? resolveDefaultTrackingMode(product as any) : 'serial',
+          countedQty: 0,
+        };
+      }
+      acc[key].expectedQty++;
+      if (item.seriNumarasi) {
+        acc[key].serials.push(item.seriNumarasi);
+      }
+      return acc;
+    }, {});
+    return Object.values(grouped);
+  }, [rawStock, newFromCount, productCodes]);
+  
+  const displayedItems = useMemo(() => {
+    if (!showOnlyUnverified) return allItemsForCount;
+    return allItemsForCount.filter(group => {
+      const isSerialTracked = group.trackingMode === 'serial';
+      const count = isSerialTracked ? (scanned[group.id] || new Set()).size : group.countedQty;
+      return count < group.expectedQty;
+    });
+  }, [allItemsForCount, showOnlyUnverified, scanned]);
+
+
+  const buffer = useRef('');
+  const timeout = useRef<NodeJS.Timeout>();
+
+  const handleScan = useCallback(async (code: string) => {
+    const res = await onScanAndStageIfMissing(code);
+    const parsed = res?.parsed;
+    if (!parsed?.stokKodu) {
+        playFeedback(true);
+        return;
+    }
+    
+    if (res?.createdLabDoc) {
+      setRawStock(prev => [...prev, res.createdLabDoc]);
+    }
+    
+    const serial = parsed.seriNumarasi || '';
+    let foundAndUpdated = false;
+
+    for (const group of allItemsForCount) {
+        const isSerialTracked = group.trackingMode === 'serial';
+        const matchesGroup = group.stokKodu === parsed.stokKodu &&
+                           (!isSerialTracked || group.lotNumarasi === parsed.lotNumarasi);
+
+        if (matchesGroup) {
+            if (isSerialTracked) {
+                if (group.serials.includes(serial)) {
+                    const alreadyScanned = (scanned[group.id] || new Set()).has(serial);
+                    if (alreadyScanned) {
+                        toast({ title: 'Tekrar', description: `Seri no ${serial} zaten okutuldu.` });
+                        playFeedback(true);
+                        return;
+                    }
+                    setScanned(prev => {
+                        const setFor = new Set(prev[group.id] || []);
+                        setFor.add(serial);
+                        return { ...prev, [group.id]: setFor };
+                    });
+                    toast({ title: 'Doğrulandı', description: `${group.stokAdi} - ${serial}` });
+                    playFeedback();
+                    foundAndUpdated = true;
+                    break;
+                }
+            } else { // Not serial tracked
+                if (group.countedQty < group.expectedQty) {
+                    setRows(prev => prev.map(g => g.id === group.id ? {...g, countedQty: g.countedQty + 1} : g));
+                    toast({ title: 'Adet Artırıldı', description: `${group.stokAdi} (${group.lotNumarasi}) adedi güncellendi.` });
+                    playFeedback();
+                    foundAndUpdated = true;
+                    break;
+                } else {
+                    toast({ title: 'Adet Tamamlandı', description: `${group.stokAdi} için beklenen adete ulaşıldı.` });
+                    playFeedback(true);
+                    return;
+                }
+            }
+        }
+    }
+    
+    if (!foundAndUpdated && serial && res?.stagedNew) {
+        const groupKey = `${parsed.stokKodu}-${parsed.lotNumarasi || ''}-${parsed.miadFormatted || ''}`;
+        setScanned(prev => {
+            const setFor = new Set(prev[groupKey] || []);
+            setFor.add(serial);
+            return { ...prev, [groupKey]: setFor };
+        });
+        toast({ title: 'Yeni Ürün Doğrulandı', description: `${parsed.stokKodu} - ${serial}` });
+        playFeedback();
+        foundAndUpdated = true;
+    }
+
+    if (!foundAndUpdated) {
+        toast({ title: 'Bulunamadı', description: `Okutulan ürün listede bulunamadı veya eşleşmedi.` });
+        playFeedback(true);
+    }
+  }, [allItemsForCount, onScanAndStageIfMissing, scanned, toast]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        handleScan(buffer.current);
+        buffer.current = '';
+        if (timeout.current) clearTimeout(timeout.current);
+      } else if (e.key.length === 1 && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+        buffer.current += e.key;
+        if (timeout.current) clearTimeout(timeout.current);
+        timeout.current = setTimeout(() => { buffer.current = ''; }, 100);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [handleScan]);
+  
+  const { totalItems, verifiedItems, progress } = useMemo(() => {
+    let total = 0;
+    let verified = 0;
+    allItemsForCount.forEach(group => {
+      total += group.expectedQty;
+      const isSerialTracked = group.trackingMode === 'serial';
+      verified += isSerialTracked ? (scanned[group.id] || new Set()).size : group.countedQty;
+    });
+    const progressPercentage = total > 0 ? (verified / total) * 100 : 0;
+    return {
+      totalItems: total,
+      verifiedItems: verified,
+      progress: progressPercentage
+    };
+  }, [allItemsForCount, scanned]);
+
+  return (
+    <div className="p-4 space-y-4">
+      <BackButton fallback="/laboratuvar-yonetimi" />
+      <Card>
+        <CardHeader>
+            <div className="flex justify-between items-start">
+              <div>
+                <CardTitle>Sayım Oturumu: {labName}</CardTitle>
+                <CardDescription>Okutulan yeşil, okutulmayan kırmızı. Kaynaktan eklenenler mavi renkte gösterilir.</CardDescription>
+              </div>
+              <Button onClick={() => setShowOnlyUnverified(v => !v)} variant="outline">
+                <ListFilter className="mr-2 h-4 w-4"/>
+                {showOnlyUnverified ? 'Tümünü Göster' : 'Doğrulanmayanları Göster'}
+              </Button>
+            </div>
+            <div className="pt-4 space-y-2">
+                <Progress value={progress} className="h-3" indicatorClassName={progress === 100 ? 'bg-green-500' : 'bg-primary'} />
+                <div className="flex justify-between text-sm font-medium">
+                    <span className="text-muted-foreground">Toplam Ürün: {totalItems}</span>
+                    <span className="text-primary">Doğrulanan: {verifiedItems}</span>
+                </div>
+            </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="h-8 w-8 animate-spin" /></div>
+          ) : (
+            <ScrollArea className="h-[60vh] border rounded p-2">
+              <Accordion type="multiple" defaultValue={displayedItems.map(i => i.id)}>
+                {displayedItems.map(group => {
+                  const isSerialTracked = group.trackingMode === 'serial';
+                  const count = isSerialTracked ? (scanned[group.id] || new Set()).size : group.countedQty;
+                  const complete = count === group.expectedQty;
+
+                  const triggerContent = (
+                    <div className="flex-1 text-left flex justify-between items-center w-full">
+                        <div className="flex-1 text-left">{group.stokAdi} ({group.stokKodu})</div>
+                        <div className="flex-1 text-left">Lot: {group.lotNumarasi}</div>
+                        <div className="flex-1 text-left">Miad: {group.miad}</div>
+                        <div className="font-bold">{count}/{group.expectedQty}</div>
+                    </div>
+                  );
+                  
+                  if (!isSerialTracked) {
+                    return (
+                        <div key={group.id} className={cn('p-2 rounded-lg flex items-center', complete ? 'bg-green-100 dark:bg-green-900/30' : 'bg-background', groupRowClass(group.stokKodu, group.lotNumarasi, group.miad))}>
+                            {triggerContent}
+                        </div>
+                    );
+                  }
+
+                  return (
+                    <AccordionItem
+                      key={group.id}
+                      value={group.id}
+                      className={cn(groupRowClass(group.stokKodu, group.lotNumarasi, group.miad))}
+                    >
+                      <AccordionTrigger className={cn('p-2 rounded-lg', complete && 'bg-green-100 dark:bg-green-900/30')}>
+                        {triggerContent}
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <ul className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2 font-mono text-xs">
+                          {group.serials.map(s => (
+                            <li key={s}
+                              className={cn(
+                                'p-1 rounded flex items-center gap-2',
+                                (scanned[group.id] || new Set()).has(s) ? 'bg-green-200' : 'bg-red-200',
+                                isNewSerial(s) && 'bg-blue-200'
+                              )}
+                            >
+                              {(scanned[group.id] || new Set()).has(s) || isNewSerial(s) ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                              <span className={cn(serialTextClass(s))}>{s || '(no-serial)'}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
+            </ScrollArea>
+          )}
+        </CardContent>
+        <CardFooter className="justify-end">
+          <Button onClick={saveSession} disabled={isLoading || allItemsForCount.length === 0}>
+            {isLoading && <Loader2 className="animate-spin mr-2" />} Sayımı Tamamla ve Kaydet
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  );
+}

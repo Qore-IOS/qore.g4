@@ -1,0 +1,26 @@
+diff --git a/node_modules/@react-three/fiber/dist/index.js b/node_modules/@react-three/fiber/dist/index.js
+index 920f69a..74205c0 100644
+--- a/node_modules/@react-three/fiber/dist/index.js
++++ b/node_modules/@react-three/fiber/dist/index.js
+@@ -10,7 +10,7 @@ import { FlushSync as FlushSync$1, FixedStage as FixedStage$1, SortBy as SortBy$
+ import * as import1 from 'react';
+ import { createContext, useContext, useMemo, useRef, useEffect, forwardRef, createElement, Children, isValidElement, cloneElement, useState, useLayoutEffect, startTransition } from 'react';
+ import { flushSync, unstable_isProcessing, useThree, createEvents, useStore, useFrame as useFrame$1, addEffect, addAfterEffect, addTail, advance } from '@react-three/fiber/dist/native.js';
+-import { unstable_getPriorityLevel, unstable_runWithPriority } from 'scheduler';
++import { unstable_getPriorityLevel, unstable_runWithPriority } from 'react/Scheduler.js';
+ import { create, StoreApi as StoreApi$1, UseBoundStore as UseBoundStore$1 } from 'zustand';
+ import { subscribeWithSelector } from 'zustand/middleware';
+ import { MathUtils, Vector2, Raycaster, Matrix4, Group, OrthographicCamera, PerspectiveCamera, Scene, WebGLRenderer, Color, Clock, Vector3, Sphere, Box3, Plane, Object3D } from 'three';
+diff --git a/node_modules/@react-three/fiber/dist/native.js b/node_modules/@react-three/fiber/dist/native.js
+index 515867a..b12d5e7 100644
+--- a/node_modules/@react-three/fiber/dist/native.js
++++ b/node_modules/@react-three/fiber/dist/native.js
+@@ -8,7 +8,7 @@ import { Reconciler as Reconciler$1 } from 'react-reconciler';
+ import * as import1 from 'react';
+ import { createContext, useContext, useMemo, useRef, useEffect, forwardRef, createElement, Children, isValidElement, cloneElement, useState, useLayoutEffect, startTransition } from 'react';
+ import { create, StoreApi as StoreApi$1, UseBoundStore as UseBoundStore$1 } from 'zustand';
+-import { unstable_getPriorityLevel, unstable_runWithPriority } from 'scheduler';
++import { unstable_getPriorityLevel, unstable_runWithPriority } from 'react/Scheduler.js';
+ import { subscribeWithSelector } from 'zustand/middleware';
+ import { MathUtils, Vector2, Raycaster, Matrix4, Group, OrthographicCamera, PerspectiveCamera, Scene, WebGLRenderer, Color, Clock, Vector3, Sphere, Box3, Plane, Object3D } from 'three';
+ import { Invalidate as Invalidate$1, RenderCallback as RenderCallback$1, Root as Root$1, RootState as RootState$1 } from '@react-three/fiber';

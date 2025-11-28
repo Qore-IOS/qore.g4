@@ -1,0 +1,188 @@
+
+'use client';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Loader2, Trash2 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs, doc, getDoc, writeBatch } from 'firebase/firestore';
+import type { DepoStokItem, ConsumptionRecord } from '@/lib/types';
+import BackButton from '@/components/BackButton';
+import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/auth-context';
+import { formatMiad } from "@/lib/date";
+import TimestampText from '@/components/TimestampText';
+
+export default function LabStockDetailPage() {
+  const params = useParams();
+  const firstId = Array.isArray(params?.id) ? params.id[0] : params?.id;
+  const { toast } = useToast();
+  const { currentUserProfile } = useAuth();
+
+  const [items, setItems] = useState<DepoStokItem[]>([]);
+  const [parentItem, setParentItem] = useState<DepoStokItem | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+
+  const fetchItems = useCallback(async () => {
+    if (!firstId) {
+        setLoading(false);
+        return;
+    }
+    setLoading(true);
+    try {
+        const firstItemSnap = await getDoc(doc(db, 'depoStok', firstId));
+        if (!firstItemSnap.exists()) {
+            toast({ title: 'Hata', description: 'Ana ürün bilgisi bulunamadı.', variant: 'destructive'});
+            setLoading(false);
+            return;
+        }
+        const parent = { id: firstItemSnap.id, ...firstItemSnap.data() } as DepoStokItem;
+        setParentItem(parent);
+
+        const q = query(
+            collection(db, 'depoStok'),
+            where('stokKodu', '==', parent.stokKodu),
+            where('lotNumarasi', '==', parent.lotNumarasi),
+            where('miad', '==', parent.miad),
+            where('hedefKurum', '==', parent.hedefKurum),
+            where('isShipped', '==', true)
+        );
+        const snap = await getDocs(q);
+        const fetchedItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        setItems(fetchedItems);
+
+    } catch (err) {
+      console.error("Error fetching lab stock details:", err);
+      toast({ title: 'Hata', description: 'Stok detayları yüklenemedi.', variant: 'destructive'});
+    } finally {
+      setLoading(false);
+    }
+  }, [firstId, toast]);
+
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
+
+  const handleDeductFromStock = async (itemToDeduct: DepoStokItem) => {
+    if (!currentUserProfile) {
+        toast({ title: 'Hata', description: 'Bu işlemi yapmak için giriş yapmalısınız.', variant: 'destructive'});
+        return;
+    }
+    
+    if (!confirm(`${itemToDeduct.seriNumarasi} seri numaralı ürünü stoktan düşmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
+      return;
+    }
+
+    const id = itemToDeduct?.id;
+    if (!id) {
+        toast({
+            title: "Kayıt ID bulunamadı",
+            description: "Seçilen stok kaleminin kimliği eksik. Lütfen kaydı kontrol edin.",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    setIsDeleting(id);
+
+    try {
+      const newConsumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+        stokKodu: itemToDeduct.stokKodu,
+        stokAdi: itemToDeduct.stokAdi,
+        lotNumarasi: itemToDeduct.lotNumarasi ?? '',
+        miad: formatMiad(itemToDeduct.miad),
+        seriNumarasi: itemToDeduct.seriNumarasi ?? '',
+        laboratoryId: '', // We don't have the lab ID here, just the name. This might need refinement.
+        laboratoryName: itemToDeduct.hedefKurum || 'Bilinmeyen Lab.',
+        consumptionTimestamp: new Date(),
+        consumptionType: 'sayimdan_dusum', // Or a new type like 'manuel_düşüm'
+        userId: currentUserProfile.uid,
+        userName: currentUserProfile.name || 'Bilinmeyen Kullanıcı',
+      };
+      
+      const batch = writeBatch(db);
+      const consumptionRef = doc(collection(db, 'tuketimKayitlari'));
+      const stockRef = doc(db, 'depoStok', id);
+
+      batch.set(consumptionRef, newConsumptionRecord);
+      batch.delete(stockRef);
+
+      await batch.commit();
+      setItems(prev => prev.filter(item => item.id !== id));
+      toast({ title: 'Başarılı', description: `${itemToDeduct.stokAdi} stoktan düşüldü.` });
+    } catch (err) {
+      console.error("Error deducting stock:", err);
+      toast({ title: 'Hata', description: 'Stoktan düşme işlemi sırasında bir hata oluştu.', variant: 'destructive'});
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
+
+  if (loading) {
+    return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div>;
+  }
+  
+  if (!parentItem) {
+    return (
+        <div className="flex h-full items-center justify-center text-destructive">
+            Ürün bilgisi yüklenemedi veya bulunamadı.
+        </div>
+    );
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <BackButton fallback="/laboratuvar-yonetimi" />
+      <Card>
+        <CardHeader>
+          <CardTitle className="truncate max-w-full">{parentItem.stokAdi}</CardTitle>
+          <CardDescription>
+            Stok Kodu: {parentItem.stokKodu} | Lot: {parentItem.lotNumarasi} | Miad: {formatMiad(parentItem.miad)}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {items.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">Bu lot için stok bulunamadı.</p>
+          ) : (
+            <ScrollArea className="h-[70vh]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Seri Numarası</TableHead>
+                    <TableHead>Raf Adresi (Depo)</TableHead>
+                    <TableHead>Sevk Tarihi</TableHead>
+                    <TableHead className="text-right">İşlem</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map(item => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-mono text-xs">{item.seriNumarasi}</TableCell>
+                      <TableCell>{item.rafAdresi}</TableCell>
+                      <TableCell><TimestampText value={item.sevkTarihi} /></TableCell>
+                      <TableCell className="text-right">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => handleDeductFromStock(item)}
+                          disabled={isDeleting === item.id}
+                        >
+                          {isDeleting === item.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

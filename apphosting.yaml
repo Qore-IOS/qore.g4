@@ -1,0 +1,38 @@
+# Settings to manage and configure a Firebase App Hosting backend.
+# https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  # Increase this value if you'd like to automatically spin up
+  # more instances in response to increased traffic.
+  maxInstances: 1
+# Set the startup timeout to 180 seconds to allow for longer build/start times.
+startupTimeoutSeconds: 180
+
+# --- Environment Variables ---
+env:
+  # --- SECRET KEY ---
+  # This key is sensitive and is loaded from Secret Manager.
+  # The "secret" value must match the name you created in Step 1.
+
+  # --- PUBLIC KEYS ---
+  # These NEXT_PUBLIC_ keys are safe to be public and are added directly.
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: "AIzaSyCNyMrzGqqE6lswpxAXkNavCdWqOcXupwY"
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: "invpilot.firebaseapp.com"
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: "invpilot"
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: "invpilot.appspot.com"
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "929852527053"
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:929852527053:web:bde59db5aae5c07a387484"
+  - variable: NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+    value: "G-TGHCKJKWEZ"
+  - variable: NEXT_PUBLIC_FIREBASE_VAPID_KEY
+    value: "BE2fqTvYpQ5glBOFR2MoPj0g5ZMd34V3isHYFGX5HjSBjhneZUavSbROEVVvNOpwKAQHYo3fFKzSHadfdq8zQ-o"
+  - variable: NEXT_PUBLIC_FB_FUNCTION_REGION
+    value: "europe-west1"
+  - variable: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+    value: "AIzaSyDW59zZ7YY_z-Vg_M-FjZ4i1i7F-P0KQqQ"

@@ -1,0 +1,23 @@
+{
+  "hosting": {
+    "source": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "frameworksBackend": {
+      "region": "us-central1"
+    }
+  },
+  "database": {
+    "instance": "invpilot-default-rtdb",
+    "rules": "database.rules.json"
+  },
+  "functions": {
+    "source": "functions"
+  },
+  "firestore": {
+    "indexes": "[\n      {\n        \"collectionGroup\": \"overtimeRequests\",\n        \"queryScope\": \"COLLECTION\",\n        \"fields\": [\n          {\n            \"fieldPath\": \"userId\",\n            \"order\": \"ASCENDING\"\n          },\n          {\n            \"fieldPath\": \"createdAt\",\n            \"order\": \"DESCENDING\"\n          }\n        ]\n      }\n    ]"
+  }
+}

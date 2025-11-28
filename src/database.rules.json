@@ -1,0 +1,18 @@
+
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "status": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    ".info": {
+      "connected": {
+        ".read": "auth != null"
+      }
+    }
+  }
+}

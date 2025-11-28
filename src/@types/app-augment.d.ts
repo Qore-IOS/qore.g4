@@ -1,0 +1,607 @@
+// src/@types/app-augment.d.ts
+// Unified augmentation so builds never fail if some exports are missing in "@/lib/types".
+declare module "@/lib/types" {
+  // ---------- Common / Core ----------
+  export type ID = string;
+  export type TimestampLike = string | number | Date | { toDate: () => Date; seconds: number; nanoseconds: number; };
+
+  export type AppView =
+    | "dashboard"
+    | "arama"
+    | "stok-yonetimi"
+    | "depo-sayim"
+    | "urun-kullanim"
+    | "sevkiyat"
+    | "raporlama"
+    | "yonetim"
+    | "cihaz-yonetimi"
+    | "miad-uyarilari"
+    | "verimlilik"
+    | "cihaz-ustu-ekle"
+    | "numune-arsivi";
+
+  export interface User {
+    id?: ID;
+    uid?: string;
+    displayName?: string;
+    email?: string;
+    role?: "admin" | "editor" | "viewer" | "user" | "teknik_servis" | "aplikasyon" | string;
+    hospitalId?: ID;
+    depotId?: ID;
+    active?: boolean;
+    accessibleViews?: AppView[];
+    name?: string;
+    assignedLaboratories?: string[];
+    assignedDepots?: string[];
+    assignedBrands?: string[];
+    phoneNumber?: string;
+    createdAt?: TimestampLike;
+    notificationsEnabled?: boolean;
+    notificationPreferences?: string[];
+  }
+
+  // ---------- Master Data ----------
+  export interface ProductCode {
+    id?: ID;
+    stokKodu?: string;
+    stokAdi?: string;
+    barkod?: string;
+    anaBirim?: "Kutu" | "Adet" | "Test" | "Flakon" | "Paket" | "Şişe" | string;
+    uretici?: string;
+    kategori?: string;
+    marka?: string;
+    laboratuvarGrubu?: string;
+    testGrubu?: string;
+    cihazGrubu?: string;
+    aktif?: boolean;
+    ambalajDegeri?: number;
+    urunGrubu?: 'kit' | 'sarf';
+    trackingMode?: any; // Keep it flexible
+    barcodeNumber?: string;
+    barcodeFormatId?: string | null;
+    cost?: number;
+    currency?: 'EUR' | 'USD' | 'TRY';
+    [k: string]: unknown;
+  }
+  
+  export interface Asset {
+    id: string;
+    category: string;
+    demirbasNo: string;
+    urunKodu: string;
+    urunAdi: string;
+    marka: string;
+    model: string;
+    seriNumarasi?: string; // NEW
+    durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü'; // NEW
+    konum: string;
+    manuelKonum?: string; // NEW
+    teslimEdilenPersonel: string;
+    aciklama: string;
+  }
+
+  export interface Depot {
+    id?: ID;
+    ad?: string;
+    name?: string;
+    kod?: string;
+    hospitalId?: ID;
+    adres?: string;
+    aktif?: boolean;
+    companies?: string[];
+    mapDefinition?: any;
+    [k: string]: unknown;
+  }
+
+  export interface Hospital {
+    id?: ID;
+    ad?: string;
+    name?: string;
+    kod?: string;
+    sehir?: string;
+    ilce?: string;
+    aktif?: boolean;
+    consumptionTrackingEnabled?: boolean;
+    fefoEnabled?: boolean;
+    address?: string;
+    lat?: number;
+    lng?: number;
+    updatedAt?: TimestampLike;
+    createdAt?: TimestampLike;
+    [k: string]: unknown;
+  }
+  export type Laboratory = Hospital;
+
+  export interface AddressDefinition {
+    id?: ID;
+    code?: string;
+    description?: string;
+    group?: string;
+    rack?: string;
+    shelf?: string;
+    hospitalId?: ID;
+    depotId?: ID;
+    active?: boolean;
+    addressBarcode?: string;
+    addressName?: string;
+    [k: string]: unknown;
+  }
+
+  // ---------- Inventory & Counting ----------
+  export interface DepoStokItem {
+    id?: ID;
+    productCodeId?: ID;
+    stokKodu?: string;
+    stokAdi?: string;
+    lot?: string;
+    lotNumarasi?: string;
+    seriNo?: string;
+    seriNumarasi?: string;
+    adet?: number;
+    birim?: string;
+    miad?: TimestampLike;
+    depotId?: ID;
+    hospitalId?: ID;
+    shelf?: string;
+    rafAdresi?: string;
+    createdAt?: TimestampLike;
+    updatedAt?: TimestampLike;
+    hedefKurum?: string;
+    isShipped?: boolean;
+    sevkTarihi?: TimestampLike;
+    depotName?: string;
+    eklenmeTarihi?: TimestampLike;
+    irsaliyeNumarasi?: string;
+    [k: string]: unknown;
+  }
+
+  export interface DepotStockCountSession {
+    id?: ID;
+    depotId?: ID;
+    depotName?: string;
+    brand?: string;
+    startedAt?: TimestampLike;
+    closedAt?: TimestampLike | null;
+    createdBy?: ID;
+    createdByName?: string;
+    note?: string;
+    status?: 'active' | 'completed';
+    itemCount?: number;
+    scannedCount?: number;
+    missingCount?: number;
+    [k: string]: unknown;
+  }
+
+  export interface HospitalStockCountSession {
+    id?: ID;
+    hospitalId?: ID;
+    startedAt?: TimestampLike;
+    closedAt?: TimestampLike | null;
+    createdBy?: ID;
+    note?: string;
+    [k: string]: unknown;
+  }
+
+  export interface CellDef {
+    row?: number;
+    col?: number;
+    code?: string;
+    label?: string;
+    [k: string]: unknown;
+  }
+
+  export interface SessionCell {
+    id?: ID;
+    sessionId?: ID;
+    address?: string;
+    quantity?: number;
+    productCodeId?: ID;
+    updatedAt?: TimestampLike;
+    [k: string]: unknown;
+  }
+
+  // ---------- Shipments / Orders ----------
+  export interface ShipmentItem {
+    id?: ID;
+    productCodeId?: ID;
+    lot?: string;
+    seriNo?: string;
+    miktar?: number;
+    birim?: string;
+    miad?: TimestampLike;
+    stokKodu?: string;
+    stokAdi?: string;
+    lotNumarasi?: string;
+    quantity?: number;
+    serialNumbers?: string[];
+    [k: string]: unknown;
+  }
+
+  export interface Shipment {
+    id?: ID;
+    no?: string;
+    tarih?: TimestampLike;
+    sourceDepotId?: ID;
+    targetHospitalId?: ID;
+    items?: ShipmentItem[];
+    durum?: "hazir" | "yolda" | "teslim" | string;
+    orderId?: string;
+    depotId?: string;
+    depotName?: string;
+    recipientHospital?: string;
+    userId?: string;
+    userName?: string;
+    timestamp?: TimestampLike;
+    [k: string]: unknown;
+  }
+
+  export interface OrderItem {
+    id?: ID;
+    productCodeId?: ID;
+    miktar?: number;
+    birim?: string;
+    stokKodu?: string;
+    stokAdi?: string;
+    adet?: number;
+    [k: string]: unknown;
+  }
+
+  export interface Order {
+    id?: ID;
+    hospitalId?: ID;
+    tarih?: TimestampLike;
+    items?: OrderItem[];
+    durum?: "taslak" | "onayli" | "gonderildi" | "kapatildi" | "pending" | "toplaniyor" | "completed" | string;
+    kurumAdi?: string;
+    depotId?: string;
+    labId?: string;
+    createdAt?: TimestampLike;
+    status?: "pending" | "completed" | "toplaniyor";
+    createdBy?: string;
+    transferredAt?: TimestampLike;
+    depotName?: string;
+    createdById?: string;
+    transferredById?: string;
+    transferredBy?: string;
+    [k: string]: unknown;
+  }
+
+  export interface PickingListItem {
+    id?: ID;
+    shipmentId?: ID;
+    productCodeId?: ID;
+    lot?: string;
+    seriNo?: string;
+    miktar?: number;
+    orderId?: string;
+    stokKodu?: string;
+    stokAdi?: string;
+    lotNumarasi?: string;
+    miad?: string;
+    rafAdresiOnerilen?: string;
+    adetIstenen?: number;
+    toplananSeriNumaralari?: string[];
+    [k: string]: unknown;
+  }
+
+  // ---------- Consumption / Usage ----------
+  export interface ParsedBarcode {
+    type?: "product" | "lot" | "serial" | string;
+    productCodeId?: ID;
+    lot?: string;
+    serials?: string[];
+    quantity?: number;
+    error?: string | null;
+    [k: string]: unknown;
+  }
+
+  export interface ConsumptionRecord {
+    id?: ID;
+    productCodeId?: ID;
+    hospitalId?: ID;
+    deviceId?: ID;
+    miktar?: number;
+    birim?: string;
+    lot?: string;
+    seriNo?: string;
+    seriNumarasi?: string;
+    stokKodu?: string;
+    stokAdi?: string;
+    lotNumarasi?: string;
+    miad?: TimestampLike;
+    tarih?: TimestampLike;
+    consumptionTimestamp?: TimestampLike;
+    createdBy?: ID;
+    laboratoryId?: string;
+    laboratoryName?: string;
+    userName?: string;
+    userId?: string;
+    consumptionType?: string;
+    [k: string]: unknown;
+  }
+  
+  export interface VerificationItemGroup {
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi: string;
+    miad: string;
+    tuketilenAdet: number;
+    dogrulananAdet: number;
+    originalRecordIds: string[];
+  }
+
+  export interface VerificationReportItem {
+    id?: ID;
+    productCodeId?: ID;
+    lot?: string;
+    seriNo?: string;
+    status?: "ok" | "mismatch" | "missing" | string;
+    note?: string;
+    [k: string]: unknown;
+  }
+
+  export interface ScannedItem {
+    id?: ID;
+    barkod?: string;
+    parsed?: ParsedBarcode;
+    at?: TimestampLike;
+    stokKodu?: string;
+    stokAdi?: string;
+    lotNumarasi?: string;
+    miad?: string;
+    seriNumarasi?: string;
+    rafAdresi?: string;
+    irsaliyeNumarasi?: string;
+    isSelected?: boolean;
+    timestamp?: TimestampLike;
+    isProcessed?: boolean;
+    [k: string]: unknown;
+  }
+
+  // ---------- Devices ----------
+  export interface Device {
+    id?: ID;
+    ad?: string;
+    name?: string;
+    brand?: string;
+    model?: string;
+    imageUrl?: string;
+    cihazAdi?: string;
+    seriNumarasi?: string;
+    kod?: string;
+    hospitalId?: ID;
+    aktif?: boolean;
+    arizaDurumu?: 'yok' | 'teknik_servis' | 'aplikasyon';
+    sonArizaTarihi?: any;
+    arizaAciklamasi?: string;
+    [k: string]: unknown;
+  }
+  
+  export interface DeviceFaultReportPayload {
+    reportId: string;
+    [key: string]: any;
+  }
+
+  export interface AssignedDevice {
+    id?: ID;
+    hastaneId?: string;
+    cihazId?: string;
+    assignedAt?: TimestampLike;
+    deviceId?: string;
+    name?: string;
+    arizaDurumu?: string;
+    serial?: string;
+    subPointId?: string | null;
+    subPointName?: string | null;
+    arizaTip?: 'teknik_servis' | 'aplikasyon';
+    arizaTarihi?: TimestampLike;
+    [k: string]: unknown;
+  }
+  export type LabDeviceAssignment = AssignedDevice;
+
+  export interface DeviceGroupSlot {
+    deviceId: string | null;
+    name: string;
+  }
+
+  export interface DeviceGroup {
+    id: string;
+    name: string;
+    order: number;
+    subPointId?: string | null;
+    subPointName?: string | null;
+    // Changed from deviceIds: string[]
+    slots: DeviceGroupSlot[];
+  }
+
+  export interface CihazUstuStokInput {
+    deviceId?: ID;
+    productCodeId?: ID;
+    miktar?: number;
+    [k: string]: unknown;
+  }
+
+  // ---------- Analytics / Efficiency ----------
+  export interface EfficiencyData {
+    id?: ID;
+    hospitalId?: ID;
+    deviceId?: ID;
+    tarih?: TimestampLike;
+    calismaSuresiDakika?: number;
+    testSayisi?: number;
+    hospitalName?: string;
+    month?: number;
+    year?: number;
+    cihazUstuDevir?: Record<string, number>;
+    sistemTuketimleriDateRange?: { from?: Date; to?: Date };
+    hesaplananTestBazliTuketim?: Record<string, number>;
+    cihazUstuAySonu?: Record<string, number>;
+    kumulatifVeriler?: Record<string, KumulatifDataInput>;
+    verimlilikSonuclari?: Record<string, VerimlilikAnalizi>;
+    consumptionInputMethod?: 'system' | 'manual';
+    lastUpdated?: TimestampLike;
+    [k: string]: unknown;
+  }
+
+  export interface VerimlilikAnalizi {
+    id?: ID;
+    hospitalId?: ID;
+    ay?: number;
+    yil?: number;
+    skor?: number;
+    stokKodu?: string;
+    stokAdi?: string;
+    anaTuketimTestAdeti?: number;
+    kumulatifTotalTest?: number;
+    bilinenFire?: number;
+    bilinmeyenFire?: number;
+    toplamFire?: number;
+    rutinHastaSayisi?: number;
+    [k: string]: unknown;
+  }
+
+  export interface KumulatifDataInput {
+    hospitalId?: ID;
+    deviceId?: ID;
+    from?: TimestampLike;
+    to?: TimestampLike;
+    stokKodu?: string;
+    kumulatifTotal?: number;
+    rutin?: number;
+    kontrol?: number;
+    kalibrasyon?: number;
+    tekrar?: number;
+    [k: string]: unknown;
+  }
+
+  // ---------- Min/Max & Settings ----------
+  export interface MinMaxRule {
+    id?: ID;
+    hospitalId?: ID;
+    productCodeId?: ID;
+    min?: number;
+    max?: number;
+    stokKodu?: string;
+    [k: string]: unknown;
+  }
+
+  export interface UploadedReport {
+    id?: ID;
+    name?: string;
+    url?: string;
+    uploadedAt?: TimestampLike;
+    uploaderId?: string;
+    uploaderName?: string;
+    path?: string;
+    type?: string;
+    [k: string]: unknown;
+  }
+
+  // ---------- Ledger (ProductLedger) ----------
+  export type LedgerOpType = "IN" | "OUT" | "TRANSFER" | string;
+
+  export interface LedgerItemRow {
+    id?: ID;
+    date?: TimestampLike;
+    type: LedgerOpType;
+    source?: string;
+    target?: string;
+    details?: string;
+    [k: string]: unknown;
+  }
+
+  export interface GroupedLedgerRow {
+    date?: TimestampLike;
+    stokKodu?: string;
+    stokAdi?: string;
+    lot?: string;
+    type: LedgerOpType;
+    seriNolar?: string[];
+    source?: string;
+    target?: string;
+    [k: string]: unknown;
+  }
+
+  export interface LedgerHeaderStockInfo {
+    depoAdi: string;
+    adet: number;
+    birim: string;
+  }
+
+  export interface LedgerHeader {
+    sorgu: string;
+    stokKodu?: string;
+    stokAdi?: string;
+    stokBilgisi?: LedgerHeaderStockInfo[];
+  }
+
+  export interface LedgerData {
+    header: LedgerHeader;
+    items: Array<LedgerItemRow | GroupedLedgerRow>;
+  }
+  
+  export type Currency = 'EUR' | 'USD' | 'TRY';
+  export type TrackingType = 'serial' | 'lot_barcode' | 'lot_manual' | 'quantity_only';
+  
+  export interface SummaryRow {
+    test: string;
+    routine: number;
+    rerun: number;
+    calib: number;
+    control: number;
+    total: number;
+  };
+  export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
+
+  export type ParseTarget = 'reference' | 'barcodeNumber';
+  export type ExpiryPattern = 'YYMMDD' | 'YYYYMMDD' | 'DDMMYYYY' | 'MMYY' | 'MMYYYY' | 'text';
+  export type PositionDef = { start: number; length: number };
+
+
+  export type BarcodeFormat = {
+      id: string;
+      name: string;
+      strategy: 'positional' | 'regex' | 'legacy_roche';
+      active: boolean;
+      priority: number;
+      totalLength?: number;
+      reference?: { start: number; length: number };
+      lot?: { start: number; length: number };
+      expiry?: { start: number; length: number; pattern: ExpiryPattern };
+      regex?: string;
+      fields?: { reference?: number; lot?: number; expiry?: number };
+      parseTarget?: ParseTarget;
+  };
+  
+  export interface Transfer {
+    id: string;
+    sourceDepotId: string;
+    sourceDepotName: string;
+    targetName: string;
+    userId?: string;
+    userName?: string;
+    timestamp: TimestampLike;
+    itemCount: number;
+    [k: string]: any;
+  }
+  
+  export interface TestDefinition {
+    id: string;
+    name: string;
+    linkedProductCode: string; // stokKodu
+  }
+
+  export interface EventRow {
+    id: string;
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi?: string;
+    miad: string;
+    islemTipi: 'Mal Kabul' | 'Karşılanan Sipariş' | 'Direkt Transfer' | 'Kullanım';
+    actor?: string;
+    tarih: Date;
+    adet: number;
+    seriNolar: string[];
+    konum: string;
+  }
+}

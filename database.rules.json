@@ -1,0 +1,31 @@
+
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      ".read": "query.whereKeys.size() === 1 && query.whereKeys[0] === 'nfcId'",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || get(/databases/(default)/documents/users/$(auth.uid)).data.role == 'admin')",
+        ".write": "auth != null && (auth.uid === $uid || get(/databases/(default)/documents/users/$(auth.uid)).data.role == 'admin')"
+      }
+    },
+    "status": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    ".info": {
+      "connected": {
+        ".read": "auth != null"
+      }
+    },
+    "deviceFaultReports": {
+      "$reportId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    }
+  }
+}
