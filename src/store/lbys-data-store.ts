@@ -124,33 +124,37 @@ export const useLbysDataStore = create<LbysStore>()(
           const groups: Map<string, Omit<AggregatedRecord, 'id' | 'patientIds'> & { patientIds: Set<string> }> = new Map();
           
           const processChunk = (chunk: any[]) => {
-            chunk.forEach((row, rowIndex) => {
-                const calismaTarihiRaw = row[26];
-                if (!calismaTarihiRaw) return;
+            chunk.forEach((row) => {
+                if (!row || row.length < 27) return;
 
-                const calismaTarihi = toDateFromAny(calismaTarihiRaw);
-                if (!calismaTarihi || !isValid(calismaTarihi)) return;
-                
-                const dateStr = format(calismaTarihi, 'yyyy-MM-dd');
-                const hastaneId = String(row[3] || '').trim();
-                const isAsm = hastaneId === '999';
-                
+                const resultDateRaw = row[26];
+                if (!resultDateRaw) return;
+
+                const resultDate = toDateFromAny(resultDateRaw);
+                if (!resultDate || !isValid(resultDate)) return;
+
+                const dateStr = format(resultDate, 'yyyy-MM-dd');
+
+                const hospitalId = String(row[3] || '').trim();
+                const isAsm = hospitalId === '999';
+
                 let derivedHospitalName = 'Bilinmeyen Kurum';
                 if (isAsm) {
                     derivedHospitalName = normalize(row[11]);
                 } else {
-                    derivedHospitalName = hospitalDefinitions[hastaneId] || `Hastane (${hastaneId})`;
+                    derivedHospitalName = hospitalDefinitions[hospitalId] || `Hastane (${hospitalId})`;
                 }
 
                 const testName = normalize(row[7]);
                 const serviceName = normalize(row[11]);
-                const hastaId = String(row[1] || `no-id-${rowIndex}`);
+                const patientId = String(row[1] || `no-id-${Math.random()}`);
                 const isEmergency = String(row[4] || '').toUpperCase() === 'E';
                 const isRepeat = Number(row[14] || 0) > 0;
                 const rejectionReason = String(row[16] || '').trim();
                 const branchName = normalize(row[12]);
-
-                const key = `${dateStr}|${hastaneId}|${serviceName}|${testName}|${branchName}`;
+                const labDate = toDateFromAny(row[24]);
+                
+                const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
 
                 if (!groups.has(key)) {
                     groups.set(key, {
@@ -165,17 +169,15 @@ export const useLbysDataStore = create<LbysStore>()(
                 const record = groups.get(key)!;
                 record.totalTests++;
                 if (isEmergency) record.emergencyCount++;
-                if (hastaId) record.patientIds.add(hastaId);
+                if (patientId) record.patientIds.add(patientId);
                 if (isRepeat) record.repeatCount++;
                 if (rejectionReason) {
                     record.rejectedCount++;
                     record.rejectionReasons[rejectionReason] = (record.rejectionReasons[rejectionReason] || 0) + 1;
                 }
-
-                const labKabul = toDateFromAny(row[24]);
-                const calismaDate = toDateFromAny(row[26]);
-                if (labKabul && calismaDate && calismaDate > labKabul) {
-                    const diff = (calismaDate.getTime() - labKabul.getTime()) / (1000 * 60);
+                
+                if (labDate && isValid(labDate) && resultDate > labDate) {
+                    const diff = (resultDate.getTime() - labDate.getTime()) / (1000 * 60);
                     if (diff > 0) {
                         record.totalTatMinutes += diff;
                         record.tatCount++;
@@ -257,5 +259,3 @@ export const useLbysDataStore = create<LbysStore>()(
     })
   )
 );
-
-    
