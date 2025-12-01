@@ -1,6 +1,7 @@
+
 // src/lib/barcode/pos-utils.ts
 // Tek nokta: Pos alanlarını sayısallaştırır ve tip seviyesinde kesişim döndürür.
-import type { PositionDef, BarcodeFormat } from './types';
+import type { PositionDef, BarcodeFormat } from '../types';
 
 export type LoosePos = { start?: number | string; length?: number | string } & Record<string, unknown>;
 

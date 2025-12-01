@@ -1,23 +1,23 @@
 
 'use client';
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, writeBatch, deleteField } from 'firebase/firestore';
-import type { BarcodeFormat, ExpiryPattern } from '@/lib/barcode';
+import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import type { BarcodeFormat, ExpiryPattern } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Loader2, PlusCircle, Save, Trash2, Edit3, SlidersHorizontal, Info } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import BackButton from '../BackButton';
+import BackButton from '@/components/BackButton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { Label } from '../ui/label';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { normalizePos, normalizeFormat } from '@/lib/barcode/pos-utils';
-import { Switch } from '../ui/switch';
 
 
 type Pos = { start: number | string; length: number | string };
@@ -25,13 +25,13 @@ type Pos = { start: number | string; length: number | string };
 type LocalFormat = (Partial<BarcodeFormat> & {
     parseTarget?: 'reference' | 'barcodeNumber';
     trackLot?: boolean;
-    trackSerial?: boolean; // YENİ
+    trackSerial?: boolean; // NEW
     priority?: number;
     totalLength?: number | string;
     reference: Pos;
     lot: Pos;
     expiry?: (Pos & { pattern?: any }) | undefined;
-    serial?: Pos; // YENİ
+    serial?: Pos; // NEW
 });
 
 const EXPIRY_PATTERNS: ExpiryPattern[] = ['YYMMDD','YYYYMMDD','DDMMYYYY','MMYY','MMYYYY', 'text'];
@@ -53,11 +53,19 @@ function PosInputs({ value, onChange }: { value?: Pos; onChange: (v: Pos) => voi
     <div className="grid grid-cols-2 gap-2">
       <div>
         <Label>Başlangıç (1 bazlı)</Label>
-        <Input type="number" value={Number(v.start ?? 0)} onChange={e => onChange({ ...v, start: Number(e.target.value) })} />
+        <Input 
+            type="number" 
+            value={Number(v.start ?? 0)} 
+            onChange={e => onChange({ ...v, start: Number(e.target.value) })} 
+        />
       </div>
       <div>
         <Label>Uzunluk</Label>
-        <Input type="number" value={Number(v.length ?? 0)} onChange={e => onChange({ ...v, length: Number(e.target.value) })} />
+        <Input 
+            type="number" 
+            value={Number(v.length ?? 0)} 
+            onChange={e => onChange({ ...v, length: Number(e.target.value) })} 
+        />
       </div>
     </div>
   );
@@ -80,7 +88,6 @@ function cleanExpiry(p?: any) {
   return { start: s, length: l, pattern };
 }
 
-
 export default function BarkodFormatlariPanel() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(true);
@@ -90,10 +97,15 @@ export default function BarkodFormatlariPanel() {
 
   const fetchFormats = useCallback(async () => {
     setIsLoading(true);
-    const snap = await getDocs(query(collection(db, 'barcodeFormats'), orderBy('priority', 'asc')));
-    const rawFormats = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
-    setFormats(rawFormats.map(f => normalizeFormat(f) as BarcodeFormat));
-    setIsLoading(false);
+    try {
+        const snap = await getDocs(query(collection(db, 'barcodeFormats'), orderBy('priority', 'asc')));
+        const rawFormats = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        setFormats(rawFormats.map(f => normalizeFormat(f) as BarcodeFormat));
+    } catch (error) {
+        console.error("Format fetch error:", error);
+    } finally {
+        setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => { fetchFormats(); }, [fetchFormats]);
@@ -108,10 +120,10 @@ export default function BarkodFormatlariPanel() {
       reference: { start: 1, length: 1 },
       lot: { start: 0, length: 0 },
       expiry: { start: 0, length: 0, pattern: 'YYMMDD' },
-      serial: { start: 0, length: 0 }, // YENİ
+      serial: { start: 0, length: 0 },
       parseTarget: 'reference',
       trackLot: true,
-      trackSerial: true, // Varsayılan olarak açık (eski davranışa uyması için)
+      trackSerial: true, // Default to true for new formats
     });
     setIsModalOpen(true);
   };
@@ -128,20 +140,19 @@ export default function BarkodFormatlariPanel() {
     const totalLengthNum = Number(editing.totalLength ?? 0);
     const referenceClean = cleanPos(editing.reference);
     const trackLot = editing.trackLot !== false;
-    const trackSerial = editing.trackSerial === true; // YENİ
+    const trackSerial = editing.trackSerial === true; // Strict check
 
     if (!editing.name?.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Ad zorunlu.', variant: 'destructive' });
       return;
     }
     if (!referenceClean) {
-      toast({ title: 'Eksik Dilim', description: 'Referans / Ürün Barkodu başlangıç ve uzunluk girin.', variant: 'destructive' });
+      toast({ title: 'Eksik Dilim', description: 'Referans başlangıç ve uzunluk girin.', variant: 'destructive' });
       return;
     }
 
     const lotClean    = trackLot ? cleanPos(editing.lot) : undefined;
     const expiryClean = trackLot ? cleanExpiry(editing.expiry) : undefined;
-    
     const serialClean = (trackSerial && editing.strategy === 'positional') ? cleanPos(editing.serial) : undefined;
 
     const payload: any = {
@@ -151,7 +162,7 @@ export default function BarkodFormatlariPanel() {
       strategy: editing.strategy ?? 'positional',
       parseTarget: (editing.parseTarget as 'reference' | 'barcodeNumber') ?? 'reference',
       trackLot: trackLot,
-      trackSerial: trackSerial, // YENİ
+      trackSerial: trackSerial,
       reference: referenceClean,
     };
 
@@ -159,7 +170,7 @@ export default function BarkodFormatlariPanel() {
 
     if (trackLot) {
       if (payload.strategy === 'positional' && (!lotClean || !expiryClean)) {
-        toast({ title: 'Eksik Dilim', description: 'Lot ve Miad için başlangıç/uzunluk girin.', variant: 'destructive' });
+        toast({ title: 'Eksik Dilim', description: 'Lot ve Miad için aralıkları girin.', variant: 'destructive' });
         return;
       }
       payload.lot = lotClean;
@@ -173,7 +184,7 @@ export default function BarkodFormatlariPanel() {
        if (serialClean) {
          payload.serial = serialClean;
        } else {
-         payload.serial = deleteField();
+         payload.serial = deleteField(); 
        }
     } else {
        payload.serial = deleteField();
@@ -181,20 +192,20 @@ export default function BarkodFormatlariPanel() {
   
     try {
       await setDoc(doc(db, 'barcodeFormats', id), payload, { merge: true });
-      toast({ title: 'Kaydedildi', description: 'Barkod formatı güncellendi.' });
+      toast({ title: 'Kaydedildi', description: 'Barkod formatı başarıyla güncellendi.' });
       setIsModalOpen(false);
       setEditing(null);
       fetchFormats();
     } catch (e) {
       console.error(e);
-      toast({ title: 'Kayıt Hatası', description: 'Barkod formatı kaydedilemedi.', variant: 'destructive' });
+      toast({ title: 'Kayıt Hatası', description: 'Format kaydedilemedi.', variant: 'destructive' });
     }
   };
 
   const remove = async (f: BarcodeFormat) => {
     if(!confirm(`'${f.name}' formatını silmek istediğinizden emin misiniz?`)) return;
     await deleteDoc(doc(db, 'barcodeFormats', f.id));
-    toast({ title: 'Silindi', description: `${f.name} kaldırıldı.` });
+    toast({ title: 'Silindi', description: 'Format kaldırıldı.' });
     if (editing?.id === f.id) setEditing(null);
     fetchFormats();
   };
@@ -202,9 +213,9 @@ export default function BarkodFormatlariPanel() {
   return (
     <div className="p-6 space-y-6">
       <BackButton fallback="/yonetim" />
-      <Card className="shadow-lg">
+      <Card className="shadow-lg border-l-4 border-l-primary">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-xl font-headline">Barkod Formatları Yönetimi</CardTitle>
+          <CardTitle className="text-xl font-bold">Barkod Formatları Yönetimi</CardTitle>
           <Button onClick={openNew} className="gap-2"><PlusCircle className="h-4 w-4" /> Yeni Format</Button>
         </CardHeader>
         <CardContent>
@@ -218,26 +229,32 @@ export default function BarkodFormatlariPanel() {
                     <TableHead>Ad</TableHead>
                     <TableHead>Strateji</TableHead>
                     <TableHead>Öncelik</TableHead>
-                    <TableHead>Aktif</TableHead>
                     <TableHead>Tanıma</TableHead>
-                    <TableHead>Lot Takibi</TableHead>
-                    <TableHead>Seri No Takibi</TableHead>
+                    <TableHead>Lot</TableHead>
+                    <TableHead>Seri No</TableHead>
                     <TableHead className="text-right">İşlemler</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {formats.map(f => (
                     <TableRow key={f.id}>
-                      <TableCell>{f.name}</TableCell>
-                      <TableCell>{f.strategy || '-'}</TableCell>
-                      <TableCell>{f.priority ?? '-'}</TableCell>
-                      <TableCell>{f.active === false ? 'Hayır' : 'Evet'}</TableCell>
-                      <TableCell>{f.parseTarget === 'barcodeNumber' ? 'Barkod (UDI)' : 'Referans'}</TableCell>
-                      <TableCell>{(f as any).trackLot === false ? 'Hayır' : 'Evet'}</TableCell>
-                      <TableCell>{(f as any).trackSerial === false ? 'Hayır' : 'Evet'}</TableCell>
+                      <TableCell className="font-medium">{f.name}</TableCell>
+                      <TableCell>{f.strategy || 'Positional'}</TableCell>
+                      <TableCell>{f.priority ?? 10}</TableCell>
+                      <TableCell>{f.parseTarget === 'barcodeNumber' ? 'UDI' : 'Referans'}</TableCell>
+                      <TableCell>
+                        <span className={cn("px-2 py-1 rounded text-xs", (f as any).trackLot !== false ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800")}>
+                           {(f as any).trackLot !== false ? 'Aktif' : 'Pasif'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className={cn("px-2 py-1 rounded text-xs", (f as any).trackSerial === true ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800")}>
+                           {(f as any).trackSerial === true ? 'Aktif' : 'Pasif'}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-right space-x-2">
-                        <Button variant="outline" size="sm" onClick={() => openEdit(f)} className="gap-1"><Edit3 className="h-4 w-4" /> Düzenle</Button>
-                        <Button variant="outline" size="sm" onClick={() => remove(f)} className="gap-1 text-red-600"><Trash2 className="h-4 w-4" /> Sil</Button>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(f)}><Edit3 className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => remove(f)} className="text-red-600 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -249,161 +266,183 @@ export default function BarkodFormatlariPanel() {
       </Card>
 
       <Dialog open={isModalOpen} onOpenChange={(open) => { if (!open) setEditing(null); setIsModalOpen(open); }}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editing?.id ? 'Formatı Düzenle' : 'Yeni Format'}</DialogTitle>
+            <DialogTitle>{editing?.id ? 'Formatı Düzenle' : 'Yeni Format Oluştur'}</DialogTitle>
           </DialogHeader>
 
           {editing && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 py-4">
-              <div className="col-span-1 md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 py-4">
+              {/* Basic Info */}
+              <div className="col-span-1 md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 bg-muted/20 p-4 rounded-lg">
                 <div>
-                  <Label>Ad</Label>
-                  <Input value={editing.name || ''} onChange={e => setEditing(prev => ({ ...prev!, name: e.target.value }))} />
+                  <Label>Format Adı</Label>
+                  <Input 
+                    value={editing.name || ''} 
+                    onChange={e => setEditing(prev => ({ ...prev!, name: e.target.value }))}
+                    placeholder="Örn: Roche Kit Barkodu" 
+                  />
                 </div>
                 <div>
-                  <Label>Öncelik</Label>
+                  <Label>Öncelik (Küçük önce taranır)</Label>
                   <Input type="number" value={editing.priority ?? 10} onChange={e => setEditing(p => ({ ...p!, priority: Number(e.target.value) }))} />
                 </div>
-                <div className="flex items-end gap-2">
-                  <Checkbox
-                    id="active"
-                    checked={editing.active !== false}
-                    onCheckedChange={v => setEditing(p => ({ ...p!, active: Boolean(v) }))}
-                  />
-                  <Label htmlFor="active">Aktif</Label>
+                <div className="flex items-end gap-2 pb-2">
+                  <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="active"
+                        checked={editing.active !== false}
+                        onCheckedChange={v => setEditing(p => ({ ...p!, active: Boolean(v) }))}
+                      />
+                      <Label htmlFor="active">Bu Format Aktif</Label>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <Label>Strateji</Label>
-                <Select value={editing.strategy ?? 'positional'} onValueChange={v => setEditing(p => ({ ...p!, strategy: v as any }))}>
-                  <SelectTrigger><SelectValue placeholder="Strateji seçin" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="positional">Pozisyonel</SelectItem>
-                    <SelectItem value="regex">Regex</SelectItem>
-                    <SelectItem value="legacy_roche">Legacy (Roche)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="md:col-span-1">
-                <Label>Tanıma Kriteri</Label>
-                <Select
-                  value={editing.parseTarget ?? 'reference'}
-                  onValueChange={(v: 'reference' | 'barcodeNumber') => setEditing(p => ({ ...p!, parseTarget: v }))}
-                >
-                  <SelectTrigger className="w-full"><SelectValue placeholder="Seçin" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="reference">Referans (stokKodu) ile tanı</SelectItem>
-                    <SelectItem value="barcodeNumber">Barkod (UDI) ile tanı</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1">
-                  <Info className="h-3 w-3 mt-0.5 shrink-0" />
-                  <span>
-                    <b>Barkod (UDI)</b> seçerseniz, aşağıdaki <em>Referans</em> aralığını ürünün barkod numarasına ayarlayın.
-                  </span>
-                </p>
-              </div>
-              
-              <div className="flex flex-col justify-end gap-2">
-                  <div className="flex items-center space-x-2 border p-3 rounded-md">
-                      <Switch
-                          id="trackLot"
-                          checked={editing.trackLot !== false}
-                          onCheckedChange={(checked) => setEditing(p => ({ ...p!, trackLot: checked }))}
-                      />
-                      <Label htmlFor="trackLot">Lot Takibi</Label>
+              {/* Strategy & Target */}
+              <div className="space-y-4">
+                  <div>
+                    <Label>Okuma Stratejisi</Label>
+                    <Select value={editing.strategy ?? 'positional'} onValueChange={v => setEditing(p => ({ ...p!, strategy: v as any }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="positional">Pozisyonel (Karakter Sayısı)</SelectItem>
+                        <SelectItem value="regex">Regex (Gelişmiş Desen)</SelectItem>
+                        <SelectItem value="legacy_roche">Legacy (Roche Özel)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                   <div className="flex items-center space-x-2 border p-3 rounded-md">
-                      <Switch
-                        id="trackSerial"
-                        checked={editing.trackSerial === true}
-                        onCheckedChange={(checked) => setEditing(p => ({ ...p!, trackSerial: checked }))}
-                      />
-                      <Label htmlFor="trackSerial" className="cursor-pointer">
-                        Seri No Takibi
-                      </Label>
-                    </div>
+                  <div>
+                    <Label>Ürün Eşleştirme Hedefi</Label>
+                    <Select
+                      value={editing.parseTarget ?? 'reference'}
+                      onValueChange={(v: 'reference' | 'barcodeNumber') => setEditing(p => ({ ...p!, parseTarget: v }))}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="reference">Referans No (stokKodu)</SelectItem>
+                        <SelectItem value="barcodeNumber">Barkod No (UDI/GTIN)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+              </div>
+
+              {/* Switches Panel */}
+              <div className="md:col-span-2 grid grid-cols-2 gap-4 border p-4 rounded-lg bg-card">
+                  <div className="flex flex-col justify-center space-y-3">
+                      <div className="flex items-center justify-between border-b pb-2">
+                          <Label htmlFor="trackLot" className="font-semibold">Lot & Miad Takibi</Label>
+                          <Switch
+                              id="trackLot"
+                              checked={editing.trackLot !== false}
+                              onCheckedChange={(checked) => setEditing(p => ({ ...p!, trackLot: checked }))}
+                          />
+                      </div>
+                      <p className="text-xs text-muted-foreground">Ürünün lot numarası ve son kullanma tarihini içeriyorsa açın.</p>
+                  </div>
+
+                  <div className="flex flex-col justify-center space-y-3 border-l pl-4">
+                       <div className="flex items-center justify-between border-b pb-2">
+                          <Label htmlFor="trackSerial" className="font-semibold">Seri No Takibi</Label>
+                          <Switch
+                            id="trackSerial"
+                            checked={editing.trackSerial === true}
+                            onCheckedChange={(checked) => setEditing(p => ({ ...p!, trackSerial: checked }))}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">Her ürünün kendine ait tekil (unique) seri numarası varsa açın.</p>
+                  </div>
               </div>
 
 
+              {/* POSITIONAL INPUTS */}
               {(editing.strategy ?? 'positional') === 'positional' && (
                 <>
-                  <div className="md:col-span-3">
-                    <Label>Toplam Uzunluk</Label>
-                    <Input type="number" value={String(editing.totalLength ?? '')} onChange={e => setEditing(p => ({ ...p!, totalLength: Number(e.target.value) }))} />
+                  <div className="md:col-span-3 border-t pt-4 mt-2">
+                    <Label className="text-lg">Pozisyon Ayarları</Label>
                   </div>
 
-                  <Section title="Referans / Ürün Barkodu">
+                  <div className="md:col-span-1">
+                    <Label>Toplam Barkod Uzunluğu</Label>
+                    <Input type="number" value={String(editing.totalLength ?? '')} onChange={e => setEditing(p => ({ ...p!, totalLength: Number(e.target.value) }))} />
+                  </div>
+                  <div className="md:col-span-2"></div>
+
+                  <Section title="Referans / Ürün Kodu">
                     <PosInputs value={editing.reference} onChange={v => setEditing(p => ({ ...p!, reference: normalizePos(v) }))} />
                   </Section>
 
-                  <Section title="Lot" disabled={editing.trackLot === false}>
-                    <PosInputs
-                      value={editing.lot}
-                      onChange={v => setEditing(p => ({ ...p!, lot: normalizePos(v) }))}
-                    />
-                  </Section>
-
-                  <Section title="Miad" disabled={editing.trackLot === false}>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="col-span-2">
-                          <PosInputs value={editing.expiry as any} onChange={v => setEditing(p => ({ ...p!, expiry: { ...(p?.expiry as any), ...normalizePos(v) } }))} />
-                        </div>
-                        <div>
-                          <Label>Desen</Label>
-                          <Select
-                            value={editing.expiry?.pattern ?? 'YYMMDD'}
-                            onValueChange={(v) => setEditing(p => ({ ...p!, expiry: { ...(p?.expiry as any), pattern: v } }))}
-                            disabled={editing.trackLot === false}
-                          >
-                            <SelectTrigger><SelectValue placeholder="Seçin" /></SelectTrigger>
-                            <SelectContent>
-                              {EXPIRY_PATTERNS.map(p => (<SelectItem key={p} value={p}>{p}</SelectItem>))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                  </Section>
+                  {editing.trackLot !== false && (
+                    <>
+                        <Section title="Lot Numarası">
+                            <PosInputs
+                            value={editing.lot}
+                            onChange={v => setEditing(p => ({ ...p!, lot: normalizePos(v) }))}
+                            />
+                        </Section>
+                        <Section title="Son Kullanma Tarihi (Miad)">
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="col-span-2">
+                                <PosInputs value={editing.expiry as any} onChange={v => setEditing(p => ({ ...p!, expiry: { ...(p?.expiry as any), ...normalizePos(v) } }))} />
+                                </div>
+                                <div>
+                                <Label>Format</Label>
+                                <Select
+                                    value={editing.expiry?.pattern ?? 'YYMMDD'}
+                                    onValueChange={(v) => setEditing(p => ({ ...p!, expiry: { ...(p?.expiry as any), pattern: v } }))}
+                                >
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                    {EXPIRY_PATTERNS.map(p => (<SelectItem key={p} value={p}>{p}</SelectItem>))}
+                                    </SelectContent>
+                                </Select>
+                                </div>
+                            </div>
+                        </Section>
+                    </>
+                  )}
                   
-                  {editing.trackSerial && (
+                  {editing.trackSerial === true && (
                     <Section title="Seri Numarası">
-                        <div className="space-y-2">
+                        <div className="space-y-4">
                             <PosInputs
                               value={editing?.serial}
                               onChange={v => setEditing(p => ({ ...p!, serial: normalizePos(v) }))}
                             />
-                            <p className="text-xs text-muted-foreground">
-                                Boş (0,0) bırakırsanız ve "Regex" yerine "Pozisyonel" kullanıyorsanız, 
-                                sistem otomatik olarak kalan kısmı seri no olarak algılamaya çalışır.
-                            </p>
+                            <div className="bg-yellow-50 p-2 rounded text-xs text-yellow-800 border border-yellow-200">
+                                <strong>Bilgi:</strong> Başlangıç ve Uzunluk alanlarını 0 bırakırsanız, sistem barkodun <em>geri kalanını</em> seri numarası olarak alır.
+                            </div>
                         </div>
                     </Section>
                   )}
                 </>
               )}
 
+              {/* REGEX INPUTS */}
               {editing.strategy === 'regex' && (
-                <div className="md:col-span-3 p-3 border rounded-md">
-                  <p className="text-xs text-muted-foreground mb-2">
-                    Regex stratejisinde parantezli grupları kullanın. Gruplar sıralaması şu olabilir: (reference?) (lot?) (expiry?) (serial?) (barcodeNumber?) — yalnızca kullanacaklarınızı ekleyin.
-                  </p>
-                  <Label>Regex</Label>
+                <div className="md:col-span-3 p-4 border border-blue-200 bg-blue-50/50 rounded-md mt-4">
+                  <Label className="text-blue-900">Regex İfadesi</Label>
                   <Input
+                    className="font-mono mt-1"
                     value={editing.regex ?? ''}
                     onChange={e => setEditing(p => ({ ...p!, regex: e.target.value }))}
-                    placeholder="Örn: ^(.{3}).{1}(.{5}).{1}(.{6}).*$"
+                    placeholder="^(.{10})(.{5}).*$"
                   />
+                   <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                    Parantez grupları şu sırayla eşleştirilir:<br/>
+                    1. Referans/Barkod No<br/>
+                    2. Lot (Lot Takibi açıksa)<br/>
+                    3. Miad (Lot Takibi açıksa)<br/>
+                    4. Seri No (Seri No Takibi açıksa)
+                  </p>
                 </div>
               )}
             </div>
           )}
 
           <DialogFooter>
-            <DialogClose asChild><Button variant="outline">Kapat</Button></DialogClose>
-            <Button onClick={save} className="gap-2"><Save className="h-4 w-4" /> Kaydet</Button>
+            <DialogClose asChild><Button variant="outline">Vazgeç</Button></DialogClose>
+            <Button onClick={save} className="gap-2"><Save className="h-4 w-4" /> Değişiklikleri Kaydet</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
