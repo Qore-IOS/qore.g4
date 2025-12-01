@@ -1,4 +1,3 @@
-
 'use client';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -136,13 +135,13 @@ export default function RaporlamaPanel() {
                 <HistoryIcon className="mr-2 h-4 w-4" />
                 Geçmiş Stok Raporu
               </Button>
-              <Button
+               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/yonetim/barkod-formatlari')}
+                onClick={() => router.push('/raporlama/seri-no-format')}
               >
                 <Barcode className="mr-2 h-4 w-4" />
-                Barkod Formatları
+                Seri No Format Tanımla
               </Button>
               <Button
                 size="sm"
