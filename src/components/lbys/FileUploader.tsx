@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useCallback, useState } from 'react';
@@ -32,7 +33,7 @@ export function FileUploader({ className }: FileUploaderProps) {
 
         try {
             const buffer = await file.arrayBuffer();
-            const workbook = XLSX.read(buffer);
+            const workbook = XLSX.read(buffer, { type: 'array' });
             const worksheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[worksheetName];
             // header: 1 forces array of arrays, which the store expects
@@ -100,16 +101,16 @@ export function FileUploader({ className }: FileUploaderProps) {
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center space-x-3">
                             <Loader2 className="h-5 w-5 animate-spin text-primary"/>
-                            <h3 className="font-semibold text-gray-800">{progress.status}</h3>
+                            <h3 className="font-semibold text-gray-800">{processingProgress.status}</h3>
                         </div>
                         <span className="text-sm font-mono text-gray-500">
-                            {progress.current} / {progress.total}
+                            {processingProgress.current} / {processingProgress.total}
                         </span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
                         <div 
                             className="bg-primary h-2.5 rounded-full transition-all duration-300 ease-out" 
-                            style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                            style={{ width: `${(processingProgress.current / processingProgress.total) * 100}%` }}
                         ></div>
                     </div>
                     <p className="text-xs text-gray-400 mt-3 text-center">
