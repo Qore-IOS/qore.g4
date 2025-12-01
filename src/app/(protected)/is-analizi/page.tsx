@@ -1,6 +1,7 @@
+
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, ChangeEvent } from 'react';
 import {
     Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X
 } from 'lucide-react';
@@ -19,6 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import MultiSelectFilter from '@/components/lbys/MultiSelectFilter';
 import { useLbysDataStore } from '@/store/lbys-data-store';
@@ -389,4 +391,5 @@ export default function IsAnaliziPage() {
             </Dialog>
         </div>
     );
-}
+
+    
