@@ -21,6 +21,9 @@ type AnyFormat = {
   reference?: OldPos;
   lot?: OldPos;
   expiry?: (OldPos & { pattern?: ExpiryPattern }) | undefined;
+  serial?: OldPos;
+  trackSerial?: boolean;
+
   regex?: string;
   fields?: Fields;
 
@@ -58,6 +61,8 @@ export function buildRegexFromPositional(fmt: AnyFormat): { re: RegExp; fields: 
   if (fmt.reference) defs.push({ key: 'reference', ...fmt.reference });
   if (fmt.lot) defs.push({ key: 'lot', ...fmt.lot });
   if (fmt.expiry) defs.push({ key: 'expiry', start: fmt.expiry.start, length: fmt.expiry.length });
+  
+  if (fmt.serial) defs.push({ key: 'serial', ...fmt.serial });
 
   defs.sort((a,b) => a.start - b.start);
 
@@ -74,9 +79,12 @@ export function buildRegexFromPositional(fmt: AnyFormat): { re: RegExp; fields: 
     cursor = d.start + d.length;
   }
   
-  // Always capture the rest of the string as a potential serial number
-  pattern += '(.*)';
-  fields['serial'] = gi;
+  if (!fmt.serial) {
+      pattern += '(.*)';
+      fields['serial'] = gi;
+  } else {
+      pattern += '(.*)';
+  }
   
   pattern += '$';
 
@@ -111,7 +119,6 @@ export function inferSerialFromRemainder(
 
 function compileFormat(f: AnyFormat): Compiled {
   try {
-    // Strip dangerous flags and anchor the pattern
     const cleanRegex = (source: string): RegExp => {
         const m = source.match(/^\/(.+)\/([gimsuy]*)$/);
         const body = m ? m[1] : source;
@@ -195,11 +202,20 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
             const lot = c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
             const expRaw = c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
             const miad = expRaw ? normalizeExpiry(expRaw, c.expiryPattern) : undefined;
-            const serialFromRegex = c.fields.serial ? (m[c.fields.serial] || '').trim() : undefined;
             
-            const takenParts = [c.f.reference, c.f.lot, c.f.expiry].filter(Boolean) as PositionDef[];
-            const inferredSerial = inferSerialFromRemainder(candidate, takenParts);
-            const seriNumarasi = serialFromRegex || inferredSerial;
+            let seriNumarasi: string | undefined;
+
+            if (c.f.trackSerial !== false) {
+                const serialFromRegex = c.fields.serial ? (m[c.fields.serial] || '').trim() : undefined;
+                
+                if (serialFromRegex) {
+                    seriNumarasi = serialFromRegex;
+                } else {
+                    const takenParts = [c.f.reference, c.f.lot, c.f.expiry, c.f.serial].filter(Boolean) as PositionDef[];
+                    const inferredSerial = inferSerialFromRemainder(candidate, takenParts);
+                    seriNumarasi = inferredSerial;
+                }
+            }
 
             const udi = c.fields.barcodeNumber ? (m[c.fields.barcodeNumber] || '').trim() : undefined;
             
@@ -215,7 +231,6 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
         }
         if (parsed) results.push(parsed);
       } catch (e) {
-        // Silently ignore errors for a single format, so others can run
         console.warn(`Format error for "${c.f.name}":`, e);
       }
     }

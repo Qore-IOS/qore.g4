@@ -24,13 +24,13 @@ type Pos = { start: number | string; length: number | string };
 type LocalFormat = (Partial<BarcodeFormat> & {
     parseTarget?: 'reference' | 'barcodeNumber';
     trackLot?: boolean;
-    trackSerial?: boolean; // YENİ
+    trackSerial?: boolean;
     priority?: number;
     totalLength?: number | string;
     reference: Pos;
     lot: Pos;
     expiry?: (Pos & { pattern?: any }) | undefined;
-    serial?: Pos; // YENİ
+    serial?: Pos;
 });
 
 const EXPIRY_PATTERNS: ExpiryPattern[] = ['YYMMDD','YYYYMMDD','DDMMYYYY','MMYY','MMYYYY', 'text'];
@@ -107,10 +107,10 @@ export default function BarkodFormatlariPanel() {
       reference: { start: 1, length: 1 },
       lot: { start: 0, length: 0 },
       expiry: { start: 0, length: 0, pattern: 'YYMMDD' },
-      serial: { start: 0, length: 0 }, // YENİ
+      serial: { start: 0, length: 0 },
       parseTarget: 'reference',
       trackLot: true,
-      trackSerial: true, // Varsayılan olarak açık (eski davranışa uyması için)
+      trackSerial: true,
     });
     setIsModalOpen(true);
   };
@@ -127,7 +127,7 @@ export default function BarkodFormatlariPanel() {
     const totalLengthNum = Number(editing.totalLength ?? 0);
     const referenceClean = cleanPos(editing.reference);
     const trackLot = editing.trackLot !== false;
-    const trackSerial = editing.trackSerial !== false; // YENİ
+    const trackSerial = editing.trackSerial !== false;
 
     if (!editing.name?.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Ad zorunlu.', variant: 'destructive' });
@@ -140,8 +140,6 @@ export default function BarkodFormatlariPanel() {
 
     const lotClean    = trackLot ? cleanPos(editing.lot) : undefined;
     const expiryClean = trackLot ? cleanExpiry(editing.expiry) : undefined;
-    
-    // YENİ: Seri no pozisyon kontrolü (Eğer positional ise ve trackSerial açıksa)
     const serialClean = (trackSerial && editing.strategy === 'positional') ? cleanPos(editing.serial) : undefined;
 
     const payload: any = {
@@ -151,7 +149,7 @@ export default function BarkodFormatlariPanel() {
       strategy: editing.strategy ?? 'positional',
       parseTarget: (editing.parseTarget as 'reference' | 'barcodeNumber') ?? 'reference',
       trackLot: trackLot,
-      trackSerial: trackSerial, // YENİ
+      trackSerial: trackSerial,
       reference: referenceClean,
     };
 
@@ -169,11 +167,7 @@ export default function BarkodFormatlariPanel() {
       payload.expiry = deleteField();
     }
 
-    // YENİ: Seri no alanları
     if (trackSerial) {
-       // Not: Eğer positional stratejisi kullanılıyorsa ve kullanıcı özel bir alan girmemişse
-       // (start:0, length:0) bu durumda "serial" alanını kaydetmeyiz, parser remainder'ı kullanır.
-       // Ancak kullanıcı özel bir alan girdiyse onu kaydederiz.
        if (serialClean) {
          payload.serial = serialClean;
        } else {

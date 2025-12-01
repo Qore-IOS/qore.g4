@@ -470,8 +470,11 @@ export type BarcodeFormat = {
     reference?: { start: number; length: number };
     lot?: { start: number; length: number };
     expiry?: { start: number; length: number; pattern: ExpiryPattern };
+    serial?: { start: number; length: number };
+    trackSerial?: boolean;
+    trackLot?: boolean;
     regex?: string;
-    fields?: { reference?: number; lot?: number; expiry?: number };
+    fields?: { reference?: number; lot?: number; expiry?: number; serial?: number };
     parseTarget?: ParseTarget;
 };
 
