@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Label } from '../ui/label';
 import { cn } from '@/lib/utils';
 import { normalizePos, normalizeFormat } from '@/lib/barcode/pos-utils';
+import { Switch } from '../ui/switch';
 
 
 type Pos = { start: number | string; length: number | string };
@@ -24,13 +25,13 @@ type Pos = { start: number | string; length: number | string };
 type LocalFormat = (Partial<BarcodeFormat> & {
     parseTarget?: 'reference' | 'barcodeNumber';
     trackLot?: boolean;
-    trackSerial?: boolean;
+    trackSerial?: boolean; // YENİ
     priority?: number;
     totalLength?: number | string;
     reference: Pos;
     lot: Pos;
     expiry?: (Pos & { pattern?: any }) | undefined;
-    serial?: Pos;
+    serial?: Pos; // YENİ
 });
 
 const EXPIRY_PATTERNS: ExpiryPattern[] = ['YYMMDD','YYYYMMDD','DDMMYYYY','MMYY','MMYYYY', 'text'];
@@ -107,10 +108,10 @@ export default function BarkodFormatlariPanel() {
       reference: { start: 1, length: 1 },
       lot: { start: 0, length: 0 },
       expiry: { start: 0, length: 0, pattern: 'YYMMDD' },
-      serial: { start: 0, length: 0 },
+      serial: { start: 0, length: 0 }, // YENİ
       parseTarget: 'reference',
       trackLot: true,
-      trackSerial: true,
+      trackSerial: true, // Varsayılan olarak açık (eski davranışa uyması için)
     });
     setIsModalOpen(true);
   };
@@ -127,7 +128,7 @@ export default function BarkodFormatlariPanel() {
     const totalLengthNum = Number(editing.totalLength ?? 0);
     const referenceClean = cleanPos(editing.reference);
     const trackLot = editing.trackLot !== false;
-    const trackSerial = editing.trackSerial !== false;
+    const trackSerial = editing.trackSerial === true; // YENİ
 
     if (!editing.name?.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Ad zorunlu.', variant: 'destructive' });
@@ -140,6 +141,7 @@ export default function BarkodFormatlariPanel() {
 
     const lotClean    = trackLot ? cleanPos(editing.lot) : undefined;
     const expiryClean = trackLot ? cleanExpiry(editing.expiry) : undefined;
+    
     const serialClean = (trackSerial && editing.strategy === 'positional') ? cleanPos(editing.serial) : undefined;
 
     const payload: any = {
@@ -149,7 +151,7 @@ export default function BarkodFormatlariPanel() {
       strategy: editing.strategy ?? 'positional',
       parseTarget: (editing.parseTarget as 'reference' | 'barcodeNumber') ?? 'reference',
       trackLot: trackLot,
-      trackSerial: trackSerial,
+      trackSerial: trackSerial, // YENİ
       reference: referenceClean,
     };
 
@@ -305,31 +307,25 @@ export default function BarkodFormatlariPanel() {
                 </p>
               </div>
               
-              <div className="md:col-span-1">
-                <Label>Lot Takibi</Label>
-                <Select
-                  value={((editing as any).trackLot === false ? 'off' : 'on')}
-                  onValueChange={(v: 'on' | 'off') => setEditing(p => ({ ...p!, trackLot: v === 'on' }))}
-                >
-                  <SelectTrigger className="w-full"><SelectValue placeholder="Seçin" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="on">Evet — Lot & Miad aranır</SelectItem>
-                    <SelectItem value="off">Hayır — Lot & Miad aranmaz</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="md:col-span-1">
-                <Label>Seri No Takibi</Label>
-                <Select
-                    value={((editing.trackSerial === false) ? 'off' : 'on')}
-                    onValueChange={(v: 'on' | 'off') => setEditing(p => ({ ...p!, trackSerial: v === 'on' }))}
-                >
-                    <SelectTrigger className="w-full"><SelectValue placeholder="Seçin" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="on">Evet — Seri No var</SelectItem>
-                      <SelectItem value="off">Hayır — Seri No yok</SelectItem>
-                    </SelectContent>
-                </Select>
+              <div className="flex flex-col justify-end gap-2">
+                  <div className="flex items-center space-x-2 border p-3 rounded-md">
+                      <Switch
+                          id="trackLot"
+                          checked={editing.trackLot !== false}
+                          onCheckedChange={(checked) => setEditing(p => ({ ...p!, trackLot: checked }))}
+                      />
+                      <Label htmlFor="trackLot">Lot Takibi</Label>
+                  </div>
+                   <div className="flex items-center space-x-2 border p-3 rounded-md">
+                      <Switch
+                        id="trackSerial"
+                        checked={editing.trackSerial === true}
+                        onCheckedChange={(checked) => setEditing(p => ({ ...p!, trackSerial: checked }))}
+                      />
+                      <Label htmlFor="trackSerial" className="cursor-pointer">
+                        Seri No Takibi
+                      </Label>
+                    </div>
               </div>
 
 
@@ -344,14 +340,14 @@ export default function BarkodFormatlariPanel() {
                     <PosInputs value={editing.reference} onChange={v => setEditing(p => ({ ...p!, reference: normalizePos(v) }))} />
                   </Section>
 
-                  <Section title="Lot" disabled={(editing as any).trackLot === false}>
+                  <Section title="Lot" disabled={editing.trackLot === false}>
                     <PosInputs
                       value={editing.lot}
                       onChange={v => setEditing(p => ({ ...p!, lot: normalizePos(v) }))}
                     />
                   </Section>
 
-                  <Section title="Miad" disabled={(editing as any).trackLot === false}>
+                  <Section title="Miad" disabled={editing.trackLot === false}>
                       <div className="grid grid-cols-3 gap-2">
                         <div className="col-span-2">
                           <PosInputs value={editing.expiry as any} onChange={v => setEditing(p => ({ ...p!, expiry: { ...(p?.expiry as any), ...normalizePos(v) } }))} />
@@ -361,7 +357,7 @@ export default function BarkodFormatlariPanel() {
                           <Select
                             value={editing.expiry?.pattern ?? 'YYMMDD'}
                             onValueChange={(v) => setEditing(p => ({ ...p!, expiry: { ...(p?.expiry as any), pattern: v } }))}
-                            disabled={(editing as any).trackLot === false}
+                            disabled={editing.trackLot === false}
                           >
                             <SelectTrigger><SelectValue placeholder="Seçin" /></SelectTrigger>
                             <SelectContent>
@@ -372,17 +368,20 @@ export default function BarkodFormatlariPanel() {
                       </div>
                   </Section>
                   
-                  <Section title="Seri Numarası" disabled={editing?.trackSerial === false}>
-                      <div className="space-y-2">
-                          <PosInputs
-                            value={editing?.serial}
-                            onChange={v => setEditing(p => ({ ...p!, serial: normalizePos(v) }))}
-                          />
-                          <p className="text-xs text-muted-foreground">
-                             Boş (0,0) bırakırsanız barkodun <b>kalan kısmı</b> seri no olarak alınır.
-                          </p>
-                      </div>
-                  </Section>
+                  {editing.trackSerial && (
+                    <Section title="Seri Numarası">
+                        <div className="space-y-2">
+                            <PosInputs
+                              value={editing?.serial}
+                              onChange={v => setEditing(p => ({ ...p!, serial: normalizePos(v) }))}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Boş (0,0) bırakırsanız ve "Regex" yerine "Pozisyonel" kullanıyorsanız, 
+                                sistem otomatik olarak kalan kısmı seri no olarak algılamaya çalışır.
+                            </p>
+                        </div>
+                    </Section>
+                  )}
                 </>
               )}
 
