@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback, ChangeEvent } from 'react';
 import {
-    Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X
+    Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X, ChevronDown, ChevronUp
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Dialog,
     DialogContent,
+    DialogTrigger,
     DialogHeader,
     DialogTitle,
     DialogDescription,
@@ -26,6 +27,7 @@ import MultiSelectFilter from '@/components/lbys/MultiSelectFilter';
 import { useLbysDataStore } from '@/store/lbys-data-store';
 import { FileUploader } from '@/components/lbys/FileUploader';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
+import { AnimatePresence, motion } from 'framer-motion';
 
 // --- TYPES ---
 interface FilterOption {
@@ -157,6 +159,7 @@ export default function IsAnaliziPage() {
     const [rejectionModalOpen, setRejectionModalOpen] = useState(false);
     const [rejectionData, setRejectionData] = useState<{ title: string; reasons: Record<string, number> } | null>(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [topPanelOpen, setTopPanelOpen] = useState(false);
 
     useEffect(() => {
         loadHospitalDefinitions();
@@ -274,19 +277,38 @@ export default function IsAnaliziPage() {
 
     return (
         <div className="p-4 sm:p-6 space-y-6 bg-slate-50 min-h-screen pb-20">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                <div className="flex items-center gap-3">
-                    <BackButton />
-                    <div>
-                        <h1 className="text-xl font-bold tracking-tight text-gray-800">Qore Analiz</h1>
-                        <p className="text-sm text-slate-500">Laboratuvar performans ve iş yükü analizi</p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <HospitalSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
-                    <Button onClick={() => setSettingsOpen(true)} variant="ghost" size="sm" className="gap-2"><Settings className="h-4 w-4" />Ayarlar</Button>
-                    <FileUploader />
-                </div>
+             <AnimatePresence>
+                {topPanelOpen && (
+                    <motion.div
+                        initial={{ opacity: 0, height: 0, y: -20 }}
+                        animate={{ opacity: 1, height: 'auto', y: 0 }}
+                        exit={{ opacity: 0, height: 0, y: -20 }}
+                        transition={{ duration: 0.3, ease: 'easeInOut' }}
+                        className="overflow-hidden"
+                    >
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                            <div className="flex items-center gap-3">
+                                <BackButton />
+                                <div>
+                                    <h1 className="text-xl font-bold tracking-tight text-gray-800">Qore Analiz</h1>
+                                    <p className="text-sm text-slate-500">Laboratuvar performans ve iş yükü analizi</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <HospitalSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+                                <Button onClick={() => setSettingsOpen(true)} variant="ghost" size="sm" className="gap-2"><Settings className="h-4 w-4" />Ayarlar</Button>
+                                <FileUploader />
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+             <div className="flex justify-center">
+                <Button variant="ghost" onClick={() => setTopPanelOpen(p => !p)} className="text-muted-foreground hover:text-primary transition-colors">
+                    {topPanelOpen ? <ChevronUp className="h-4 w-4 mr-2" /> : <ChevronDown className="h-4 w-4 mr-2" />}
+                    {topPanelOpen ? 'Paneli Gizle' : 'Paneli Aç'}
+                </Button>
             </div>
 
             {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Hata</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
@@ -393,3 +415,4 @@ export default function IsAnaliziPage() {
     );
 
     
+}
