@@ -268,12 +268,8 @@ export const useLbysDataStore = create<LbysStore>()(
       
       applyFilters: () => {
         const { aggregatedData, filters } = get();
-        const { from, to } = filters.dateRange;
-
+        
         const filtered = aggregatedData.filter((item) => {
-            const itemDate = new Date(item.date);
-            if (from && to && (itemDate < from || itemDate > to)) return false;
-
             let locationMatch = true;
             if (filters.selectedHospitals.length > 0 || filters.selectedAsms.length > 0) {
                  locationMatch = (filters.selectedHospitals.includes(item.hospitalName) || filters.selectedAsms.includes(item.hospitalName));
@@ -290,7 +286,6 @@ export const useLbysDataStore = create<LbysStore>()(
       
       setFilters: (newFilters) => {
         set(state => ({ filters: { ...state.filters, ...newFilters } }));
-        // Don't auto-apply here. Let the useEffect in the page component trigger the fetch.
       },
       
       resetFilters: () => {
@@ -302,11 +297,8 @@ export const useLbysDataStore = create<LbysStore>()(
             selectedHospitals: [], selectedAsms: [], selectedServices: [], selectedTests: [], selectedBranches: [] 
          };
          set({ filters: newFilters });
-         // Trigger fetch with new default dates
          get().loadDataFromFirestore({ from: lastWeek, to: today });
       }
     })
   )
 );
-
-    
