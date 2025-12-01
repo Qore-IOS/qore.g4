@@ -4,16 +4,10 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
     Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { tr } from 'date-fns/locale';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
-import * as XLSX from 'xlsx';
-
 import BackButton from '@/components/BackButton';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -22,18 +16,14 @@ import {
     DialogHeader,
     DialogTitle,
     DialogDescription,
-    DialogTrigger,
-    DialogFooter
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
-import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import MultiSelectFilter from '@/components/lbys/MultiSelectFilter';
-import { useLbysDataStore, AggregatedRecord } from '@/store/lbys-data-store';
+import { useLbysDataStore } from '@/store/lbys-data-store';
 import { FileUploader } from '@/components/lbys/FileUploader';
-
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 
 // --- TYPES ---
 interface FilterOption {
@@ -44,7 +34,7 @@ interface FilterOption {
 function KpiCard({ title, value, icon: Icon, color, bg, onClick }: any) {
     const isClickable = !!onClick;
     return (
-        <Card className={cn("border-none shadow-sm transition-shadow", isClickable && "cursor-pointer hover:shadow-md")} onClick={onClick}>
+        <Card className={`border-none shadow-sm transition-shadow ${isClickable && "cursor-pointer hover:shadow-md"}`} onClick={onClick}>
             <CardContent className="p-4 flex items-center justify-between">
                 <div>
                     <p className="text-sm font-medium text-slate-500">{title}</p>
@@ -152,39 +142,25 @@ function HospitalSettingsModal({ open, onOpenChange }: { open: boolean, onOpenCh
     )
 }
 
-
 // --- MAIN PAGE COMPONENT ---
 export default function IsAnaliziPage() {
-    // Store
     const {
-        isLoading,
-        error,
-        aggregatedData,
-        filteredData,
-        filters,
-        processAndUploadExcel,
-        setFilters,
-        loadHospitalDefinitions,
-        resetFilters,
-        processingProgress,
+        isLoading, error, aggregatedData, filteredData, filters,
+        setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore
     } = useLbysDataStore();
-    const { toast } = useToast();
-
-    // Local State
+    
     const [date, setDate] = useState<{ from: Date | undefined; to: Date | undefined }>(filters.dateRange);
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailModalData, setDetailModalData] = useState<{ title: string; data: Record<string, number>, type: 'service' | 'test' } | null>(null);
     const [rejectionModalOpen, setRejectionModalOpen] = useState(false);
     const [rejectionData, setRejectionData] = useState<{ title: string; reasons: Record<string, number> } | null>(null);
-    const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
 
-    // Initial Load
     useEffect(() => {
         loadHospitalDefinitions();
-    }, [loadHospitalDefinitions]);
+        loadDataFromFirestore();
+    }, [loadHospitalDefinitions, loadDataFromFirestore]);
 
-    // Date Range Sync
     useEffect(() => {
         setFilters({ dateRange: { from: date?.from, to: date?.to } });
     }, [date, setFilters]);
@@ -194,15 +170,14 @@ export default function IsAnaliziPage() {
         const services = new Set<string>();
         const tests = new Set<string>();
         const asms = new Set<string>();
+        const branches = new Set<string>();
 
         aggregatedData.forEach(item => {
-            if (item.isAsm) {
-                asms.add(item.hospitalName);
-            } else {
-                hospitals.add(item.hospitalName);
-            }
+            if (item.isAsm) asms.add(item.hospitalName);
+            else hospitals.add(item.hospitalName);
             services.add(item.service);
             tests.add(item.testName);
+            branches.add(item.branch);
         });
 
         return {
@@ -210,15 +185,12 @@ export default function IsAnaliziPage() {
             services: Array.from(services).sort().map(v => ({ label: v, value: v })),
             tests: Array.from(tests).sort().map(v => ({ label: v, value: v })),
             asms: Array.from(asms).sort().map(v => ({ label: v, value: v })),
+            branches: Array.from(branches).sort().map(v => ({ label: v, value: v })),
         };
     }, [aggregatedData]);
 
     const kpiData = useMemo(() => {
-        let totalTests = 0;
-        let totalRejected = 0;
-        let totalRepeat = 0;
-        let totalTat = 0;
-        let tatCount = 0;
+        let totalTests = 0, totalRejected = 0, totalRepeat = 0, totalTat = 0, tatCount = 0;
         const patientIdSet = new Set<string>();
 
         filteredData.forEach(d => {
@@ -248,9 +220,7 @@ export default function IsAnaliziPage() {
     const hospitalsChartData = useMemo(() => {
         const map = new Map<string, { name: string, tests: number, emergency: number }>();
         filteredData.filter(d => !d.isAsm).forEach(d => {
-            if (!map.has(d.hospitalName)) {
-                map.set(d.hospitalName, { name: d.hospitalName, tests: 0, emergency: 0 });
-            }
+            if (!map.has(d.hospitalName)) map.set(d.hospitalName, { name: d.hospitalName, tests: 0, emergency: 0 });
             const rec = map.get(d.hospitalName)!;
             rec.tests += d.totalTests;
             rec.emergency += d.emergencyCount;
@@ -259,7 +229,15 @@ export default function IsAnaliziPage() {
             .map(d => ({ ...d, emergencyRate: d.tests > 0 ? ((d.emergency / d.tests) * 100) : 0 }))
             .sort((a, b) => b.tests - a.tests);
     }, [filteredData]);
-
+    
+    const asmData = useMemo(() => {
+        const map = new Map<string, number>();
+        filteredData.filter(d => d.isAsm).forEach(d => {
+            map.set(d.hospitalName, (map.get(d.hospitalName) || 0) + d.totalTests);
+        });
+        return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
+    }, [filteredData]);
+    
     const servicesChartData = useMemo(() => {
         const map = new Map<string, number>();
         filteredData.forEach(d => {
@@ -276,36 +254,8 @@ export default function IsAnaliziPage() {
         return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
     }, [filteredData]);
 
-    const asmData = useMemo(() => {
-        const map = new Map<string, number>();
-        filteredData.filter(d => d.isAsm).forEach(d => {
-            map.set(d.hospitalName, (map.get(d.hospitalName) || 0) + d.totalTests);
-        });
-        return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-    }, [filteredData]);
-
-    // --- HANDLERS ---
-    const handleFileUpload = (files: File[]) => {
-        if (files.length > 0) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const data = e.target?.result;
-                const workbook = XLSX.read(data, { type: 'binary' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                processAndUploadExcel(jsonData);
-                setUploadDialogOpen(false);
-            };
-            reader.readAsBinaryString(files[0]);
-        }
-    };
-    
     const handleRejectionClick = () => {
-        setRejectionData({
-            title: "Tüm Red Nedenleri",
-            reasons: kpiData.rejectionReasons,
-        });
+        setRejectionData({ title: "Tüm Red Nedenleri", reasons: kpiData.rejectionReasons });
         setRejectionModalOpen(true);
     };
 
@@ -316,15 +266,12 @@ export default function IsAnaliziPage() {
                 acc[curr.service] = (acc[curr.service] || 0) + curr.totalTests;
                 return acc;
             }, {} as Record<string, number>);
-        
         setDetailModalData({ title: `${hospitalName} - Servis Dağılımı`, data: hospitalServices, type: 'service' });
         setDetailModalOpen(true);
     };
-    
 
     return (
         <div className="p-4 sm:p-6 space-y-6 bg-slate-50 min-h-screen pb-20">
-            {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
                 <div className="flex items-center gap-3">
                     <BackButton />
@@ -336,50 +283,26 @@ export default function IsAnaliziPage() {
                 <div className="flex items-center gap-2">
                     <HospitalSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
                     <Button onClick={() => setSettingsOpen(true)} variant="ghost" size="sm" className="gap-2"><Settings className="h-4 w-4" />Ayarlar</Button>
-                    <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-                        <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="gap-2 bg-[#f0f2f5] shadow-[4px_4px_10px_#d1d9e6,-4px_-4px_10px_#ffffff] hover:shadow-[inset_4px_4px_10px_#d1d9e6,inset_-4px_-4px_10px_#ffffff] text-gray-700 rounded-xl transition-all border-none">
-                                <Upload className="h-4 w-4 text-blue-600" />
-                                <span className="hidden sm:inline font-medium">Excel Yükle</span>
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Veri Dosyası Yükle</DialogTitle>
-                            </DialogHeader>
-                            <FileUploader onFilesSelected={handleFileUpload} />
-                        </DialogContent>
-                    </Dialog>
+                    <FileUploader />
                 </div>
             </div>
 
-            {error && (
-                <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Hata</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                </Alert>
-            )}
+            {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Hata</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
 
             <Card className="border-none shadow-sm">
                 <CardContent className="p-4 flex flex-wrap gap-2 md:gap-4 items-end">
                     <div className="flex flex-col gap-1.5 flex-grow min-w-[200px]">
                         <Label className="text-xs font-semibold text-slate-500 uppercase">Tarih Aralığı</Label>
-                        <DatePickerWithRange 
-                            date={date} 
-                            setDate={setDate} 
-                            className="[&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!shadow-sm"
-                        />
+                        <DatePickerWithRange date={date} setDate={setDate} className="[&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!shadow-sm" />
                     </div>
-                     
-                     <FilterGroup title="Hastaneler" options={filterOptions.hospitals} selected={filters.selectedHospitals} onChange={(val) => setFilters({ selectedHospitals: val })} />
-                     <FilterGroup title="ASM'ler" options={filterOptions.asms} selected={filters.selectedAsms} onChange={(val) => setFilters({ selectedAsms: val })} />
-                     <FilterGroup title="Servisler" options={filterOptions.services} selected={filters.selectedServices} onChange={(val) => setFilters({ selectedServices: val })} />
-                     <FilterGroup title="Testler" options={filterOptions.tests} selected={filters.selectedTests} onChange={(val) => setFilters({ selectedTests: val })} />
-
-                     <Button variant="ghost" onClick={resetFilters} className="text-red-600 hover:text-red-700 hover:bg-red-50 h-9 px-3 self-end ml-auto">
+                    <FilterGroup title="Hastaneler" options={filterOptions.hospitals} selected={filters.selectedHospitals} onChange={(val) => setFilters({ selectedHospitals: val })} />
+                    <FilterGroup title="ASM'ler" options={filterOptions.asms} selected={filters.selectedAsms} onChange={(val) => setFilters({ selectedAsms: val })} />
+                    <FilterGroup title="Servisler" options={filterOptions.services} selected={filters.selectedServices} onChange={(val) => setFilters({ selectedServices: val })} />
+                    <FilterGroup title="Testler" options={filterOptions.tests} selected={filters.selectedTests} onChange={(val) => setFilters({ selectedTests: val })} />
+                    <FilterGroup title="Branşlar" options={filterOptions.branches} selected={filters.selectedBranches} onChange={(val) => setFilters({ selectedBranches: val })} />
+                    <Button variant="ghost" onClick={resetFilters} className="text-red-600 hover:text-red-700 hover:bg-red-50 h-9 px-3 self-end ml-auto">
                         <RefreshCcw className="w-4 h-4 mr-2" /> Tümünü Göster
-                     </Button>
+                    </Button>
                 </CardContent>
             </Card>
 
@@ -393,12 +316,7 @@ export default function IsAnaliziPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card>
-                    <CardHeader>
-                        <CardTitle className="flex justify-between items-center text-base">
-                            <span>Test Sayısına Göre Hastaneler</span>
-                            <span className="text-xs font-normal text-muted-foreground bg-slate-100 px-2 py-1 rounded">Acil %</span>
-                        </CardTitle>
-                    </CardHeader>
+                    <CardHeader><CardTitle className="flex justify-between items-center text-base"><span>Test Sayısına Göre Hastaneler</span><span className="text-xs font-normal text-muted-foreground bg-slate-100 px-2 py-1 rounded">Acil %</span></CardTitle></CardHeader>
                     <CardContent className="h-[350px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={hospitalsChartData} layout="vertical" margin={{ left: 20 }}>
@@ -409,13 +327,7 @@ export default function IsAnaliziPage() {
                                     content={({ active, payload }) => {
                                         if (active && payload && payload.length) {
                                             const d = payload[0].payload;
-                                            return (
-                                                <div className="bg-white p-2 border rounded shadow-lg text-xs">
-                                                    <p className="font-bold">{d.name}</p>
-                                                    <p>Test: {d.tests.toLocaleString()}</p>
-                                                    <p className="text-red-600">Acil: {d.emergency.toLocaleString()} ({d.emergencyRate.toFixed(1)}%)</p>
-                                                </div>
-                                            );
+                                            return <div className="bg-white p-2 border rounded shadow-lg text-xs"><p className="font-bold">{d.name}</p><p>Test: {d.tests.toLocaleString()}</p><p className="text-red-600">Acil: {d.emergency.toLocaleString()} ({d.emergencyRate.toFixed(1)}%)</p></div>;
                                         }
                                         return null;
                                     }}
@@ -425,8 +337,7 @@ export default function IsAnaliziPage() {
                         </ResponsiveContainer>
                     </CardContent>
                 </Card>
-
-                 <Card>
+                <Card>
                     <CardHeader><CardTitle className="text-base">Test Sayısına Göre Servisler (İlk 10)</CardTitle></CardHeader>
                     <CardContent className="h-[350px]">
                         <ResponsiveContainer width="100%" height="100%">
@@ -440,7 +351,6 @@ export default function IsAnaliziPage() {
                         </ResponsiveContainer>
                     </CardContent>
                 </Card>
-
                 <Card>
                     <CardHeader><CardTitle className="text-base">En Çok Çalışılan Testler</CardTitle></CardHeader>
                     <CardContent className="h-[350px]">
@@ -455,8 +365,7 @@ export default function IsAnaliziPage() {
                         </ResponsiveContainer>
                     </CardContent>
                 </Card>
-
-                 <Card>
+                <Card>
                     <CardHeader><CardTitle className="text-base">Aile Sağlığı Merkezleri (ASM)</CardTitle></CardHeader>
                     <CardContent className="h-[350px]">
                         <ResponsiveContainer width="100%" height="100%">
@@ -473,49 +382,10 @@ export default function IsAnaliziPage() {
             </div>
 
             <Dialog open={detailModalOpen} onOpenChange={setDetailModalOpen}>
-                <DialogContent className="max-w-3xl">
-                    <DialogHeader>
-                        <DialogTitle>{detailModalData?.title}</DialogTitle>
-                    </DialogHeader>
-                    <ScrollArea className="h-[400px]">
-                        <Table>
-                            <TableHeader><TableRow><TableHead>İsim</TableHead><TableHead className="text-right">Sayı</TableHead></TableRow></TableHeader>
-                            <TableBody>
-                                {detailModalData && Object.entries(detailModalData.data)
-                                    .sort((a,b) => b[1] - a[1])
-                                    .map(([name, val], i) => (
-                                    <TableRow key={i}>
-                                        <TableCell>{name}</TableCell>
-                                        <TableCell className="text-right font-bold">{val.toLocaleString()}</TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    </ScrollArea>
-                </DialogContent>
+                <DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>{detailModalData?.title}</DialogTitle></DialogHeader><ScrollArea className="h-[400px]"><Table><TableHeader><TableRow><TableHead>İsim</TableHead><TableHead className="text-right">Sayı</TableHead></TableRow></TableHeader><TableBody>{detailModalData && Object.entries(detailModalData.data).sort((a,b) => b[1] - a[1]).map(([name, val], i) => (<TableRow key={i}><TableCell>{name}</TableCell><TableCell className="text-right font-bold">{val.toLocaleString()}</TableCell></TableRow>))}</TableBody></Table></ScrollArea></DialogContent>
             </Dialog>
-
             <Dialog open={rejectionModalOpen} onOpenChange={setRejectionModalOpen}>
-                 <DialogContent className="max-w-xl">
-                    <DialogHeader>
-                        <DialogTitle>{rejectionData?.title}</DialogTitle>
-                    </DialogHeader>
-                    <ScrollArea className="h-[400px]">
-                        <Table>
-                            <TableHeader><TableRow><TableHead>Red Nedeni</TableHead><TableHead className="text-right">Sayı</TableHead></TableRow></TableHeader>
-                            <TableBody>
-                                {rejectionData && Object.entries(rejectionData.reasons)
-                                    .sort((a,b) => b[1] - a[1])
-                                    .map(([reason, count]) => (
-                                    <TableRow key={reason}>
-                                        <TableCell>{reason}</TableCell>
-                                        <TableCell className="text-right font-bold">{count}</TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    </ScrollArea>
-                </DialogContent>
+                 <DialogContent className="max-w-xl"><DialogHeader><DialogTitle>{rejectionData?.title}</DialogTitle></DialogHeader><ScrollArea className="h-[400px]"><Table><TableHeader><TableRow><TableHead>Red Nedeni</TableHead><TableHead className="text-right">Sayı</TableHead></TableRow></TableHeader><TableBody>{rejectionData && Object.entries(rejectionData.reasons).sort((a,b) => b[1] - a[1]).map(([reason, count]) => (<TableRow key={reason}><TableCell>{reason}</TableCell><TableCell className="text-right font-bold">{count}</TableCell></TableRow>))}</TableBody></Table></ScrollArea></DialogContent>
             </Dialog>
         </div>
     );
