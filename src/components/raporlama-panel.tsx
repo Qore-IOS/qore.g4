@@ -1,3 +1,4 @@
+
 'use client';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   FileSpreadsheet,
+  Files,
   FileJson,
   Loader2,
   CalendarClock,
@@ -31,6 +33,7 @@ import {
   Archive,
   Database,
   FileCode,
+  Barcode, // Added Barcode icon
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -132,6 +135,14 @@ export default function RaporlamaPanel() {
               >
                 <HistoryIcon className="mr-2 h-4 w-4" />
                 Geçmiş Stok Raporu
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push('/arama')}
+              >
+                <Barcode className="mr-2 h-4 w-4" />
+                Seri Numarası Ekstresi
               </Button>
               <Button
                 size="sm"
