@@ -286,6 +286,7 @@ export const useLbysDataStore = create<LbysStore>()(
       
       setFilters: (newFilters) => {
         set(state => ({ filters: { ...state.filters, ...newFilters } }));
+        get().applyFilters();
       },
       
       resetFilters: () => {
