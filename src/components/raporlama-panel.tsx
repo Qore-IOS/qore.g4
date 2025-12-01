@@ -33,7 +33,7 @@ import {
   Archive,
   Database,
   FileCode,
-  Barcode, // Added Barcode icon
+  Barcode,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -139,10 +139,10 @@ export default function RaporlamaPanel() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/arama')}
+                onClick={() => router.push('/yonetim/barkod-formatlari')}
               >
                 <Barcode className="mr-2 h-4 w-4" />
-                Seri Numarası Ekstresi
+                Barkod Formatları
               </Button>
               <Button
                 size="sm"

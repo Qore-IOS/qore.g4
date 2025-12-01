@@ -1,4 +1,3 @@
-
 // src/lib/barcode/pos-utils.ts
 // Tek nokta: Pos alanlarını sayısallaştırır ve tip seviyesinde kesişim döndürür.
 import type { PositionDef, BarcodeFormat } from '../types';

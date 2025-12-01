@@ -23,6 +23,7 @@ type AnyFormat = {
   expiry?: (OldPos & { pattern?: ExpiryPattern }) | undefined;
   serial?: OldPos;
   trackSerial?: boolean;
+  trackLot?: boolean; // Ensure trackLot is part of the type
 
   regex?: string;
   fields?: Fields;
@@ -59,10 +60,11 @@ export function normalizeExpiry(raw: string, pattern?: ExpiryPattern): string {
 export function buildRegexFromPositional(fmt: AnyFormat): { re: RegExp; fields: Fields } {
   const defs: Array<{ key: keyof Fields; start: number; length: number }> = [];
   if (fmt.reference) defs.push({ key: 'reference', ...fmt.reference });
-  if (fmt.lot) defs.push({ key: 'lot', ...fmt.lot });
-  if (fmt.expiry) defs.push({ key: 'expiry', start: fmt.expiry.start, length: fmt.expiry.length });
+  if (fmt.trackLot !== false && fmt.lot) defs.push({ key: 'lot', ...fmt.lot });
+  if (fmt.trackLot !== false && fmt.expiry) defs.push({ key: 'expiry', start: fmt.expiry.start, length: fmt.expiry.length });
   
-  if (fmt.serial) defs.push({ key: 'serial', ...fmt.serial });
+  // Only include serial if trackSerial is explicitly true
+  if (fmt.trackSerial === true && fmt.serial) defs.push({ key: 'serial', ...fmt.serial });
 
   defs.sort((a,b) => a.start - b.start);
 
@@ -79,17 +81,21 @@ export function buildRegexFromPositional(fmt: AnyFormat): { re: RegExp; fields: 
     cursor = d.start + d.length;
   }
   
-  if (!fmt.serial) {
+  // If serial tracking is on but no specific position is defined, capture the rest
+  if (fmt.trackSerial && !fmt.serial?.start) {
       pattern += '(.*)';
       fields['serial'] = gi;
-  } else {
+  } else if (!fmt.trackSerial) { // if serial tracking is off, capture rest as remainder but dont assign to serial
       pattern += '(.*)';
+  } else {
+      pattern += '.*'; // if serial is defined, it's already in the loop
   }
   
   pattern += '$';
 
   return { re: new RegExp(pattern), fields };
 }
+
 
 export function inferSerialFromRemainder(
   fullString: string,
@@ -199,13 +205,13 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
           const m = candidate.match(c.re);
           if (m) {
             const ref = c.fields.reference ? (m[c.fields.reference] || '').trim() : undefined;
-            const lot = c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
-            const expRaw = c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
+            const lot = c.f.trackLot !== false && c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
+            const expRaw = c.f.trackLot !== false && c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
             const miad = expRaw ? normalizeExpiry(expRaw, c.expiryPattern) : undefined;
             
             let seriNumarasi: string | undefined;
 
-            if (c.f.trackSerial !== false) {
+            if (c.f.trackSerial === true) {
                 const serialFromRegex = c.fields.serial ? (m[c.fields.serial] || '').trim() : undefined;
                 
                 if (serialFromRegex) {
