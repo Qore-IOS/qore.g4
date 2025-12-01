@@ -3,25 +3,25 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
-import type { BarcodeFormat, ExpiryPattern } from '@/lib/types';
+import type { BarcodeFormat, ExpiryPattern } from '@/lib/types'; // Check your types import path
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { Switch } from '@/components/ui/switch'; // Absolute import
 import { Loader2, PlusCircle, Save, Trash2, Edit3, SlidersHorizontal, Info } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import BackButton from '@/components/BackButton';
+import BackButton from '@/components/BackButton'; // Absolute import
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import { Label } from '@/components/ui/label'; // Absolute import
 import { cn } from '@/lib/utils';
 import { normalizePos, normalizeFormat } from '@/lib/barcode/pos-utils';
 
-
 type Pos = { start: number | string; length: number | string };
 
+// Extended Local Format for editing state
 type LocalFormat = (Partial<BarcodeFormat> & {
     parseTarget?: 'reference' | 'barcodeNumber';
     trackLot?: boolean;
@@ -39,7 +39,9 @@ const EXPIRY_PATTERNS: ExpiryPattern[] = ['YYMMDD','YYYYMMDD','DDMMYYYY','MMYY',
 function Section({ title, disabled, children }: { title: string; disabled?: boolean; children: React.ReactNode }) {
   return (
     <div className={cn('md:col-span-3 border rounded-xl p-3 transition-opacity', disabled && 'opacity-50')}>
-      <div className="text-sm font-medium mb-2 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" /> {title}</div>
+      <div className="text-sm font-medium mb-2 flex items-center gap-2">
+        <SlidersHorizontal className="h-4 w-4" /> {title}
+      </div>
       <div className={disabled ? 'pointer-events-none' : ''}>
         {children}
       </div>
@@ -153,6 +155,7 @@ export default function BarkodFormatlariPanel() {
 
     const lotClean    = trackLot ? cleanPos(editing.lot) : undefined;
     const expiryClean = trackLot ? cleanExpiry(editing.expiry) : undefined;
+    // For serial, only require explicit coords if using Positional strategy
     const serialClean = (trackSerial && editing.strategy === 'positional') ? cleanPos(editing.serial) : undefined;
 
     const payload: any = {
@@ -181,9 +184,12 @@ export default function BarkodFormatlariPanel() {
     }
 
     if (trackSerial) {
+       // Save serial definition if present, otherwise save as empty field if needed or just flag
        if (serialClean) {
          payload.serial = serialClean;
        } else {
+         // If using Regex or inferred serial, we might not have 'serial' coords, but trackSerial is true.
+         // We can delete the 'serial' coords field if it exists to avoid confusion.
          payload.serial = deleteField(); 
        }
     } else {
@@ -216,7 +222,10 @@ export default function BarkodFormatlariPanel() {
       <Card className="shadow-lg border-l-4 border-l-primary">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-xl font-bold">Barkod Formatları Yönetimi</CardTitle>
-          <Button onClick={openNew} className="gap-2"><PlusCircle className="h-4 w-4" /> Yeni Format</Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => {}} className="gap-2" variant="secondary">Seri Numarası</Button>
+            <Button onClick={openNew} className="gap-2"><PlusCircle className="h-4 w-4" /> Yeni Format</Button>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -449,3 +458,5 @@ export default function BarkodFormatlariPanel() {
     </div>
   );
 }
+
+    
