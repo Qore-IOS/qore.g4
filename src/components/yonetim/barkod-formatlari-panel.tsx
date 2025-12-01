@@ -24,11 +24,13 @@ type Pos = { start: number | string; length: number | string };
 type LocalFormat = (Partial<BarcodeFormat> & {
     parseTarget?: 'reference' | 'barcodeNumber';
     trackLot?: boolean;
+    trackSerial?: boolean; // YENİ
     priority?: number;
     totalLength?: number | string;
     reference: Pos;
     lot: Pos;
     expiry?: (Pos & { pattern?: any }) | undefined;
+    serial?: Pos; // YENİ
 });
 
 const EXPIRY_PATTERNS: ExpiryPattern[] = ['YYMMDD','YYYYMMDD','DDMMYYYY','MMYY','MMYYYY', 'text'];
@@ -105,8 +107,10 @@ export default function BarkodFormatlariPanel() {
       reference: { start: 1, length: 1 },
       lot: { start: 0, length: 0 },
       expiry: { start: 0, length: 0, pattern: 'YYMMDD' },
+      serial: { start: 0, length: 0 }, // YENİ
       parseTarget: 'reference',
       trackLot: true,
+      trackSerial: true, // Varsayılan olarak açık (eski davranışa uyması için)
     });
     setIsModalOpen(true);
   };
@@ -123,6 +127,7 @@ export default function BarkodFormatlariPanel() {
     const totalLengthNum = Number(editing.totalLength ?? 0);
     const referenceClean = cleanPos(editing.reference);
     const trackLot = editing.trackLot !== false;
+    const trackSerial = editing.trackSerial !== false; // YENİ
 
     if (!editing.name?.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Ad zorunlu.', variant: 'destructive' });
@@ -135,6 +140,9 @@ export default function BarkodFormatlariPanel() {
 
     const lotClean    = trackLot ? cleanPos(editing.lot) : undefined;
     const expiryClean = trackLot ? cleanExpiry(editing.expiry) : undefined;
+    
+    // YENİ: Seri no pozisyon kontrolü (Eğer positional ise ve trackSerial açıksa)
+    const serialClean = (trackSerial && editing.strategy === 'positional') ? cleanPos(editing.serial) : undefined;
 
     const payload: any = {
       name: editing.name.trim(),
@@ -143,13 +151,14 @@ export default function BarkodFormatlariPanel() {
       strategy: editing.strategy ?? 'positional',
       parseTarget: (editing.parseTarget as 'reference' | 'barcodeNumber') ?? 'reference',
       trackLot: trackLot,
+      trackSerial: trackSerial, // YENİ
       reference: referenceClean,
     };
 
     if (totalLengthNum > 0) payload.totalLength = totalLengthNum; else payload.totalLength = deleteField();
 
     if (trackLot) {
-      if (!lotClean || !expiryClean) {
+      if (payload.strategy === 'positional' && (!lotClean || !expiryClean)) {
         toast({ title: 'Eksik Dilim', description: 'Lot ve Miad için başlangıç/uzunluk girin.', variant: 'destructive' });
         return;
       }
@@ -158,6 +167,20 @@ export default function BarkodFormatlariPanel() {
     } else {
       payload.lot = deleteField();
       payload.expiry = deleteField();
+    }
+
+    // YENİ: Seri no alanları
+    if (trackSerial) {
+       // Not: Eğer positional stratejisi kullanılıyorsa ve kullanıcı özel bir alan girmemişse
+       // (start:0, length:0) bu durumda "serial" alanını kaydetmeyiz, parser remainder'ı kullanır.
+       // Ancak kullanıcı özel bir alan girdiyse onu kaydederiz.
+       if (serialClean) {
+         payload.serial = serialClean;
+       } else {
+         payload.serial = deleteField();
+       }
+    } else {
+       payload.serial = deleteField();
     }
   
     try {
@@ -185,7 +208,7 @@ export default function BarkodFormatlariPanel() {
       <BackButton fallback="/yonetim" />
       <Card className="shadow-lg">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-xl font-headline">Barkod Formatları</CardTitle>
+          <CardTitle className="text-xl font-headline">Barkod Formatları Yönetimi</CardTitle>
           <Button onClick={openNew} className="gap-2"><PlusCircle className="h-4 w-4" /> Yeni Format</Button>
         </CardHeader>
         <CardContent>
@@ -202,6 +225,7 @@ export default function BarkodFormatlariPanel() {
                     <TableHead>Aktif</TableHead>
                     <TableHead>Tanıma</TableHead>
                     <TableHead>Lot Takibi</TableHead>
+                    <TableHead>Seri No Takibi</TableHead>
                     <TableHead className="text-right">İşlemler</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -214,6 +238,7 @@ export default function BarkodFormatlariPanel() {
                       <TableCell>{f.active === false ? 'Hayır' : 'Evet'}</TableCell>
                       <TableCell>{f.parseTarget === 'barcodeNumber' ? 'Barkod (UDI)' : 'Referans'}</TableCell>
                       <TableCell>{(f as any).trackLot === false ? 'Hayır' : 'Evet'}</TableCell>
+                      <TableCell>{(f as any).trackSerial === false ? 'Hayır' : 'Evet'}</TableCell>
                       <TableCell className="text-right space-x-2">
                         <Button variant="outline" size="sm" onClick={() => openEdit(f)} className="gap-1"><Edit3 className="h-4 w-4" /> Düzenle</Button>
                         <Button variant="outline" size="sm" onClick={() => remove(f)} className="gap-1 text-red-600"><Trash2 className="h-4 w-4" /> Sil</Button>
@@ -290,23 +315,29 @@ export default function BarkodFormatlariPanel() {
                 <Label>Lot Takibi</Label>
                 <Select
                   value={((editing as any).trackLot === false ? 'off' : 'on')}
-                  onValueChange={(v: 'on' | 'off') => setEditing(p => {
-                    const trackLot = v === 'on';
-                    return trackLot ? { ...p!, trackLot } : {
-                      ...p!,
-                      trackLot,
-                      lot: { start: 0, length: 0 },
-                      expiry: { start: 0, length: 0, pattern: p?.expiry?.pattern || 'YYMMDD' },
-                    };
-                  })}
+                  onValueChange={(v: 'on' | 'off') => setEditing(p => ({ ...p!, trackLot: v === 'on' }))}
                 >
                   <SelectTrigger className="w-full"><SelectValue placeholder="Seçin" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="on">Evet — Lot & Miad aranır</SelectItem>
-                    <SelectItem value="off">Hayır — Sadece adet takibi</SelectItem>
+                    <SelectItem value="off">Hayır — Lot & Miad aranmaz</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              <div className="md:col-span-1">
+                <Label>Seri No Takibi</Label>
+                <Select
+                    value={((editing.trackSerial === false) ? 'off' : 'on')}
+                    onValueChange={(v: 'on' | 'off') => setEditing(p => ({ ...p!, trackSerial: v === 'on' }))}
+                >
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Seçin" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="on">Evet — Seri No var</SelectItem>
+                      <SelectItem value="off">Hayır — Seri No yok</SelectItem>
+                    </SelectContent>
+                </Select>
+              </div>
+
 
               {(editing.strategy ?? 'positional') === 'positional' && (
                 <>
@@ -344,6 +375,18 @@ export default function BarkodFormatlariPanel() {
                             </SelectContent>
                           </Select>
                         </div>
+                      </div>
+                  </Section>
+                  
+                  <Section title="Seri Numarası" disabled={editing?.trackSerial === false}>
+                      <div className="space-y-2">
+                          <PosInputs
+                            value={editing?.serial}
+                            onChange={v => setEditing(p => ({ ...p!, serial: normalizePos(v) }))}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                             Boş (0,0) bırakırsanız barkodun <b>kalan kısmı</b> seri no olarak alınır.
+                          </p>
                       </div>
                   </Section>
                 </>
