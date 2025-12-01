@@ -153,7 +153,6 @@ export default function IsAnaliziPage() {
         setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore
     } = useLbysDataStore();
     
-    const [date, setDate] = useState<{ from: Date | undefined; to: Date | undefined }>(filters.dateRange);
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailModalData, setDetailModalData] = useState<{ title: string; data: Record<string, number>, type: 'service' | 'test' } | null>(null);
     const [rejectionModalOpen, setRejectionModalOpen] = useState(false);
@@ -163,12 +162,24 @@ export default function IsAnaliziPage() {
 
     useEffect(() => {
         loadHospitalDefinitions();
-        loadDataFromFirestore();
+        // Load initial data based on default date range
+        if (filters.dateRange.from && filters.dateRange.to) {
+            loadDataFromFirestore({ from: filters.dateRange.from, to: filters.dateRange.to });
+        }
     }, [loadHospitalDefinitions, loadDataFromFirestore]);
 
+    // This effect triggers a re-fetch whenever the date range filter changes.
     useEffect(() => {
-        setFilters({ dateRange: { from: date?.from, to: date?.to } });
-    }, [date, setFilters]);
+        if (filters.dateRange.from && filters.dateRange.to) {
+            loadDataFromFirestore({ from: filters.dateRange.from, to: filters.dateRange.to });
+        }
+    }, [filters.dateRange, loadDataFromFirestore]);
+
+    const handleDateChange = (dateRange: { from: Date | undefined; to: Date | undefined }) => {
+        setFilters({ dateRange });
+        // The useEffect above will handle the refetch
+    };
+
 
     const filterOptions = useMemo(() => {
         const hospitals = new Set<string>();
@@ -317,7 +328,7 @@ export default function IsAnaliziPage() {
                 <CardContent className="p-4 flex flex-wrap gap-2 md:gap-4 items-end">
                     <div className="flex flex-col gap-1.5 flex-grow min-w-[200px]">
                         <Label className="text-xs font-semibold text-slate-500 uppercase">Tarih Aralığı</Label>
-                        <DatePickerWithRange date={date} setDate={setDate} className="[&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!shadow-sm" />
+                        <DatePickerWithRange date={filters.dateRange} setDate={handleDateChange} className="[&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!shadow-sm" />
                     </div>
                     <FilterGroup title="Hastaneler" options={filterOptions.hospitals} selected={filters.selectedHospitals} onChange={(val) => setFilters({ selectedHospitals: val })} />
                     <FilterGroup title="ASM'ler" options={filterOptions.asms} selected={filters.selectedAsms} onChange={(val) => setFilters({ selectedAsms: val })} />
@@ -416,3 +427,5 @@ export default function IsAnaliziPage() {
 
     
 }
+
+    

@@ -1,8 +1,9 @@
+
 'use client';
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { collection, getDocs, writeBatch, doc, query, setDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, query, setDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { nanoid } from 'nanoid';
 import { format } from 'date-fns';
@@ -47,7 +48,7 @@ interface LbysStore {
   hospitalDefinitions: Record<string, string>;
   error: string | null;
 
-  loadDataFromFirestore: () => Promise<void>;
+  loadDataFromFirestore: (dateRange: { from: Date; to: Date }) => Promise<void>;
   processAndUploadExcel: (excelData: any[]) => Promise<void>;
   setFilters: (newFilters: Partial<FilterState>) => void;
   applyFilters: () => void;
@@ -111,10 +112,19 @@ export const useLbysDataStore = create<LbysStore>()(
          } catch(e) { console.error(e); }
       },
 
-      loadDataFromFirestore: async () => {
+      loadDataFromFirestore: async (dateRange) => {
+        if (!dateRange.from || !dateRange.to) return;
         set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Veriler Buluttan İndiriliyor...' } });
         try {
-            const q = query(collection(db, 'analysis_results'));
+            const startDate = format(dateRange.from, 'yyyy-MM-dd');
+            const endDate = format(dateRange.to, 'yyyy-MM-dd');
+            
+            const q = query(
+                collection(db, 'analysis_results'),
+                where('date', '>=', startDate),
+                where('date', '<=', endDate)
+            );
+
             const querySnapshot = await getDocs(q);
             const fetchedData: AggregatedRecord[] = [];
             
@@ -124,9 +134,10 @@ export const useLbysDataStore = create<LbysStore>()(
 
             set({ aggregatedData: fetchedData });
             get().applyFilters();
-            console.log(`Qore Analyse: Firestore'dan ${fetchedData.length} kayıt indirildi.`);
+            console.log(`Qore Analyse: Firestore'dan ${fetchedData.length} kayıt indirildi (${startDate} - ${endDate}).`);
         } catch (error: any) {
             set({ error: "Veri indirme hatası: " + error.message });
+            console.error("Firestore query failed:", error);
         } finally {
             set({ isLoading: false });
         }
@@ -279,16 +290,23 @@ export const useLbysDataStore = create<LbysStore>()(
       
       setFilters: (newFilters) => {
         set(state => ({ filters: { ...state.filters, ...newFilters } }));
-        get().applyFilters();
+        // Don't auto-apply here. Let the useEffect in the page component trigger the fetch.
       },
       
       resetFilters: () => {
          const today = new Date();
          const lastWeek = new Date();
          lastWeek.setDate(today.getDate() - 7);
-         set({ filters: { dateRange: { from: lastWeek, to: today }, selectedHospitals: [], selectedAsms: [], selectedServices: [], selectedTests: [], selectedBranches: [] } });
-         get().applyFilters();
+         const newFilters = { 
+            dateRange: { from: lastWeek, to: today }, 
+            selectedHospitals: [], selectedAsms: [], selectedServices: [], selectedTests: [], selectedBranches: [] 
+         };
+         set({ filters: newFilters });
+         // Trigger fetch with new default dates
+         get().loadDataFromFirestore({ from: lastWeek, to: today });
       }
     })
   )
 );
+
+    
