@@ -132,7 +132,8 @@ export const useLbysDataStore = create<LbysStore>()(
                 fetchedData.push(doc.data() as AggregatedRecord);
             });
 
-            set({ aggregatedData: fetchedData });
+            // *** FIX: Overwrite state instead of merging ***
+            set({ aggregatedData: fetchedData }); 
             get().applyFilters();
             console.log(`Qore Analyse: Firestore'dan ${fetchedData.length} kayıt indirildi (${startDate} - ${endDate}).`);
         } catch (error: any) {
@@ -153,8 +154,6 @@ export const useLbysDataStore = create<LbysStore>()(
             const groups: Map<string, any> = new Map();
             let skippedCount = 0;
     
-            // This is the core logic change:
-            // We now process the excelData directly without fetching any old data.
             const processChunk = (chunk: any[]) => {
                 chunk.forEach((row) => {
                     if (!row || row.length < 20) return;
@@ -237,7 +236,24 @@ export const useLbysDataStore = create<LbysStore>()(
             const totalDocs = recordsToWrite.length;
             set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
     
-            // Instead of merging, we now set the data for each document, which can still be batched.
+            const dateFilter = get().filters.dateRange;
+            if (!dateFilter.from || !dateFilter.to) {
+                throw new Error("Date range is not set for upload.");
+            }
+            
+            const startDate = format(dateFilter.from, 'yyyy-MM-dd');
+            const endDate = format(dateFilter.to, 'yyyy-MM-dd');
+            const q = query(
+                collection(db, 'analysis_results'),
+                where('date', '>=', startDate),
+                where('date', '<=', endDate)
+            );
+            const oldDocsSnap = await getDocs(q);
+            const deleteBatch = writeBatch(db);
+            oldDocsSnap.forEach(doc => deleteBatch.delete(doc.ref));
+            await deleteBatch.commit();
+            console.log(`Qore Analyse: Deleted ${oldDocsSnap.size} old records in date range.`);
+
             for (let i = 0; i < totalDocs; i += CHUNK_SIZE) {
                 const batch = writeBatch(db);
                 const chunk = recordsToWrite.slice(i, i + CHUNK_SIZE);
@@ -251,7 +267,7 @@ export const useLbysDataStore = create<LbysStore>()(
     
             console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi.`);
             
-            // Overwrite the local state, don't merge
+            // *** FIX: Set the local state to ONLY the newly written records ***
             set({ aggregatedData: recordsToWrite });
             get().applyFilters();
     
