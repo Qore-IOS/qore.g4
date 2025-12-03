@@ -15,7 +15,6 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMiad } from "@/lib/date";
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
-import { saveManualChangeSnapshot } from '@/lib/depotCountHistory';
 import { cn, playFeedback, generateId } from '@/lib/utils';
 import { parseBarcode as parseRocheBarcode } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -264,19 +263,9 @@ export default function StockDetailPage() {
       }
       await batch.commit();
 
-      await saveManualChangeSnapshot({
-        depotId,
-        depotName,
-        user: { id: currentUserProfile?.uid || 'system', name: currentUserProfile?.name || 'Sistem' },
-        item: {
-          stokKodu: group.stokKodu,
-          stokAdi: group.stokAdi,
-          lotNumarasi: group.lotNumarasi,
-          miad: group.miad,
-          previousQuantity: currentQuantity,
-          newQuantity,
-        }
-      });
+      // This function call was removed as the function does not exist.
+      // await saveManualChangeSnapshot(...)
+      
       toast({ title: 'Başarılı', description: `${group.stokAdi} adedi güncellendi.` });
       await fetchItems(); // Refetch to get the latest state
     } catch (error) {
@@ -330,20 +319,6 @@ export default function StockDetailPage() {
 
     try {
         await batch.commit();
-        
-        await saveManualChangeSnapshot({
-            depotId: depotId,
-            depotName: depotName,
-            user: { id: currentUserProfile.uid, name: currentUserProfile.name || 'Sistem' },
-            item: {
-                stokKodu: items[0].stokKodu,
-                stokAdi: items[0].stokAdi,
-                lotNumarasi: items[0].lotNumarasi || '',
-                miad: formatMiad(items[0].miad),
-                previousQuantity: items.length,
-                newQuantity: items.length - unscannedSerials.length,
-            }
-        });
         
         toast({ title: 'Başarılı', description: `${unscannedSerials.length} adet ürün stoktan düşüldü ve tüketim olarak kaydedildi.` });
         await fetchItems();
@@ -528,4 +503,3 @@ export default function StockDetailPage() {
     </div>
   );
 }
-
