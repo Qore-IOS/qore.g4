@@ -55,6 +55,7 @@ interface LbysStore {
   resetFilters: () => void;
   loadHospitalDefinitions: () => Promise<void>;
   saveHospitalDefinition: (code: string, name: string) => Promise<void>;
+  resetAnalysisData: () => Promise<void>;
 }
 
 // --- HELPERS ---
@@ -299,7 +300,31 @@ export const useLbysDataStore = create<LbysStore>()(
          };
          set({ filters: newFilters });
          get().loadDataFromFirestore({ from: lastWeek, to: today });
-      }
+      },
+      
+      resetAnalysisData: async () => {
+        set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Veriler Siliniyor...' } });
+        try {
+          const snapshot = await getDocs(collection(db, 'analysis_results'));
+          const total = snapshot.size;
+          set({ processingProgress: { current: 0, total, status: 'Veriler Siliniyor...' } });
+          
+          const CHUNK_SIZE = 450;
+          for (let i = 0; i < total; i += CHUNK_SIZE) {
+            const batch = writeBatch(db);
+            const chunk = snapshot.docs.slice(i, i + CHUNK_SIZE);
+            chunk.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, total), total, status: 'Veriler Siliniyor...' } });
+          }
+
+          set({ aggregatedData: [], filteredData: [] });
+        } catch (error: any) {
+          set({ error: "Veri sıfırlama hatası: " + error.message });
+        } finally {
+          set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
+        }
+      },
     })
   )
 );

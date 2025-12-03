@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback, ChangeEvent } from 'react';
 import {
-    Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X, ChevronDown, ChevronUp
+    Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X, ChevronDown, ChevronUp, Trash2
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -150,7 +150,7 @@ function HospitalSettingsModal({ open, onOpenChange }: { open: boolean, onOpenCh
 export default function IsAnaliziPage() {
     const {
         isLoading, error, aggregatedData, filteredData, filters,
-        setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore
+        setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore, resetAnalysisData
     } = useLbysDataStore();
     
     const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -285,6 +285,12 @@ export default function IsAnaliziPage() {
         setDetailModalData({ title: `${hospitalName} - Servis Dağılımı`, data: hospitalServices, type: 'service' });
         setDetailModalOpen(true);
     };
+    
+    const handleResetDataConfirm = () => {
+        if (confirm("Bu işlem geri alınamaz! Analiz veritabanındaki tüm kayıtları kalıcı olarak silmek istediğinizden emin misiniz?")) {
+            resetAnalysisData();
+        }
+    };
 
     return (
         <div className="p-4 sm:p-6 space-y-6 bg-slate-50 min-h-screen pb-20">
@@ -308,6 +314,7 @@ export default function IsAnaliziPage() {
                             <div className="flex items-center gap-2">
                                 <HospitalSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
                                 <Button onClick={() => setSettingsOpen(true)} variant="ghost" size="sm" className="gap-2"><Settings className="h-4 w-4" />Ayarlar</Button>
+                                <Button onClick={handleResetDataConfirm} variant="destructive" size="sm" className="gap-2"><Trash2 className="h-4 w-4" />Verileri Sıfırla</Button>
                                 <FileUploader />
                             </div>
                         </div>
@@ -427,5 +434,3 @@ export default function IsAnaliziPage() {
 
     
 }
-
-    
