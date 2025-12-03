@@ -1,4 +1,3 @@
-
 'use client';
 
 import { create } from 'zustand';
@@ -145,39 +144,32 @@ export const useLbysDataStore = create<LbysStore>()(
       },
 
       processAndUploadExcel: async (excelData) => {
-        console.log("Qore Analyse: Veri işleme v2 başlatıldı...");
+        console.log("Qore Analyse: Veri işleme başlatıldı...");
         set({ isLoading: true, error: null, processingProgress: { current: 0, total: excelData.length, status: 'Analiz Ediliyor...' } });
         const { hospitalDefinitions } = get();
         const uploadBatchId = nanoid();
-
+    
         try {
             const groups: Map<string, any> = new Map();
             let skippedCount = 0;
-
-            if (excelData.length > 1) {
-                console.log("Debug - İlk Satır İndeksleri:", {
-                    Index21_ISTEM: excelData[1][21],
-                    Index22_KAYIT: excelData[1][22],
-                    Index24_LAB: excelData[1][24],
-                    Index26_SONUC: excelData[1][26]
-                });
-            }
-
+    
+            // This is the core logic change:
+            // We now process the excelData directly without fetching any old data.
             const processChunk = (chunk: any[]) => {
                 chunk.forEach((row) => {
                     if (!row || row.length < 20) return;
-
+    
                     const rawHospitalId = row[3];
                     let rawResultDate = row[26] || row[22]; 
                     let rawLabDate = row[24] || row[21]; 
-
+    
                     if (!rawHospitalId || !rawResultDate) { skippedCount++; return; }
-
+    
                     const resDate = parseExcelDate(rawResultDate);
                     const labDate = parseExcelDate(rawLabDate) || resDate; 
-
+    
                     if (!resDate || !labDate) { skippedCount++; return; }
-
+    
                     const tatMin = (resDate.getTime() - labDate.getTime()) / (1000 * 60);
                     const dateStr = format(resDate, 'yyyy-MM-dd');
                     const hospitalId = String(rawHospitalId).trim();
@@ -189,7 +181,7 @@ export const useLbysDataStore = create<LbysStore>()(
                     } else {
                         derivedHospitalName = hospitalDefinitions[hospitalId] || `Hastane (${hospitalId})`;
                     }
-
+    
                     const testName = normalize(row[7]);
                     const serviceName = normalize(row[11]);
                     const branchName = normalize(row[12]);
@@ -197,7 +189,7 @@ export const useLbysDataStore = create<LbysStore>()(
                     const isEmergency = String(row[4] || '').toUpperCase() === 'E';
                     const isRepeat = Number(row[14] || 0) > 0;
                     const rejectionReason = String(row[16] || '').trim();
-
+    
                     const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
                     
                     if (!groups.has(key)) {
@@ -226,8 +218,9 @@ export const useLbysDataStore = create<LbysStore>()(
                     }
                 });
             };
-
+    
             const chunkSize = 5000;
+            // Start from 1 to skip header row
             for (let i = 1; i < excelData.length; i += chunkSize) {
                 const chunk = excelData.slice(i, i + chunkSize);
                 processChunk(chunk);
@@ -239,11 +232,12 @@ export const useLbysDataStore = create<LbysStore>()(
                 ...g,
                 patientIds: Array.from(g.patientIds)
             }));
-
+    
             const CHUNK_SIZE = 450;
             const totalDocs = recordsToWrite.length;
             set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
-
+    
+            // Instead of merging, we now set the data for each document, which can still be batched.
             for (let i = 0; i < totalDocs; i += CHUNK_SIZE) {
                 const batch = writeBatch(db);
                 const chunk = recordsToWrite.slice(i, i + CHUNK_SIZE);
@@ -254,12 +248,13 @@ export const useLbysDataStore = create<LbysStore>()(
                 await batch.commit();
                 set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, totalDocs), total: totalDocs, status: 'Buluta Yazılıyor...' } });
             }
-
+    
             console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi.`);
             
-            set(state => ({ aggregatedData: [...state.aggregatedData, ...recordsToWrite] }));
+            // Overwrite the local state, don't merge
+            set({ aggregatedData: recordsToWrite });
             get().applyFilters();
-
+    
         } catch (error: any) {
             set({ error: "Hata: " + error.message });
         } finally {
