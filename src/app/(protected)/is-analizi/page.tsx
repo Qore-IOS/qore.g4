@@ -150,7 +150,8 @@ function HospitalSettingsModal({ open, onOpenChange }: { open: boolean, onOpenCh
 export default function IsAnaliziPage() {
     const {
         isLoading, error, aggregatedData, filteredData, filters,
-        setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore, resetAnalysisData
+        setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore, resetAnalysisData,
+        showAllData, loadAllDataFromFirestore
     } = useLbysDataStore();
     
     const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -170,13 +171,15 @@ export default function IsAnaliziPage() {
 
     // This effect triggers a re-fetch whenever the date range filter changes.
     useEffect(() => {
-        if (filters.dateRange.from && filters.dateRange.to) {
+        // showAll true ise loadAllDataFromFirestore zaten çağrılmış olacak
+        if (!filters.showAll && filters.dateRange.from && filters.dateRange.to) {
             loadDataFromFirestore({ from: filters.dateRange.from, to: filters.dateRange.to });
         }
-    }, [filters.dateRange, loadDataFromFirestore]);
+    }, [filters.dateRange, filters.showAll, loadDataFromFirestore]);
 
     const handleDateChange = (dateRange: { from: Date | undefined; to: Date | undefined }) => {
-        setFilters({ dateRange });
+        // Tarih seçildiğinde showAll'ı kapat
+        setFilters({ dateRange, showAll: false });
         // The useEffect above will handle the refetch
     };
 
@@ -242,7 +245,11 @@ export default function IsAnaliziPage() {
             rec.emergency += d.emergencyCount;
         });
         return Array.from(map.values())
-            .map(d => ({ ...d, emergencyRate: d.tests > 0 ? ((d.emergency / d.tests) * 100) : 0 }))
+            .map(d => ({
+                ...d,
+                normal: d.tests - d.emergency,
+                emergencyRate: d.tests > 0 ? ((d.emergency / d.tests) * 100) : 0
+            }))
             .sort((a, b) => b.tests - a.tests);
     }, [filteredData]);
     
@@ -342,9 +349,14 @@ export default function IsAnaliziPage() {
                     <FilterGroup title="Servisler" options={filterOptions.services} selected={filters.selectedServices} onChange={(val) => setFilters({ selectedServices: val })} />
                     <FilterGroup title="Testler" options={filterOptions.tests} selected={filters.selectedTests} onChange={(val) => setFilters({ selectedTests: val })} />
                     <FilterGroup title="Branşlar" options={filterOptions.branches} selected={filters.selectedBranches} onChange={(val) => setFilters({ selectedBranches: val })} />
-                    <Button variant="ghost" onClick={resetFilters} className="text-red-600 hover:text-red-700 hover:bg-red-50 h-9 px-3 self-end ml-auto">
-                        <RefreshCcw className="w-4 h-4 mr-2" /> Tümünü Göster
-                    </Button>
+                    <div className="flex gap-2 self-end ml-auto">
+                        <Button variant="outline" onClick={resetFilters} className="h-9 px-3">
+                            <RefreshCcw className="w-4 h-4 mr-2" /> Son 7 Gün
+                        </Button>
+                        <Button variant="default" onClick={showAllData} className="h-9 px-3 bg-blue-600 hover:bg-blue-700">
+                            <Filter className="w-4 h-4 mr-2" /> Tümünü Göster
+                        </Button>
+                    </div>
                 </CardContent>
             </Card>
 
@@ -358,23 +370,52 @@ export default function IsAnaliziPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card>
-                    <CardHeader><CardTitle className="flex justify-between items-center text-base"><span>Test Sayısına Göre Hastaneler</span><span className="text-xs font-normal text-muted-foreground bg-slate-100 px-2 py-1 rounded">Acil %</span></CardTitle></CardHeader>
+                    <CardHeader>
+                        <CardTitle className="flex justify-between items-center text-base">
+                            <span>Test Sayısına Göre Hastaneler</span>
+                            <div className="flex gap-2 text-xs font-normal">
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500"></span>Normal</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500"></span>Acil</span>
+                            </div>
+                        </CardTitle>
+                    </CardHeader>
                     <CardContent className="h-[350px]">
                         <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={hospitalsChartData} layout="vertical" margin={{ left: 20 }}>
+                            <BarChart data={hospitalsChartData} layout="vertical" margin={{ left: 20, right: 60 }}>
                                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                                 <XAxis type="number" hide />
                                 <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 11}} interval={0} />
-                                <RechartsTooltip 
+                                <RechartsTooltip
                                     content={({ active, payload }) => {
                                         if (active && payload && payload.length) {
                                             const d = payload[0].payload;
-                                            return <div className="bg-white p-2 border rounded shadow-lg text-xs"><p className="font-bold">{d.name}</p><p>Test: {d.tests.toLocaleString()}</p><p className="text-red-600">Acil: {d.emergency.toLocaleString()} ({d.emergencyRate.toFixed(1)}%)</p></div>;
+                                            return (
+                                                <div className="bg-white dark:bg-slate-800 p-3 border rounded-lg shadow-lg text-xs">
+                                                    <p className="font-bold text-sm mb-2">{d.name}</p>
+                                                    <div className="space-y-1">
+                                                        <p>Toplam Test: <span className="font-semibold">{d.tests.toLocaleString()}</span></p>
+                                                        <p className="text-red-600">Acil: <span className="font-semibold">{d.emergency.toLocaleString()}</span> ({d.emergencyRate.toFixed(1)}%)</p>
+                                                        <p className="text-blue-600">Normal: <span className="font-semibold">{(d.tests - d.emergency).toLocaleString()}</span></p>
+                                                    </div>
+                                                </div>
+                                            );
                                         }
                                         return null;
                                     }}
                                 />
-                                <Bar dataKey="tests" fill="#3b82f6" radius={[0, 4, 4, 0]} onClick={(d) => handleHospitalClick(d.name)} cursor="pointer" />
+                                <Bar dataKey="normal" stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} onClick={(d) => handleHospitalClick(d.name)} cursor="pointer" name="Normal" />
+                                <Bar dataKey="emergency" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} onClick={(d) => handleHospitalClick(d.name)} cursor="pointer" name="Acil"
+                                    label={({ x, y, width, height, value, payload }: any) => {
+                                        if (payload?.emergencyRate > 0) {
+                                            return (
+                                                <text x={x + width + 5} y={y + height / 2} fill="#ef4444" fontSize={10} dominantBaseline="middle">
+                                                    {payload.emergencyRate.toFixed(0)}%
+                                                </text>
+                                            );
+                                        }
+                                        return null;
+                                    }}
+                                />
                             </BarChart>
                         </ResponsiveContainer>
                     </CardContent>
