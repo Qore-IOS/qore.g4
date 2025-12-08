@@ -14,7 +14,12 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Rack } from '@/lib/types';
-import { todayYmd } from './rack-utils';
+import { format } from 'date-fns';
+
+/** Returns today's date in YYYY.MM.DD format */
+function todayYmd(): string {
+  return format(new Date(), 'yyyy.MM.dd');
+}
 
 /**
  * Finds the current day's rack count for a specific lab and fridge.
