@@ -222,59 +222,51 @@ export const useLbysDataStore = create<LbysStore>()(
         try {
             const groups: Map<string, any> = new Map();
             let skippedCount = 0;
+            let processedCount = 0;
 
             const processChunk = (chunk: any[]) => {
                 chunk.forEach((row) => {
-                    if (!row || row.length < 20) return;
+                    if (!row || row.length < 12) return;
 
                     // D sütunu (index 3): HASTANE_ID
                     const rawHospitalId = row[3];
-                    // AA sütunu (index 26): CALISMA_TARIHI - Test sayısı için bu dolu olmalı
-                    let rawResultDate = row[26];
-                    // Y sütunu (index 24): LABKABUL_TARIHI - TAT hesabı için
-                    let rawLabDate = row[24];
+                    if (!rawHospitalId) { skippedCount++; return; }
 
-                    // AA sütununda çalışma tarihi doluysa test sayılır
-                    if (!rawHospitalId || !rawResultDate) { skippedCount++; return; }
+                    // Tarih için öncelik: AA (26) > Y (24) > V (21)
+                    // AA: CALISMA_TARIHI, Y: LABKABUL_TARIHI, V: ISTEMTARIHI
+                    let rawResultDate = row[26] || row[24] || row[21];
+                    let rawLabDate = row[24] || row[21];
 
-                    const resDate = parseExcelDate(rawResultDate);
+                    // Tarih yoksa atla
+                    if (!rawResultDate && !rawLabDate) { skippedCount++; return; }
+
+                    const resDate = parseExcelDate(rawResultDate) || parseExcelDate(rawLabDate);
                     const labDate = parseExcelDate(rawLabDate) || resDate;
 
-                    if (!resDate || !labDate) { skippedCount++; return; }
+                    if (!resDate) { skippedCount++; return; }
 
-                    // TAT: Y (lab kabul) ile AA (çalışma tarihi) arası fark
-                    const tatMin = (resDate.getTime() - labDate.getTime()) / (1000 * 60);
+                    // TAT hesabı
+                    const tatMin = labDate ? (resDate.getTime() - labDate.getTime()) / (1000 * 60) : 0;
                     const dateStr = format(resDate, 'yyyy-MM-dd');
                     const hospitalId = String(rawHospitalId).trim();
-                    // D sütunu 999 ise ASM
                     const isAsm = hospitalId === '999';
 
                     let derivedHospitalName = 'Bilinmeyen Kurum';
                     if (isAsm) {
-                        // ASM için L sütunundan (index 11) ad alınır
                         derivedHospitalName = normalize(row[11]);
                     } else {
                         derivedHospitalName = hospitalDefinitions[hospitalId] || `Hastane (${hospitalId})`;
                     }
 
-                    // H sütunu (index 7): TEST_ADI
                     const testName = normalize(row[7]);
-                    // L sütunu (index 11): SERVIS_POL_ADI
                     const serviceName = normalize(row[11]);
-                    // M sütunu (index 12): DOKTOR_BRANS
                     const branchName = normalize(row[12]);
-                    // B sütunu (index 1): HASTA_ID - Benzersiz numune için
                     const patientId = String(row[1] || `temp-${Math.random()}`);
-                    // E sütunu (index 4): ACIL - "E" ise acil
                     const isEmergency = String(row[4] || '').toUpperCase() === 'E';
-                    // O sütunu (index 14): TEKRAR_SAYISI - 0'dan büyükse tekrar
                     const isRepeat = Number(row[14] || 0) > 0;
-                    // Q sütunu (index 16): RET_NEDENI - Doluysa red
                     const rejectionReason = String(row[16] || '').trim();
 
-                    // Composite key ile gruplama - deterministik ID oluştur
                     const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
-                    // Deterministik ID - aynı key için her zaman aynı ID
                     const docId = key.replace(/\|/g, '_').replace(/[^a-zA-Z0-9_\u00C0-\u024F]/g, '').substring(0, 150);
 
                     if (!groups.has(key)) {
@@ -290,6 +282,7 @@ export const useLbysDataStore = create<LbysStore>()(
 
                     const record = groups.get(key);
                     record.totalTests++;
+                    processedCount++;
                     if (isEmergency) record.emergencyCount++;
                     record.patientIds.add(patientId);
                     if (isRepeat) record.repeatCount++;
@@ -305,7 +298,6 @@ export const useLbysDataStore = create<LbysStore>()(
             };
 
             const chunkSize = 5000;
-            // Start from 1 to skip header row
             for (let i = 1; i < excelData.length; i += chunkSize) {
                 const chunk = excelData.slice(i, i + chunkSize);
                 processChunk(chunk);
@@ -318,65 +310,52 @@ export const useLbysDataStore = create<LbysStore>()(
                 patientIds: Array.from(g.patientIds)
             }));
 
-            // OPTİMİZE KÜMÜLATİF YAZMA: Mevcut verileri toplu çekmek yerine,
-            // Her kayıt için tek tek kontrol edip güncelle
+            console.log(`Qore Analyse: ${processedCount} satır işlendi, ${newRecords.length} grup oluşturuldu, ${skippedCount} satır atlandı.`);
+
+            // SADECE YENİ KAYITLARI YAZ - mevcut verileri kontrol etme
             const totalDocs = newRecords.length;
             set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
 
-            const CHUNK_SIZE = 100; // Daha küçük chunk - her biri için getDoc yapılacak
-            let processedCount = 0;
+            const CHUNK_SIZE = 450;
+            let writtenCount = 0;
 
             for (let i = 0; i < totalDocs; i += CHUNK_SIZE) {
                 const chunk = newRecords.slice(i, i + CHUNK_SIZE);
                 const batch = writeBatch(db);
 
-                // Her kayıt için mevcut veriyi kontrol et
-                for (const newRec of chunk) {
-                    const docRef = doc(db, 'analysis_results', newRec.id);
-                    const existingDoc = await getDoc(docRef);
-
-                    if (existingDoc.exists()) {
-                        // Mevcut kayıt var - birleştir
-                        const existing = existingDoc.data() as AggregatedRecord;
-                        const mergedPatientIds = new Set([...existing.patientIds, ...newRec.patientIds]);
-                        const mergedRejectionReasons: Record<string, number> = { ...existing.rejectionReasons };
-                        Object.entries(newRec.rejectionReasons).forEach(([reason, count]) => {
-                            mergedRejectionReasons[reason] = (mergedRejectionReasons[reason] || 0) + count;
-                        });
-
-                        batch.set(docRef, {
-                            ...existing,
-                            totalTests: existing.totalTests + newRec.totalTests,
-                            emergencyCount: existing.emergencyCount + newRec.emergencyCount,
-                            patientIds: Array.from(mergedPatientIds),
-                            rejectedCount: existing.rejectedCount + newRec.rejectedCount,
-                            repeatCount: existing.repeatCount + newRec.repeatCount,
-                            totalTatMinutes: existing.totalTatMinutes + newRec.totalTatMinutes,
-                            tatCount: existing.tatCount + newRec.tatCount,
-                            rejectionReasons: mergedRejectionReasons,
-                            uploadBatchId: newRec.uploadBatchId,
-                            createdAt: new Date().toISOString()
-                        });
-                    } else {
-                        // Yeni kayıt
-                        batch.set(docRef, newRec);
-                    }
-                }
+                chunk.forEach((docData) => {
+                    const docRef = doc(db, 'analysis_results', docData.id);
+                    // merge: true ile mevcut veriyi koruyarak güncelle
+                    batch.set(docRef, docData, { merge: true });
+                });
 
                 await batch.commit();
-                processedCount += chunk.length;
-                set({ processingProgress: { current: processedCount, total: totalDocs, status: 'Buluta Yazılıyor...' } });
+                writtenCount += chunk.length;
+                set({ processingProgress: { current: writtenCount, total: totalDocs, status: 'Buluta Yazılıyor...' } });
             }
 
-            console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi (kümülatif). Atlanan satır: ${skippedCount}`);
+            console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi.`);
 
-            // Mevcut tarih filtresine göre verileri yeniden yükle
-            const dateFilter = get().filters;
-            if (dateFilter.showAll) {
-                await get().loadAllDataFromFirestore();
-            } else if (dateFilter.dateRange.from && dateFilter.dateRange.to) {
-                await get().loadDataFromFirestore({ from: dateFilter.dateRange.from, to: dateFilter.dateRange.to });
-            }
+            // Yükleme bitti - sadece yeni kayıtları local state'e ekle
+            // Mevcut verileri TEKRAR ÇEKMİYORUZ
+            const currentData = get().aggregatedData;
+            const newDataMap = new Map(newRecords.map(r => [r.id, r]));
+
+            // Mevcut verileri güncelle veya yenilerini ekle
+            const updatedData = currentData.map(existing => {
+                const newVersion = newDataMap.get(existing.id);
+                if (newVersion) {
+                    newDataMap.delete(existing.id);
+                    return newVersion; // Yeni versiyon ile değiştir
+                }
+                return existing;
+            });
+
+            // Kalan yeni kayıtları ekle
+            newDataMap.forEach(newRec => updatedData.push(newRec));
+
+            set({ aggregatedData: updatedData });
+            get().applyFilters();
 
         } catch (error: any) {
             set({ error: "Hata: " + error.message });
