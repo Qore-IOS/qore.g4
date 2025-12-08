@@ -13,41 +13,44 @@ import { format } from 'date-fns';
 // C sütunu (index 2): ORNEKNO
 // D sütunu (index 3): HASTANE_ID - 999 ise ASM
 // E sütunu (index 4): ACIL - "E" ise acil, "H" ise normal
-// F sütunu (index 5): YATAN
-// G sütunu (index 6): TEST_ID
 // H sütunu (index 7): TEST_ADI - Test adı
-// I sütunu (index 8): ENDIKE_KODU
-// J sütunu (index 9): BARKODNO
-// K sütunu (index 10): SERVIS_POLIKLINIK_KODU
 // L sütunu (index 11): SERVIS_POL_ADI - Servis/ASM adı
 // M sütunu (index 12): DOKTOR_BRANS
-// N sütunu (index 13): DOKTOR_BRANS_KOD
 // O sütunu (index 14): TEKRAR_SAYISI - 0'dan büyükse tekrar
-// P sütunu (index 15): CIHAZNO
 // Q sütunu (index 16): RET_NEDENI - Doluysa red sayılır
-// ... diğer sütunlar kullanılmıyor
-// Y sütunu (index 24): LABKABUL_TARIHI - TAT hesabı için
-// Z sütunu (index 25): -
-// AA sütunu (index 26): CALISMA_TARIHI - Test sayısı ve TAT hesabı için
+// Y sütunu (index 24): LABKABUL_TARIHI - Lab kabul aşaması
+// AA sütunu (index 26): CALISMA_TARIHI - Çalışılmış aşaması
+// AC sütunu (index 28): ONAYTARIH - Onaylanmış aşaması
+
+// --- VIEW MODE ---
+export type ViewMode = 'labAccepted' | 'worked' | 'approved';
+
+// --- STAGE STATS ---
+export interface StageStats {
+  totalTests: number;
+  emergencyCount: number;
+  patientIds: string[];
+  rejectedCount: number;
+  repeatCount: number;
+  totalTatMinutes: number;
+  tatCount: number;
+  rejectionReasons: Record<string, number>;
+}
 
 // --- TYPE DEFINITIONS ---
 export interface AggregatedRecord {
-  id: string; // Composite key: date|hospitalId|service|testName|branch
-  date: string; // YYYY-MM-DD
-  hospitalId: string; // HASTANE_ID (Raw) - D sütunu
-  hospitalName: string; // Mapped Name or ASM Name
-  isAsm: boolean; // hospitalId == 999
-  service: string; // L sütunu
-  testName: string; // H sütunu
-  totalTests: number; // AA sütunu dolu olanlar
-  emergencyCount: number; // E sütunu == 'E' sayısı
-  patientIds: string[]; // B sütunu - benzersiz numune
-  rejectedCount: number; // Q sütunu dolu olanlar
-  repeatCount: number; // O sütunu > 0 olanlar
-  totalTatMinutes: number; // Y ve AA arası fark toplamı
-  tatCount: number; // TAT hesaplanan satır sayısı
-  rejectionReasons: Record<string, number>; // Red nedenleri ve sayıları
-  branch: string; // M sütunu
+  id: string;
+  date: string;
+  hospitalId: string;
+  hospitalName: string;
+  isAsm: boolean;
+  service: string;
+  testName: string;
+  branch: string;
+  // 3 aşama için ayrı istatistikler
+  labAccepted: StageStats;
+  worked: StageStats;
+  approved: StageStats;
   uploadBatchId?: string;
   createdAt?: string;
 }
@@ -59,25 +62,27 @@ export interface FilterState {
   selectedServices: string[];
   selectedTests: string[];
   selectedBranches: string[];
-  showAll: boolean; // Tüm verileri göster
+  showAll: boolean;
 }
 
 interface LbysStore {
   aggregatedData: AggregatedRecord[];
   filteredData: AggregatedRecord[];
   filters: FilterState;
+  viewMode: ViewMode;
   isLoading: boolean;
   processingProgress: { current: number; total: number; status: string };
   hospitalDefinitions: Record<string, string>;
   error: string | null;
 
+  setViewMode: (mode: ViewMode) => void;
   loadDataFromFirestore: (dateRange: { from: Date; to: Date }) => Promise<void>;
-  loadAllDataFromFirestore: () => Promise<void>; // Tüm verileri yükle
+  loadAllDataFromFirestore: () => Promise<void>;
   processAndUploadExcel: (excelData: any[]) => Promise<void>;
   setFilters: (newFilters: Partial<FilterState>) => void;
   applyFilters: () => void;
   resetFilters: () => void;
-  showAllData: () => void; // Tümünü göster
+  showAllData: () => void;
   loadHospitalDefinitions: () => Promise<void>;
   saveHospitalDefinition: (code: string, name: string) => Promise<void>;
   resetAnalysisData: () => Promise<void>;
@@ -96,6 +101,17 @@ const parseExcelDate = (input: any): Date | null => {
   return isNaN(d.getTime()) ? null : d;
 };
 
+const emptyStageStats = (): StageStats => ({
+  totalTests: 0,
+  emergencyCount: 0,
+  patientIds: [],
+  rejectedCount: 0,
+  repeatCount: 0,
+  totalTatMinutes: 0,
+  tatCount: 0,
+  rejectionReasons: {}
+});
+
 // --- ZUSTAND STORE ---
 export const useLbysDataStore = create<LbysStore>()(
   devtools(
@@ -105,6 +121,7 @@ export const useLbysDataStore = create<LbysStore>()(
       isLoading: false,
       processingProgress: { current: 0, total: 0, status: '' },
       error: null,
+      viewMode: 'approved', // Default: Onaylanmış testler
       filters: {
         dateRange: { from: new Date(new Date().setDate(new Date().getDate() - 7)), to: new Date() },
         selectedHospitals: [],
@@ -115,6 +132,11 @@ export const useLbysDataStore = create<LbysStore>()(
         showAll: false,
       },
       hospitalDefinitions: {},
+
+      setViewMode: (mode) => {
+        set({ viewMode: mode });
+        get().applyFilters();
+      },
 
       loadHospitalDefinitions: async () => {
         try {
@@ -173,7 +195,6 @@ export const useLbysDataStore = create<LbysStore>()(
       loadAllDataFromFirestore: async () => {
         set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Tüm Veriler Yükleniyor...' } });
         try {
-            // Performans için son 90 günlük veriyi çek (çok fazla veri tarayıcıyı çökertebilir)
             const ninetyDaysAgo = new Date();
             ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
             const startDate = format(ninetyDaysAgo, 'yyyy-MM-dd');
@@ -186,7 +207,6 @@ export const useLbysDataStore = create<LbysStore>()(
             const querySnapshot = await getDocs(q);
             const fetchedData: AggregatedRecord[] = [];
 
-            // Chunk halinde işle - tarayıcı donmasını önle
             const docs = querySnapshot.docs;
             const totalDocs = docs.length;
             set({ processingProgress: { current: 0, total: totalDocs, status: 'Veriler İşleniyor...' } });
@@ -198,7 +218,6 @@ export const useLbysDataStore = create<LbysStore>()(
                     fetchedData.push(doc.data() as AggregatedRecord);
                 });
                 set({ processingProgress: { current: Math.min(i + PROCESS_CHUNK, totalDocs), total: totalDocs, status: 'Veriler İşleniyor...' } });
-                // UI'ın güncellenmesine izin ver
                 await new Promise(r => setTimeout(r, 0));
             }
 
@@ -220,9 +239,25 @@ export const useLbysDataStore = create<LbysStore>()(
         const uploadBatchId = nanoid();
 
         try {
-            const groups: Map<string, any> = new Map();
+            // Her aşama için ayrı gruplar
+            const groups: Map<string, {
+              id: string;
+              date: string;
+              hospitalId: string;
+              hospitalName: string;
+              isAsm: boolean;
+              service: string;
+              testName: string;
+              branch: string;
+              labAccepted: { totalTests: number; emergencyCount: number; patientIds: Set<string>; rejectedCount: number; repeatCount: number; totalTatMinutes: number; tatCount: number; rejectionReasons: Record<string, number> };
+              worked: { totalTests: number; emergencyCount: number; patientIds: Set<string>; rejectedCount: number; repeatCount: number; totalTatMinutes: number; tatCount: number; rejectionReasons: Record<string, number> };
+              approved: { totalTests: number; emergencyCount: number; patientIds: Set<string>; rejectedCount: number; repeatCount: number; totalTatMinutes: number; tatCount: number; rejectionReasons: Record<string, number> };
+            }> = new Map();
+
             let skippedCount = 0;
-            let processedCount = 0;
+            let labAcceptedCount = 0;
+            let workedCount = 0;
+            let approvedCount = 0;
 
             const processChunk = (chunk: any[]) => {
                 chunk.forEach((row) => {
@@ -232,22 +267,23 @@ export const useLbysDataStore = create<LbysStore>()(
                     const rawHospitalId = row[3];
                     if (!rawHospitalId) { skippedCount++; return; }
 
-                    // Tarih için öncelik: AA (26) > Y (24) > V (21)
-                    // AA: CALISMA_TARIHI, Y: LABKABUL_TARIHI, V: ISTEMTARIHI
-                    let rawResultDate = row[26] || row[24] || row[21];
-                    let rawLabDate = row[24] || row[21];
+                    // Aşama kontrolü
+                    // Y (24): Lab Kabul, AA (26): Çalışılmış, AC (28): Onaylanmış
+                    const rawLabAcceptDate = row[24];
+                    const rawWorkDate = row[26];
+                    const rawApproveDate = row[28];
 
-                    // Tarih yoksa atla
-                    if (!rawResultDate && !rawLabDate) { skippedCount++; return; }
+                    // En az lab kabul tarihi olmalı
+                    if (!rawLabAcceptDate) { skippedCount++; return; }
 
-                    const resDate = parseExcelDate(rawResultDate) || parseExcelDate(rawLabDate);
-                    const labDate = parseExcelDate(rawLabDate) || resDate;
+                    const labAcceptDate = parseExcelDate(rawLabAcceptDate);
+                    if (!labAcceptDate) { skippedCount++; return; }
 
-                    if (!resDate) { skippedCount++; return; }
+                    const workDate = parseExcelDate(rawWorkDate);
+                    const approveDate = parseExcelDate(rawApproveDate);
 
-                    // TAT hesabı
-                    const tatMin = labDate ? (resDate.getTime() - labDate.getTime()) / (1000 * 60) : 0;
-                    const dateStr = format(resDate, 'yyyy-MM-dd');
+                    // Tarih olarak lab kabul tarihini kullan
+                    const dateStr = format(labAcceptDate, 'yyyy-MM-dd');
                     const hospitalId = String(rawHospitalId).trim();
                     const isAsm = hospitalId === '999';
 
@@ -266,33 +302,73 @@ export const useLbysDataStore = create<LbysStore>()(
                     const isRepeat = Number(row[14] || 0) > 0;
                     const rejectionReason = String(row[16] || '').trim();
 
+                    // TAT hesabı (lab kabul - çalışma arası)
+                    const tatMin = workDate ? (workDate.getTime() - labAcceptDate.getTime()) / (1000 * 60) : 0;
+
                     const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
                     const docId = key.replace(/\|/g, '_').replace(/[^a-zA-Z0-9_\u00C0-\u024F]/g, '').substring(0, 150);
 
                     if (!groups.has(key)) {
                         groups.set(key, {
                             id: docId,
-                            date: dateStr, hospitalId, hospitalName: derivedHospitalName, isAsm,
-                            service: serviceName, testName, branch: branchName,
-                            totalTests: 0, emergencyCount: 0, patientIds: new Set(),
-                            rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0,
-                            rejectionReasons: {}, uploadBatchId, createdAt: new Date().toISOString()
+                            date: dateStr,
+                            hospitalId,
+                            hospitalName: derivedHospitalName,
+                            isAsm,
+                            service: serviceName,
+                            testName,
+                            branch: branchName,
+                            labAccepted: { totalTests: 0, emergencyCount: 0, patientIds: new Set(), rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {} },
+                            worked: { totalTests: 0, emergencyCount: 0, patientIds: new Set(), rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {} },
+                            approved: { totalTests: 0, emergencyCount: 0, patientIds: new Set(), rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {} }
                         });
                     }
 
-                    const record = groups.get(key);
-                    record.totalTests++;
-                    processedCount++;
-                    if (isEmergency) record.emergencyCount++;
-                    record.patientIds.add(patientId);
-                    if (isRepeat) record.repeatCount++;
+                    const record = groups.get(key)!;
+
+                    // Lab Kabul aşaması (Y dolu) - her zaman sayılır
+                    record.labAccepted.totalTests++;
+                    labAcceptedCount++;
+                    if (isEmergency) record.labAccepted.emergencyCount++;
+                    record.labAccepted.patientIds.add(patientId);
+                    if (isRepeat) record.labAccepted.repeatCount++;
                     if (rejectionReason) {
-                        record.rejectedCount++;
-                        record.rejectionReasons[rejectionReason] = (record.rejectionReasons[rejectionReason] || 0) + 1;
+                        record.labAccepted.rejectedCount++;
+                        record.labAccepted.rejectionReasons[rejectionReason] = (record.labAccepted.rejectionReasons[rejectionReason] || 0) + 1;
                     }
-                    if (tatMin > 0) {
-                        record.totalTatMinutes += tatMin;
-                        record.tatCount++;
+
+                    // Çalışılmış aşaması (Y + AA dolu)
+                    if (workDate) {
+                        record.worked.totalTests++;
+                        workedCount++;
+                        if (isEmergency) record.worked.emergencyCount++;
+                        record.worked.patientIds.add(patientId);
+                        if (isRepeat) record.worked.repeatCount++;
+                        if (rejectionReason) {
+                            record.worked.rejectedCount++;
+                            record.worked.rejectionReasons[rejectionReason] = (record.worked.rejectionReasons[rejectionReason] || 0) + 1;
+                        }
+                        if (tatMin > 0) {
+                            record.worked.totalTatMinutes += tatMin;
+                            record.worked.tatCount++;
+                        }
+                    }
+
+                    // Onaylanmış aşaması (Y + AA + AC dolu)
+                    if (workDate && approveDate) {
+                        record.approved.totalTests++;
+                        approvedCount++;
+                        if (isEmergency) record.approved.emergencyCount++;
+                        record.approved.patientIds.add(patientId);
+                        if (isRepeat) record.approved.repeatCount++;
+                        if (rejectionReason) {
+                            record.approved.rejectedCount++;
+                            record.approved.rejectionReasons[rejectionReason] = (record.approved.rejectionReasons[rejectionReason] || 0) + 1;
+                        }
+                        if (tatMin > 0) {
+                            record.approved.totalTatMinutes += tatMin;
+                            record.approved.tatCount++;
+                        }
                     }
                 });
             };
@@ -305,14 +381,26 @@ export const useLbysDataStore = create<LbysStore>()(
                 await new Promise(r => setTimeout(r, 0));
             }
 
-            const newRecords = Array.from(groups.values()).map(g => ({
-                ...g,
-                patientIds: Array.from(g.patientIds)
+            // Set'leri array'e dönüştür
+            const newRecords: AggregatedRecord[] = Array.from(groups.values()).map(g => ({
+                id: g.id,
+                date: g.date,
+                hospitalId: g.hospitalId,
+                hospitalName: g.hospitalName,
+                isAsm: g.isAsm,
+                service: g.service,
+                testName: g.testName,
+                branch: g.branch,
+                labAccepted: { ...g.labAccepted, patientIds: Array.from(g.labAccepted.patientIds) },
+                worked: { ...g.worked, patientIds: Array.from(g.worked.patientIds) },
+                approved: { ...g.approved, patientIds: Array.from(g.approved.patientIds) },
+                uploadBatchId,
+                createdAt: new Date().toISOString()
             }));
 
-            console.log(`Qore Analyse: ${processedCount} satır işlendi, ${newRecords.length} grup oluşturuldu, ${skippedCount} satır atlandı.`);
+            console.log(`Qore Analyse: Lab Kabul: ${labAcceptedCount}, Çalışılmış: ${workedCount}, Onaylanmış: ${approvedCount}, Atlanan: ${skippedCount}`);
 
-            // SADECE YENİ KAYITLARI YAZ - mevcut verileri kontrol etme
+            // Firestore'a yaz
             const totalDocs = newRecords.length;
             set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
 
@@ -325,7 +413,6 @@ export const useLbysDataStore = create<LbysStore>()(
 
                 chunk.forEach((docData) => {
                     const docRef = doc(db, 'analysis_results', docData.id);
-                    // merge: true ile mevcut veriyi koruyarak güncelle
                     batch.set(docRef, docData, { merge: true });
                 });
 
@@ -336,22 +423,19 @@ export const useLbysDataStore = create<LbysStore>()(
 
             console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi.`);
 
-            // Yükleme bitti - sadece yeni kayıtları local state'e ekle
-            // Mevcut verileri TEKRAR ÇEKMİYORUZ
+            // Local state güncelle
             const currentData = get().aggregatedData;
             const newDataMap = new Map(newRecords.map(r => [r.id, r]));
 
-            // Mevcut verileri güncelle veya yenilerini ekle
             const updatedData = currentData.map(existing => {
                 const newVersion = newDataMap.get(existing.id);
                 if (newVersion) {
                     newDataMap.delete(existing.id);
-                    return newVersion; // Yeni versiyon ile değiştir
+                    return newVersion;
                 }
                 return existing;
             });
 
-            // Kalan yeni kayıtları ekle
             newDataMap.forEach(newRec => updatedData.push(newRec));
 
             set({ aggregatedData: updatedData });
@@ -364,11 +448,15 @@ export const useLbysDataStore = create<LbysStore>()(
             set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
         }
       },
-      
+
       applyFilters: () => {
-        const { aggregatedData, filters } = get();
-        
+        const { aggregatedData, filters, viewMode } = get();
+
         const filtered = aggregatedData.filter((item) => {
+            // viewMode'a göre bu kayıtta veri var mı kontrol et
+            const stageData = item[viewMode];
+            if (!stageData || stageData.totalTests === 0) return false;
+
             let locationMatch = true;
             if (filters.selectedHospitals.length > 0 || filters.selectedAsms.length > 0) {
                  locationMatch = (filters.selectedHospitals.includes(item.hospitalName) || filters.selectedAsms.includes(item.hospitalName));
@@ -377,17 +465,17 @@ export const useLbysDataStore = create<LbysStore>()(
             const serviceMatch = filters.selectedServices.length === 0 || filters.selectedServices.includes(item.service);
             const testMatch = filters.selectedTests.length === 0 || filters.selectedTests.includes(item.testName);
             const branchMatch = filters.selectedBranches.length === 0 || filters.selectedBranches.includes(item.branch);
-            
+
             return locationMatch && serviceMatch && testMatch && branchMatch;
         });
         set({ filteredData: filtered });
       },
-      
+
       setFilters: (newFilters) => {
         set(state => ({ filters: { ...state.filters, ...newFilters } }));
         get().applyFilters();
       },
-      
+
       resetFilters: () => {
          const today = new Date();
          const lastWeek = new Date();
@@ -397,7 +485,7 @@ export const useLbysDataStore = create<LbysStore>()(
             selectedHospitals: [], selectedAsms: [], selectedServices: [], selectedTests: [], selectedBranches: [],
             showAll: false
          };
-         set({ filters: newFilters });
+         set({ filters: newFilters, viewMode: 'approved' });
          get().loadDataFromFirestore({ from: lastWeek, to: today });
       },
 
@@ -410,7 +498,7 @@ export const useLbysDataStore = create<LbysStore>()(
          set({ filters: newFilters });
          get().loadAllDataFromFirestore();
       },
-      
+
       resetAnalysisData: async () => {
         set({ isLoading: true, error: null, processingProgress: { current: 0, total: 0, status: 'Veriler Sayılıyor...' } });
         try {
@@ -437,7 +525,6 @@ export const useLbysDataStore = create<LbysStore>()(
             await batch.commit();
             deletedCount += chunk.length;
             set({ processingProgress: { current: deletedCount, total, status: `${deletedCount}/${total} Kayıt Silindi` } });
-            // UI güncellenmesi için bekle
             await new Promise(r => setTimeout(r, 10));
           }
 
