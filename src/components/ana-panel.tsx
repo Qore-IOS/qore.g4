@@ -32,6 +32,7 @@ import { Barcode, Trash2, CheckSquare, PlusCircle, AlertTriangle, Loader2, Searc
 import { Switch } from "@/components/ui/switch";
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, orderBy, limit, getDoc, addDoc, onSnapshot, updateDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { cn, generateId, readExcelData, exportDataToExcel, playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { format as formatDate, differenceInDays, parse as parseDate, getMonth, getYear, isValid, subMonths } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -241,18 +242,21 @@ export default function AnaPanel(props: AnaPanelProps) {
   const router = useRouter();
   const { currentUser, currentUserProfile } = useAuth();
 
-  const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormat[]>([]);
-  const [selectedDepotId, setSelectedDepotId] = useState<string>('');
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
-  const [users, setUsers] = useState<AppUser[]>([]);
+  // Use TanStack Query for static data - shared cache, 1 hour stale time
+  const { data: depots = [], isLoading: depotsLoading } = useDepots();
+  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
+  const { data: addressDefinitions = [] } = useAddressDefinitions();
+  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+  const { data: users = [] } = useUsers();
+  const { invalidateDepoStok } = useInvalidateQueries();
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [selectedDepotId, setSelectedDepotId] = useState<string>('');
+
+  // Use TanStack Query for depot stock with polling
+  const { data: depotStockData = [] } = useDepoStokByDepot(selectedDepotId);
+
+  const isLoading = depotsLoading || productsLoading;
   const [isProcessingScan, setIsProcessingScan] = useState(false);
-  
-  // Map: stokKodu -> Set<seriNumarasi> - mükerrer kontrolü ürün bazında yapılmalı
-  const [existingDepotSerials, setExistingDepotSerials] = useState<Map<string, Set<string>>>(new Map());
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   const [lastScannedProduct, setLastScannedProduct] = useState<ScanRow | null>(null);
@@ -264,8 +268,6 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
 
   const [showManualInline, setShowManualInline] = useState(false);
-  const [productTracking, setProductTracking] = useState<Record<string, TrackingMode>>({});
-  const [productNames, setProductNames] = useState<Record<string, string>>({});
   
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
   const [availableSessions, setAvailableSessions] = useState<DepotStockCountSession[]>([]);
@@ -293,78 +295,42 @@ export default function AnaPanel(props: AnaPanelProps) {
       }, {} as Record<string, number>);
   }, [scannedItems]);
 
-  const fetchPrerequisites = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [depotsSnap, productsSnap, addressesSnap, formatsSnap, usersSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'addressDefinitions')),
-        getDocs(query(collection(db, 'barcodeFormats'), where('active', '==', true))),
-        getDocs(collection(db, 'users')),
-      ]);
-      const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-      const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
-      setDepots(depotList);
-      setProductCodes(productsData);
-      setAddressDefinitions(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
-      setBarcodeFormats(formatsSnap.docs.map(d => ({ id: d.id, ...d.data() } as BarcodeFormat)));
-      setUsers(usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as AppUser)));
-
-      const t: Record<string, any> = {};
-      const names: Record<string, string> = {};
-      productsData.forEach(p => {
-        const code = p.stokKodu || '';
-        if (!code) return;
-        names[code] = p.stokAdi || code;
-        if ((p as any).trackingMode) t[code] = (p as any).trackingMode as TrackingMode;
-      });
-      setProductTracking(t);
-      setProductNames(names);
-
-      if (depotList.length > 0 && !selectedDepotId) {
-        setSelectedDepotId(depotList[0].id);
-      }
-    } catch (e) {
-      console.error("Error fetching data for AnaPanel:", e);
-      toast({ title: 'Veri Hatası', description: 'Mal kabul paneli için veriler yüklenemedi.', variant: 'destructive' });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedDepotId, toast]);
-
-  useEffect(() => {
-    fetchPrerequisites();
-  }, [fetchPrerequisites]);
-
-  // Use real-time listener for stock to ensure up-to-date duplicate checks
-  // Map: stokKodu -> Set<seriNumarasi> formatında tutuyoruz
-  useEffect(() => {
-    if (!selectedDepotId) {
-        setExistingDepotSerials(new Map());
-        return;
-    }
-    const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const serialsByProduct = new Map<string, Set<string>>();
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const serial = data.seriNumarasi;
-            const stokKodu = data.stokKodu;
-            if (serial && stokKodu) {
-                if (!serialsByProduct.has(stokKodu)) {
-                    serialsByProduct.set(stokKodu, new Set());
-                }
-                serialsByProduct.get(stokKodu)!.add(serial);
-            }
-        });
-        setExistingDepotSerials(serialsByProduct);
-    }, (error) => {
-        console.error("Error listening to depot stock:", error);
-        toast({ title: "Seri No Okuma Hatası", description: "Depo seri numaraları dinlenemedi. Mükerrer kontrolü aksayabilir.", variant: "destructive" });
+  // Compute productTracking and productNames from productCodes (TanStack Query data)
+  const { productTracking, productNames } = useMemo(() => {
+    const t: Record<string, TrackingMode> = {};
+    const names: Record<string, string> = {};
+    productCodes.forEach(p => {
+      const code = p.stokKodu || '';
+      if (!code) return;
+      names[code] = p.stokAdi || code;
+      if ((p as any).trackingMode) t[code] = (p as any).trackingMode as TrackingMode;
     });
-    return () => unsubscribe(); // Cleanup listener on component unmount or depot change
-  }, [selectedDepotId, toast]);
+    return { productTracking: t, productNames: names };
+  }, [productCodes]);
+
+  // Auto-select first depot when loaded
+  useEffect(() => {
+    if (depots.length > 0 && !selectedDepotId) {
+      setSelectedDepotId(depots[0].id);
+    }
+  }, [depots, selectedDepotId]);
+
+  // Build existing serials map from TanStack Query data (polling instead of real-time listener)
+  // This reduces Firestore reads dramatically
+  const existingDepotSerials = useMemo(() => {
+    const serialsByProduct = new Map<string, Set<string>>();
+    depotStockData.forEach(item => {
+      const serial = item.seriNumarasi;
+      const stokKodu = item.stokKodu;
+      if (serial && stokKodu) {
+        if (!serialsByProduct.has(stokKodu)) {
+          serialsByProduct.set(stokKodu, new Set());
+        }
+        serialsByProduct.get(stokKodu)!.add(serial);
+      }
+    });
+    return serialsByProduct;
+  }, [depotStockData]);
   
   useEffect(() => {
     if (!selectedDepotId) {
@@ -819,7 +785,10 @@ export default function AnaPanel(props: AnaPanelProps) {
       }
   
       await queue.flush();
-  
+
+      // Invalidate depoStok cache so it refetches fresh data
+      invalidateDepoStok();
+
       const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
       toast({
         title: 'Kabul tamamlandı',

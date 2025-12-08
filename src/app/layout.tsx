@@ -3,12 +3,12 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/contexts/auth-context";
+import { QueryProvider } from "@/contexts/query-context";
 import { Toaster } from "@/components/ui/toaster";
 import { LoadingProvider } from "@/contexts/loading-context";
 import MobileResponsiveFix from "@/components/responsive/MobileResponsiveFix";
 import React from "react";
 import AppBackground from "@/components/AppBackground";
-import Script from "next/script";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -46,19 +46,18 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AuthProvider>
-            <LoadingProvider>
-              <MobileResponsiveFix />
-              <AppBackground />
-              {children}
-              <Toaster />
-            </LoadingProvider>
-          </AuthProvider>
+          <QueryProvider>
+            <AuthProvider>
+              <LoadingProvider>
+                <MobileResponsiveFix />
+                <AppBackground />
+                {children}
+                <Toaster />
+              </LoadingProvider>
+            </AuthProvider>
+          </QueryProvider>
         </ThemeProvider>
-        <Script
-          src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.mjs"
-          type="module"
-        />
+        {/* PDF.js is loaded lazily where needed - see src/lib/pdf.ts */}
       </body>
     </html>
   );
