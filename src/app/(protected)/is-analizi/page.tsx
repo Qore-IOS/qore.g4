@@ -24,7 +24,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import MultiSelectFilter from '@/components/lbys/MultiSelectFilter';
-import { useLbysDataStore } from '@/store/lbys-data-store';
+import { useLbysDataStore, ViewMode } from '@/store/lbys-data-store';
 import { FileUploader } from '@/components/lbys/FileUploader';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -151,9 +151,10 @@ export default function IsAnaliziPage() {
     const {
         isLoading, error, aggregatedData, filteredData, filters,
         setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore, resetAnalysisData,
-        showAllData, loadAllDataFromFirestore
+        showAllData, loadAllDataFromFirestore, processingProgress, viewMode, setViewMode
     } = useLbysDataStore();
-    
+    const { toast } = useToast();
+
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailModalData, setDetailModalData] = useState<{ title: string; data: Record<string, number>, type: 'service' | 'test' } | null>(null);
     const [rejectionModalOpen, setRejectionModalOpen] = useState(false);
@@ -213,12 +214,14 @@ export default function IsAnaliziPage() {
         const patientIdSet = new Set<string>();
 
         filteredData.forEach(d => {
-            totalTests += d.totalTests;
-            totalRejected += d.rejectedCount;
-            totalRepeat += d.repeatCount;
-            totalTat += d.totalTatMinutes;
-            tatCount += d.tatCount;
-            d.patientIds.forEach(pid => patientIdSet.add(pid));
+            const stage = d[viewMode];
+            if (!stage) return;
+            totalTests += stage.totalTests;
+            totalRejected += stage.rejectedCount;
+            totalRepeat += stage.repeatCount;
+            totalTat += stage.totalTatMinutes;
+            tatCount += stage.tatCount;
+            stage.patientIds.forEach(pid => patientIdSet.add(pid));
         });
 
         return {
@@ -228,21 +231,25 @@ export default function IsAnaliziPage() {
             avgTat: tatCount > 0 ? Math.round(totalTat / tatCount) : 0,
             repeatRate: totalTests > 0 ? (totalRepeat / totalTests) * 100 : 0,
             rejectionReasons: filteredData.reduce((acc, curr) => {
-                Object.entries(curr.rejectionReasons).forEach(([reason, count]) => {
+                const stage = curr[viewMode];
+                if (!stage) return acc;
+                Object.entries(stage.rejectionReasons).forEach(([reason, count]) => {
                     acc[reason] = (acc[reason] || 0) + count;
                 });
                 return acc;
             }, {} as Record<string, number>)
         };
-    }, [filteredData]);
+    }, [filteredData, viewMode]);
 
     const hospitalsChartData = useMemo(() => {
         const map = new Map<string, { name: string, tests: number, emergency: number }>();
         filteredData.filter(d => !d.isAsm).forEach(d => {
+            const stage = d[viewMode];
+            if (!stage) return;
             if (!map.has(d.hospitalName)) map.set(d.hospitalName, { name: d.hospitalName, tests: 0, emergency: 0 });
             const rec = map.get(d.hospitalName)!;
-            rec.tests += d.totalTests;
-            rec.emergency += d.emergencyCount;
+            rec.tests += stage.totalTests;
+            rec.emergency += stage.emergencyCount;
         });
         return Array.from(map.values())
             .map(d => ({
@@ -251,31 +258,37 @@ export default function IsAnaliziPage() {
                 emergencyRate: d.tests > 0 ? ((d.emergency / d.tests) * 100) : 0
             }))
             .sort((a, b) => b.tests - a.tests);
-    }, [filteredData]);
+    }, [filteredData, viewMode]);
     
     const asmData = useMemo(() => {
         const map = new Map<string, number>();
         filteredData.filter(d => d.isAsm).forEach(d => {
-            map.set(d.hospitalName, (map.get(d.hospitalName) || 0) + d.totalTests);
+            const stage = d[viewMode];
+            if (!stage) return;
+            map.set(d.hospitalName, (map.get(d.hospitalName) || 0) + stage.totalTests);
         });
         return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-    }, [filteredData]);
+    }, [filteredData, viewMode]);
     
     const servicesChartData = useMemo(() => {
         const map = new Map<string, number>();
         filteredData.forEach(d => {
-            map.set(d.service, (map.get(d.service) || 0) + d.totalTests);
+            const stage = d[viewMode];
+            if (!stage) return;
+            map.set(d.service, (map.get(d.service) || 0) + stage.totalTests);
         });
         return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-    }, [filteredData]);
+    }, [filteredData, viewMode]);
 
     const topTestsData = useMemo(() => {
         const map = new Map<string, number>();
         filteredData.forEach(d => {
-            map.set(d.testName, (map.get(d.testName) || 0) + d.totalTests);
+            const stage = d[viewMode];
+            if (!stage) return;
+            map.set(d.testName, (map.get(d.testName) || 0) + stage.totalTests);
         });
         return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-    }, [filteredData]);
+    }, [filteredData, viewMode]);
 
     const handleRejectionClick = () => {
         setRejectionData({ title: "Tüm Red Nedenleri", reasons: kpiData.rejectionReasons });
@@ -286,21 +299,52 @@ export default function IsAnaliziPage() {
         const hospitalServices = filteredData
             .filter(d => d.hospitalName === hospitalName)
             .reduce((acc, curr) => {
-                acc[curr.service] = (acc[curr.service] || 0) + curr.totalTests;
+                const stage = curr[viewMode];
+                if (!stage) return acc;
+                acc[curr.service] = (acc[curr.service] || 0) + stage.totalTests;
                 return acc;
             }, {} as Record<string, number>);
         setDetailModalData({ title: `${hospitalName} - Servis Dağılımı`, data: hospitalServices, type: 'service' });
         setDetailModalOpen(true);
     };
     
-    const handleResetDataConfirm = () => {
+    const handleResetDataConfirm = async () => {
         if (confirm("Bu işlem geri alınamaz! Analiz veritabanındaki tüm kayıtları kalıcı olarak silmek istediğinizden emin misiniz?")) {
-            resetAnalysisData();
+            await resetAnalysisData();
+            toast({
+                title: 'Başarılı',
+                description: 'Tüm analiz verileri silindi.',
+            });
         }
     };
 
     return (
         <div className="p-4 sm:p-6 space-y-6 bg-slate-50 min-h-screen pb-20">
+            {/* Global Loading Overlay */}
+            {isLoading && processingProgress.status && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-2xl max-w-md w-full mx-4">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                            <h3 className="font-semibold text-lg">{processingProgress.status}</h3>
+                        </div>
+                        {processingProgress.total > 0 && (
+                            <>
+                                <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                                    <div
+                                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                                        style={{ width: `${(processingProgress.current / processingProgress.total) * 100}%` }}
+                                    ></div>
+                                </div>
+                                <p className="text-sm text-gray-500 text-center">
+                                    {processingProgress.current.toLocaleString()} / {processingProgress.total.toLocaleString()}
+                                </p>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
              <AnimatePresence>
                 {topPanelOpen && (
                     <motion.div
@@ -337,6 +381,52 @@ export default function IsAnaliziPage() {
             </div>
 
             {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Hata</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+
+            {/* Aşama Seçici */}
+            <Card className="border-none shadow-sm">
+                <CardContent className="p-4">
+                    <div className="flex flex-col gap-2">
+                        <Label className="text-xs font-semibold text-slate-500 uppercase">Veri Aşaması</Label>
+                        <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit">
+                            <button
+                                onClick={() => setViewMode('labAccepted')}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                                    viewMode === 'labAccepted'
+                                        ? 'bg-white shadow-sm text-blue-600'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                Lab Kabul
+                            </button>
+                            <button
+                                onClick={() => setViewMode('worked')}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                                    viewMode === 'worked'
+                                        ? 'bg-white shadow-sm text-purple-600'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                Çalışılmış
+                            </button>
+                            <button
+                                onClick={() => setViewMode('approved')}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                                    viewMode === 'approved'
+                                        ? 'bg-white shadow-sm text-green-600'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                Onaylanmış
+                            </button>
+                        </div>
+                        <p className="text-xs text-slate-400">
+                            {viewMode === 'labAccepted' && 'Y sütunu dolu olan tüm testler (Lab Kabul Tarihi)'}
+                            {viewMode === 'worked' && 'Y + AA sütunu dolu olan testler (Çalışma Tarihi)'}
+                            {viewMode === 'approved' && 'Y + AA + AC sütunu dolu olan testler (Onay Tarihi)'}
+                        </p>
+                    </div>
+                </CardContent>
+            </Card>
 
             <Card className="border-none shadow-sm">
                 <CardContent className="p-4 flex flex-wrap gap-2 md:gap-4 items-end">

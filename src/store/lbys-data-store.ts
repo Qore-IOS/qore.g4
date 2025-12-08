@@ -13,41 +13,44 @@ import { format } from 'date-fns';
 // C sütunu (index 2): ORNEKNO
 // D sütunu (index 3): HASTANE_ID - 999 ise ASM
 // E sütunu (index 4): ACIL - "E" ise acil, "H" ise normal
-// F sütunu (index 5): YATAN
-// G sütunu (index 6): TEST_ID
 // H sütunu (index 7): TEST_ADI - Test adı
-// I sütunu (index 8): ENDIKE_KODU
-// J sütunu (index 9): BARKODNO
-// K sütunu (index 10): SERVIS_POLIKLINIK_KODU
 // L sütunu (index 11): SERVIS_POL_ADI - Servis/ASM adı
 // M sütunu (index 12): DOKTOR_BRANS
-// N sütunu (index 13): DOKTOR_BRANS_KOD
 // O sütunu (index 14): TEKRAR_SAYISI - 0'dan büyükse tekrar
-// P sütunu (index 15): CIHAZNO
 // Q sütunu (index 16): RET_NEDENI - Doluysa red sayılır
-// ... diğer sütunlar kullanılmıyor
-// Y sütunu (index 24): LABKABUL_TARIHI - TAT hesabı için
-// Z sütunu (index 25): -
-// AA sütunu (index 26): CALISMA_TARIHI - Test sayısı ve TAT hesabı için
+// Y sütunu (index 24): LABKABUL_TARIHI - Lab kabul aşaması
+// AA sütunu (index 26): CALISMA_TARIHI - Çalışılmış aşaması
+// AC sütunu (index 28): ONAYTARIH - Onaylanmış aşaması
+
+// --- VIEW MODE ---
+export type ViewMode = 'labAccepted' | 'worked' | 'approved';
+
+// --- STAGE STATS ---
+export interface StageStats {
+  totalTests: number;
+  emergencyCount: number;
+  patientIds: string[];
+  rejectedCount: number;
+  repeatCount: number;
+  totalTatMinutes: number;
+  tatCount: number;
+  rejectionReasons: Record<string, number>;
+}
 
 // --- TYPE DEFINITIONS ---
 export interface AggregatedRecord {
-  id: string; // Composite key: date|hospitalId|service|testName|branch
-  date: string; // YYYY-MM-DD
-  hospitalId: string; // HASTANE_ID (Raw) - D sütunu
-  hospitalName: string; // Mapped Name or ASM Name
-  isAsm: boolean; // hospitalId == 999
-  service: string; // L sütunu
-  testName: string; // H sütunu
-  totalTests: number; // AA sütunu dolu olanlar
-  emergencyCount: number; // E sütunu == 'E' sayısı
-  patientIds: string[]; // B sütunu - benzersiz numune
-  rejectedCount: number; // Q sütunu dolu olanlar
-  repeatCount: number; // O sütunu > 0 olanlar
-  totalTatMinutes: number; // Y ve AA arası fark toplamı
-  tatCount: number; // TAT hesaplanan satır sayısı
-  rejectionReasons: Record<string, number>; // Red nedenleri ve sayıları
-  branch: string; // M sütunu
+  id: string;
+  date: string;
+  hospitalId: string;
+  hospitalName: string;
+  isAsm: boolean;
+  service: string;
+  testName: string;
+  branch: string;
+  // 3 aşama için ayrı istatistikler
+  labAccepted: StageStats;
+  worked: StageStats;
+  approved: StageStats;
   uploadBatchId?: string;
   createdAt?: string;
 }
@@ -59,25 +62,27 @@ export interface FilterState {
   selectedServices: string[];
   selectedTests: string[];
   selectedBranches: string[];
-  showAll: boolean; // Tüm verileri göster
+  showAll: boolean;
 }
 
 interface LbysStore {
   aggregatedData: AggregatedRecord[];
   filteredData: AggregatedRecord[];
   filters: FilterState;
+  viewMode: ViewMode;
   isLoading: boolean;
   processingProgress: { current: number; total: number; status: string };
   hospitalDefinitions: Record<string, string>;
   error: string | null;
 
+  setViewMode: (mode: ViewMode) => void;
   loadDataFromFirestore: (dateRange: { from: Date; to: Date }) => Promise<void>;
-  loadAllDataFromFirestore: () => Promise<void>; // Tüm verileri yükle
+  loadAllDataFromFirestore: () => Promise<void>;
   processAndUploadExcel: (excelData: any[]) => Promise<void>;
   setFilters: (newFilters: Partial<FilterState>) => void;
   applyFilters: () => void;
   resetFilters: () => void;
-  showAllData: () => void; // Tümünü göster
+  showAllData: () => void;
   loadHospitalDefinitions: () => Promise<void>;
   saveHospitalDefinition: (code: string, name: string) => Promise<void>;
   resetAnalysisData: () => Promise<void>;
@@ -96,6 +101,17 @@ const parseExcelDate = (input: any): Date | null => {
   return isNaN(d.getTime()) ? null : d;
 };
 
+const emptyStageStats = (): StageStats => ({
+  totalTests: 0,
+  emergencyCount: 0,
+  patientIds: [],
+  rejectedCount: 0,
+  repeatCount: 0,
+  totalTatMinutes: 0,
+  tatCount: 0,
+  rejectionReasons: {}
+});
+
 // --- ZUSTAND STORE ---
 export const useLbysDataStore = create<LbysStore>()(
   devtools(
@@ -105,6 +121,7 @@ export const useLbysDataStore = create<LbysStore>()(
       isLoading: false,
       processingProgress: { current: 0, total: 0, status: '' },
       error: null,
+      viewMode: 'approved', // Default: Onaylanmış testler
       filters: {
         dateRange: { from: new Date(new Date().setDate(new Date().getDate() - 7)), to: new Date() },
         selectedHospitals: [],
@@ -115,6 +132,11 @@ export const useLbysDataStore = create<LbysStore>()(
         showAll: false,
       },
       hospitalDefinitions: {},
+
+      setViewMode: (mode) => {
+        set({ viewMode: mode });
+        get().applyFilters();
+      },
 
       loadHospitalDefinitions: async () => {
         try {
@@ -173,21 +195,40 @@ export const useLbysDataStore = create<LbysStore>()(
       loadAllDataFromFirestore: async () => {
         set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Tüm Veriler Yükleniyor...' } });
         try {
-            const querySnapshot = await getDocs(collection(db, 'analysis_results'));
+            const ninetyDaysAgo = new Date();
+            ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+            const startDate = format(ninetyDaysAgo, 'yyyy-MM-dd');
+
+            const q = query(
+                collection(db, 'analysis_results'),
+                where('date', '>=', startDate)
+            );
+
+            const querySnapshot = await getDocs(q);
             const fetchedData: AggregatedRecord[] = [];
 
-            querySnapshot.forEach((doc) => {
-                fetchedData.push(doc.data() as AggregatedRecord);
-            });
+            const docs = querySnapshot.docs;
+            const totalDocs = docs.length;
+            set({ processingProgress: { current: 0, total: totalDocs, status: 'Veriler İşleniyor...' } });
+
+            const PROCESS_CHUNK = 500;
+            for (let i = 0; i < totalDocs; i += PROCESS_CHUNK) {
+                const chunk = docs.slice(i, i + PROCESS_CHUNK);
+                chunk.forEach((doc) => {
+                    fetchedData.push(doc.data() as AggregatedRecord);
+                });
+                set({ processingProgress: { current: Math.min(i + PROCESS_CHUNK, totalDocs), total: totalDocs, status: 'Veriler İşleniyor...' } });
+                await new Promise(r => setTimeout(r, 0));
+            }
 
             set({ aggregatedData: fetchedData });
             get().applyFilters();
-            console.log(`Qore Analyse: Firestore'dan toplam ${fetchedData.length} kayıt indirildi.`);
+            console.log(`Qore Analyse: Firestore'dan toplam ${fetchedData.length} kayıt indirildi (son 90 gün).`);
         } catch (error: any) {
             set({ error: "Veri indirme hatası: " + error.message });
             console.error("Firestore query failed:", error);
         } finally {
-            set({ isLoading: false });
+            set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
         }
       },
 
@@ -198,90 +239,141 @@ export const useLbysDataStore = create<LbysStore>()(
         const uploadBatchId = nanoid();
 
         try {
-            const groups: Map<string, any> = new Map();
+            // Her aşama için ayrı gruplar
+            const groups: Map<string, {
+              id: string;
+              date: string;
+              hospitalId: string;
+              hospitalName: string;
+              isAsm: boolean;
+              service: string;
+              testName: string;
+              branch: string;
+              labAccepted: { totalTests: number; emergencyCount: number; patientIds: Set<string>; rejectedCount: number; repeatCount: number; totalTatMinutes: number; tatCount: number; rejectionReasons: Record<string, number> };
+              worked: { totalTests: number; emergencyCount: number; patientIds: Set<string>; rejectedCount: number; repeatCount: number; totalTatMinutes: number; tatCount: number; rejectionReasons: Record<string, number> };
+              approved: { totalTests: number; emergencyCount: number; patientIds: Set<string>; rejectedCount: number; repeatCount: number; totalTatMinutes: number; tatCount: number; rejectionReasons: Record<string, number> };
+            }> = new Map();
+
             let skippedCount = 0;
+            let labAcceptedCount = 0;
+            let workedCount = 0;
+            let approvedCount = 0;
 
             const processChunk = (chunk: any[]) => {
                 chunk.forEach((row) => {
-                    if (!row || row.length < 20) return;
+                    if (!row || row.length < 12) return;
 
                     // D sütunu (index 3): HASTANE_ID
                     const rawHospitalId = row[3];
-                    // AA sütunu (index 26): CALISMA_TARIHI - Test sayısı için bu dolu olmalı
-                    let rawResultDate = row[26];
-                    // Y sütunu (index 24): LABKABUL_TARIHI - TAT hesabı için
-                    let rawLabDate = row[24];
+                    if (!rawHospitalId) { skippedCount++; return; }
 
-                    // AA sütununda çalışma tarihi doluysa test sayılır
-                    if (!rawHospitalId || !rawResultDate) { skippedCount++; return; }
+                    // Aşama kontrolü
+                    // Y (24): Lab Kabul, AA (26): Çalışılmış, AC (28): Onaylanmış
+                    const rawLabAcceptDate = row[24];
+                    const rawWorkDate = row[26];
+                    const rawApproveDate = row[28];
 
-                    const resDate = parseExcelDate(rawResultDate);
-                    const labDate = parseExcelDate(rawLabDate) || resDate;
+                    // En az lab kabul tarihi olmalı
+                    if (!rawLabAcceptDate) { skippedCount++; return; }
 
-                    if (!resDate || !labDate) { skippedCount++; return; }
+                    const labAcceptDate = parseExcelDate(rawLabAcceptDate);
+                    if (!labAcceptDate) { skippedCount++; return; }
 
-                    // TAT: Y (lab kabul) ile AA (çalışma tarihi) arası fark
-                    const tatMin = (resDate.getTime() - labDate.getTime()) / (1000 * 60);
-                    const dateStr = format(resDate, 'yyyy-MM-dd');
+                    const workDate = parseExcelDate(rawWorkDate);
+                    const approveDate = parseExcelDate(rawApproveDate);
+
+                    // Tarih olarak lab kabul tarihini kullan
+                    const dateStr = format(labAcceptDate, 'yyyy-MM-dd');
                     const hospitalId = String(rawHospitalId).trim();
-                    // D sütunu 999 ise ASM
                     const isAsm = hospitalId === '999';
 
                     let derivedHospitalName = 'Bilinmeyen Kurum';
                     if (isAsm) {
-                        // ASM için L sütunundan (index 11) ad alınır
                         derivedHospitalName = normalize(row[11]);
                     } else {
                         derivedHospitalName = hospitalDefinitions[hospitalId] || `Hastane (${hospitalId})`;
                     }
 
-                    // H sütunu (index 7): TEST_ADI
                     const testName = normalize(row[7]);
-                    // L sütunu (index 11): SERVIS_POL_ADI
                     const serviceName = normalize(row[11]);
-                    // M sütunu (index 12): DOKTOR_BRANS
                     const branchName = normalize(row[12]);
-                    // B sütunu (index 1): HASTA_ID - Benzersiz numune için
                     const patientId = String(row[1] || `temp-${Math.random()}`);
-                    // E sütunu (index 4): ACIL - "E" ise acil
                     const isEmergency = String(row[4] || '').toUpperCase() === 'E';
-                    // O sütunu (index 14): TEKRAR_SAYISI - 0'dan büyükse tekrar
                     const isRepeat = Number(row[14] || 0) > 0;
-                    // Q sütunu (index 16): RET_NEDENI - Doluysa red
                     const rejectionReason = String(row[16] || '').trim();
 
-                    // Composite key ile gruplama
+                    // TAT hesabı (lab kabul - çalışma arası)
+                    const tatMin = workDate ? (workDate.getTime() - labAcceptDate.getTime()) / (1000 * 60) : 0;
+
                     const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
+                    const docId = key.replace(/\|/g, '_').replace(/[^a-zA-Z0-9_\u00C0-\u024F]/g, '').substring(0, 150);
 
                     if (!groups.has(key)) {
                         groups.set(key, {
-                            id: key.replace(/\|/g, '_').replace(/[^a-zA-Z0-9_]/g, '').substring(0, 100) + '_' + nanoid(8),
-                            date: dateStr, hospitalId, hospitalName: derivedHospitalName, isAsm,
-                            service: serviceName, testName, branch: branchName,
-                            totalTests: 0, emergencyCount: 0, patientIds: new Set(),
-                            rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0,
-                            rejectionReasons: {}, uploadBatchId, createdAt: new Date().toISOString()
+                            id: docId,
+                            date: dateStr,
+                            hospitalId,
+                            hospitalName: derivedHospitalName,
+                            isAsm,
+                            service: serviceName,
+                            testName,
+                            branch: branchName,
+                            labAccepted: { totalTests: 0, emergencyCount: 0, patientIds: new Set(), rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {} },
+                            worked: { totalTests: 0, emergencyCount: 0, patientIds: new Set(), rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {} },
+                            approved: { totalTests: 0, emergencyCount: 0, patientIds: new Set(), rejectedCount: 0, repeatCount: 0, totalTatMinutes: 0, tatCount: 0, rejectionReasons: {} }
                         });
                     }
 
-                    const record = groups.get(key);
-                    record.totalTests++;
-                    if (isEmergency) record.emergencyCount++;
-                    record.patientIds.add(patientId);
-                    if (isRepeat) record.repeatCount++;
+                    const record = groups.get(key)!;
+
+                    // Lab Kabul aşaması (Y dolu) - her zaman sayılır
+                    record.labAccepted.totalTests++;
+                    labAcceptedCount++;
+                    if (isEmergency) record.labAccepted.emergencyCount++;
+                    record.labAccepted.patientIds.add(patientId);
+                    if (isRepeat) record.labAccepted.repeatCount++;
                     if (rejectionReason) {
-                        record.rejectedCount++;
-                        record.rejectionReasons[rejectionReason] = (record.rejectionReasons[rejectionReason] || 0) + 1;
+                        record.labAccepted.rejectedCount++;
+                        record.labAccepted.rejectionReasons[rejectionReason] = (record.labAccepted.rejectionReasons[rejectionReason] || 0) + 1;
                     }
-                    if (tatMin > 0) {
-                        record.totalTatMinutes += tatMin;
-                        record.tatCount++;
+
+                    // Çalışılmış aşaması (Y + AA dolu)
+                    if (workDate) {
+                        record.worked.totalTests++;
+                        workedCount++;
+                        if (isEmergency) record.worked.emergencyCount++;
+                        record.worked.patientIds.add(patientId);
+                        if (isRepeat) record.worked.repeatCount++;
+                        if (rejectionReason) {
+                            record.worked.rejectedCount++;
+                            record.worked.rejectionReasons[rejectionReason] = (record.worked.rejectionReasons[rejectionReason] || 0) + 1;
+                        }
+                        if (tatMin > 0) {
+                            record.worked.totalTatMinutes += tatMin;
+                            record.worked.tatCount++;
+                        }
+                    }
+
+                    // Onaylanmış aşaması (Y + AA + AC dolu)
+                    if (workDate && approveDate) {
+                        record.approved.totalTests++;
+                        approvedCount++;
+                        if (isEmergency) record.approved.emergencyCount++;
+                        record.approved.patientIds.add(patientId);
+                        if (isRepeat) record.approved.repeatCount++;
+                        if (rejectionReason) {
+                            record.approved.rejectedCount++;
+                            record.approved.rejectionReasons[rejectionReason] = (record.approved.rejectionReasons[rejectionReason] || 0) + 1;
+                        }
+                        if (tatMin > 0) {
+                            record.approved.totalTatMinutes += tatMin;
+                            record.approved.tatCount++;
+                        }
                     }
                 });
             };
 
             const chunkSize = 5000;
-            // Start from 1 to skip header row
             for (let i = 1; i < excelData.length; i += chunkSize) {
                 const chunk = excelData.slice(i, i + chunkSize);
                 processChunk(chunk);
@@ -289,116 +381,65 @@ export const useLbysDataStore = create<LbysStore>()(
                 await new Promise(r => setTimeout(r, 0));
             }
 
-            const newRecords = Array.from(groups.values()).map(g => ({
-                ...g,
-                patientIds: Array.from(g.patientIds)
+            // Set'leri array'e dönüştür
+            const newRecords: AggregatedRecord[] = Array.from(groups.values()).map(g => ({
+                id: g.id,
+                date: g.date,
+                hospitalId: g.hospitalId,
+                hospitalName: g.hospitalName,
+                isAsm: g.isAsm,
+                service: g.service,
+                testName: g.testName,
+                branch: g.branch,
+                labAccepted: { ...g.labAccepted, patientIds: Array.from(g.labAccepted.patientIds) },
+                worked: { ...g.worked, patientIds: Array.from(g.worked.patientIds) },
+                approved: { ...g.approved, patientIds: Array.from(g.approved.patientIds) },
+                uploadBatchId,
+                createdAt: new Date().toISOString()
             }));
 
-            // KÜMÜLATİF VERİ YAZMA: Mevcut verileri sil ve yenilerini ekle yerine,
-            // Aynı tarih aralığındaki verileri kontrol et ve birleştir
-            set({ processingProgress: { current: 0, total: newRecords.length, status: 'Mevcut Veriler Kontrol Ediliyor...' } });
+            console.log(`Qore Analyse: Lab Kabul: ${labAcceptedCount}, Çalışılmış: ${workedCount}, Onaylanmış: ${approvedCount}, Atlanan: ${skippedCount}`);
 
-            // Yeni kayıtlardaki tarihleri al
-            const newDates = new Set(newRecords.map(r => r.date));
-            const minDate = Array.from(newDates).sort()[0];
-            const maxDate = Array.from(newDates).sort().reverse()[0];
-
-            // Bu tarih aralığındaki mevcut kayıtları al
-            const existingQuery = query(
-                collection(db, 'analysis_results'),
-                where('date', '>=', minDate),
-                where('date', '<=', maxDate)
-            );
-            const existingSnap = await getDocs(existingQuery);
-            const existingRecordsMap = new Map<string, AggregatedRecord>();
-
-            existingSnap.forEach((doc) => {
-                const data = doc.data() as AggregatedRecord;
-                const key = `${data.date}|${data.hospitalId}|${data.service}|${data.testName}|${data.branch}`;
-                existingRecordsMap.set(key, data);
-            });
-
-            // Yeni kayıtları mevcut kayıtlarla birleştir
-            const mergedRecords: AggregatedRecord[] = [];
-
-            for (const newRec of newRecords) {
-                const key = `${newRec.date}|${newRec.hospitalId}|${newRec.service}|${newRec.testName}|${newRec.branch}`;
-                const existing = existingRecordsMap.get(key);
-
-                if (existing) {
-                    // Mevcut kayıt var - birleştir (kümülatif toplama)
-                    const mergedPatientIds = new Set([...existing.patientIds, ...newRec.patientIds]);
-                    const mergedRejectionReasons: Record<string, number> = { ...existing.rejectionReasons };
-                    Object.entries(newRec.rejectionReasons).forEach(([reason, count]) => {
-                        mergedRejectionReasons[reason] = (mergedRejectionReasons[reason] || 0) + count;
-                    });
-
-                    mergedRecords.push({
-                        ...existing,
-                        totalTests: existing.totalTests + newRec.totalTests,
-                        emergencyCount: existing.emergencyCount + newRec.emergencyCount,
-                        patientIds: Array.from(mergedPatientIds),
-                        rejectedCount: existing.rejectedCount + newRec.rejectedCount,
-                        repeatCount: existing.repeatCount + newRec.repeatCount,
-                        totalTatMinutes: existing.totalTatMinutes + newRec.totalTatMinutes,
-                        tatCount: existing.tatCount + newRec.tatCount,
-                        rejectionReasons: mergedRejectionReasons,
-                        uploadBatchId: newRec.uploadBatchId,
-                        createdAt: new Date().toISOString()
-                    });
-                    existingRecordsMap.delete(key); // İşlendi olarak işaretle
-                } else {
-                    // Yeni kayıt
-                    mergedRecords.push(newRec);
-                }
-            }
-
-            // İşlenmeyen mevcut kayıtları da ekle (bu tarih aralığındaki ama yeni excelde olmayan)
-            existingRecordsMap.forEach((rec) => {
-                mergedRecords.push(rec);
-            });
-
-            // Önce bu tarih aralığındaki eski kayıtları sil
-            const CHUNK_SIZE = 450;
-            const deleteDocsCount = existingSnap.size;
-            if (deleteDocsCount > 0) {
-                set({ processingProgress: { current: 0, total: deleteDocsCount, status: 'Eski Kayıtlar Güncelleniyor...' } });
-                for (let i = 0; i < deleteDocsCount; i += CHUNK_SIZE) {
-                    const deleteBatch = writeBatch(db);
-                    const chunk = existingSnap.docs.slice(i, i + CHUNK_SIZE);
-                    chunk.forEach(doc => deleteBatch.delete(doc.ref));
-                    await deleteBatch.commit();
-                    set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, deleteDocsCount), total: deleteDocsCount, status: 'Eski Kayıtlar Güncelleniyor...' } });
-                }
-            }
-
-            // Birleştirilmiş kayıtları yaz
-            const totalDocs = mergedRecords.length;
+            // Firestore'a yaz
+            const totalDocs = newRecords.length;
             set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
 
+            const CHUNK_SIZE = 450;
+            let writtenCount = 0;
+
             for (let i = 0; i < totalDocs; i += CHUNK_SIZE) {
+                const chunk = newRecords.slice(i, i + CHUNK_SIZE);
                 const batch = writeBatch(db);
-                const chunk = mergedRecords.slice(i, i + CHUNK_SIZE);
+
                 chunk.forEach((docData) => {
                     const docRef = doc(db, 'analysis_results', docData.id);
-                    batch.set(docRef, docData);
+                    batch.set(docRef, docData, { merge: true });
                 });
+
                 await batch.commit();
-                set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, totalDocs), total: totalDocs, status: 'Buluta Yazılıyor...' } });
+                writtenCount += chunk.length;
+                set({ processingProgress: { current: writtenCount, total: totalDocs, status: 'Buluta Yazılıyor...' } });
             }
 
-            console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi (kümülatif). Atlanan satır: ${skippedCount}`);
+            console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi.`);
 
-            // Mevcut tarih filtresine göre verileri yeniden yükle
-            const dateFilter = get().filters;
-            if (dateFilter.showAll) {
-                await get().loadAllDataFromFirestore();
-            } else if (dateFilter.dateRange.from && dateFilter.dateRange.to) {
-                await get().loadDataFromFirestore({ from: dateFilter.dateRange.from, to: dateFilter.dateRange.to });
-            } else {
-                set({ aggregatedData: mergedRecords });
-                get().applyFilters();
-            }
+            // Local state güncelle
+            const currentData = get().aggregatedData;
+            const newDataMap = new Map(newRecords.map(r => [r.id, r]));
+
+            const updatedData = currentData.map(existing => {
+                const newVersion = newDataMap.get(existing.id);
+                if (newVersion) {
+                    newDataMap.delete(existing.id);
+                    return newVersion;
+                }
+                return existing;
+            });
+
+            newDataMap.forEach(newRec => updatedData.push(newRec));
+
+            set({ aggregatedData: updatedData });
+            get().applyFilters();
 
         } catch (error: any) {
             set({ error: "Hata: " + error.message });
@@ -407,11 +448,15 @@ export const useLbysDataStore = create<LbysStore>()(
             set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
         }
       },
-      
+
       applyFilters: () => {
-        const { aggregatedData, filters } = get();
-        
+        const { aggregatedData, filters, viewMode } = get();
+
         const filtered = aggregatedData.filter((item) => {
+            // viewMode'a göre bu kayıtta veri var mı kontrol et
+            const stageData = item[viewMode];
+            if (!stageData || stageData.totalTests === 0) return false;
+
             let locationMatch = true;
             if (filters.selectedHospitals.length > 0 || filters.selectedAsms.length > 0) {
                  locationMatch = (filters.selectedHospitals.includes(item.hospitalName) || filters.selectedAsms.includes(item.hospitalName));
@@ -420,17 +465,17 @@ export const useLbysDataStore = create<LbysStore>()(
             const serviceMatch = filters.selectedServices.length === 0 || filters.selectedServices.includes(item.service);
             const testMatch = filters.selectedTests.length === 0 || filters.selectedTests.includes(item.testName);
             const branchMatch = filters.selectedBranches.length === 0 || filters.selectedBranches.includes(item.branch);
-            
+
             return locationMatch && serviceMatch && testMatch && branchMatch;
         });
         set({ filteredData: filtered });
       },
-      
+
       setFilters: (newFilters) => {
         set(state => ({ filters: { ...state.filters, ...newFilters } }));
         get().applyFilters();
       },
-      
+
       resetFilters: () => {
          const today = new Date();
          const lastWeek = new Date();
@@ -440,7 +485,7 @@ export const useLbysDataStore = create<LbysStore>()(
             selectedHospitals: [], selectedAsms: [], selectedServices: [], selectedTests: [], selectedBranches: [],
             showAll: false
          };
-         set({ filters: newFilters });
+         set({ filters: newFilters, viewMode: 'approved' });
          get().loadDataFromFirestore({ from: lastWeek, to: today });
       },
 
@@ -453,25 +498,40 @@ export const useLbysDataStore = create<LbysStore>()(
          set({ filters: newFilters });
          get().loadAllDataFromFirestore();
       },
-      
+
       resetAnalysisData: async () => {
-        set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Veriler Siliniyor...' } });
+        set({ isLoading: true, error: null, processingProgress: { current: 0, total: 0, status: 'Veriler Sayılıyor...' } });
         try {
+          console.log('Qore Analyse: Tüm veriler siliniyor...');
           const snapshot = await getDocs(collection(db, 'analysis_results'));
           const total = snapshot.size;
-          set({ processingProgress: { current: 0, total, status: 'Veriler Siliniyor...' } });
-          
+
+          if (total === 0) {
+            console.log('Qore Analyse: Silinecek veri yok.');
+            set({ aggregatedData: [], filteredData: [] });
+            return;
+          }
+
+          console.log(`Qore Analyse: ${total} kayıt silinecek.`);
+          set({ processingProgress: { current: 0, total, status: `${total} Kayıt Siliniyor...` } });
+
           const CHUNK_SIZE = 450;
+          let deletedCount = 0;
+
           for (let i = 0; i < total; i += CHUNK_SIZE) {
             const batch = writeBatch(db);
             const chunk = snapshot.docs.slice(i, i + CHUNK_SIZE);
-            chunk.forEach(doc => batch.delete(doc.ref));
+            chunk.forEach(docSnap => batch.delete(docSnap.ref));
             await batch.commit();
-            set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, total), total, status: 'Veriler Siliniyor...' } });
+            deletedCount += chunk.length;
+            set({ processingProgress: { current: deletedCount, total, status: `${deletedCount}/${total} Kayıt Silindi` } });
+            await new Promise(r => setTimeout(r, 10));
           }
 
+          console.log(`Qore Analyse: ${deletedCount} kayıt başarıyla silindi.`);
           set({ aggregatedData: [], filteredData: [] });
         } catch (error: any) {
+          console.error('Qore Analyse: Silme hatası:', error);
           set({ error: "Veri sıfırlama hatası: " + error.message });
         } finally {
           set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
