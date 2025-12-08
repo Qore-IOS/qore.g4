@@ -1,21 +1,21 @@
 
 'use client';
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import type { Hospital, DepoStokItem, Device, ConsumptionRecord, EfficiencyData, AppView, ProductCode, MinMaxRule, Shipment } from '@/lib/types';
+import type { Hospital, DepoStokItem, Device, ConsumptionRecord, ProductCode, MinMaxRule, Shipment } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { AlertTriangle, PackageCheck, PackageX, TrendingUp, Zap, Warehouse, ChevronLeft, ChevronRight, Eye, ChevronDown } from 'lucide-react';
+import { AlertTriangle, PackageCheck, PackageX, TrendingUp, Zap, ChevronLeft, ChevronRight, Eye, ChevronDown } from 'lucide-react';
 import {
-  differenceInDays, parse, format, startOfWeek, endOfWeek, eachDayOfInterval, isValid,
+  differenceInDays, format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
   startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, eachMonthOfInterval
 } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell as RechartsCell } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
+import { ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
 import { cn } from '@/lib/utils';
 import EfficiencyDetailsModal from '@/components/EfficiencyDetailsModal';
 import { motion } from 'framer-motion';
