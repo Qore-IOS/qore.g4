@@ -2,18 +2,61 @@
 'use client';
 import Tesseract from 'tesseract.js';
 
-// Dynamically load pdfjsLib from the global scope (window)
+const PDF_JS_VERSION = '4.5.136';
+const PDF_JS_CDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDF_JS_VERSION}`;
+
+let pdfJsPromise: Promise<any> | null = null;
+
+/**
+ * Lazily loads PDF.js only when needed (not on every page load)
+ * This eliminates the preload warning and reduces initial bundle size
+ */
 async function getPdfJs() {
-  if (typeof window === 'undefined' || !(window as any).pdfjsLib) {
-    // Wait a bit for the script to load if it's not there immediately
-    await new Promise(resolve => setTimeout(resolve, 200));
-    if (!(window as any).pdfjsLib) {
-      throw new Error("pdf.js library not found on window object. Check the script tag in layout.tsx.");
-    }
+  if (typeof window === 'undefined') {
+    throw new Error("PDF.js can only be used in browser environment");
   }
-  const pdfjsLib = (window as any).pdfjsLib;
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-  return pdfjsLib;
+
+  // Return cached promise if already loading/loaded
+  if (pdfJsPromise) {
+    return pdfJsPromise;
+  }
+
+  // Check if already loaded
+  if ((window as any).pdfjsLib) {
+    const pdfjsLib = (window as any).pdfjsLib;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDF_JS_CDN}/pdf.worker.min.mjs`;
+    return pdfjsLib;
+  }
+
+  // Dynamically load the script
+  pdfJsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = `${PDF_JS_CDN}/pdf.min.mjs`;
+    script.type = 'module';
+    script.crossOrigin = 'anonymous';
+
+    script.onload = () => {
+      // Give a moment for the module to initialize
+      setTimeout(() => {
+        if ((window as any).pdfjsLib) {
+          const pdfjsLib = (window as any).pdfjsLib;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDF_JS_CDN}/pdf.worker.min.mjs`;
+          resolve(pdfjsLib);
+        } else {
+          reject(new Error("PDF.js loaded but pdfjsLib not found on window"));
+        }
+      }, 100);
+    };
+
+    script.onerror = () => {
+      pdfJsPromise = null;
+      reject(new Error("Failed to load PDF.js library"));
+    };
+
+    document.head.appendChild(script);
+  });
+
+  return pdfJsPromise;
 }
 
 export async function extractTextFromPdf(file: File): Promise<string> {

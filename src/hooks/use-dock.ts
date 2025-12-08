@@ -348,10 +348,11 @@ export function useDock() {
   const notificationsAllowed =
     currentUserProfile?.notificationsEnabled === true;
 
-  const membershipKeys = useMemo(() => {
-    if (!notificationsAllowed) return [];
+  // Compute membership keys for notification targeting
+  // Using stable primitive dependencies to prevent infinite loops
+  const membershipKeysString = useMemo(() => {
+    if (!notificationsAllowed || !currentUserProfile) return '';
     const keys = new Set<string>();
-    if (!currentUserProfile) return [];
     if (currentUserProfile.uid) keys.add(`user:${currentUserProfile.uid}`);
     if (currentUserProfile.role) keys.add(`role:${currentUserProfile.role}`);
     (currentUserProfile.accessibleViews || []).forEach((v: string) =>
@@ -363,16 +364,23 @@ export function useDock() {
     (currentUserProfile.assignedDepots || []).forEach((id: string) =>
       keys.add(`depot:${id}`)
     );
-    return Array.from(keys);
-  }, [currentUserProfile, notificationsAllowed]);
+    return Array.from(keys).sort().join('|');
+  }, [
+    notificationsAllowed,
+    currentUserProfile?.uid,
+    currentUserProfile?.role,
+    // Use JSON.stringify for arrays to get stable primitive values
+    JSON.stringify(currentUserProfile?.accessibleViews || []),
+    JSON.stringify(currentUserProfile?.assignedLaboratories || []),
+    JSON.stringify(currentUserProfile?.assignedDepots || []),
+  ]);
 
-  const peekDock = useCallback(() => {
-    setIsVisible(true);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      setIsVisible(false);
-    }, 5000); // Show for 5 seconds
-  }, []);
+  const membershipKeys = useMemo(() => {
+    if (!membershipKeysString) return [];
+    return membershipKeysString.split('|');
+  }, [membershipKeysString]);
+
+  // peekDock is now defined as peekDockStable inside the notification effect section
 
   const acknowledgeNotification = useCallback(
     async (notificationId: string) => {
@@ -387,12 +395,26 @@ export function useDock() {
     [uid]
   );
 
+  // Memoize peekDock to avoid dependency issues
+  const peekDockStable = useCallback(() => {
+    setIsVisible(true);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setIsVisible(false);
+    }, 5000);
+  }, []);
+
   useEffect(() => {
-    if (
-      !currentUserProfile ||
-      membershipKeys.length === 0 ||
-      !notificationsAllowed
-    ) {
+    // Use membershipKeysString (primitive) instead of membershipKeys (array)
+    // to prevent infinite loops from reference changes
+    if (!membershipKeysString || !notificationsAllowed) {
+      setNotificationItems([]);
+      setLoadingNotifications(false);
+      return;
+    }
+
+    const keysArray = membershipKeysString.split('|').slice(0, 30);
+    if (keysArray.length === 0) {
       setNotificationItems([]);
       setLoadingNotifications(false);
       return;
@@ -402,7 +424,7 @@ export function useDock() {
 
     const q = query(
       collection(db, "notifications"),
-      where("targets", "array-contains-any", membershipKeys.slice(0, 30)),
+      where("targets", "array-contains-any", keysArray),
       orderBy("createdAt", "desc"),
       fsLimit(40)
     );
@@ -422,7 +444,7 @@ export function useDock() {
         ).length;
         // Use prevUnreadCountRef to track changes without triggering re-renders
         if (newUnreadCount > prevUnreadCountRef.current) {
-          peekDock();
+          peekDockStable();
         }
         prevUnreadCountRef.current = newUnreadCount;
       },
@@ -436,7 +458,7 @@ export function useDock() {
       trackListener("useDock-notifications", "cleanup");
       unsub();
     };
-  }, [currentUserProfile, membershipKeys, uid, notificationsAllowed]); // Removed peekDock and isVisible from dependencies
+  }, [membershipKeysString, uid, notificationsAllowed, peekDockStable]);
 
   const unreadCount = useMemo(() => {
     if (!uid || !notificationsAllowed) return 0;

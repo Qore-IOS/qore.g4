@@ -28,7 +28,8 @@ import { Input } from './ui/input';
 import { openDeviceFaultReport } from '@/lib/faults';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { useDashboardData } from './dashboard/useDashboardData';
+import { useLightDashboardData } from './dashboard/useDashboardData';
+import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
@@ -58,25 +59,26 @@ export default function UrunKullanimPanel() {
   const labIdFromUrl = slug?.[0] || '';
   const pointIdFromUrl = slug?.[1] || '';
 
+  // Use lightweight dashboard data (no heavy collections like depoStok, tuketimKayitlari)
   const {
       hospitals: laboratories,
       devices,
       productCodes: products,
-      depoStok,
-      tuketimKayitlari,
       labPools,
       isLoading,
-  } = useDashboardData();
-  
+  } = useLightDashboardData();
+
+  // Use TanStack Query for barcode formats with caching
+  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+  const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
+
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
-  const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormat[]>([]);
-  
+
   const [selectedLabId, setSelectedLabId] = useState(labIdFromUrl);
   const [selectedSubPointId, setSelectedSubPointId] = useState(pointIdFromUrl);
-  const [subPointsByLab, setSubPointsByLab] = useState<Record<string, { id: string; name: string; isActive: boolean }[]>>({});
 
-  const [productTracking, setProductTracking] = useState<Record<string, TrackingMode>>({});
-  const [productNames, setProductNames] = useState<Record<string, string>>({});
+  // Use TanStack Query for subPoints of selected lab only (not all labs!)
+  const { data: selectedLabSubPoints = [] } = useSubPoints(selectedLabId);
   
   const { onHospitalSelect, onPointSelect } = useUsageRouteSync(
     selectedLabId,
@@ -121,24 +123,22 @@ export default function UrunKullanimPanel() {
     };
   }, []);
 
+  // Fetch device groups (small collection, rarely changes)
   useEffect(() => {
-    const fetchDefs = async () => {
+    const fetchDeviceGroups = async () => {
       try {
-        const [dgsnap, formatsSnap] = await Promise.all([
-          getDocs(collection(db, 'def_deviceGroups')),
-          getDocs(query(collection(db, 'barcodeFormats'), where('active', '==', true))),
-        ]);
+        const dgsnap = await getDocs(collection(db, 'def_deviceGroups'));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
-        setBarcodeFormats(formatsSnap.docs.map(d => ({ id: d.id, ...d.data() } as BarcodeFormat)));
       } catch (e) {
-        toast({title: 'Hata', description: 'Ek tanımlar yüklenemedi.', variant: 'destructive'});
+        toast({title: 'Hata', description: 'Cihaz grupları yüklenemedi.', variant: 'destructive'});
       }
     };
-    fetchDefs();
+    fetchDeviceGroups();
   }, [toast]);
-  
-  useEffect(() => {
-    const t: Record<string, any> = {};
+
+  // Compute productTracking and productNames from products (useMemo instead of useEffect+state)
+  const { productTracking, productNames } = useMemo(() => {
+    const t: Record<string, TrackingMode> = {};
     const names: Record<string, string> = {};
     products.forEach(p => {
       if (p.stokKodu) {
@@ -146,25 +146,11 @@ export default function UrunKullanimPanel() {
         if ((p as any).trackingMode) t[p.stokKodu] = (p as any).trackingMode as TrackingMode;
       }
     });
-    setProductTracking(t);
-    setProductNames(names);
+    return { productTracking: t, productNames: names };
   }, [products]);
 
-  useEffect(() => {
-    if (laboratories.length === 0) { setSubPointsByLab({}); return; }
-    const unsubscribers = laboratories.map(lab => onSnapshot(
-      query(collection(db, 'hospitals', lab.id, 'subPoints'), orderBy('name', 'asc')),
-      (snap) => {
-        const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        setSubPointsByLab(prev => ({ ...prev, [lab.id]: items
-          .map(i => ({ id: i.id, name: i.name, isActive: i.isActive ?? true }))
-          .sort((a, b) => a.name.localeCompare(b.name))
-        }));
-      },
-      (err) => console.error('subPoints listen error', err)
-    ));
-    return () => { unsubscribers.forEach(u => u()); };
-  }, [laboratories]);
+  // REMOVED: Listeners for ALL laboratories' subPoints - was causing N listeners!
+  // Now using useSubPoints(selectedLabId) which only fetches for selected lab
 
   const assignedLaboratories = useMemo(() => {
     const allLabs = laboratories.filter(l => !l.isConsumablesHospital); 
@@ -182,18 +168,22 @@ export default function UrunKullanimPanel() {
   }, [assignedLaboratories, selectedLabId, onHospitalSelect]);
 
   const selectedLabName = laboratories.find(h => h.id === selectedLabId)?.name || '';
-  const selectedSubPoint = useMemo(() => (subPointsByLab[selectedLabId] || []).find(sp => sp.id === selectedSubPointId), [selectedLabId, selectedSubPointId, subPointsByLab]);
+  const selectedSubPoint = useMemo(
+    () => selectedLabSubPoints.find(sp => sp.id === selectedSubPointId),
+    [selectedLabSubPoints, selectedSubPointId]
+  );
 
+  // Compute pool member IDs for lab stock
   const poolMemberIds = useMemo(() => {
     const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
     return pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
   }, [labPools, selectedLabId]);
 
-  const poolNameSet = useMemo(() => new Set(laboratories.filter(l => poolMemberIds.includes(l.id)).map(l => l.name)), [laboratories, poolMemberIds]);
-  const labStock = useMemo(
-    () => depoStok.filter(i => i.isShipped && ((i.hedefKurumId && poolMemberIds.includes(i.hedefKurumId)) || (!i.hedefKurumId && i.hedefKurum && poolNameSet.has(i.hedefKurum)))),
-    [depoStok, poolMemberIds, poolNameSet]
-  );
+  // Use TanStack Query for lab stock - much more efficient than full depoStok
+  const { data: labStock = [] } = useLabStock(poolMemberIds);
+
+  // Use TanStack Query for recent consumption (for duplicate check)
+  const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
   
   const devicesToDisplay = useMemo(() => {
     if (!selectedLabId || !devices) return [];
@@ -246,7 +236,11 @@ export default function UrunKullanimPanel() {
   
     try {
       await batch.commit();
-      
+
+      // Invalidate caches so data refreshes
+      invalidateDepoStok();
+      invalidateConsumption();
+
       await logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
         stokKodu: itemToConsume.stokKodu,
         usageLabId: selectedLab.id,
@@ -279,7 +273,7 @@ export default function UrunKullanimPanel() {
       setTimeout(() => setScanStatus('idle'), 3000);
       return null;
     }
-  }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups]);
+  }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption]);
   
   const pickEarliest = (items: DepoStokItem[]) => {
     return items
@@ -652,7 +646,6 @@ export default function UrunKullanimPanel() {
                   </Card>
               </div>
             </div>
-          }
         </CardContent>
         <CardFooter className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t">
             <Button variant="outline" onClick={() => router.push(`/urun-talep`)} className="w-full sm:w-auto">
