@@ -251,7 +251,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   
-  const [existingDepotSerials, setExistingDepotSerials] = useState<Set<string>>(new Set());
+  // Map: stokKodu -> Set<seriNumarasi> - mükerrer kontrolü ürün bazında yapılmalı
+  const [existingDepotSerials, setExistingDepotSerials] = useState<Map<string, Set<string>>>(new Map());
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   const [lastScannedProduct, setLastScannedProduct] = useState<ScanRow | null>(null);
@@ -275,7 +276,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [showUnverified, setShowUnverified] = useState(false);
   const [commitInfo, setCommitInfo] = useState<{ commits: number; pending: number } | null>(null);
   
-  const scannedSerialsRef = useRef(new Set<string>());
+  // Map: stokKodu -> Set<seriNumarasi> - oturum içi mükerrer kontrolü ürün bazında
+  const scannedSerialsRef = useRef(new Map<string, Set<string>>());
 
 
   const incomingQuantities = useMemo(() => {
@@ -336,19 +338,27 @@ export default function AnaPanel(props: AnaPanelProps) {
   }, [fetchPrerequisites]);
 
   // Use real-time listener for stock to ensure up-to-date duplicate checks
+  // Map: stokKodu -> Set<seriNumarasi> formatında tutuyoruz
   useEffect(() => {
     if (!selectedDepotId) {
-        setExistingDepotSerials(new Set());
+        setExistingDepotSerials(new Map());
         return;
     }
     const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-        const serials = new Set<string>();
+        const serialsByProduct = new Map<string, Set<string>>();
         snapshot.forEach(doc => {
-            const serial = doc.data().seriNumarasi;
-            if (serial) serials.add(serial);
+            const data = doc.data();
+            const serial = data.seriNumarasi;
+            const stokKodu = data.stokKodu;
+            if (serial && stokKodu) {
+                if (!serialsByProduct.has(stokKodu)) {
+                    serialsByProduct.set(stokKodu, new Set());
+                }
+                serialsByProduct.get(stokKodu)!.add(serial);
+            }
         });
-        setExistingDepotSerials(serials);
+        setExistingDepotSerials(serialsByProduct);
     }, (error) => {
         console.error("Error listening to depot stock:", error);
         toast({ title: "Seri No Okuma Hatası", description: "Depo seri numaraları dinlenemedi. Mükerrer kontrolü aksayabilir.", variant: "destructive" });
@@ -415,10 +425,17 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         if ((mode === 'serial' || mode === 'serial_and_lot') && !isLotOnlyBarcode) {
             if (!seriNumarasi) throw new Error('Bu ürün seri numarası ile takip edilir, barkod seri içermiyor.');
-            
-            if (scannedSerialsRef.current.has(seriNumarasi) || existingDepotSerials.has(seriNumarasi)) {
+
+            // Mükerrer kontrolü: aynı ürün için aynı seri numarası kontrol edilir
+            const sessionSerials = scannedSerialsRef.current.get(stokKodu!);
+            const depotSerials = existingDepotSerials.get(stokKodu!);
+            const isInSession = sessionSerials?.has(seriNumarasi) ?? false;
+            const isInDepot = depotSerials?.has(seriNumarasi) ?? false;
+
+            if (isInSession || isInDepot) {
               playFeedback(true);
-              toast({ title: 'Uyarı', description: `Seri numarası ${seriNumarasi} bu oturumda veya depoda zaten mevcut.`, variant: 'default'});
+              const location = isInSession ? 'bu oturumda' : 'depoda';
+              toast({ title: 'Uyarı', description: `Seri numarası ${seriNumarasi} (${matchedProduct.stokAdi}) ${location} zaten mevcut.`, variant: 'default'});
               if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
               setIsProcessingScan(false);
               return;
@@ -431,7 +448,11 @@ export default function AnaPanel(props: AnaPanelProps) {
               adet: 1, isGroup: false
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
-            scannedSerialsRef.current.add(seriNumarasi);
+            // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi>
+            if (!scannedSerialsRef.current.has(stokKodu!)) {
+              scannedSerialsRef.current.set(stokKodu!, new Set());
+            }
+            scannedSerialsRef.current.get(stokKodu!)!.add(seriNumarasi);
             setScannedItems(prev => [newItem, ...prev]);
             if (source === 'barcode') setLastScannedProduct(newItem);
 
@@ -556,8 +577,9 @@ export default function AnaPanel(props: AnaPanelProps) {
     setScannedItems(prev => {
         const itemsToRemove = prev.filter(item => item.key === groupKey);
         itemsToRemove.forEach(item => {
-            if(item.seriNumarasi) {
-                scannedSerialsRef.current.delete(item.seriNumarasi);
+            if(item.seriNumarasi && item.stokKodu) {
+                const productSerials = scannedSerialsRef.current.get(item.stokKodu);
+                productSerials?.delete(item.seriNumarasi);
             }
         });
         return prev.filter(item => item.key !== groupKey);
@@ -747,7 +769,9 @@ export default function AnaPanel(props: AnaPanelProps) {
       }
 
       for (const item of itemsToProcess) {
-        if(item.seriNumarasi && existingDepotSerials.has(item.seriNumarasi)) {
+        // Mükerrer kontrolü: aynı stokKodu için aynı seri numarası kontrol edilir
+        const depotProductSerials = existingDepotSerials.get(item.stokKodu);
+        if(item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
             // Already checked on scan, this is a double-check.
             continue;
         }
@@ -808,10 +832,14 @@ export default function AnaPanel(props: AnaPanelProps) {
       });
   
       setScannedItems(prev => prev.filter(i => !processedIds.has(i.id)));
+      // Map'i temizle ve kalan öğeleri yeniden ekle
       scannedSerialsRef.current.clear();
       scannedItems.forEach(item => {
-        if (!processedIds.has(item.id) && item.seriNumarasi) {
-          scannedSerialsRef.current.add(item.seriNumarasi);
+        if (!processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
+          if (!scannedSerialsRef.current.has(item.stokKodu)) {
+            scannedSerialsRef.current.set(item.stokKodu, new Set());
+          }
+          scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
         }
       });
   
