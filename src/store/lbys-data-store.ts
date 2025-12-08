@@ -173,21 +173,43 @@ export const useLbysDataStore = create<LbysStore>()(
       loadAllDataFromFirestore: async () => {
         set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Tüm Veriler Yükleniyor...' } });
         try {
-            const querySnapshot = await getDocs(collection(db, 'analysis_results'));
+            // Performans için son 90 günlük veriyi çek (çok fazla veri tarayıcıyı çökertebilir)
+            const ninetyDaysAgo = new Date();
+            ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+            const startDate = format(ninetyDaysAgo, 'yyyy-MM-dd');
+
+            const q = query(
+                collection(db, 'analysis_results'),
+                where('date', '>=', startDate)
+            );
+
+            const querySnapshot = await getDocs(q);
             const fetchedData: AggregatedRecord[] = [];
 
-            querySnapshot.forEach((doc) => {
-                fetchedData.push(doc.data() as AggregatedRecord);
-            });
+            // Chunk halinde işle - tarayıcı donmasını önle
+            const docs = querySnapshot.docs;
+            const totalDocs = docs.length;
+            set({ processingProgress: { current: 0, total: totalDocs, status: 'Veriler İşleniyor...' } });
+
+            const PROCESS_CHUNK = 500;
+            for (let i = 0; i < totalDocs; i += PROCESS_CHUNK) {
+                const chunk = docs.slice(i, i + PROCESS_CHUNK);
+                chunk.forEach((doc) => {
+                    fetchedData.push(doc.data() as AggregatedRecord);
+                });
+                set({ processingProgress: { current: Math.min(i + PROCESS_CHUNK, totalDocs), total: totalDocs, status: 'Veriler İşleniyor...' } });
+                // UI'ın güncellenmesine izin ver
+                await new Promise(r => setTimeout(r, 0));
+            }
 
             set({ aggregatedData: fetchedData });
             get().applyFilters();
-            console.log(`Qore Analyse: Firestore'dan toplam ${fetchedData.length} kayıt indirildi.`);
+            console.log(`Qore Analyse: Firestore'dan toplam ${fetchedData.length} kayıt indirildi (son 90 gün).`);
         } catch (error: any) {
             set({ error: "Veri indirme hatası: " + error.message });
             console.error("Firestore query failed:", error);
         } finally {
-            set({ isLoading: false });
+            set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
         }
       },
 
@@ -250,12 +272,14 @@ export const useLbysDataStore = create<LbysStore>()(
                     // Q sütunu (index 16): RET_NEDENI - Doluysa red
                     const rejectionReason = String(row[16] || '').trim();
 
-                    // Composite key ile gruplama
+                    // Composite key ile gruplama - deterministik ID oluştur
                     const key = `${dateStr}|${hospitalId}|${serviceName}|${testName}|${branchName}`;
+                    // Deterministik ID - aynı key için her zaman aynı ID
+                    const docId = key.replace(/\|/g, '_').replace(/[^a-zA-Z0-9_\u00C0-\u024F]/g, '').substring(0, 150);
 
                     if (!groups.has(key)) {
                         groups.set(key, {
-                            id: key.replace(/\|/g, '_').replace(/[^a-zA-Z0-9_]/g, '').substring(0, 100) + '_' + nanoid(8),
+                            id: docId,
                             date: dateStr, hospitalId, hospitalName: derivedHospitalName, isAsm,
                             service: serviceName, testName, branch: branchName,
                             totalTests: 0, emergencyCount: 0, patientIds: new Set(),
@@ -294,97 +318,54 @@ export const useLbysDataStore = create<LbysStore>()(
                 patientIds: Array.from(g.patientIds)
             }));
 
-            // KÜMÜLATİF VERİ YAZMA: Mevcut verileri sil ve yenilerini ekle yerine,
-            // Aynı tarih aralığındaki verileri kontrol et ve birleştir
-            set({ processingProgress: { current: 0, total: newRecords.length, status: 'Mevcut Veriler Kontrol Ediliyor...' } });
-
-            // Yeni kayıtlardaki tarihleri al
-            const newDates = new Set(newRecords.map(r => r.date));
-            const minDate = Array.from(newDates).sort()[0];
-            const maxDate = Array.from(newDates).sort().reverse()[0];
-
-            // Bu tarih aralığındaki mevcut kayıtları al
-            const existingQuery = query(
-                collection(db, 'analysis_results'),
-                where('date', '>=', minDate),
-                where('date', '<=', maxDate)
-            );
-            const existingSnap = await getDocs(existingQuery);
-            const existingRecordsMap = new Map<string, AggregatedRecord>();
-
-            existingSnap.forEach((doc) => {
-                const data = doc.data() as AggregatedRecord;
-                const key = `${data.date}|${data.hospitalId}|${data.service}|${data.testName}|${data.branch}`;
-                existingRecordsMap.set(key, data);
-            });
-
-            // Yeni kayıtları mevcut kayıtlarla birleştir
-            const mergedRecords: AggregatedRecord[] = [];
-
-            for (const newRec of newRecords) {
-                const key = `${newRec.date}|${newRec.hospitalId}|${newRec.service}|${newRec.testName}|${newRec.branch}`;
-                const existing = existingRecordsMap.get(key);
-
-                if (existing) {
-                    // Mevcut kayıt var - birleştir (kümülatif toplama)
-                    const mergedPatientIds = new Set([...existing.patientIds, ...newRec.patientIds]);
-                    const mergedRejectionReasons: Record<string, number> = { ...existing.rejectionReasons };
-                    Object.entries(newRec.rejectionReasons).forEach(([reason, count]) => {
-                        mergedRejectionReasons[reason] = (mergedRejectionReasons[reason] || 0) + count;
-                    });
-
-                    mergedRecords.push({
-                        ...existing,
-                        totalTests: existing.totalTests + newRec.totalTests,
-                        emergencyCount: existing.emergencyCount + newRec.emergencyCount,
-                        patientIds: Array.from(mergedPatientIds),
-                        rejectedCount: existing.rejectedCount + newRec.rejectedCount,
-                        repeatCount: existing.repeatCount + newRec.repeatCount,
-                        totalTatMinutes: existing.totalTatMinutes + newRec.totalTatMinutes,
-                        tatCount: existing.tatCount + newRec.tatCount,
-                        rejectionReasons: mergedRejectionReasons,
-                        uploadBatchId: newRec.uploadBatchId,
-                        createdAt: new Date().toISOString()
-                    });
-                    existingRecordsMap.delete(key); // İşlendi olarak işaretle
-                } else {
-                    // Yeni kayıt
-                    mergedRecords.push(newRec);
-                }
-            }
-
-            // İşlenmeyen mevcut kayıtları da ekle (bu tarih aralığındaki ama yeni excelde olmayan)
-            existingRecordsMap.forEach((rec) => {
-                mergedRecords.push(rec);
-            });
-
-            // Önce bu tarih aralığındaki eski kayıtları sil
-            const CHUNK_SIZE = 450;
-            const deleteDocsCount = existingSnap.size;
-            if (deleteDocsCount > 0) {
-                set({ processingProgress: { current: 0, total: deleteDocsCount, status: 'Eski Kayıtlar Güncelleniyor...' } });
-                for (let i = 0; i < deleteDocsCount; i += CHUNK_SIZE) {
-                    const deleteBatch = writeBatch(db);
-                    const chunk = existingSnap.docs.slice(i, i + CHUNK_SIZE);
-                    chunk.forEach(doc => deleteBatch.delete(doc.ref));
-                    await deleteBatch.commit();
-                    set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, deleteDocsCount), total: deleteDocsCount, status: 'Eski Kayıtlar Güncelleniyor...' } });
-                }
-            }
-
-            // Birleştirilmiş kayıtları yaz
-            const totalDocs = mergedRecords.length;
+            // OPTİMİZE KÜMÜLATİF YAZMA: Mevcut verileri toplu çekmek yerine,
+            // Her kayıt için tek tek kontrol edip güncelle
+            const totalDocs = newRecords.length;
             set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
 
+            const CHUNK_SIZE = 100; // Daha küçük chunk - her biri için getDoc yapılacak
+            let processedCount = 0;
+
             for (let i = 0; i < totalDocs; i += CHUNK_SIZE) {
+                const chunk = newRecords.slice(i, i + CHUNK_SIZE);
                 const batch = writeBatch(db);
-                const chunk = mergedRecords.slice(i, i + CHUNK_SIZE);
-                chunk.forEach((docData) => {
-                    const docRef = doc(db, 'analysis_results', docData.id);
-                    batch.set(docRef, docData);
-                });
+
+                // Her kayıt için mevcut veriyi kontrol et
+                for (const newRec of chunk) {
+                    const docRef = doc(db, 'analysis_results', newRec.id);
+                    const existingDoc = await getDoc(docRef);
+
+                    if (existingDoc.exists()) {
+                        // Mevcut kayıt var - birleştir
+                        const existing = existingDoc.data() as AggregatedRecord;
+                        const mergedPatientIds = new Set([...existing.patientIds, ...newRec.patientIds]);
+                        const mergedRejectionReasons: Record<string, number> = { ...existing.rejectionReasons };
+                        Object.entries(newRec.rejectionReasons).forEach(([reason, count]) => {
+                            mergedRejectionReasons[reason] = (mergedRejectionReasons[reason] || 0) + count;
+                        });
+
+                        batch.set(docRef, {
+                            ...existing,
+                            totalTests: existing.totalTests + newRec.totalTests,
+                            emergencyCount: existing.emergencyCount + newRec.emergencyCount,
+                            patientIds: Array.from(mergedPatientIds),
+                            rejectedCount: existing.rejectedCount + newRec.rejectedCount,
+                            repeatCount: existing.repeatCount + newRec.repeatCount,
+                            totalTatMinutes: existing.totalTatMinutes + newRec.totalTatMinutes,
+                            tatCount: existing.tatCount + newRec.tatCount,
+                            rejectionReasons: mergedRejectionReasons,
+                            uploadBatchId: newRec.uploadBatchId,
+                            createdAt: new Date().toISOString()
+                        });
+                    } else {
+                        // Yeni kayıt
+                        batch.set(docRef, newRec);
+                    }
+                }
+
                 await batch.commit();
-                set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, totalDocs), total: totalDocs, status: 'Buluta Yazılıyor...' } });
+                processedCount += chunk.length;
+                set({ processingProgress: { current: processedCount, total: totalDocs, status: 'Buluta Yazılıyor...' } });
             }
 
             console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi (kümülatif). Atlanan satır: ${skippedCount}`);
@@ -395,9 +376,6 @@ export const useLbysDataStore = create<LbysStore>()(
                 await get().loadAllDataFromFirestore();
             } else if (dateFilter.dateRange.from && dateFilter.dateRange.to) {
                 await get().loadDataFromFirestore({ from: dateFilter.dateRange.from, to: dateFilter.dateRange.to });
-            } else {
-                set({ aggregatedData: mergedRecords });
-                get().applyFilters();
             }
 
         } catch (error: any) {
@@ -455,23 +433,39 @@ export const useLbysDataStore = create<LbysStore>()(
       },
       
       resetAnalysisData: async () => {
-        set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Veriler Siliniyor...' } });
+        set({ isLoading: true, error: null, processingProgress: { current: 0, total: 0, status: 'Veriler Sayılıyor...' } });
         try {
+          console.log('Qore Analyse: Tüm veriler siliniyor...');
           const snapshot = await getDocs(collection(db, 'analysis_results'));
           const total = snapshot.size;
-          set({ processingProgress: { current: 0, total, status: 'Veriler Siliniyor...' } });
-          
+
+          if (total === 0) {
+            console.log('Qore Analyse: Silinecek veri yok.');
+            set({ aggregatedData: [], filteredData: [] });
+            return;
+          }
+
+          console.log(`Qore Analyse: ${total} kayıt silinecek.`);
+          set({ processingProgress: { current: 0, total, status: `${total} Kayıt Siliniyor...` } });
+
           const CHUNK_SIZE = 450;
+          let deletedCount = 0;
+
           for (let i = 0; i < total; i += CHUNK_SIZE) {
             const batch = writeBatch(db);
             const chunk = snapshot.docs.slice(i, i + CHUNK_SIZE);
-            chunk.forEach(doc => batch.delete(doc.ref));
+            chunk.forEach(docSnap => batch.delete(docSnap.ref));
             await batch.commit();
-            set({ processingProgress: { current: Math.min(i + CHUNK_SIZE, total), total, status: 'Veriler Siliniyor...' } });
+            deletedCount += chunk.length;
+            set({ processingProgress: { current: deletedCount, total, status: `${deletedCount}/${total} Kayıt Silindi` } });
+            // UI güncellenmesi için bekle
+            await new Promise(r => setTimeout(r, 10));
           }
 
+          console.log(`Qore Analyse: ${deletedCount} kayıt başarıyla silindi.`);
           set({ aggregatedData: [], filteredData: [] });
         } catch (error: any) {
+          console.error('Qore Analyse: Silme hatası:', error);
           set({ error: "Veri sıfırlama hatası: " + error.message });
         } finally {
           set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });

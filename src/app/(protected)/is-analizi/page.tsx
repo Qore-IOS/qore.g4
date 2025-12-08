@@ -151,9 +151,10 @@ export default function IsAnaliziPage() {
     const {
         isLoading, error, aggregatedData, filteredData, filters,
         setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore, resetAnalysisData,
-        showAllData, loadAllDataFromFirestore
+        showAllData, loadAllDataFromFirestore, processingProgress
     } = useLbysDataStore();
-    
+    const { toast } = useToast();
+
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailModalData, setDetailModalData] = useState<{ title: string; data: Record<string, number>, type: 'service' | 'test' } | null>(null);
     const [rejectionModalOpen, setRejectionModalOpen] = useState(false);
@@ -293,14 +294,43 @@ export default function IsAnaliziPage() {
         setDetailModalOpen(true);
     };
     
-    const handleResetDataConfirm = () => {
+    const handleResetDataConfirm = async () => {
         if (confirm("Bu işlem geri alınamaz! Analiz veritabanındaki tüm kayıtları kalıcı olarak silmek istediğinizden emin misiniz?")) {
-            resetAnalysisData();
+            await resetAnalysisData();
+            toast({
+                title: 'Başarılı',
+                description: 'Tüm analiz verileri silindi.',
+            });
         }
     };
 
     return (
         <div className="p-4 sm:p-6 space-y-6 bg-slate-50 min-h-screen pb-20">
+            {/* Global Loading Overlay */}
+            {isLoading && processingProgress.status && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-2xl max-w-md w-full mx-4">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                            <h3 className="font-semibold text-lg">{processingProgress.status}</h3>
+                        </div>
+                        {processingProgress.total > 0 && (
+                            <>
+                                <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                                    <div
+                                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                                        style={{ width: `${(processingProgress.current / processingProgress.total) * 100}%` }}
+                                    ></div>
+                                </div>
+                                <p className="text-sm text-gray-500 text-center">
+                                    {processingProgress.current.toLocaleString()} / {processingProgress.total.toLocaleString()}
+                                </p>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
              <AnimatePresence>
                 {topPanelOpen && (
                     <motion.div
