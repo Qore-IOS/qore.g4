@@ -4,7 +4,6 @@ import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView } from '@/l
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode } from 'lucide-react';
-import CihazYonetimiMainPanel from './cihaz-yonetimi-main-panel';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import { collection, getDocs } from 'firebase/firestore';

@@ -56,7 +56,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
-import { maybeAutoPrintTutanak } from '@/lib/tutanak-autoprint';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 
@@ -104,7 +103,11 @@ export default function SiparislerPanel() {
           transferredAt: data.transferredAt ? (data.transferredAt as Timestamp).toDate() : null,
         } as Order;
       });
-      updatedOrders.sort((a, b) => (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0));
+      updatedOrders.sort((a: Order, b: Order) => {
+        const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        return bTime - aTime;
+      });
       setAllOrders(updatedOrders);
     };
   
@@ -210,16 +213,16 @@ export default function SiparislerPanel() {
     });
     
     await emitOrderCreatedFromRequest({
-      actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || ''},
+      actor: { uid: currentUserProfile?.uid ?? '', name: currentUserProfile?.name ?? ''},
       orderId: orderId,
       labId: selectedLabId,
       depotId: selectedDepotId,
       audienceHint: {
-        userId: currentUserProfile?.uid,
-        role: currentUserProfile?.role,
-        views: currentUserProfile?.accessibleViews,
-        labIds: currentUserProfile?.assignedLaboratories,
-        depotIds: currentUserProfile?.assignedDepots,
+        userId: currentUserProfile?.uid ?? undefined,
+        role: currentUserProfile?.role ?? undefined,
+        views: currentUserProfile?.accessibleViews ?? undefined,
+        labIds: currentUserProfile?.assignedLaboratories ?? undefined,
+        depotIds: currentUserProfile?.assignedDepots ?? undefined,
       }
     });
     
@@ -231,13 +234,14 @@ export default function SiparislerPanel() {
   };
   
   const startPickingProcess = async (order: Order) => {
+    if (!order.id) return;
     setIsProcessing(true);
     try {
         await updateDoc(doc(db, "orders", order.id), {
           status: 'toplaniyor',
           pickingStartedAt: serverTimestamp(),
-          pickingStartedById: currentUser?.uid || null,
-          pickingStartedBy: currentUserProfile?.name || currentUser?.email || null,
+          pickingStartedById: currentUser?.uid ?? null,
+          pickingStartedBy: currentUserProfile?.name ?? currentUser?.email ?? null,
         });
         router.push(`/siparisler/${order.id}/toplama`);
     } catch (e) {
@@ -265,7 +269,8 @@ export default function SiparislerPanel() {
       const rules: Record<string, MinMaxRule> = {};
       snap.forEach(doc => {
         const d = doc.data() as MinMaxRule;
-        if (d.stokKodu) rules[d.stokKodu] = d;
+        const stokKodu = d.stokKodu;
+        if (stokKodu) rules[stokKodu] = d;
       });
       return rules;
     };
@@ -277,16 +282,18 @@ export default function SiparislerPanel() {
         const have = depoStok.filter(
           st => st.depotId === depotId && !st.isShipped && st.stokKodu === rule.stokKodu
         ).length;
-        const need = rule.max - have;
+        const maxValue = rule.max ?? 0;
+        const need = maxValue - have;
         return {
           'Stok Kodu': rule.stokKodu,
           'Stok Adı': productCodes.find(p => p.stokKodu === rule.stokKodu)?.stokAdi || rule.stokKodu,
           'Mevcut Stok': have,
-          'Max Adedi': rule.max,
+          'Max Adedi': maxValue,
           'Sipariş Adeti': need > 0 ? need : 0,
         };
       }).filter(r => r['Sipariş Adeti'] > 0);
-      sheets[depot.name] = rows;
+      const depotName = depot.name ?? depot.id ?? 'Depot';
+      sheets[depotName] = rows;
     }
 
     for (const labId of selectedBulkLabs) {
@@ -296,16 +303,18 @@ export default function SiparislerPanel() {
         const have = depoStok.filter(
           st => st.isShipped && st.hedefKurum === lab.name && st.stokKodu === rule.stokKodu
         ).length;
-        const need = rule.max - have;
+        const maxValue = rule.max ?? 0;
+        const need = maxValue - have;
         return {
           'Stok Kodu': rule.stokKodu,
           'Stok Adı': productCodes.find(p => p.stokKodu === rule.stokKodu)?.stokAdi || rule.stokKodu,
           'Mevcut Stok': have,
-          'Max Adedi': rule.max,
+          'Max Adedi': maxValue,
           'Sipariş Adeti': need > 0 ? need : 0,
         };
       }).filter(r => r['Sipariş Adeti'] > 0);
-      sheets[lab.name] = rows;
+      const labName = lab.name ?? lab.id ?? 'Lab';
+      sheets[labName] = rows;
     }
 
     const workbook = XLSX.utils.book_new();
@@ -324,13 +333,14 @@ export default function SiparislerPanel() {
     }
   
     const hospital = hospitals.find(h => h.id === selectedLabId);
-    if (!hospital) return;
-  
+    if (!hospital || !hospital.id) return;
+
     const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
     const rules: Record<string, MinMaxRule> = {};
     rulesSnap.forEach(doc => {
         const d = doc.data() as MinMaxRule;
-        if (d.stokKodu) rules[d.stokKodu] = d;
+        const stokKodu = d.stokKodu;
+        if (stokKodu) rules[stokKodu] = d;
     });
   
     const neededItems: OrderItem[] = [];
@@ -339,7 +349,8 @@ export default function SiparislerPanel() {
       const labStockCount = depoStok.filter(
         st => st.isShipped && st.hedefKurum === hospital.name && st.stokKodu === rule.stokKodu
       ).length;
-      const need = rule.max - labStockCount;
+      const maxValue = rule.max ?? 0;
+      const need = maxValue - labStockCount;
   
       if (need > 0) {
         const product = productCodes.find(p => p.stokKodu === rule.stokKodu);
@@ -362,8 +373,10 @@ export default function SiparislerPanel() {
       const consolidatedItems: Record<string, OrderItem> = {};
       [...orderItems, ...neededItems].forEach(item => {
         const key = item.stokKodu;
-        if (consolidatedItems[key]) {
-          consolidatedItems[key].adet += item.adet;
+        if (!key) return;
+        const existing = consolidatedItems[key];
+        if (existing) {
+          existing.adet = (existing.adet ?? 0) + (item.adet ?? 0);
         } else {
           consolidatedItems[key] = { ...item };
         }
@@ -404,7 +417,7 @@ export default function SiparislerPanel() {
                     <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
                         <SelectTrigger><SelectValue placeholder="Depo seçin..." /></SelectTrigger>
                         <SelectContent>
-                        {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                        {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
@@ -432,11 +445,11 @@ export default function SiparislerPanel() {
                 {depots.map(d => (
                   <div key={d.id} className="flex items-center mb-1">
                     <Checkbox
-                      checked={selectedBulkDepots.includes(d.id)}
-                      onCheckedChange={() => toggleSelect(d.id, selectedBulkDepots, setSelectedBulkDepots)}
-                      id={`depot-${d.id}`}
+                      checked={selectedBulkDepots.includes(d.id ?? '')}
+                      onCheckedChange={() => toggleSelect(d.id ?? '', selectedBulkDepots, setSelectedBulkDepots)}
+                      id={`depot-${d.id ?? ''}`}
                     />
-                    <label htmlFor={`depot-${d.id}`} className="ml-2">{d.name}</label>
+                    <label htmlFor={`depot-${d.id ?? ''}`} className="ml-2">{d.name}</label>
                   </div>
                 ))}
               </ScrollArea>
@@ -447,11 +460,11 @@ export default function SiparislerPanel() {
                 {hospitals.map(h => (
                   <div key={h.id} className="flex items-center mb-1">
                     <Checkbox
-                      checked={selectedBulkLabs.includes(h.id)}
-                      onCheckedChange={() => toggleSelect(h.id, selectedBulkLabs, setSelectedBulkLabs)}
-                      id={`lab-${h.id}`}
+                      checked={selectedBulkLabs.includes(h.id ?? '')}
+                      onCheckedChange={() => toggleSelect(h.id ?? '', selectedBulkLabs, setSelectedBulkLabs)}
+                      id={`lab-${h.id ?? ''}`}
                     />
-                    <label htmlFor={`lab-${h.id}`} className="ml-2">{h.name}</label>
+                    <label htmlFor={`lab-${h.id ?? ''}`} className="ml-2">{h.name}</label>
                   </div>
                 ))}
               </ScrollArea>
@@ -497,12 +510,12 @@ export default function SiparislerPanel() {
                       <CommandList>
                         <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
                         <CommandGroup>
-                          {hospitals.sort((a,b) => a.name.localeCompare(b.name)).map((hospital) => (
+                          {hospitals.sort((a,b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
                             <CommandItem
                               key={hospital.id}
-                              value={hospital.name}
+                              value={hospital.name ?? ''}
                               onSelect={() => {
-                                setSelectedLabId(hospital.id);
+                                setSelectedLabId(hospital.id ?? '');
                                 setIsLabPopoverOpen(false);
                               }}
                             >
@@ -531,7 +544,7 @@ export default function SiparislerPanel() {
             <div className="space-y-2">
                 <Select value={manualStockCode} onValueChange={setManualStockCode}>
                     <SelectTrigger><SelectValue placeholder="Manuel ürün seçin..." /></SelectTrigger>
-                    <SelectContent>{productCodes.map(p => <SelectItem key={p.id} value={p.stokKodu}>{p.stokAdi}</SelectItem>)}</SelectContent>
+                    <SelectContent>{productCodes.map(p => <SelectItem key={p.id ?? ''} value={p.stokKodu ?? ''}>{p.stokAdi}</SelectItem>)}</SelectContent>
                 </Select>
                 <div className="flex gap-2">
                     <Input type="number" min="1" value={manualQty} onChange={e => setManualQty(e.target.value)} placeholder="Adet"/>
@@ -543,7 +556,7 @@ export default function SiparislerPanel() {
                     <div key={i.id} className="flex justify-between items-center p-1 rounded hover:bg-muted">
                        <span className="text-sm truncate" title={i.stokAdi}>{i.stokAdi}</span>
                        <span className="text-sm font-bold">{i.adet}</span>
-                       <Button variant="ghost" size="icon" onClick={() => removeItem(i.id)}><Trash2 className="h-4 w-4 text-destructive"/></Button>
+                       <Button variant="ghost" size="icon" onClick={() => removeItem(i.id ?? '')}><Trash2 className="h-4 w-4 text-destructive"/></Button>
                     </div>
                 ))}
             </ScrollArea>
@@ -574,9 +587,9 @@ export default function SiparislerPanel() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge variant={order.status === 'toplaniyor' ? 'default' : 'secondary'} className="py-1 px-3">
-                              {order.items.reduce((sum, it) => sum + (Number(it.adet) || 0), 0)} Adet
+                              {(order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0)} Adet
                           </Badge>
-                          <Button size="sm" variant="destructive" onClick={() => handleDeleteOrder(order.id)} disabled={isProcessing}>
+                          <Button size="sm" variant="destructive" onClick={() => handleDeleteOrder(order.id ?? '')} disabled={isProcessing}>
                             <Trash2 className="h-4 w-4"/>
                           </Button>
                           <Button size="sm" onClick={() => startPickingProcess(order)} disabled={isProcessing}>

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Warehouse, Building, Pill, MapPin, Users, Barcode, Moon, Sun, LogOut, Beaker, QrCode, History } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/contexts/auth-context';
-import AdminBackfillHedefKurumId from '../AdminBackfillHedefKurumId';
+import AdminBackfillHedefKurumId from '@/components/AdminBackfillHedefKurumId';
 
 export default function YonetimPanel() {
   const router = useRouter();

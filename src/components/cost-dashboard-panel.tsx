@@ -159,7 +159,7 @@ export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayi
       byProduct: Object.entries(costByProduct).map(([code, { name, costEUR }]) => ({
         code,
         name,
-        cost: costEUR * rates[currency],
+        cost: costEUR * (rates?.[currency] ?? 1),
       })),
     };
   }, [depoStok, currency, rates, productMap, getCostInEur]);
@@ -181,7 +181,7 @@ export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayi
         const monthCostEUR = monthConsumptions.reduce((sum, k) => sum + getCostInEur(k.stokKodu), 0);
         return {
             month: format(monthStart, 'MMM yy', { locale: tr }),
-            cost: monthCostEUR * rates[currency],
+            cost: monthCostEUR * (rates?.[currency] ?? 1),
         };
     });
   }, [tuketimKayitlari, rates, currency, getCostInEur]);
@@ -196,7 +196,7 @@ export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayi
       const costEUR = getCostInEur(item.stokKodu);
       brandMap.set(product.marka, (brandMap.get(product.marka) || 0) + costEUR);
     });
-    return Array.from(brandMap.entries()).map(([name, value]) => ({ name, value: value * rates[currency] }));
+    return Array.from(brandMap.entries()).map(([name, value]) => ({ name, value: value * (rates?.[currency] ?? 1) }));
   }, [depoStok, rates, currency, productMap, getCostInEur]);
   
   const labDailyCosts = useMemo(() => {
@@ -216,7 +216,7 @@ export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayi
           }
       });
       return Object.entries(costs).map(([name, costEUR]) => ({
-          name, cost: costEUR * rates[currency]
+          name, cost: costEUR * (rates?.[currency] ?? 1)
       })).sort((a,b) => b.cost - a.cost);
 
   }, [tuketimKayitlari, rates, currency, getCostInEur]);
@@ -230,7 +230,7 @@ export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayi
       const q = Math.floor(d.getMonth() / 3);
       quarters[q] += getCostInEur(k.stokKodu);
     });
-    return quarters.map(q => q * rates[currency]);
+    return quarters.map(q => q * (rates?.[currency] ?? 1));
   }, [tuketimKayitlari, rates, currency, getCostInEur]);
 
 
@@ -245,7 +245,7 @@ export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayi
             <CardTitle>Toplam Envanter Maliyeti</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-4xl font-bold text-primary mb-4">{CURRENCY_SYMBOLS[currency]} {totalCosts[currency]?.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) ?? '0.00'}</div>
+            <div className="text-4xl font-bold text-primary mb-4">{CURRENCY_SYMBOLS[currency]} {(totalCosts[currency as keyof Pick<typeof totalCosts, 'EUR' | 'USD' | 'TRY'>] as number).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
             <div className="flex gap-2">
                 {(['EUR', 'USD', 'TRY'] as Currency[]).map(cur => (
                     <Button size="sm" variant={currency === cur ? 'default' : 'outline'} onClick={() => setCurrency(cur)} key={cur}>

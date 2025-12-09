@@ -45,12 +45,17 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       setIsLoading(true);
       const fetchedRules: RuleState = {};
       try {
-        const rulesRef = collection(db, collectionName, target.id, "minMaxRules");
+        const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
         const snapshot = await getDocs(rulesRef);
         snapshot.forEach(doc => {
           const data = doc.data() as MinMaxRule;
           if (data.stokKodu) {
-            fetchedRules[data.stokKodu] = { min: data.min, max: data.max, aylikTuketimLimiti: data.aylikTuketimLimiti ?? '', enabled: true };
+            fetchedRules[data.stokKodu] = {
+              min: data.min ?? 0,
+              max: data.max ?? 0,
+              aylikTuketimLimiti: (data.aylikTuketimLimiti ?? '') as string | number,
+              enabled: true
+            };
           }
         });
         setRules(fetchedRules);
@@ -68,8 +73,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     setRules(prev => {
         const newRules = { ...prev };
         if (checked) {
-            newRules[stockCode] = { min: '', max: '', aylikTuketimLimiti: '', enabled: true, ...(newRules[stockCode] || {}) };
-            newRules[stockCode].enabled = true;
+            newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', aylikTuketimLimiti: '' }), enabled: true };
         } else {
             if(newRules[stockCode]) {
               newRules[stockCode].enabled = false;
@@ -85,7 +89,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     const numValue = value === '' ? '' : Number(value);
     setRules(prev => ({
         ...prev,
-        [stockCode]: { ...prev[stockCode], [field]: numValue }
+        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', aylikTuketimLimiti: '', enabled: true }), [field]: numValue }
     }));
   };
 
@@ -144,7 +148,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     const batch = writeBatch(db);
     let hasError = false;
 
-    const rulesCollectionRef = collection(db, collectionName, target.id, "minMaxRules");
+    const rulesCollectionRef = collection(db, collectionName, target.id!, "minMaxRules");
     const existingRulesSnapshot = await getDocs(rulesCollectionRef);
     const existingRuleIds = new Set(existingRulesSnapshot.docs.map(doc => doc.id));
 
@@ -152,7 +156,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
 
     for (const stockCode in rules) {
       const rule = rules[stockCode];
-      const ruleRef = doc(db, collectionName, target.id, "minMaxRules", stockCode);
+      const ruleRef = doc(db, collectionName, target.id!, "minMaxRules", stockCode);
 
       if (rule.enabled) {
         const min = Number(rule.min);
@@ -217,7 +221,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   const handleResetRules = async () => {
     setIsLoading(true);
     try {
-        const rulesRef = collection(db, collectionName, target.id, "minMaxRules");
+        const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
         const snapshot = await getDocs(rulesRef);
         if(snapshot.empty) {
             toast({ title: "Bilgi", description: `Bu ${targetType === 'depot' ? 'depo' : 'hastane'} için zaten tanımlı kural bulunmuyor.`, variant: "default" });
@@ -295,14 +299,14 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                 </TableHeader>
                 <TableBody>
                   {productCodes.map(product => {
-                    const rule = rules[product.stokKodu];
+                    const rule = rules[product.stokKodu!];
                     const isEnabled = rule?.enabled ?? false;
                     return (
                       <TableRow key={product.id}>
                         <TableCell>
                           <Checkbox
                             checked={isEnabled}
-                            onCheckedChange={(checked) => handleCheckboxChange(product.stokKodu, checked)}
+                            onCheckedChange={(checked) => handleCheckboxChange(product.stokKodu!, checked)}
                           />
                         </TableCell>
                         <TableCell>
@@ -312,8 +316,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                         <TableCell>
                           <Input
                             type="number"
-                            value={isEnabled ? rule.min : ''}
-                            onChange={e => handleRuleChange(product.stokKodu, 'min', e.target.value)}
+                            value={isEnabled ? (rule?.min ?? '') : ''}
+                            onChange={e => handleRuleChange(product.stokKodu!, 'min', e.target.value)}
                             disabled={!isEnabled}
                             className="h-8"
                           />
@@ -321,8 +325,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                         <TableCell>
                           <Input
                             type="number"
-                            value={isEnabled ? rule.max : ''}
-                            onChange={e => handleRuleChange(product.stokKodu, 'max', e.target.value)}
+                            value={isEnabled ? (rule?.max ?? '') : ''}
+                            onChange={e => handleRuleChange(product.stokKodu!, 'max', e.target.value)}
                             disabled={!isEnabled}
                             className="h-8"
                           />
@@ -330,8 +334,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                         <TableCell>
                           <Input
                             type="number"
-                            value={isEnabled ? rule.aylikTuketimLimiti : ''}
-                            onChange={e => handleRuleChange(product.stokKodu, 'aylikTuketimLimiti', e.target.value)}
+                            value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
+                            onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
                             disabled={!isEnabled || targetType === 'depot'}
                             className="h-8"
                             placeholder={targetType === 'depot' ? 'N/A' : 'Limit'}
