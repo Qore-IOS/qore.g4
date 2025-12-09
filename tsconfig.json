@@ -33,6 +33,8 @@
     "src/**/__mocks__/**",
     "src/**/legacy/**",
     "src/**/archive/**",
-    "src/**/trash/**"
+    "src/**/trash/**",
+    "src/functions/**",
+    "functions/**"
   ]
 }
