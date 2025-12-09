@@ -1,10 +1,11 @@
 'use client';
-import { db } from '@/lib/firebase';
+import { db } from './firebase';
 import {
   collection,
   doc,
   setDoc,
   Timestamp,
+  type Firestore,
 } from 'firebase/firestore';
 
 export type DepoStokItem = {
@@ -106,6 +107,7 @@ export async function saveLabCountSession(opts: {
   // Option B: or pass stock + scanned serials to compute items
   stockItemsForLab?: DepoStokItem[];
   scannedSerials?: string[] | Set<string>;
+  firestoreDb?: Firestore;
 }): Promise<string> {
   const {
     laboratoryId,
@@ -130,7 +132,8 @@ export async function saveLabCountSession(opts: {
     throw new Error('No count items to save');
   }
 
-  const sessionRef = doc(collection(db, 'hospitals', laboratoryId, 'stockCounts'));
+  const targetDb = opts.firestoreDb ?? db;
+  const sessionRef = doc(collection(targetDb, 'hospitals', laboratoryId, 'stockCounts'));
   
   // Ensure payload values are Firestore-compatible (null instead of undefined)
   const payload: LabCountSession = {

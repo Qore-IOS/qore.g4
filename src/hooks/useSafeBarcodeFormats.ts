@@ -1,9 +1,9 @@
 // src/hooks/useSafeBarcodeFormats.ts
 'use client';
-import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import type { BarcodeFormat } from '@/lib/barcode';
+import { useEffect, useState } from 'react';
+import { collection, getDocs, orderBy, query, where, type Firestore } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import type { BarcodeFormat } from '../lib/barcode';
 
 type State = {
   formats: BarcodeFormat[];
@@ -25,36 +25,9 @@ export function useSafeBarcodeFormats(): State {
 
     async function load() {
       setState(prev => ({ ...prev, loading: true, error: undefined }));
-      try {
-        // Preferred query (might require composite index on your project)
-        const q = query(
-          collection(db, 'barcodeFormats'),
-          where('active', '==', true)
-        );
-        const snap = await getDocs(q);
-        const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
-        if (!canceled) {
-          setState({ formats: withLegacy(items), loading: false });
-        }
-      } catch (err: any) {
-        // Fallback: fetch full collection, filter/sort locally
-        try {
-          const snapAll = await getDocs(collection(db, 'barcodeFormats'));
-          const all = snapAll.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
-          const activeOnly = all.filter((f: any) => f.active !== false);
-          
-          if (!canceled) {
-            setState({ formats: withLegacy(activeOnly), loading: false, error: err?.message });
-          }
-        } catch (err2: any) {
-          if (!canceled) {
-            setState({
-              formats: withLegacy([]),
-              loading: false,
-              error: err2?.message || 'Formats could not be loaded.',
-            });
-          }
-        }
+      const result = await fetchBarcodeFormats();
+      if (!canceled) {
+        setState({ formats: result.formats, loading: false, error: result.error });
       }
     }
 
@@ -67,7 +40,36 @@ export function useSafeBarcodeFormats(): State {
   return state;
 }
 
-function withLegacy(list: BarcodeFormat[]): BarcodeFormat[] {
+export async function fetchBarcodeFormats(targetDb: Firestore = db): Promise<{ formats: BarcodeFormat[]; error?: string }> {
+  try {
+    const preferred = query(
+      collection(targetDb, 'barcodeFormats'),
+      where('active', '==', true),
+      orderBy('priority', 'asc')
+    );
+    const snap = await getDocs(preferred);
+    const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
+    return { formats: withLegacy(items) };
+  } catch (err: any) {
+    // Fallback: fetch full collection, filter/sort locally
+    try {
+      const snapAll = await getDocs(collection(targetDb, 'barcodeFormats'));
+      const all = snapAll.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
+      const activeOnly = all
+        .filter((f: any) => f.active !== false)
+        .sort((a: any, b: any) => (a.priority ?? 9999) - (b.priority ?? 9999));
+
+      return { formats: withLegacy(activeOnly), error: err?.message };
+    } catch (err2: any) {
+      return {
+        formats: withLegacy([]),
+        error: err2?.message || 'Formats could not be loaded.',
+      };
+    }
+  }
+}
+
+export function withLegacy(list: BarcodeFormat[]): BarcodeFormat[] {
   // Ensure legacy Roche parser appears as a selectable strategy if you use it in useBarcodeParser
   const hasLegacy = list.some((f: any) => f.strategy === 'legacy_roche' || f.id === 'legacy_roche');
   return hasLegacy

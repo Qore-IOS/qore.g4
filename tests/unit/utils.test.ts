@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isValid61Digits, parseBarcode, sanitizeGS1 } from "../src/lib/utils";
+import { isValid61Digits, parseBarcode, sanitizeGS1 } from "../../src/lib/utils";
 
 test("sanitizeGS1 removes separators and whitespace", () => {
   const raw = "]C101234\u001d5678 90\u001d";

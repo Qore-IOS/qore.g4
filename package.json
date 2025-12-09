@@ -8,8 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "rimraf .test-dist && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.js",
-    "test:coverage": "rimraf .test-dist .coverage && tsc -p tsconfig.tests.json && NODE_V8_COVERAGE=.coverage node --test .test-dist/tests/**/*.js"
+    "test": "pnpm test:unit && pnpm test:integration && pnpm test:e2e",
+    "test:build": "rimraf .test-dist && tsc -p tsconfig.tests.json",
+    "test:unit": "pnpm test:build && node --require ./.test-dist/tests/helpers/register-paths.js --test --experimental-test-module-mocks .test-dist/tests/unit/**/*.js",
+    "test:integration": "pnpm test:build && node --require ./.test-dist/tests/helpers/register-paths.js --test --experimental-test-module-mocks .test-dist/tests/integration/**/*.js",
+    "test:e2e": "pnpm test:build && node --require ./.test-dist/tests/helpers/register-paths.js --test --experimental-test-module-mocks .test-dist/tests/e2e/**/*.js",
+    "test:coverage": "rimraf .test-dist coverage && tsc -p tsconfig.tests.json && NODE_V8_COVERAGE=coverage node --require ./.test-dist/tests/helpers/register-paths.js --test --experimental-test-module-mocks --experimental-test-coverage --test-coverage-include=.test-dist/src/lib/**/*.js,.test-dist/src/hooks/**/*.js --test-coverage-exclude=node:* --test-coverage-lines=70 --test-coverage-branches=70 --test-coverage-functions=70 .test-dist/tests/**/*.js"
   },
   "dependencies": {
     "@genkit-ai/googleai": "^1.0.0",

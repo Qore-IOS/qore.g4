@@ -13,8 +13,10 @@
     "allowSyntheticDefaultImports": true
   },
   "include": [
-    "tests/**/*.test.ts",
-    "src/lib/utils.ts"
+    "tests/**/*.ts",
+    "src/lib/utils.ts",
+    "src/lib/labCount.ts",
+    "src/hooks/useSafeBarcodeFormats.ts"
   ],
   "exclude": [
     "node_modules",
