@@ -2,8 +2,6 @@
 const config = {
   reactStrictMode: true,
   poweredByHeader: false,
-  eslint: { ignoreDuringBuilds: true },
-  typescript: { ignoreBuildErrors: true },
   images: { remotePatterns: [{ protocol: "https", hostname: "**" }] },
   experimental: {
     serverComponentsExternalPackages: ["@napi-rs/canvas", "canvas"],
