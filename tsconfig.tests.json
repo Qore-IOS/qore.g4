@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "target": "ES2020",
+    "types": ["node"],
+    "rootDir": ".",
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "tests/**/*.test.ts",
+    "src/lib/utils.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    ".test-dist"
+  ]
+}

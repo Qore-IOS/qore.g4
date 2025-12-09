@@ -2,7 +2,7 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { BarcodeFormat, ProductCode, ParsedResult } from './types';
-import { where, type QueryConstraint } from 'firebase/firestore';
+import { where, type QueryConstraint, type WhereFilterOp } from 'firebase/firestore';
 
 
 export function cn(...inputs: ClassValue[]) {
@@ -25,7 +25,7 @@ export function generateId(): string {
  */
 export function safeWhere<T>(
   field: keyof T,
-  op: FirebaseFirestore.WhereFilterOp,
+  op: WhereFilterOp,
   value: any
 ): QueryConstraint {
   if (value === undefined || value === null || value === '') {
