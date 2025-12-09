@@ -2,8 +2,8 @@
   "compilerOptions": {
     "target": "ES2017",
     "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
-    "skipLibCheck": true,
+    "allowJs": false,
+    "skipLibCheck": false,
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
@@ -35,6 +35,7 @@
     "src/**/archive/**",
     "src/**/trash/**",
     "src/functions/**",
-    "functions/**"
+    "functions/**",
+    "src/node_modules/**"
   ]
 }
