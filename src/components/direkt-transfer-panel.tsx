@@ -105,8 +105,8 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
     // FEFO Kontrol Mantığı (Date-fns ile tarih karşılaştırma)
     for (const item of shipItemsForThisCode) {
       try {
-        const itemDate = parseDate(item.miad as string, 'dd.MM.yyyy', new Date());
-        
+        const itemDate = parseDate(item.miad ?? '', 'dd.MM.yyyy', new Date());
+
         // Depodaki, transfer listesinde OLMAYAN ve miadı daha eski olan ürünleri bul
         const earlierItems = productStockInDepot.filter(s => {
           // Kendisi veya transfer listesindeki başka bir item olmamalı
@@ -114,7 +114,7 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
           if (isBeingShipped) return false;
 
           // Tarih kontrolü
-          const stockDate = parseDate(s.miad as string, 'dd.MM.yyyy', new Date());
+          const stockDate = parseDate(s.miad ?? '', 'dd.MM.yyyy', new Date());
           // Stoktaki tarih < Transfer edilen tarih ise violation vardır
           return compareAsc(stockDate, itemDate) < 0;
         });
@@ -122,10 +122,10 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
         if (earlierItems.length > 0) {
           // En eski tarihli olanı öneri olarak ekle
           earlierItems.sort((a, b) => compareAsc(
-            parseDate(a.miad as string, 'dd.MM.yyyy', new Date()), 
-            parseDate(b.miad as string, 'dd.MM.yyyy', new Date())
+            parseDate(a.miad ?? '', 'dd.MM.yyyy', new Date()),
+            parseDate(b.miad ?? '', 'dd.MM.yyyy', new Date())
           ));
-          
+
           violations.push({ scannedItem: item, recommendedItem: earlierItems[0] });
         }
       } catch (e) {
@@ -212,9 +212,10 @@ export default function DirektTransferPanel() {
     const trackingMap: Record<string, TrackingMode> = {};
     const nameMap: Record<string, string> = {};
     products.forEach(p => {
-      if (p.stokKodu) {
-          nameMap[p.stokKodu] = p.stokAdi || p.stokKodu;
-          if ((p as any).trackingMode) trackingMap[p.stokKodu] = (p as any).trackingMode as TrackingMode;
+      const stokKodu = p.stokKodu ?? '';
+      if (stokKodu) {
+          nameMap[stokKodu] = p.stokAdi ?? stokKodu;
+          if ((p as any).trackingMode) trackingMap[stokKodu] = (p as any).trackingMode as TrackingMode;
       }
     });
     setProductTracking(trackingMap);
@@ -222,7 +223,7 @@ export default function DirektTransferPanel() {
   }, [products]);
   
   const upsertGroupedRow = useCallback((partial: Partial<TransferRow>, inc = 1) => {
-    const k = `${partial.stokKodu}__${partial.lotNumarasi || ''}`;
+    const k = `${partial.stokKodu ?? ''}__${partial.lotNumarasi || ''}`;
     setDirectTransferItems(prev => {
       const i = prev.findIndex(r => r.key === k);
       if (i >= 0) {
@@ -232,8 +233,8 @@ export default function DirektTransferPanel() {
       }
       const row: TransferRow = {
         key: k,
-        stokKodu: partial.stokKodu!,
-        stokAdi: partial.stokAdi!,
+        stokKodu: partial.stokKodu ?? '',
+        stokAdi: partial.stokAdi ?? '',
         lotNumarasi: partial.lotNumarasi || '',
         miad: partial.miad || '',
         seriNumarasi: partial.seriNumarasi || '',
@@ -316,8 +317,8 @@ export default function DirektTransferPanel() {
         return;
       }
       const { product } = resolved;
-      const stokKodu = product.stokKodu!;
-      const stokAdi = product.stokAdi!;
+      const stokKodu = product.stokKodu ?? '';
+      const stokAdi = product.stokAdi ?? '';
       const lot = resolved.lotNumarasi || '';
       const miad = resolved.miadFormatted || '';
       const seri = resolved.seriNumarasi || '';
@@ -430,8 +431,8 @@ export default function DirektTransferPanel() {
     
     pool.sort((a,b) => {
       try {
-        const ad = parseDate(a.miad as string, 'dd.MM.yyyy', new Date());
-        const bd = parseDate(b.miad as string, 'dd.MM.yyyy', new Date());
+        const ad = parseDate(a.miad ?? '', 'dd.MM.yyyy', new Date());
+        const bd = parseDate(b.miad ?? '', 'dd.MM.yyyy', new Date());
         return compareAsc(ad, bd);
       } catch { return 0; }
     });
@@ -490,8 +491,8 @@ export default function DirektTransferPanel() {
           laboratoryName: targetName,
           consumptionTimestamp: new Date(),
           consumptionType: 'normal_kullanim' as const,
-          userId: currentUser?.uid || 'unknown',
-          userName: currentUserProfile?.name || currentUser?.email || 'Unknown User',
+          userId: currentUser.uid ?? 'unknown',
+          userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
         };
         batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
       } else {
@@ -524,8 +525,8 @@ export default function DirektTransferPanel() {
       id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
       sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
       mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
-      itemCount: itemsToShip.length, createdByUid: currentUser.uid || '',
-      createdByName: currentUserProfile.name || currentUser.email || '',
+      itemCount: itemsToShip.length, createdByUid: currentUser.uid ?? '',
+      createdByName: currentUserProfile.name ?? currentUser.email ?? '',
     });
 
     try {
@@ -535,20 +536,20 @@ export default function DirektTransferPanel() {
       
       confirmedViolations.forEach(v => {
         emitFefoOverride({
-            actor: { uid: currentUserProfile.uid, name: currentUserProfile.name || 'Bilinmeyen' },
+            actor: { uid: currentUserProfile.uid ?? '', name: currentUserProfile.name ?? 'Bilinmeyen' },
             action: 'direct_transfer',
-            product: { 
+            product: {
                 stokKodu: v.scannedItem.stokKodu,
                 stokAdi: v.scannedItem.stokAdi,
                 lot: v.scannedItem.lotNumarasi,
-                miad: v.scannedItem.miad as string,
+                miad: v.scannedItem.miad ?? '',
             },
             shipmentId: transferRef.id,
             depotId: selectedDepotId,
         });
       });
 
-      await autoPrintTutanakFromTransferId(db, transferRef.id, targetLab, currentUserProfile?.name || currentUser?.email || '');
+      await autoPrintTutanakFromTransferId(db, transferRef.id, targetLab, currentUserProfile.name ?? currentUser.email ?? '');
       
       if (targetId) {
         await updateHospitalLastTransferDates(targetId, itemsToShip);
@@ -600,10 +601,11 @@ export default function DirektTransferPanel() {
   const manualProducts = useMemo(() => {
     const opts: { code: string; name: string; tracking: TrackingMode }[] = [];
     products.forEach(p => {
-        if (!p.stokKodu) return;
-        const tracking = productTracking[p.stokKodu] || resolveDefaultTrackingMode(p as any);
+        const stokKodu = p.stokKodu ?? '';
+        if (!stokKodu) return;
+        const tracking = productTracking[stokKodu] || resolveDefaultTrackingMode(p as any);
         if (tracking === 'lot_manual' || tracking === 'qty_manual') {
-            opts.push({ code: p.stokKodu, name: productNames[p.stokKodu] || p.stokKodu, tracking });
+            opts.push({ code: stokKodu, name: productNames[stokKodu] || stokKodu, tracking });
         }
     });
     return opts.sort((a,b) => a.name.localeCompare(b.name));
@@ -639,7 +641,7 @@ export default function DirektTransferPanel() {
       isGroup: boolean;
       serials: { id: string; seriNumarasi: string }[]
     }> = {};
-  
+
     directTransferItems.forEach(item => {
       const groupKey = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
       if (!groups[groupKey]) {
@@ -648,7 +650,7 @@ export default function DirektTransferPanel() {
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
           lotNumarasi: item.lotNumarasi || '',
-          miad: item.miad as string || '',
+          miad: item.miad ?? '',
           adet: 0,
           isGroup: true,
           serials: [],
@@ -749,17 +751,17 @@ export default function DirektTransferPanel() {
                     <CommandList>
                       <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
                       <CommandGroup>
-                        {hospitals.sort((a,b) => (a.name || '').localeCompare(b.name || '')).map((lab) => (
+                        {hospitals.sort((a,b) => (a.name ?? '').localeCompare(b.name ?? '')).map((lab) => (
                           <CommandItem
                             key={lab.id}
-                            value={lab.name}
+                            value={lab.name ?? ''}
                             onSelect={() => {
                               setSelectedLabId(lab.id);
                               setIsLabPopoverOpen(false);
                             }}
                           >
                             <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                            {lab.name}
+                            {lab.name ?? ''}
                           </CommandItem>
                         ))}
                       </CommandGroup>
@@ -789,7 +791,7 @@ export default function DirektTransferPanel() {
                   transferRows={directTransferItems}
                   products={manualProducts}
                   onAddLot={({ code, name, lot, miad, qty }) => {
-                    upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad }, qty);
+                    upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
                   }}
                   onAddQty={({ code, name, qty }) => {
                     upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
@@ -877,8 +879,8 @@ export default function DirektTransferPanel() {
                 {fefoViolations.map((v, i) => (
                     <div key={i} className="text-sm p-2 mb-2 bg-background rounded">
                         <p><strong>{v.scannedItem.stokAdi}</strong></p>
-                        <p>Okutulan Lot: {v.scannedItem.lotNumarasi} (Miad: {v.scannedItem.miad as string})</p>
-                        <p className="text-green-600">Önerilen Lot: {v.recommendedItem.lotNumarasi} (Miad: {v.recommendedItem.miad as string})</p>
+                        <p>Okutulan Lot: {v.scannedItem.lotNumarasi} (Miad: {v.scannedItem.miad ?? ''})</p>
+                        <p className="text-green-600">Önerilen Lot: {v.recommendedItem.lotNumarasi} (Miad: {v.recommendedItem.miad ?? ''})</p>
                     </div>
                 ))}
             </ScrollArea>

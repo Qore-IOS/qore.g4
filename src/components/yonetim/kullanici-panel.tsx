@@ -66,7 +66,7 @@ export default function KullaniciPanel() {
   const [brands, setBrands] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }>>({});
+  const [currentUser, setCurrentUser] = useState<Partial<AppUser>>({});
   const [password, setPassword] = useState('');
 
   const fetchData = useCallback(async () => {
@@ -107,7 +107,7 @@ export default function KullaniciPanel() {
       toast({ title: 'Hata', description: 'E-posta boş olamaz.', variant: 'destructive' });
       return;
     }
-    const userData: Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }> = {
+    const userData: Partial<AppUser> = {
       name: currentUser.name,
       role: currentUser.role || 'user',
       nfcId: (currentUser.nfcId || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase(),
@@ -133,7 +133,7 @@ export default function KullaniciPanel() {
           setIsLoading(false);
           return;
         }
-        await signup(currentUser.email, password, payload);
+        await signup(currentUser.email ?? '', password, payload);
         toast({ title: 'Başarılı', description: 'Yeni kullanıcı oluşturuldu.' });
       }
       fetchData();
@@ -224,7 +224,7 @@ export default function KullaniciPanel() {
                         <TableCell className="font-mono text-xs">{u.nfcId || '-'}</TableCell>
                         <TableCell className="text-right space-x-1">
                           <Button variant="ghost" size="icon" onClick={() => openModal(u)}><Edit3 className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(u.uid)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDelete(u.uid ?? '')}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -291,12 +291,12 @@ export default function KullaniciPanel() {
                         <div className="flex items-center space-x-2">
                             <Switch
                                 id="notifications-enabled"
-                                checked={currentUser.notificationsEnabled}
+                                checked={currentUser.notificationsEnabled ?? false}
                                 onCheckedChange={(checked) => setCurrentUser({ ...currentUser, notificationsEnabled: checked })}
                             />
                             <Label htmlFor="notifications-enabled">Bildirimlere İzin Ver</Label>
                         </div>
-                        <div className={!currentUser.notificationsEnabled ? 'opacity-50 pointer-events-none' : ''}>
+                        <div className={!(currentUser.notificationsEnabled ?? false) ? 'opacity-50 pointer-events-none' : ''}>
                           <h4 className="font-medium text-sm mb-2">İzin Verilen Bildirim Türleri</h4>
                           <ScrollArea className="h-32 border rounded-md p-2">
                             {NOTIFICATION_OPTIONS.map(type => (
@@ -333,30 +333,30 @@ export default function KullaniciPanel() {
                     <ScrollArea className="h-1/2 border rounded-md p-2">
                         <h4 className="font-medium text-sm mb-2">Atanan Laboratuvarlar</h4>
                         {hospitals.map(h => (
-                            <div key={h.id} className="flex items-center space-x-2 mb-1">
+                            <div key={h.id ?? ''} className="flex items-center space-x-2 mb-1">
                                 <Checkbox
-                                    id={`lab-${h.id}`}
-                                    checked={currentUser.assignedLaboratories?.includes(h.id)}
+                                    id={`lab-${h.id ?? ''}`}
+                                    checked={currentUser.assignedLaboratories?.includes(h.id ?? '')}
                                     onCheckedChange={(checked) => {
                                         const currentLabs = currentUser.assignedLaboratories || [];
-                                        const newLabs = checked ? [...currentLabs, h.id] : currentLabs.filter(id => id !== h.id);
+                                        const newLabs = checked ? [...currentLabs, h.id ?? ''] : currentLabs.filter(id => id !== (h.id ?? ''));
                                         setCurrentUser({...currentUser, assignedLaboratories: newLabs});
                                     }}
                                 />
-                                <label htmlFor={`lab-${h.id}`} className="text-sm">{h.name}</label>
+                                <label htmlFor={`lab-${h.id ?? ''}`} className="text-sm">{h.name ?? ''}</label>
                             </div>
                         ))}
                     </ScrollArea>
                     <ScrollArea className="h-1/2 border rounded-md p-2">
                         <h4 className="font-medium text-sm mb-2">Atanan Depolar</h4>
                         {depots.map(d => (
-                            <div key={d.id} className="flex items-center space-x-2 mb-1">
+                            <div key={d.id ?? ''} className="flex items-center space-x-2 mb-1">
                                 <Checkbox
-                                    id={`depot-${d.id}`}
-                                    checked={currentUser.assignedDepots?.includes(d.id)}
-                                    onCheckedChange={(checked) => handleDepotCheckboxChange(d.id, !!checked)}
+                                    id={`depot-${d.id ?? ''}`}
+                                    checked={currentUser.assignedDepots?.includes(d.id ?? '')}
+                                    onCheckedChange={(checked) => handleDepotCheckboxChange(d.id ?? '', !!checked)}
                                 />
-                                <label htmlFor={`depot-${d.id}`} className="text-sm">{d.name}</label>
+                                <label htmlFor={`depot-${d.id ?? ''}`} className="text-sm">{d.name ?? ''}</label>
                             </div>
                         ))}
                     </ScrollArea>

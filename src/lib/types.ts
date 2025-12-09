@@ -121,6 +121,8 @@ export interface User {
   assignedLaboratories?: string[]; // Array of laboratory IDs
   assignedDepots?: string[]; // Array of depot IDs
   assignedBrands?: string[]; // Array of brand names
+  notificationsEnabled?: boolean; // User notification preferences
+  notificationPreferences?: string[]; // Array of notification types
 }
 
 export interface ScannedItem {
@@ -545,4 +547,19 @@ export interface LabResultExcelRow {
   bolgeKodu?: string;
   dislabKabul?: string;
   tupAdi?: string;
+}
+
+export interface Rack {
+  id: string;
+  labId: string;
+  labCode: string;
+  fridgeCode: string;
+  date: string;
+  sequence: number;
+  status: 'open' | 'sealed';
+  specimens?: string[];
+  specimenCount?: number;
+  sealedAt?: any;
+  createdAt?: any;
+  [k: string]: any;
 }

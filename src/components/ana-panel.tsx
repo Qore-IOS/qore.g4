@@ -50,6 +50,13 @@ import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import { useAuth } from '@/contexts/auth-context';
 import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
 
+// IrsaliyeOcrModal'dan dönen sonuç tipi
+interface IrsaliyeParseResult {
+  stokKodu: string;
+  lot?: string;
+  miad?: string;
+  quantity: number;
+}
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
@@ -310,7 +317,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   // Auto-select first depot when loaded
   useEffect(() => {
-    if (depots.length > 0 && !selectedDepotId) {
+    if (depots.length > 0 && !selectedDepotId && depots[0].id) {
       setSelectedDepotId(depots[0].id);
     }
   }, [depots, selectedDepotId]);
@@ -357,10 +364,14 @@ export default function AnaPanel(props: AnaPanelProps) {
   }, [selectedDepotId]);
 
   useEffect(() => {
-    if (!activeSession) return;
+    if (!activeSession || !activeSession.id) return;
     const unsub = onSnapshot(collection(db, 'depotCountSessions', activeSession.id, 'scannedItems'), (snapshot) => {
         const sessionItems = snapshot.docs.map(d => ({...d.data(), id: d.id}) as ScanRow);
-        setScannedItems(sessionItems.sort((a,b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0)));
+        setScannedItems(sessionItems.sort((a,b) => {
+          const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : (a.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+          const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+          return bTime - aTime;
+        }));
     });
     return () => unsub();
   }, [activeSession]);
@@ -380,21 +391,23 @@ export default function AnaPanel(props: AnaPanelProps) {
         const parsed: ParsedGeneric | null = parseAnyBarcode(barcodeData, barcodeFormats);
         if (!parsed) throw new Error('Barkod tanımlı formatlarla eşleşmiyor.');
 
-        const resolved = resolveProductFromParsed(parsed, productCodes);
+        const resolved = resolveProductFromParsed(parsed, productCodes as any);
         if (!resolved.product) throw new Error(`Barkod numarası/referans herhangi bir ürünle eşleşmedi.`);
-        
+
         const { lotNumarasi, miadFormatted, seriNumarasi, stokKodu } = resolved;
+        if (!stokKodu) throw new Error('Stok kodu bulunamadı.');
+
         const matchedProduct = resolved.product;
         const mode = resolveDefaultTrackingMode(matchedProduct as any);
-        
-        const isLotOnlyBarcode = (mode === 'serial_and_lot' || mode === 'serial') && !!lotNumarasi && !seriNumarasi;
 
-        if ((mode === 'serial' || mode === 'serial_and_lot') && !isLotOnlyBarcode) {
+        const isLotOnlyBarcode = (mode === 'serial') && !!lotNumarasi && !seriNumarasi;
+
+        if ((mode === 'serial') && !isLotOnlyBarcode) {
             if (!seriNumarasi) throw new Error('Bu ürün seri numarası ile takip edilir, barkod seri içermiyor.');
 
             // Mükerrer kontrolü: aynı ürün için aynı seri numarası kontrol edilir
-            const sessionSerials = scannedSerialsRef.current.get(stokKodu!);
-            const depotSerials = existingDepotSerials.get(stokKodu!);
+            const sessionSerials = scannedSerialsRef.current.get(stokKodu);
+            const depotSerials = existingDepotSerials.get(stokKodu);
             const isInSession = sessionSerials?.has(seriNumarasi) ?? false;
             const isInDepot = depotSerials?.has(seriNumarasi) ?? false;
 
@@ -408,17 +421,17 @@ export default function AnaPanel(props: AnaPanelProps) {
             }
 
             const newItem: ScanRow = {
-              id: generateId(), barkod: barcodeData, stokKodu: stokKodu!, stokAdi: matchedProduct.stokAdi,
+              id: generateId(), barkod: barcodeData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
               rafAdresi: '', irsaliyeNumarasi: '', isSelected: false, timestamp: new Date(), isProcessed: false,
               adet: 1, isGroup: false
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
             // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi>
-            if (!scannedSerialsRef.current.has(stokKodu!)) {
-              scannedSerialsRef.current.set(stokKodu!, new Set());
+            if (!scannedSerialsRef.current.has(stokKodu)) {
+              scannedSerialsRef.current.set(stokKodu, new Set());
             }
-            scannedSerialsRef.current.get(stokKodu!)!.add(seriNumarasi);
+            scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
             setScannedItems(prev => [newItem, ...prev]);
             if (source === 'barcode') setLastScannedProduct(newItem);
 
@@ -426,7 +439,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           // It's a lot-based or quantity-based item
           upsertGroupedRow(
             setScannedItems,
-            { stokKodu: stokKodu!, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: barcodeData },
+            { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: barcodeData },
             (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === (lotNumarasi || '') && r.miad === (miadFormatted || '')),
             1
           );
@@ -481,7 +494,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         upsertGroupedRow(
             setScannedItems,
-            { stokKodu: res.stokKodu, stokAdi: product.stokAdi, lot: res.lot, miad: res.miad },
+            { stokKodu: res.stokKodu, stokAdi: product.stokAdi || '', lot: res.lot, miad: res.miad },
             (r) => !!(r.isGroup && r.stokKodu === res.stokKodu && r.lotNumarasi === (res.lot || '') && r.miad === (res.miad || '')),
             res.quantity
         );
@@ -525,10 +538,15 @@ export default function AnaPanel(props: AnaPanelProps) {
         }
       }
     });
-    return Object.values(grouped).sort((a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0));
+    return Object.values(grouped).sort((a, b) => {
+      const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : (a.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+      const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+      return bTime - aTime;
+    });
   }, [scannedItems]);
   
-  const toggleGroupSelection = (groupKey: string) => {
+  const toggleGroupSelection = (groupKey: string | undefined) => {
+    if (!groupKey) return;
     const isCurrentlySelected = groupedScannedItems.find(g => g.key === groupKey)?.isSelected ?? false;
     setScannedItems(prev =>
       prev.map(item =>
@@ -539,7 +557,8 @@ export default function AnaPanel(props: AnaPanelProps) {
     );
   };
   
-  const deleteGroup = (groupKey: string) => {
+  const deleteGroup = (groupKey: string | undefined) => {
+    if (!groupKey) return;
     setScannedItems(prev => {
         const itemsToRemove = prev.filter(item => item.key === groupKey);
         itemsToRemove.forEach(item => {
@@ -577,7 +596,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   
   const getBrandFor = (stockCode: string, name: string) => {
     const p = productCodes.find(p => p.stokKodu === stockCode) as any;
-    return (p?.marka || p?.brand || (name?.split(' ')?.[0] ?? '')).toString();
+    return (p?.marka || p?.brand || name.split(' ')[0] || '').toString();
   };
 
   const buildTransactionLines = (rows: ScanRow[]): MalKabulLine[] => {
@@ -587,8 +606,8 @@ export default function AnaPanel(props: AnaPanelProps) {
       
       if (!map.has(key)) {
         map.set(key, {
-          stokKodu: r.stokKodu,
-          stokAdi: r.stokAdi,
+          stokKodu: r.stokKodu || '',
+          stokAdi: r.stokAdi || '',
           lotNumarasi: r.lotNumarasi || '',
           miad: r.miad || '',
           adet: 0,
@@ -622,7 +641,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       userName: currentUserProfile?.name || currentUser?.email || 'Unknown',
       timestamp: Timestamp.now(),
       itemCount: rows.reduce((n, r) => n + Math.max(1, r.adet ?? 1), 0),
-      brands: Array.from(new Set(rows.map(r => getBrandFor(r.stokKodu, r.stokAdi)).filter(Boolean))),
+      brands: Array.from(new Set(rows.map(r => getBrandFor(r.stokKodu || '', r.stokAdi || '')).filter(Boolean))),
       mode
     };
 
@@ -736,24 +755,24 @@ export default function AnaPanel(props: AnaPanelProps) {
 
       for (const item of itemsToProcess) {
         // Mükerrer kontrolü: aynı stokKodu için aynı seri numarası kontrol edilir
-        const depotProductSerials = existingDepotSerials.get(item.stokKodu);
+        const depotProductSerials = item.stokKodu ? existingDepotSerials.get(item.stokKodu) : undefined;
         if(item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
             // Already checked on scan, this is a double-check.
             continue;
         }
-        
+
         const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
-        
+
         const createDocData = (serial = '') => ({
           depotId: selectedDepotId,
           depotName,
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
+          stokKodu: item.stokKodu || '',
+          stokAdi: item.stokAdi || '',
           lotNumarasi: item.lotNumarasi || '',
           miad: item.miad ? normalizeMiad(item.miad) : '',
           seriNumarasi: serial,
-          rafAdresi: item.rafAdresi,
-          irsaliyeNumarasi: item.irsaliyeNumarasi,
+          rafAdresi: item.rafAdresi || '',
+          irsaliyeNumarasi: item.irsaliyeNumarasi || '',
           eklenmeTarihi: toFsTimestamp(item.timestamp),
           isShipped: false,
           createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
@@ -772,12 +791,12 @@ export default function AnaPanel(props: AnaPanelProps) {
             await queue.set(stokRef, createDocData(serial));
             
             await enqueueSerialHistory(queue, serial, 'intake', {
-              stokKodu: item.stokKodu,
-              stokAdi: item.stokAdi,
+              stokKodu: item.stokKodu || '',
+              stokAdi: item.stokAdi || '',
               depotId: selectedDepotId,
               depotName,
-              rafAdresi: item.rafAdresi,
-              irsaliyeNumarasi: item.irsaliyeNumarasi,
+              rafAdresi: item.rafAdresi || '',
+              irsaliyeNumarasi: item.irsaliyeNumarasi || '',
             });
           }
         }
@@ -800,11 +819,11 @@ export default function AnaPanel(props: AnaPanelProps) {
         ),
       });
   
-      setScannedItems(prev => prev.filter(i => !processedIds.has(i.id)));
+      setScannedItems(prev => prev.filter(i => i.id && !processedIds.has(i.id)));
       // Map'i temizle ve kalan öğeleri yeniden ekle
       scannedSerialsRef.current.clear();
       scannedItems.forEach(item => {
-        if (!processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
+        if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
           if (!scannedSerialsRef.current.has(item.stokKodu)) {
             scannedSerialsRef.current.set(item.stokKodu, new Set());
           }
@@ -849,7 +868,8 @@ export default function AnaPanel(props: AnaPanelProps) {
     return opts.sort((a,b) => a.name.localeCompare(b.name));
   }, [productCodes, productTracking, productNames]);
   
-  const handleAdetChange = (groupKey: string, newAdetStr: string) => {
+  const handleAdetChange = (groupKey: string | undefined, newAdetStr: string) => {
+    if (!groupKey) return;
     const newAdet = parseInt(newAdetStr, 10);
     if (isNaN(newAdet) || newAdet < 0) return;
 
@@ -992,13 +1012,13 @@ export default function AnaPanel(props: AnaPanelProps) {
             ) : (
               <Accordion type="multiple" className="w-full">
                 {groupedScannedItems.map((group, groupIndex) => {
-                  const trackingMode = productTracking[group.stokKodu] || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
-                  const hasSerials = trackingMode === 'serial' || trackingMode === 'serial_and_lot';
+                  const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
+                  const hasSerials = trackingMode === 'serial';
                   return (
                     <AccordionItem value={`group-${groupIndex}`} key={group.key}>
                       <AccordionTrigger className="flex items-center p-2 cursor-pointer hover:bg-muted/50 w-full text-left">
                            <div className="px-2">
-                             <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key!)} onClick={e => e.stopPropagation()} />
+                             <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} onClick={e => e.stopPropagation()} />
                            </div>
                            <div className="flex-1">
                              {group.stokAdi}<span className="block text-xs text-muted-foreground">{group.stokKodu}</span>
@@ -1014,7 +1034,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                                <Input
                                    type="number"
                                    value={group.adet}
-                                   onChange={(e) => handleAdetChange(group.key!, e.target.value)}
+                                   onChange={(e) => handleAdetChange(group.key, e.target.value)}
                                    onClick={(e) => e.stopPropagation()}
                                    className="h-8 w-20 text-center font-bold text-lg"
                                    min="1"
@@ -1022,7 +1042,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                            )}
                            </div>
                            <div className="w-20 text-right">
-                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); deleteGroup(group.key!); }}>
+                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); deleteGroup(group.key); }}>
                                    <Trash2 className="h-4 w-4 text-destructive" />
                                </Button>
                            </div>
@@ -1071,7 +1091,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                 <Select value={selectedAddressBarcode} onValueChange={setSelectedAddressBarcode}>
                     <SelectTrigger><SelectValue placeholder="Tanımlı Adres Seçin..." /></SelectTrigger>
                     <SelectContent>
-                        {addressDefinitions.map(ad => <SelectItem key={ad.id} value={ad.addressBarcode}>{ad.addressName}</SelectItem>)}
+                        {addressDefinitions.map(ad => <SelectItem key={ad.id} value={ad.addressBarcode || ''}>{ad.addressName}</SelectItem>)}
                     </SelectContent>
                 </Select>
                 <Input value={addressAssignmentInput} onChange={e => setAddressAssignmentInput(e.target.value)} placeholder="Veya manuel adres girin"/>

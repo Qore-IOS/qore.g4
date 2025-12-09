@@ -210,7 +210,7 @@ export default function UrunKullanimPanel() {
       stokKodu: itemToConsume.stokKodu,
       stokAdi: itemToConsume.stokAdi,
       lotNumarasi: itemToConsume.lotNumarasi || '',
-      miad: itemToConsume.miad as string,
+      miad: itemToConsume.miad ?? '',
       seriNumarasi: itemToConsume.seriNumarasi || '',
       laboratoryId: selectedLab.id,
       laboratoryName: selectedLab.name || '',
@@ -277,7 +277,7 @@ export default function UrunKullanimPanel() {
   
   const pickEarliest = (items: DepoStokItem[]) => {
     return items
-      .map(i => ({ item: i, d: parseDate(i.miad as any, 'dd.MM.yyyy', new Date()) }))
+      .map(i => ({ item: i, d: parseDate(i.miad ?? '', 'dd.MM.yyyy', new Date()) }))
       .sort((a, b) => compareAsc(a.d, b.d))[0]?.item;
   };
 
@@ -375,7 +375,7 @@ export default function UrunKullanimPanel() {
           toast({ title: 'Yanlış Lot', description: `Lütfen ${lotReplaceTarget.recommended.lotNumarasi} lotundan bir seri okutun.`, variant: 'destructive' });
           return;
         }
-        const newItem = findBySerial(parsed.stokKodu!, parsed.seriNumarasi);
+        const newItem = findBySerial(parsed.stokKodu ?? '', parsed.seriNumarasi);
         if (!newItem) {
           toast({ title: 'Depoda Bulunamadı', description: 'Bu seri lotta bulunamadı.', variant: 'destructive' });
           return;
@@ -408,8 +408,8 @@ export default function UrunKullanimPanel() {
     setIsSavingFault(true);
     try {
       await openDeviceFaultReport({
-        hospitalId: selectedLabId,
-        labName: selectedLabName,
+        hospitalId: selectedLabId ?? '',
+        labName: selectedLabName ?? '',
         deviceId: selectedDevice.id,
         model: selectedDevice.cihazAdi || selectedDevice.name || '',
         serial: selectedDevice.seriNumarasi || '',
@@ -418,14 +418,14 @@ export default function UrunKullanimPanel() {
         openedByName: currentUserProfile?.name || '',
         openDescription: faultDescription,
       });
-  
+
       await emitFaultOpened({
         actor: { uid: currentUser?.uid || '', name: currentUserProfile?.name || '' },
         assignedDeviceId: selectedDevice.id,
         deviceName: selectedDevice.cihazAdi || selectedDevice.name || '',
         faultType: faultType,
-        hospitalId: selectedLabId,
-        hospitalName: selectedLabName,
+        hospitalId: selectedLabId ?? '',
+        hospitalName: selectedLabName ?? '',
       });
   
       toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için arıza bildirildi.` });
@@ -454,7 +454,7 @@ export default function UrunKullanimPanel() {
       .filter(item => item.stokKodu === manualProductCode)
       .forEach(item => {
         const key = `${item.lotNumarasi || 'N/A'}|${item.miad || 'N/A'}`;
-        const current = lots.get(key) || { miad: item.miad as string || 'N/A', count: 0 };
+        const current = lots.get(key) || { miad: item.miad ?? 'N/A', count: 0 };
         current.count += 1;
         lots.set(key, current);
       });
@@ -590,9 +590,9 @@ export default function UrunKullanimPanel() {
                               <CardContent className="p-0">
                                 {lastScannedProduct ? (
                                   <div className="space-y-1">
-                                    <p className="text-lg font-semibold">{safeName(lastScannedProduct.stokKodu, lastScannedProduct.stokAdi)}</p>
+                                    <p className="text-lg font-semibold">{safeName(lastScannedProduct.stokKodu, lastScannedProduct.stokAdi ?? '')}</p>
                                     <p className="text-sm text-muted-foreground">Seri No: <span className="font-mono">{lastScannedProduct.seriNumarasi}</span></p>
-                                    <p className="text-sm text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad as string}</p>
+                                    <p className="text-sm text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad ?? ''}</p>
                                     {lastScannedProduct.subPointName ? (
                                       <p className="text-sm text-muted-foreground">Tüketim Noktası: {lastScannedProduct.subPointName}</p>
                                     ) : null}
@@ -633,7 +633,7 @@ export default function UrunKullanimPanel() {
                                       {sessionHistory.map((item, index) => (
                                           <li key={index} className="flex justify-between items-center text-xs p-1 rounded-md hover:bg-muted/50">
                                               <div className="truncate">
-                                                  <span className="font-semibold">{safeName(item.stokKodu, item.stokAdi)}</span>
+                                                  <span className="font-semibold">{safeName(item.stokKodu, item.stokAdi ?? '')}</span>
                                                   <span className="text-muted-foreground ml-2">({item.lotNumarasi})</span>
                                               </div>
                                               <span className="font-mono text-muted-foreground flex-shrink-0">{item.seriNumarasi}</span>
@@ -756,7 +756,7 @@ export default function UrunKullanimPanel() {
                 <Label>Ürün</Label>
                 <Select value={manualProductCode} onValueChange={setManualProductCode}>
                     <SelectTrigger><SelectValue placeholder="Ürün seçin..." /></SelectTrigger>
-                    <SelectContent>{manualDeductionAvailableProducts.map(p => (<SelectItem key={p.id} value={p.stokKodu}>{p.stokAdi}</SelectItem>))}</SelectContent>
+                    <SelectContent>{manualDeductionAvailableProducts.map(p => (<SelectItem key={p.id} value={p.stokKodu ?? ''}>{p.stokAdi}</SelectItem>))}</SelectContent>
                 </Select>
               </div>
               <div>

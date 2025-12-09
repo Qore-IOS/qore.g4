@@ -211,7 +211,7 @@ export default function StokYonetimiPanel() {
       setAddressDefinitions(addressesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AddressDefinition)));
       setHospitals(hospitalsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital)));
 
-      if (depotList.length > 0 && !selectedDepotId) {
+      if (depotList.length > 0 && !selectedDepotId && depotList[0]?.id) {
         setSelectedDepotId(depotList[0].id);
       }
     } catch (e) {
@@ -285,12 +285,14 @@ export default function StokYonetimiPanel() {
         };
         for (let i = 0; i < diff; i++) {
           const newDocRef = doc(collection(db, 'depoStok'));
-          batch.set(newDocRef, { ...newItemTemplate, seriNumarasi: `MANUEL-${generateId(6)}` });
+          batch.set(newDocRef, { ...newItemTemplate, seriNumarasi: `MANUEL-${generateId()}` });
         }
       } else { // Remove items
         const itemsToRemove = group.items.slice(0, Math.abs(diff));
         itemsToRemove.forEach(item => {
-          batch.delete(doc(db, 'depoStok', item.id));
+          if (item.id) {
+            batch.delete(doc(db, 'depoStok', item.id));
+          }
         });
       }
       await batch.commit();
@@ -345,8 +347,13 @@ export default function StokYonetimiPanel() {
   const filteredStock = useMemo(() => {
     let items = fullDepotStok.filter(item => !item.isShipped && item.depotId === selectedDepotId);
     if (activeFilters.length > 0) {
-      const productCodeMap = new Map<string, ProductCode>(productCodes.map(p => [p.stokKodu, p] as const));
+      const productCodeMap = new Map<string, ProductCode>(
+        productCodes
+          .filter(p => p.stokKodu !== undefined)
+          .map(p => [p.stokKodu!, p] as const)
+      );
       items = items.filter(item => {
+        if (!item.stokKodu) return false;
         const product = productCodeMap.get(item.stokKodu);
         if (!product) return false;
         return activeFilters.every(filter => {
@@ -359,8 +366,8 @@ export default function StokYonetimiPanel() {
     if (debouncedSearchTerm) {
       const term = debouncedSearchTerm.toLowerCase();
       items = items.filter(item =>
-        item.stokKodu.toLowerCase().includes(term) ||
-        item.stokAdi.toLowerCase().includes(term) ||
+        item.stokKodu?.toLowerCase().includes(term) ||
+        item.stokAdi?.toLowerCase().includes(term) ||
         item.rafAdresi?.toLowerCase().includes(term) ||
         item.lotNumarasi?.toLowerCase().includes(term) ||
         item.seriNumarasi?.toLowerCase().includes(term)
@@ -375,12 +382,12 @@ export default function StokYonetimiPanel() {
       const bIsEmpty = !b.lotNumarasi && !b.miad;
       if (aIsEmpty && !bIsEmpty) return 1;
       if (!aIsEmpty && bIsEmpty) return -1;
-      const valA = a[sortBy];
-      const valB = b[sortBy];
+      const valA = a[sortBy] ?? '';
+      const valB = b[sortBy] ?? '';
       if (sortBy === 'miad') {
         try {
-          const dateA = parse(valA as string, 'dd.MM.yyyy', new Date());
-          const dateB = parse(valB as string, 'dd.MM.yyyy', new Date());
+          const dateA = parse(String(valA), 'dd.MM.yyyy', new Date());
+          const dateB = parse(String(valB), 'dd.MM.yyyy', new Date());
           if (isValid(dateA) && isValid(dateB)) {
             return sortOrder === 'asc' ? compareAsc(dateA, dateB) : compareAsc(dateB, dateA);
           }
@@ -396,10 +403,10 @@ export default function StokYonetimiPanel() {
       if (!acc[key]) {
         const productInfo = productCodes.find(p => p.stokKodu === item.stokKodu);
         acc[key] = {
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
+          stokKodu: item.stokKodu || '',
+          stokAdi: item.stokAdi || '',
           lotNumarasi: item.lotNumarasi || '',
-          miad: item.miad as string || '',
+          miad: (item.miad as string) || '',
           anaBirim: productInfo?.anaBirim || 'Kutu',
           rafAdresi: item.rafAdresi || '',
           items: [],
@@ -415,9 +422,9 @@ export default function StokYonetimiPanel() {
     if (colorFilter !== 'none') {
       baseList = baseList.filter(group => {
         const rule = minMaxRules[group.stokKodu];
-        const miadDate = parse(group.miad, 'dd.MM.yyyy', new Date());
+        const miadDate = parse(group.miad || '', 'dd.MM.yyyy', new Date());
         const days = isValid(miadDate) ? differenceInDays(miadDate, new Date()) : Infinity;
-        const nearMin = rule && group.items.length <= rule.min;
+        const nearMin = rule && rule.min !== undefined && group.items.length <= rule.min;
         if (colorFilter === 'nearMin' && nearMin) return true;
         if (colorFilter === 'expiringSoon' && days >= 45 && days < 60) return true;
         if (colorFilter === 'expiringVerySoon' && days < 45) return true;
@@ -442,20 +449,25 @@ export default function StokYonetimiPanel() {
       toast({ title: 'Laboratuvar Seçilmedi', description: 'Lütfen rapor için en az bir laboratuvar seçin.', variant: "default" });
       return;
     }
-  
-    const labNames = hospitals.filter(h => selectedLabsForReport.includes(h.id)).map(h => h.name);
-  
+
+    const labNames = hospitals
+      .filter(h => h.id && selectedLabsForReport.includes(h.id))
+      .map(h => h.name)
+      .filter((name): name is string => name !== undefined);
+
     const stockForSelectedLabs = fullDepotStok.filter(item => item.isShipped && item.hedefKurum && labNames.includes(item.hedefKurum));
     const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
-  
+
     stockForSelectedLabs.forEach(item => {
-      if (!stockSummary[item.stokKodu]) {
-        stockSummary[item.stokKodu] = {
-          stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi,
+      const stokKodu = item.stokKodu;
+      if (!stokKodu) return;
+      if (!stockSummary[stokKodu]) {
+        stockSummary[stokKodu] = {
+          stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi || '',
           quantity: 0
         };
       }
-      stockSummary[item.stokKodu].quantity += 1;
+      stockSummary[stokKodu].quantity += 1;
     });
   
     const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
@@ -480,18 +492,22 @@ export default function StokYonetimiPanel() {
       return;
     }
     const fileName = `${depotName}_Stok_Raporu_${detailed ? 'Detayli' : 'Ozet'}`;
-    const productCodeMap = new Map<string, ProductCode>(productCodes.map(p => [p.stokKodu, p] as const));
+    const productCodeMap = new Map<string, ProductCode>(
+      productCodes
+        .filter(p => p.stokKodu !== undefined)
+        .map(p => [p.stokKodu!, p] as const)
+    );
     if (detailed) {
       const dataToExport = dataToExportSource.flatMap(group => group.items)
         .map(item => ({
-          'Stok Kodu': item.stokKodu,
-          'Stok Adı': item.stokAdi,
-          'Lot Numarası': item.lotNumarasi,
-          'Miad': item.miad,
-          'Seri Numarası': item.seriNumarasi,
-          'Raf Adresi': item.rafAdresi,
+          'Stok Kodu': item.stokKodu || '',
+          'Stok Adı': item.stokAdi || '',
+          'Lot Numarası': item.lotNumarasi || '',
+          'Miad': item.miad || '',
+          'Seri Numarası': item.seriNumarasi || '',
+          'Raf Adresi': item.rafAdresi || '',
         }))
-        .sort((a, b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+        .sort((a, b) => (a['Stok Adı'] || '').localeCompare(b['Stok Adı'] || ''));
       exportDataToExcel(dataToExport, fileName, "StokRaporu", toast);
     } else {
       const sheets: Record<string, any[]> = {};
@@ -519,12 +535,12 @@ export default function StokYonetimiPanel() {
 
   const getRowClass = (group: (typeof sortedAndGroupedStock)[0]): string => {
     const rule = minMaxRules[group.stokKodu];
-    const miadDate = parse(group.miad, 'dd.MM.yyyy', new Date());
+    const miadDate = parse(group.miad || '', 'dd.MM.yyyy', new Date());
     if (!isValid(miadDate)) return '';
     const days = differenceInDays(miadDate, new Date());
     if (days < 45) return 'bg-red-500/10 text-red-700 dark:text-red-300';
     if (days < 60) return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400';
-    if (rule && group.items.length <= rule.min) return 'bg-gray-500/10 text-gray-600 dark:text-gray-400';
+    if (rule && rule.min !== undefined && group.items.length <= rule.min) return 'bg-gray-500/10 text-gray-600 dark:text-gray-400';
     return '';
   };
 
@@ -652,7 +668,7 @@ export default function StokYonetimiPanel() {
                               </>
                             ) : (
                               <>
-                                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); router.push(`/stok-yonetimi/${selectedDepotId}/${encodeURIComponent(g.stokKodu)}/${encodeURIComponent(g.lotNumarasi)}`); }}>
+                                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); router.push(`/stok-yonetimi/${selectedDepotId}/${encodeURIComponent(g.stokKodu)}/${encodeURIComponent(g.lotNumarasi || '')}`); }}>
                                   Detay
                                 </Button>
                                 <Button size="icon" className="h-8 w-8" variant="ghost" onClick={(e) => { e.stopPropagation(); handleStartEditing(g); }}>
@@ -709,14 +725,15 @@ export default function StokYonetimiPanel() {
           </DialogHeader>
           <div className="py-4">
             <ScrollArea className="h-64 border rounded-md p-2">
-              {hospitals.map(lab => (
+              {hospitals.filter(lab => lab.id !== undefined).map(lab => (
                 <div key={lab.id} className="flex items-center space-x-2 p-1">
                   <Checkbox
                     id={`lab-select-${lab.id}`}
-                    checked={selectedLabsForReport.includes(lab.id)}
+                    checked={lab.id ? selectedLabsForReport.includes(lab.id) : false}
                     onCheckedChange={(checked) => {
-                      setSelectedLabsForReport(prev => 
-                        checked ? [...prev, lab.id] : prev.filter(id => id !== lab.id)
+                      if (!lab.id) return;
+                      setSelectedLabsForReport(prev =>
+                        checked ? [...prev, lab.id!] : prev.filter(id => id !== lab.id)
                       );
                     }}
                   />

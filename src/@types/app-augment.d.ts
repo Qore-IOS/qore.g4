@@ -31,6 +31,7 @@ declare module "@/lib/types" {
     active?: boolean;
     accessibleViews?: AppView[];
     name?: string;
+    nfcId?: string;
     assignedLaboratories?: string[];
     assignedDepots?: string[];
     assignedBrands?: string[];
