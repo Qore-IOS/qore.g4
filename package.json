@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "rimraf .test-dist && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.js",
+    "test:coverage": "rimraf .test-dist .coverage && tsc -p tsconfig.tests.json && NODE_V8_COVERAGE=.coverage node --test .test-dist/tests/**/*.js"
   },
   "dependencies": {
     "@genkit-ai/googleai": "^1.0.0",
