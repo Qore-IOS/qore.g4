@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -10,6 +11,7 @@ import { MobileProfileButton } from "@/components/ui/MobileProfileButton";
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
 import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
+import Image from "next/image";
 
 // --- HELPERS ---
 
@@ -77,17 +79,14 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
                   triggerHaptic();
                   setIsOpen(true);
                 }}
-                className={cn(
-                  "w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-300 rotate-45 overflow-hidden",
-                  isDark
-                    ? "bg-white/10 backdrop-blur-xl border border-white/20 shadow-[0_4px_30px_rgba(0,0,0,0.3)]"
-                    : "bg-[#e0e0e0] shadow-[6px_6px_12px_#bebebe,-6px_-6px_12px_#ffffff]"
-                )}
+                className="w-16 h-16 flex items-center justify-center transition-all duration-300"
               >
-                <img
-                  src="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
+                <Image
+                  src={isDark ? "/newlogoblk.png" : "/newlogowh.png"}
                   alt="Qore"
-                  className="w-10 h-10 object-contain -rotate-45"
+                  width={64}
+                  height={64}
+                  className="w-16 h-16 object-contain"
                 />
               </motion.button>
             </div>
