@@ -72,21 +72,21 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             <MobileProfileButton isDark={isDark} />
 
             {/* Center - Logo Button (Floating Above) */}
-            <div className="absolute left-1/2 -translate-x-1/2 -top-6">
+            <div className="absolute left-1/2 -translate-x-1/2 -top-[2.375rem]">
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={() => {
                   triggerHaptic();
                   setIsOpen(true);
                 }}
-                className="w-16 h-16 flex items-center justify-center transition-all duration-300"
+                className="w-20 h-20 flex items-center justify-center transition-all duration-300"
               >
                 <Image
                   src={isDark ? "/newlogoblk.png" : "/newlogowh.png"}
                   alt="Qore"
-                  width={64}
-                  height={64}
-                  className="w-16 h-16 object-contain"
+                  width={80}
+                  height={80}
+                  className="w-20 h-20 object-contain"
                 />
               </motion.button>
             </div>
