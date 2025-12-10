@@ -265,6 +265,59 @@ export function useRecentConsumption(limitCount = 500) {
 }
 
 /**
+ * Consumption Records - By date range
+ * Fetches all consumption records within a specified date range.
+ * This is used when user selects a specific date range or "Show All" in the statistics panel.
+ */
+export function useConsumptionByDateRange(
+  startDate: Date | null,
+  endDate: Date | null,
+  enabled = false
+) {
+  return useQuery({
+    queryKey: ['tuketimKayitlari', 'dateRange', startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: async () => {
+      if (!startDate || !endDate) return [];
+
+      const startTimestamp = Timestamp.fromDate(startDate);
+      const endTimestamp = Timestamp.fromDate(endDate);
+
+      const q = query(
+        collection(db, 'tuketimKayitlari'),
+        where('consumptionTimestamp', '>=', startTimestamp),
+        where('consumptionTimestamp', '<=', endTimestamp),
+        orderBy('consumptionTimestamp', 'desc')
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
+    },
+    enabled: enabled && !!startDate && !!endDate,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+  });
+}
+
+/**
+ * Fetch consumption records by date range - imperative function for on-demand fetching
+ */
+export async function fetchConsumptionByDateRange(
+  startDate: Date,
+  endDate: Date
+): Promise<ConsumptionRecord[]> {
+  const startTimestamp = Timestamp.fromDate(startDate);
+  const endTimestamp = Timestamp.fromDate(endDate);
+
+  const q = query(
+    collection(db, 'tuketimKayitlari'),
+    where('consumptionTimestamp', '>=', startTimestamp),
+    where('consumptionTimestamp', '<=', endTimestamp),
+    orderBy('consumptionTimestamp', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
+}
+
+/**
  * Shipments - Recent only
  */
 export function useRecentShipments(limitCount = 200) {
