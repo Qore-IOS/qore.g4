@@ -117,7 +117,16 @@ export function AIChatbot() {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.chunk) {
+              if (data.error) {
+                // Handle error from stream
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMessageId
+                      ? { ...m, content: `Hata: ${data.error}`, isStreaming: false }
+                      : m
+                  )
+                );
+              } else if (data.chunk) {
                 fullContent += data.chunk;
                 setMessages((prev) =>
                   prev.map((m) =>
