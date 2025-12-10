@@ -239,13 +239,23 @@ export default function TuketimIstatistikleriPanel({
   const filteredData = useMemo(() => {
     let data = activeData;
 
-    if (!showAll) {
+    // If data was explicitly fetched for date range, show all data (with optional lab filter)
+    // Otherwise, require hospital selection when not in showAll mode
+    if (!showAll && !isDataFetched) {
       if (!selectedHospitalId) return [];
       const selectedLabName = hospitals.find(
         (h) => h.id === selectedHospitalId
       )?.name;
       if (!selectedLabName) return [];
       data = data.filter((record) => record.laboratoryName === selectedLabName);
+    } else if (!showAll && isDataFetched && selectedHospitalId) {
+      // If data was fetched and a hospital is selected, filter by that hospital
+      const selectedLabName = hospitals.find(
+        (h) => h.id === selectedHospitalId
+      )?.name;
+      if (selectedLabName) {
+        data = data.filter((record) => record.laboratoryName === selectedLabName);
+      }
     }
 
     return data.filter((record) => {
@@ -267,7 +277,7 @@ export default function TuketimIstatistikleriPanel({
             .toLowerCase()
             .includes(filterStokKoduAdi.toLowerCase()));
 
-      const matchesLab = showAll
+      const matchesLab = (showAll || isDataFetched)
         ? labFilter === "all" || record.laboratoryName === labFilter
         : true;
 
@@ -277,7 +287,7 @@ export default function TuketimIstatistikleriPanel({
           record.userName.toLowerCase().includes(userFilter.toLowerCase()));
 
       return (
-        (showAll || isInDateRange) && matchesSearch && matchesLab && matchesUser
+        (showAll || isDataFetched || isInDateRange) && matchesSearch && matchesLab && matchesUser
       );
     });
   }, [
@@ -287,6 +297,7 @@ export default function TuketimIstatistikleriPanel({
     dateRange,
     filterStokKoduAdi,
     showAll,
+    isDataFetched,
     labFilter,
     userFilter,
   ]);
@@ -597,7 +608,7 @@ export default function TuketimIstatistikleriPanel({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {showAll && (
+                      {(showAll || isDataFetched) && (
                         <TableHead>
                           <Select
                             value={labFilter}
@@ -676,7 +687,7 @@ export default function TuketimIstatistikleriPanel({
                     ) : (
                       paginatedData.map((record) => (
                         <TableRow key={record.id}>
-                          {showAll && (
+                          {(showAll || isDataFetched) && (
                             <TableCell>{record.laboratoryName}</TableCell>
                           )}
                           <TableCell className="font-mono text-xs">
