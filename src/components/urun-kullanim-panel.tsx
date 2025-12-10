@@ -173,14 +173,19 @@ export default function UrunKullanimPanel() {
     [selectedLabSubPoints, selectedSubPointId]
   );
 
-  // Compute pool member IDs for lab stock
-  const poolMemberIds = useMemo(() => {
+  // Compute pool member IDs and names for lab stock
+  const { poolMemberIds, poolMemberNames } = useMemo(() => {
     const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
-    return pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
-  }, [labPools, selectedLabId]);
+    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    // Get names for fallback query (for older records without hedefKurumId)
+    const names = ids
+      .map(id => laboratories.find(l => l.id === id)?.name)
+      .filter((name): name is string => !!name);
+    return { poolMemberIds: ids, poolMemberNames: names };
+  }, [labPools, selectedLabId, laboratories]);
 
-  // Use TanStack Query for lab stock - much more efficient than full depoStok
-  const { data: labStock = [] } = useLabStock(poolMemberIds);
+  // Use TanStack Query for lab stock - supports both ID and name-based lookups
+  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames);
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
@@ -281,16 +286,17 @@ export default function UrunKullanimPanel() {
       .sort((a, b) => compareAsc(a.d, b.d))[0]?.item;
   };
 
+  // Note: isShipped check removed - useLabStock already filters for isShipped === true
   const findBySerial = (stokKodu: string, seri: string) =>
-    labStock.find(i => i.stokKodu === stokKodu && i.seriNumarasi === seri && i.isShipped);
+    labStock.find(i => i.stokKodu === stokKodu && i.seriNumarasi === seri);
 
   const findByLot = (stokKodu: string, lot: string) => {
-    const pool = labStock.filter(i => i.stokKodu === stokKodu && i.lotNumarasi === lot && i.isShipped);
+    const pool = labStock.filter(i => i.stokKodu === stokKodu && i.lotNumarasi === lot);
     return pickEarliest(pool);
   };
 
   const findByRefOnly = (stokKodu: string) => {
-    const pool = labStock.filter(i => i.stokKodu === stokKodu && i.isShipped);
+    const pool = labStock.filter(i => i.stokKodu === stokKodu);
     return pickEarliest(pool);
   };
 

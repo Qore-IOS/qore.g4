@@ -220,23 +220,54 @@ export function useAllDepoStok() {
 
 /**
  * Shipped stock for a specific lab (or pool of labs)
+ * Supports both hedefKurumId (ID-based) and hedefKurum (name-based) lookups
+ * for backwards compatibility with older records that may not have hedefKurumId
  */
-export function useLabStock(labIds: string[]) {
+export function useLabStock(labIds: string[], labNames: string[] = []) {
   return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(',')],
+    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(',')],
     queryFn: async () => {
-      if (labIds.length === 0) return [];
-      // We can only use 'in' with up to 30 values
-      const ids = labIds.slice(0, 30);
-      const q = query(
-        collection(db, 'depoStok'),
-        where('hedefKurumId', 'in', ids),
-        where('isShipped', '==', true)
-      );
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      if (labIds.length === 0 && labNames.length === 0) return [];
+
+      const results: DepoStokItem[] = [];
+      const seenIds = new Set<string>();
+
+      // Query 1: By hedefKurumId (primary, for newer records)
+      if (labIds.length > 0) {
+        const ids = labIds.slice(0, 30);
+        const qById = query(
+          collection(db, 'depoStok'),
+          where('hedefKurumId', 'in', ids),
+          where('isShipped', '==', true)
+        );
+        const snapById = await getDocs(qById);
+        snapById.docs.forEach(d => {
+          seenIds.add(d.id);
+          results.push({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem);
+        });
+      }
+
+      // Query 2: By hedefKurum name (fallback, for older records without hedefKurumId)
+      if (labNames.length > 0) {
+        const names = labNames.slice(0, 30);
+        const qByName = query(
+          collection(db, 'depoStok'),
+          where('hedefKurum', 'in', names),
+          where('isShipped', '==', true)
+        );
+        const snapByName = await getDocs(qByName);
+        snapByName.docs.forEach(d => {
+          // Avoid duplicates (some records may have both hedefKurumId and hedefKurum)
+          if (!seenIds.has(d.id)) {
+            seenIds.add(d.id);
+            results.push({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem);
+          }
+        });
+      }
+
+      return results;
     },
-    enabled: labIds.length > 0,
+    enabled: labIds.length > 0 || labNames.length > 0,
     staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchInterval: 60 * 1000,
