@@ -413,24 +413,24 @@ export default function TuketimIstatistikleriPanel({
       return;
     }
 
-    const dataToExport = sortedData.map((record) => ({
-      Laboratuvar: record.laboratoryName,
-      "Stok Kodu": record.stokKodu,
-      "Stok Adı": record.stokAdi,
-      "Lot Numarası": record.lotNumarasi,
-      Miad: record.miad,
-      "Seri Numarası": record.seriNumarasi,
-      "Tüketim Zamanı": format(
-        toDateFromAny(record.consumptionTimestamp)!,
-        "dd.MM.yyyy HH:mm:ss",
-        { locale: tr }
-      ),
-      "Tüketim Tipi":
-        record.consumptionType === "normal_kullanim"
-          ? "Normal Kullanım"
-          : "Sayımdan Düşüm",
-      Kullanıcı: record.userName,
-    }));
+    const dataToExport = sortedData.map((record) => {
+      const consumptionDate = toDateFromAny(record.consumptionTimestamp)!;
+      return {
+        Laboratuvar: record.laboratoryName,
+        "Stok Kodu": record.stokKodu,
+        "Stok Adı": record.stokAdi,
+        "Lot Numarası": record.lotNumarasi,
+        Miad: record.miad,
+        "Seri Numarası": record.seriNumarasi,
+        "Tüketim Tarihi": format(consumptionDate, "dd.MM.yyyy", { locale: tr }),
+        "Tüketim Saati": format(consumptionDate, "HH:mm:ss", { locale: tr }),
+        "Tüketim Tipi":
+          record.consumptionType === "normal_kullanim"
+            ? "Normal Kullanım"
+            : "Sayımdan Düşüm",
+        Kullanıcı: record.userName,
+      };
+    });
 
     const labName = showAll
       ? "Tum_Tuketimler"
