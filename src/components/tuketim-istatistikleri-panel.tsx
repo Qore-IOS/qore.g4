@@ -45,8 +45,10 @@ import {
   ChevronUp,
   ChevronDown,
   FileSpreadsheet,
-  Eye, // Added Eye icon
+  Eye,
+  Download,
 } from "lucide-react";
+import { fetchConsumptionByDateRange } from "@/hooks/useFirebaseQueries";
 import {
   Popover,
   PopoverContent,
@@ -143,18 +145,99 @@ export default function TuketimIstatistikleriPanel({
   const [labFilter, setLabFilter] = useState<string>("all");
   const [userFilter, setUserFilter] = useState<string>("");
 
+  // Dynamic data fetching state
+  const [fetchedData, setFetchedData] = useState<ConsumptionRecord[]>([]);
+  const [isFetching, setIsFetching] = useState(false);
+  const [isDataFetched, setIsDataFetched] = useState(false);
+
+  // Determine which data to use - fetched data if available, otherwise initial 500
+  const activeData = useMemo(() => {
+    if (isDataFetched && fetchedData.length > 0) {
+      return fetchedData;
+    }
+    return urunKullanimKayitlari;
+  }, [isDataFetched, fetchedData, urunKullanimKayitlari]);
+
+  // Function to fetch data for selected date range
+  const handleFetchDateRange = useCallback(async () => {
+    if (!dateRange?.from || !dateRange?.to) {
+      toast({
+        title: "Tarih Seçin",
+        description: "Lütfen başlangıç ve bitiş tarihi seçin.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsFetching(true);
+    try {
+      const endOfDayDate = endOfDay(dateRange.to);
+      const data = await fetchConsumptionByDateRange(dateRange.from, endOfDayDate);
+      setFetchedData(data);
+      setIsDataFetched(true);
+      toast({
+        title: "Veriler Yüklendi",
+        description: `${data.length} tüketim kaydı yüklendi.`,
+      });
+    } catch (error) {
+      console.error("Error fetching consumption data:", error);
+      toast({
+        title: "Hata",
+        description: "Veriler yüklenirken bir hata oluştu.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFetching(false);
+    }
+  }, [dateRange, toast]);
+
+  // Function to toggle show all - fetches all data if not already fetched
+  const handleShowAllToggle = useCallback(async () => {
+    if (showAll) {
+      // Switching back to filtered mode
+      setShowAll(false);
+      return;
+    }
+
+    // Switching to show all mode - fetch data for current date range
+    setShowAll(true);
+
+    if (!isDataFetched && dateRange?.from && dateRange?.to) {
+      setIsFetching(true);
+      try {
+        const endOfDayDate = endOfDay(dateRange.to);
+        const data = await fetchConsumptionByDateRange(dateRange.from, endOfDayDate);
+        setFetchedData(data);
+        setIsDataFetched(true);
+        toast({
+          title: "Veriler Yüklendi",
+          description: `${data.length} tüketim kaydı yüklendi.`,
+        });
+      } catch (error) {
+        console.error("Error fetching consumption data:", error);
+        toast({
+          title: "Hata",
+          description: "Veriler yüklenirken bir hata oluştu.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsFetching(false);
+      }
+    }
+  }, [showAll, isDataFetched, dateRange, toast]);
+
   const uniqueLabs = useMemo(
     () =>
       Array.from(
         new Set(
-          urunKullanimKayitlari.map((r) => r.laboratoryName).filter(Boolean)
+          activeData.map((r) => r.laboratoryName).filter(Boolean)
         )
       ),
-    [urunKullanimKayitlari]
+    [activeData]
   );
 
   const filteredData = useMemo(() => {
-    let data = urunKullanimKayitlari;
+    let data = activeData;
 
     if (!showAll) {
       if (!selectedHospitalId) return [];
@@ -198,7 +281,7 @@ export default function TuketimIstatistikleriPanel({
       );
     });
   }, [
-    urunKullanimKayitlari,
+    activeData,
     selectedHospitalId,
     hospitals,
     dateRange,
@@ -294,6 +377,9 @@ export default function TuketimIstatistikleriPanel({
     setLabFilter("all");
     setUserFilter("");
     setCurrentPage(1);
+    // Reset fetched data to use initial 500 records
+    setFetchedData([]);
+    setIsDataFetched(false);
   };
 
   const handleSort = (key: SortKey) => {
@@ -424,14 +510,36 @@ export default function TuketimIstatistikleriPanel({
                   >
                     Tarih Aralığı
                   </label>
-                  <DatePickerWithRange
-                    date={dateRange}
-                    setDate={setDateRange}
-                    className="w-full"
-                    disabled={showAll}
-                  />
+                  <div className="flex gap-2">
+                    <DatePickerWithRange
+                      date={dateRange}
+                      setDate={(newRange) => {
+                        setDateRange(newRange);
+                        // Reset fetched data when date range changes
+                        if (isDataFetched) {
+                          setFetchedData([]);
+                          setIsDataFetched(false);
+                        }
+                      }}
+                      className="flex-1"
+                      disabled={showAll}
+                    />
+                    <Button
+                      onClick={handleFetchDateRange}
+                      variant="default"
+                      disabled={isFetching || !dateRange?.from || !dateRange?.to}
+                      className="whitespace-nowrap"
+                    >
+                      {isFetching ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="mr-2 h-4 w-4" />
+                      )}
+                      Verileri Getir
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-end gap-2">
+                <div className="flex items-end gap-2 flex-wrap">
                   <Button
                     onClick={clearFilters}
                     variant="ghost"
@@ -441,16 +549,21 @@ export default function TuketimIstatistikleriPanel({
                   </Button>
                   <Button
                     variant="secondary"
-                    onClick={() => setShowAll((s) => !s)}
+                    onClick={handleShowAllToggle}
+                    disabled={isFetching}
                   >
-                    <Eye className="mr-2 h-4 w-4" />{" "}
+                    {isFetching ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Eye className="mr-2 h-4 w-4" />
+                    )}{" "}
                     {showAll ? "Filtreye Dön" : "Tümünü Göster"}
                   </Button>
                   <Button
                     onClick={handleExport}
                     variant="outline"
                     className="rounded-md self-end mt-2 sm:mt-0"
-                    disabled={sortedData.length === 0}
+                    disabled={sortedData.length === 0 || isFetching}
                   >
                     <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
                   </Button>
@@ -458,9 +571,25 @@ export default function TuketimIstatistikleriPanel({
               </div>
             </div>
 
-            <h4 className="text-md font-semibold mt-6 mb-2 flex items-center gap-2">
+            <h4 className="text-md font-semibold mt-6 mb-2 flex items-center gap-2 flex-wrap">
               Tüketim Kayıtları ({sortedData.length})
               {showAll && <Badge variant="secondary">TÜMÜ GÖSTERİLİYOR</Badge>}
+              {!isDataFetched && (
+                <Badge variant="outline" className="text-muted-foreground">
+                  Son 500 kayıt gösteriliyor
+                </Badge>
+              )}
+              {isDataFetched && (
+                <Badge variant="default" className="bg-green-600">
+                  Tarih aralığı verileri yüklendi ({activeData.length} kayıt)
+                </Badge>
+              )}
+              {isFetching && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Veriler yükleniyor...
+                </Badge>
+              )}
             </h4>
 
             <>
