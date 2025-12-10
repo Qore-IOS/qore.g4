@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useRouter } from 'next/navigation';
+import { fetchConsumptionByDateRange } from '@/hooks/useFirebaseQueries';
 
 interface Row {
   productId: string;
@@ -97,20 +98,37 @@ export default function VerimlilikHesaplamaPanel({
     if (rowIndex === -1) return prevRows;
 
     const updatedRow = { ...prevRows[rowIndex], ...patch };
-    
+
     const {
       consumption, carryOverPrev, total, rerun, routine, control, calib, eomDeviceOn, packageTests
     } = updatedRow;
-    
+
+    // Ana Tüketim = Devir (önceki ay sonu cihaz üstü) + Dönem içi tüketim
     const anaTuketim = carryOverPrev + consumption;
-    
+
+    // Bilinen Fire = Kontrol + Kalibrasyon + Tekrar (bunlar rutin hasta testi değil)
     updatedRow.knownLoss = control + calib + rerun;
-    updatedRow.unknownLoss = Math.max(0, anaTuketim - total);
-    
+
+    // Bilinmeyen Fire = Ana Tüketim - Kümülatif Total - Ay Sonu Cihaz Üstü
+    // Formül: Yüklenen - Yapılan - Kalan = Fire
+    // Yüklenen = carryOverPrev + consumption
+    // Yapılan = total (kümülatif)
+    // Kalan = eomDeviceOn
+    updatedRow.unknownLoss = Math.max(0, anaTuketim - total - eomDeviceOn);
+
+    // Bilinmeyen Fire (Kutu cinsinden)
     updatedRow.unknownLossBoxes = packageTests > 0 ? Math.ceil(updatedRow.unknownLoss / packageTests) : 0;
+
+    // Cihaz Verimlilik % = (Rutin Testler / Toplam Testler) * 100
+    // Rutin = Total - Tekrar - Kalibrasyon - Kontrol
     updatedRow.deviceEffPct = total > 0 ? ((total - rerun - calib - control) / total) * 100 : 0;
+
+    // Kit Verimlilik % = 1 - ((Bilinmeyen Fire + Kontrol + Kalib) / (Ana Tüketim - Ay Sonu Cihaz Üstü))
+    // Payda = Gerçekten tüketilen test sayısı
     const kitEfficiencyDenominator = anaTuketim - eomDeviceOn;
-    updatedRow.kitEffPct = kitEfficiencyDenominator > 0 ? (1 - ((updatedRow.unknownLoss + control + calib) / kitEfficiencyDenominator)) * 100 : 0;
+    updatedRow.kitEffPct = kitEfficiencyDenominator > 0
+      ? (1 - ((updatedRow.unknownLoss + control + calib) / kitEfficiencyDenominator)) * 100
+      : 0;
 
     const newRows = [...prevRows];
     newRows[rowIndex] = updatedRow;
@@ -192,69 +210,101 @@ export default function VerimlilikHesaplamaPanel({
   }, [selectedHospitalId, labPools, allMinMaxRules, productCodes, toRow, toast]);
 
   const fetchDeviceOnHandForPeriod = useCallback(async (periodKey: string): Promise<Record<string, number> | null> => {
-    const record = cihazUstuGecmisi.find(
-      (r) => r.hospitalId === selectedHospitalId && (r.period || r.Dönem || r.donem) === periodKey
-    );
-    if (!record) return null;
+    try {
+      // Firestore'dan doğrudan çek
+      const docId = `${selectedHospitalId}_${periodKey}`;
+      const snapshot = await getDocs(
+        query(
+          collection(db, 'cihazUstuGecmisi'),
+          where('hospitalId', '==', selectedHospitalId),
+          where('period', '==', periodKey)
+        )
+      );
 
-    const items = record.items || record.data || [];
-    const map: Record<string, number> = {};
-    if (Array.isArray(items)) {
-      items.forEach((item: any) => {
-        if (item.productId && item.value !== undefined) {
-          map[item.productId] = Number(item.value);
-        }
-      });
+      if (snapshot.empty) return null;
+
+      const record = snapshot.docs[0].data();
+      const items = record.items || record.data || [];
+      const map: Record<string, number> = {};
+      if (Array.isArray(items)) {
+        items.forEach((item: any) => {
+          if (item.productId && item.value !== undefined) {
+            map[item.productId] = Number(item.value);
+          }
+        });
+      }
+      return map;
+    } catch (error) {
+      console.error('Error fetching device on-hand data:', error);
+      return null;
     }
-    return map;
-  }, [cihazUstuGecmisi, selectedHospitalId]);
+  }, [selectedHospitalId]);
 
 
   const handleImportSystemData = useCallback(async () => {
     if (!selectedHospitalId) return;
 
-    const prevDate = new Date(selectedYear, selectedMonth - 1, 1);
-    const prevPeriodKey = `${String(prevDate.getMonth() + 1).padStart(2, '0')}-${prevDate.getFullYear()}`;
-    const devirData = await fetchDeviceOnHandForPeriod(prevPeriodKey);
+    setIsLoading(true);
 
-    const cumulativeRecord = kumulatifRaporlar.find(r => r.hospitalId === selectedHospitalId && r.month === selectedMonth && r.year === selectedYear);
+    try {
+      const prevDate = new Date(selectedYear, selectedMonth - 1, 1);
+      const prevPeriodKey = `${String(prevDate.getMonth() + 1).padStart(2, '0')}-${prevDate.getFullYear()}`;
+      const devirData = await fetchDeviceOnHandForPeriod(prevPeriodKey);
 
-    setRows(prevRows => {
-      let newRows = [...prevRows];
-      prevRows.forEach(row => {
-        let patch: Partial<Row> = {};
-        if (devirData) {
-          patch.carryOverPrev = devirData[row.productId] || 0;
-        }
-        if (cumulativeRecord) {
-          const cumulativeItem = cumulativeRecord.summary[row.productId];
-          if (cumulativeItem) {
-            patch = {
-              ...patch,
-              total: cumulativeItem?.total || 0,
-              rerun: cumulativeItem?.rerun || 0,
-              routine: cumulativeItem?.routine || 0,
-              control: cumulativeItem?.control || 0,
-              calib: cumulativeItem?.calib || 0,
-            };
+      // Kümülatif verileri Firestore'dan çek
+      const kumulatifSnapshot = await getDocs(
+        query(
+          collection(db, 'kumulatifRaporlar'),
+          where('hospitalId', '==', selectedHospitalId),
+          where('month', '==', selectedMonth),
+          where('year', '==', selectedYear)
+        )
+      );
+
+      const cumulativeRecord = !kumulatifSnapshot.empty ? kumulatifSnapshot.docs[0].data() : null;
+
+      setRows(prevRows => {
+        let newRows = [...prevRows];
+        prevRows.forEach(row => {
+          let patch: Partial<Row> = {};
+          if (devirData) {
+            patch.carryOverPrev = devirData[row.productId] || 0;
           }
-        }
-        newRows = computeAndApplyChanges(newRows, row.productId, patch);
+          if (cumulativeRecord && cumulativeRecord.summary) {
+            const cumulativeItem = cumulativeRecord.summary[row.productId];
+            if (cumulativeItem) {
+              patch = {
+                ...patch,
+                total: cumulativeItem?.total || 0,
+                rerun: cumulativeItem?.rerun || 0,
+                routine: cumulativeItem?.routine || 0,
+                control: cumulativeItem?.control || 0,
+                calib: cumulativeItem?.calib || 0,
+              };
+            }
+          }
+          newRows = computeAndApplyChanges(newRows, row.productId, patch);
+        });
+        return newRows;
       });
-      return newRows;
-    });
 
-    if (devirData) {
-      toast({ title: 'Devir Verisi Aktarıldı', description: `${prevPeriodKey} dönemi için cihaz üstü verileri aktarıldı.` });
-    } else {
-      toast({ title: 'Devir Verisi Bulunamadı', description: `Önceki dönem (${prevPeriodKey}) için kayıt bulunamadı.`, variant: 'default' });
+      if (devirData) {
+        toast({ title: 'Devir Verisi Aktarıldı', description: `${prevPeriodKey} dönemi için cihaz üstü verileri aktarıldı.` });
+      } else {
+        toast({ title: 'Devir Verisi Bulunamadı', description: `Önceki dönem (${prevPeriodKey}) için kayıt bulunamadı.`, variant: 'default' });
+      }
+      if (cumulativeRecord) {
+        toast({ title: "Kümülatif Veri Aktarıldı", description: "Seçili dönem için kümülatif veriler içe aktarıldı." });
+      } else {
+        toast({ title: "Kümülatif Veri Bulunamadı", description: "Seçili dönem için kümülatif veri bulunamadı.", variant: 'default' });
+      }
+    } catch (error) {
+      console.error('Error importing system data:', error);
+      toast({ title: 'Hata', description: 'Sistem verileri aktarılırken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
     }
-    if (cumulativeRecord) {
-      toast({ title: "Kümülatif Veri Aktarıldı", description: "Seçili dönem için kümülatif veriler içe aktarıldı." });
-    } else {
-      toast({ title: "Kümülatif Veri Bulunamadı", description: "Seçili dönem için kümülatif veri bulunamadı.", variant: 'default' });
-    }
-  }, [selectedHospitalId, selectedYear, selectedMonth, fetchDeviceOnHandForPeriod, kumulatifRaporlar, toast, computeAndApplyChanges]);
+  }, [selectedHospitalId, selectedYear, selectedMonth, fetchDeviceOnHandForPeriod, toast, computeAndApplyChanges]);
 
   const handleImportEOM = useCallback(async () => {
     if (!selectedHospitalId) return;
@@ -340,7 +390,9 @@ export default function VerimlilikHesaplamaPanel({
     setIsTuketimModalOpen(true);
   };
 
-  const handleConfirmTuketimHesapla = () => {
+  const [isTuketimLoading, setIsTuketimLoading] = useState(false);
+
+  const handleConfirmTuketimHesapla = async () => {
     if (!tempFromStr || !tempToStr) {
       toast({ title: "Eksik Seçim", description: "Başlangıç ve bitiş tarih/saatlerini seçin.", variant: "destructive" });
       return;
@@ -351,43 +403,65 @@ export default function VerimlilikHesaplamaPanel({
       toast({ title: "Geçersiz Aralık", description: "Tarih/saat aralığını kontrol edin.", variant: "destructive" });
       return;
     }
-    
-    const pool = labPools.find(p => p.memberIds.includes(selectedHospitalId));
-    const targetLabNames = new Set(
-        hospitals
-            .filter(h => (pool ? pool.memberIds : [selectedHospitalId]).includes(h.id))
-            .map(h => h.name)
-    );
-  
-    const filtered = tuketimKayitlari.filter(rec => {
-      if (!targetLabNames.has(rec.laboratoryName)) return false;
-      const t = new Date(rec.consumptionTimestamp as any);
-      return isValid(t) && t >= from && t <= to;
-    });
-  
-    const totals: Record<string, number> = {};
-    filtered.forEach(rec => {
-      const product = productCodes.find(p => p.stokKodu === rec.stokKodu);
-      const ambalaj = product?.ambalajDegeri || 1;
-      const test = rows.find(r => r.productId === rec.stokKodu);
-      if(test) {
-        totals[test.productId] = (totals[test.productId] || 0) + ambalaj;
-      }
-    });
 
-    let newRows = [...rows];
-    rows.forEach(row => {
-      const consumptionValue = totals[row.productId] || 0;
-      newRows = computeAndApplyChanges(newRows, row.productId, { consumption: consumptionValue });
-    });
-    setRows(newRows);
-    
-    setSistemTuketimleriDateRange({ from, to });
-    setIsTuketimModalOpen(false);
-    toast({
-      title: "Tüketim Hesaplandı",
-      description: `${filtered.length} kayıt işlendi. Aralık: ${format(from, 'dd.MM.yyyy HH:mm')} – ${format(to, 'dd.MM.yyyy HH:mm')}`
-    });
+    setIsTuketimLoading(true);
+
+    try {
+      // Firestore'dan seçilen tarih aralığına göre tüketim verilerini çek
+      const fetchedConsumption = await fetchConsumptionByDateRange(from, to);
+
+      // Ortak laboratuvar havuzu kontrolü
+      const pool = labPools.find(p => p.memberIds.includes(selectedHospitalId));
+      const targetLabIds = new Set(pool ? pool.memberIds : [selectedHospitalId]);
+      const targetLabNames = new Set(
+          hospitals
+              .filter(h => targetLabIds.has(h.id))
+              .map(h => h.name)
+      );
+
+      // Hedef laboratuvarlara ait tüketim kayıtlarını filtrele
+      const filtered = fetchedConsumption.filter(rec => {
+        // laboratoryName veya laboratoryId ile kontrol et
+        if (rec.laboratoryName && targetLabNames.has(rec.laboratoryName)) return true;
+        if (rec.laboratoryId && targetLabIds.has(rec.laboratoryId)) return true;
+        return false;
+      });
+
+      // Her tüketim kaydı = 1 kutu = ambalajDegeri test
+      const totals: Record<string, number> = {};
+      filtered.forEach(rec => {
+        const product = productCodes.find(p => p.stokKodu === rec.stokKodu);
+        const ambalaj = product?.ambalajDegeri || 1;
+        const test = rows.find(r => r.productId === rec.stokKodu);
+        if(test) {
+          // Her kayıt 1 kutu, ambalajDegeri kadar test
+          totals[test.productId] = (totals[test.productId] || 0) + ambalaj;
+        }
+      });
+
+      let newRows = [...rows];
+      rows.forEach(row => {
+        const consumptionValue = totals[row.productId] || 0;
+        newRows = computeAndApplyChanges(newRows, row.productId, { consumption: consumptionValue });
+      });
+      setRows(newRows);
+
+      setSistemTuketimleriDateRange({ from, to });
+      setIsTuketimModalOpen(false);
+      toast({
+        title: "Tüketim Hesaplandı",
+        description: `${filtered.length} kayıt işlendi (Toplam: ${fetchedConsumption.length}). Aralık: ${format(from, 'dd.MM.yyyy HH:mm')} – ${format(to, 'dd.MM.yyyy HH:mm')}`
+      });
+    } catch (error) {
+      console.error('Error fetching consumption data:', error);
+      toast({
+        title: "Hata",
+        description: "Tüketim verileri çekilirken bir hata oluştu.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsTuketimLoading(false);
+    }
   };
   
   return (
@@ -521,9 +595,18 @@ export default function VerimlilikHesaplamaPanel({
 
           <DialogFooter className="gap-2">
             <DialogClose asChild>
-              <Button variant="secondary">Vazgeç</Button>
+              <Button variant="secondary" disabled={isTuketimLoading}>Vazgeç</Button>
             </DialogClose>
-            <Button onClick={handleConfirmTuketimHesapla}>Hesapla</Button>
+            <Button onClick={handleConfirmTuketimHesapla} disabled={isTuketimLoading}>
+              {isTuketimLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Veriler Yükleniyor...
+                </>
+              ) : (
+                'Hesapla'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
