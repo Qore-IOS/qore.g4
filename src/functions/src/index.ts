@@ -189,9 +189,9 @@ export const sendFaultReportEmail = functions
 
         let recipients: string[];
         if (faultType === 'teknik_servis') {
-            recipients = ['scaglar@nukleus.com.tr', 'ysahan@nukleus.com.tr', 'dkilic@nukleus.com.tr', 'tdonmez@nukleus.com.tr', 'bbasar@nukleus.com.tr', 'vturunca@nukleus.com.tr'];
+            recipients = ['ysahan@nukleus.com.tr', 'dkilic@nukleus.com.tr', 'tdonmez@nukleus.com.tr', 'bbasar@nukleus.com.tr'];
         } else if (faultType === 'aplikasyon') {
-            recipients = ['bkahraman@nukleus.com.tr', 'iertugrul@nukleus.com.tr', 'ehoscanli@nukleus.com.tr', 'helkoca@nukleus.com.tr', 'bbasar@nukleus.com.tr', 'vturunca@nukleus.com.tr'];
+            recipients = ['bkahraman@nukleus.com.tr', 'iertugrul@nukleus.com.tr', 'ehoscanli@nukleus.com.tr', 'helkoca@nukleus.com.tr', 'bbasar@nukleus.com.tr'];
         } else {
             recipients = ['bbasar@nukleus.com.tr', 'btubasar@gmail.com'];
         }
@@ -256,7 +256,7 @@ export const sendFaultReportEmail = functions
         const mailOptions = {
             from: `"Qore Arıza Sistemi" <batuhan@qorengine.com>`,
             to: recipients.join(', '),
-            subject: `🔥 Yeni Arıza: ${model || title || "Bilinmeyen Cihaz"} (#${docId.substring(0, 6)})`,
+            subject: `🔧 Yeni Arıza: ${model || title || "Bilinmeyen Cihaz"} (#${docId.substring(0, 6)})`,
             html: htmlContent,
         };
 
