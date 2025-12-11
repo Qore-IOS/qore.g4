@@ -1,6 +1,6 @@
 'use client';
-import LaboratuvarPanel from '@/components/yonetim/laboratuvar-panel';
+import LaboratuvarlarPanel from '@/components/yonetim/laboratuvarlar-panel';
 
 export default function LaboratuvarlarPage() {
-  return <LaboratuvarPanel />;
+  return <LaboratuvarlarPanel />;
 }
