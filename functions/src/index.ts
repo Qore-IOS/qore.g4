@@ -73,12 +73,10 @@ export const sendFaultReportEmail = functions
         let recipients: string[] = [];
 
         const teknikServisListesi = [
-            'scaglar@nukleus.com.tr',
             'ysahan@nukleus.com.tr',
             'dkilic@nukleus.com.tr',
             'tdonmez@nukleus.com.tr',
-            'bbasar@nukleus.com.tr',
-            'vturunca@nukleus.com.tr'
+            'bbasar@nukleus.com.tr'
         ];
 
         const aplikasyonListesi = [
@@ -86,8 +84,7 @@ export const sendFaultReportEmail = functions
             'iertugrul@nukleus.com.tr',
             'ehoscanli@nukleus.com.tr',
             'helkoca@nukleus.com.tr',
-            'bbasar@nukleus.com.tr',
-            'vturunca@nukleus.com.tr'
+            'bbasar@nukleus.com.tr'
         ];
 
         // Kucuk harf kontrolu ile eslestirme yapalim
@@ -107,7 +104,7 @@ export const sendFaultReportEmail = functions
         
         const htmlContent = `
           <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; color: #333; max-width: 600px;">
-            <h2 style="color: #d32f2f; margin-top: 0;">🔥 Yeni Arıza Kaydı (#${docId.substring(0, 5)})</h2>
+            <h2 style="color: #d32f2f; margin-top: 0;">🔧 Yeni Arıza Kaydı (#${docId.substring(0, 5)})</h2>
             
             <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                 <tr style="background-color: #f9f9f9;">
