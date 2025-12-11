@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Depot, Hospital, ProductCode, AddressDefinition, LabPool, DepoStokItem } from '@/lib/types';
+import type { Depot, Hospital, ProductCode, AddressDefinition, LabPool, DepoStokItem, EfficiencyPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -17,6 +17,7 @@ import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import BackButton from '@/components/BackButton';
 import dynamic from 'next/dynamic';
 import SharedLabPoolModal from '@/components/SharedLabPoolModal';
+import EfficiencyPoolModal from '@/components/EfficiencyPoolModal';
 import { exportDataToExcel } from '@/lib/utils';
 
 
@@ -50,22 +51,30 @@ export default function LaboratuvarPanel() {
   const [isPoolListModalOpen, setIsPoolListModalOpen] = useState(false);
   const [poolDetailsModal, setPoolDetailsModal] = useState<{ open: boolean; pool: LabPool | null }>({ open: false, pool: null });
 
+  // Verimlilik Havuzu State
+  const [isEfficiencyPoolModalOpen, setIsEfficiencyPoolModalOpen] = useState(false);
+  const [isEfficiencyPoolListOpen, setIsEfficiencyPoolListOpen] = useState(false);
+  const [efficiencyPools, setEfficiencyPools] = useState<EfficiencyPool[]>([]);
+  const [efficiencyPoolDetailsModal, setEfficiencyPoolDetailsModal] = useState<{ open: boolean; pool: EfficiencyPool | null }>({ open: false, pool: null });
+
 
   const fetchHospitalsAndProducts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap] = await Promise.all([
+      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'addressDefinitions')),
         getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'depoStok')),
+        getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
       ]);
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setAddressDefinitions(addrSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
       setLabPools(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
       setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setEfficiencyPools(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)));
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -248,6 +257,22 @@ export default function LaboratuvarPanel() {
     }
   };
 
+  const handleDeleteEfficiencyPool = async (poolId: string) => {
+    if (confirm('Bu verimlilik havuzunu silmek istediğinizden emin misiniz?')) {
+      setIsLoading(true);
+      try {
+        await deleteDoc(doc(db, 'efficiencyPools', poolId));
+        toast({ title: 'Silindi', description: 'Verimlilik havuzu silindi.' });
+        setEfficiencyPoolDetailsModal({ open: false, pool: null });
+        fetchHospitalsAndProducts();
+      } catch (error) {
+        toast({ title: 'Hata', description: 'Havuz silinemedi.', variant: 'destructive' });
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const handlePoolStockExport = async (pool: LabPool | null) => {
     if (!pool) return;
     const labNamesInPool = new Set(
@@ -299,7 +324,15 @@ export default function LaboratuvarPanel() {
               </CardTitle>
               <CardDescription>Yeni laboratuvarlar ekleyin veya mevcutları düzenleyin.</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" onClick={() => setIsEfficiencyPoolListOpen(true)} size="sm" disabled={isLoading}>
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Verimlilik Havuzları
+              </Button>
+              <Button variant="secondary" onClick={() => setIsEfficiencyPoolModalOpen(true)} size="sm" disabled={isLoading}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Verimlilik Havuzu Oluştur
+              </Button>
               <Button variant="secondary" onClick={() => setIsPoolListModalOpen(true)} size="sm" disabled={isLoading}>
                   Ortak Laboratuvarları Göster
               </Button>
@@ -545,6 +578,84 @@ export default function LaboratuvarPanel() {
             })}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Verimlilik Havuzu Modalları */}
+      <EfficiencyPoolModal
+        open={isEfficiencyPoolModalOpen}
+        onOpenChange={setIsEfficiencyPoolModalOpen}
+        onPoolCreated={fetchHospitalsAndProducts}
+      />
+
+      <Dialog open={isEfficiencyPoolListOpen} onOpenChange={setIsEfficiencyPoolListOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-primary" />
+              Verimlilik Havuzları
+            </DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="h-72 mt-4">
+            <div className="space-y-3">
+              {efficiencyPools.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  Henüz verimlilik havuzu oluşturulmadı.
+                </p>
+              ) : (
+                efficiencyPools.map(pool => (
+                  <div
+                    key={pool.id}
+                    className="p-3 border rounded-md flex justify-between items-center cursor-pointer hover:bg-muted/50"
+                    onClick={() => setEfficiencyPoolDetailsModal({ open: true, pool })}
+                  >
+                    <div>
+                      <p className="font-semibold">{pool.name}</p>
+                      <p className="text-xs text-muted-foreground">{pool.memberIds.length} laboratuvar</p>
+                    </div>
+                    <Button variant="ghost" size="icon"><Edit3 className="h-4 w-4" /></Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={efficiencyPoolDetailsModal.open} onOpenChange={(open) => !open && setEfficiencyPoolDetailsModal({ open: false, pool: null })}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verimlilik Havuzu: {efficiencyPoolDetailsModal.pool?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-3">
+            <h4 className="font-medium">Dahil Laboratuvarlar</h4>
+            <ScrollArea className="h-48">
+              <div className="space-y-2">
+                {efficiencyPoolDetailsModal.pool?.memberIds.map(labId => {
+                  const lab = hospitals.find(h => h.id === labId);
+                  return (
+                    <div key={labId} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                      <span className="text-sm flex items-center gap-2">
+                        <FlaskConical className="h-4 w-4 text-green-500" />
+                        {lab?.name || 'Bilinmeyen Lab'}
+                        {lab?.kod && <span className="text-xs font-mono text-muted-foreground">({lab.kod})</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => efficiencyPoolDetailsModal.pool && handleDeleteEfficiencyPool(efficiencyPoolDetailsModal.pool.id)}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Havuzu Sil
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

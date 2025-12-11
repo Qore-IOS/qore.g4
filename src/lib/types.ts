@@ -23,6 +23,7 @@ export interface ProductCode {
   laboratuvarGrubu?: string;
   testGrubu?: string;
   cihazGrubu?: string;
+  testAdi?: string; // Ürünün çalıştığı testin adı (Total Verimlilik paneli için)
   barcodeFormatId?: string | null; // Links to a BarcodeFormat
   barcodeNumber?: string; // The unique identifier part of the barcode for this product (UDI)
   trackingMode?: TrackingMode;
@@ -419,6 +420,7 @@ export type AppView =
   | 'cihaz-ariza-gecmis'
   | 'personel-islemleri'
   | 'is-analizi'
+  | 'total-verimlilik'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
@@ -509,6 +511,55 @@ export interface LabPool {
   createdByUid: string;
   createdByName: string;
   mainLabId?: string; // NEW
+}
+
+// Verimlilik Havuzu - Total Verimlilik paneli için laboratuvar grupları
+export interface EfficiencyPool {
+  id: string;
+  name: string;
+  memberIds: string[]; // Havuza dahil laboratuvar ID'leri
+  active: boolean;
+  createdAt: any;
+  createdByUid: string;
+  createdByName: string;
+}
+
+// Total Verimlilik kayıt satırı
+export interface TotalEfficiencyRow {
+  labId: string;
+  labName: string;
+  stokKodu: string;
+  stokAdi: string;
+  testAdi: string;
+  ambalajDegeri: number;
+  cihazGrubu: string;
+  baslangicStokuKutu: number; // Manuel giriş - kutu cinsinden
+  ayBasiCihazUstuTest: number; // Manuel giriş - test adedi
+  totalAyBasiStok: number; // Hesaplanan: (baslangicStokuKutu * ambalajDegeri) + ayBasiCihazUstuTest
+  sevkiyatKutu: number; // Manuel giriş
+  sevkiyatTest: number; // Hesaplanan
+  donemSonuStokKutu: number; // Manuel giriş
+  donemSonuCihazUstuTest: number; // Manuel giriş
+  totalDonemSonuStok: number; // Hesaplanan
+  kumulatifDeger: number; // Manuel giriş
+  hesaplananTuketim: number; // Hesaplanan
+  stokDogrulukOrani: number; // Hesaplanan yüzde
+  hakEdis: number; // Manuel giriş
+  hakEdisVerimliligi: number; // Hesaplanan yüzde
+}
+
+// Total Verimlilik kayıt dökümanı
+export interface TotalEfficiencyRecord {
+  id: string;
+  poolId: string;
+  poolName: string;
+  month: number;
+  year: number;
+  rows: TotalEfficiencyRow[];
+  createdAt: any;
+  createdByUid: string;
+  createdByName: string;
+  updatedAt?: any;
 }
 
 export interface LabResultExcelRow {

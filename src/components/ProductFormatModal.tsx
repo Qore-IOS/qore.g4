@@ -118,6 +118,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       laboratuvarGrubu: product.laboratuvarGrubu?.trim() || null,
       testGrubu: product.testGrubu?.trim() || null,
       cihazGrubu: product.cihazGrubu?.trim() || null,
+      testAdi: product.testAdi?.trim() || null,
       barcodeNumber: (product.barcodeNumber || '').trim() || null,
       barcodeFormatId: product.barcodeFormatId || null,
       ambalajDegeri: product.ambalajDegeri || null,
@@ -195,6 +196,16 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
                 <SelectTrigger><SelectValue placeholder="Test grubu seçin..." /></SelectTrigger>
                 <SelectContent>{definitions.testGroups.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}</SelectContent>
             </Select>
+          </div>
+          <div>
+            <Label>Test Adı</Label>
+            <Input
+              name="testAdi"
+              value={product.testAdi || ''}
+              onChange={handleChange}
+              placeholder="Örn: HbA1c, TSH, Ferritin..."
+            />
+            <p className="text-xs text-muted-foreground mt-1">Ürünün çalıştığı testin adı (Total Verimlilik paneli için).</p>
           </div>
           <div>
             <Label>Cihaz Grubu</Label>
