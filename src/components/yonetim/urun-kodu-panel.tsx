@@ -296,8 +296,8 @@ export default function UrunKoduPanel() {
   const handleDownloadTemplate = () => {
     const workbook = XLSX.utils.book_new();
     const templateSheet = XLSX.utils.json_to_sheet([
-      { 
-        stokKodu: '', stokAdi: '', urunGrubu: 'kit', ambalajDegeri: '', anaBirim: 'Kutu', cost: '', currency: 'EUR', marka: '', laboratuvarGrubu: '', testGrubu: '', cihazGrubu: '', trackingMode: 'serial', barcodeNumber: '', barcodeFormatId: ''
+      {
+        stokKodu: '', stokAdi: '', urunGrubu: 'kit', ambalajDegeri: '', anaBirim: 'Kutu', cost: '', currency: 'EUR', marka: '', laboratuvarGrubu: '', testGrubu: '', cihazGrubu: '', testAdi: '', trackingMode: 'serial', barcodeNumber: '', barcodeFormatId: ''
       },
     ]);
     XLSX.utils.book_append_sheet(workbook, templateSheet, 'Urunler');
@@ -321,6 +321,7 @@ export default function UrunKoduPanel() {
         laboratuvarGrubu: p.laboratuvarGrubu,
         testGrubu: p.testGrubu,
         cihazGrubu: p.cihazGrubu,
+        testAdi: p.testAdi ?? '',
         trackingMode: trackingModeToExcel((p as any).trackingMode),
         barcodeNumber: (p as any).barcodeNumber ?? '',
         barcodeFormatId: (p as any).barcodeFormatId ?? '',
@@ -384,6 +385,7 @@ export default function UrunKoduPanel() {
             laboratuvarGrubu: row['laboratuvargrubu'] || undefined,
             testGrubu: row['testgrubu'] || undefined,
             cihazGrubu: row['cihazgrubu'] || undefined,
+            testAdi: row['testadi'] || row['testadı'] || undefined,
             trackingMode: trackingModeFromExcel(row['trackingmode']),
             barcodeNumber: row['barcodenumber'] ?? null,
             barcodeFormatId: row['barcodeformatid'] || null,

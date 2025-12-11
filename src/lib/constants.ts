@@ -19,6 +19,7 @@ export const VIEWS: { key: string; label: string; icon: React.ElementType; type:
   { key: 'numune-arsivi', label: 'Numune Arşivi', icon: Archive, type: 'nav', href: '/numune-arsivi' },
   { key: 'is-analizi', label: 'İş Analizi', icon: TrendingUp, type: 'nav', href: '/is-analizi'},
   { key: 'verimlilik-hesaplama', label: 'Verimlilik & Maliyet', icon: Calculator, type: 'nav' }, // onClick will be handled in app-layout
+  { key: 'total-verimlilik', label: 'Total Verimlilik', icon: BarChart3, type: 'nav', href: '/total-verimlilik' },
   { key: 'cihaz-yonetimi-ana', label: 'Cihaz Yönetimi', icon: Server, type: 'nav', href: '/cihaz-yonetimi-ana' },
   { key: 'raporlama', label: 'Raporlama', icon: BarChart3, type: 'nav', href: '/raporlama' },
   { key: 'cihaz-ustu-ekle', label: 'Cihaz Üstü Ekle', icon: Activity, type: 'nav', href: '/raporlama/cihaz-ustu-ekle'},
