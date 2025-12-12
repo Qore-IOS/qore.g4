@@ -173,14 +173,18 @@ export default function UrunKullanimPanel() {
     [selectedLabSubPoints, selectedSubPointId]
   );
 
-  // Compute pool member IDs for lab stock
-  const poolMemberIds = useMemo(() => {
+  // Compute pool member IDs and names for lab stock
+  const { poolMemberIds, poolMemberNames } = useMemo(() => {
     const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
-    return pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
-  }, [labPools, selectedLabId]);
+    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    // Get names for legacy record support
+    const names = ids.map(id => laboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
+    return { poolMemberIds: ids, poolMemberNames: names };
+  }, [labPools, selectedLabId, laboratories]);
 
   // Use TanStack Query for lab stock - much more efficient than full depoStok
-  const { data: labStock = [] } = useLabStock(poolMemberIds);
+  // Now also passes lab names to support legacy records without hedefKurumId
+  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames);
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
