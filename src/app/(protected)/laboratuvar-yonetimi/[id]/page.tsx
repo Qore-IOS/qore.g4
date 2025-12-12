@@ -43,16 +43,39 @@ export default function LabStockDetailPage() {
         const parent = { id: firstItemSnap.id, ...firstItemSnap.data() } as DepoStokItem;
         setParentItem(parent);
 
-        const q = query(
-            collection(db, 'depoStok'),
+        // Query using hedefKurumId if available, otherwise fall back to hedefKurum (name)
+        // This handles both new records (with hedefKurumId) and legacy records (with only hedefKurum)
+        const baseConstraints = [
             where('stokKodu', '==', parent.stokKodu),
             where('lotNumarasi', '==', parent.lotNumarasi),
             where('miad', '==', parent.miad),
-            where('hedefKurum', '==', parent.hedefKurum),
             where('isShipped', '==', true)
-        );
-        const snap = await getDocs(q);
-        const fetchedItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        ];
+
+        let fetchedItems: DepoStokItem[] = [];
+
+        if (parent.hedefKurumId) {
+            // Query by hedefKurumId for new records
+            const q = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurumId', '==', parent.hedefKurumId));
+            const snap = await getDocs(q);
+            fetchedItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        }
+
+        // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
+        if (parent.hedefKurum) {
+            const legacyQ = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurum', '==', parent.hedefKurum));
+            const legacySnap = await getDocs(legacyQ);
+            const legacyItems = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+
+            // Merge results, avoiding duplicates
+            const existingIds = new Set(fetchedItems.map(item => item.id));
+            legacyItems.forEach(item => {
+                if (!existingIds.has(item.id)) {
+                    fetchedItems.push(item);
+                }
+            });
+        }
+
         setItems(fetchedItems);
 
     } catch (err) {

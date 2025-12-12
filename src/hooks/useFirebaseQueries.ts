@@ -220,21 +220,48 @@ export function useAllDepoStok() {
 
 /**
  * Shipped stock for a specific lab (or pool of labs)
+ * Now also queries by hedefKurum (name) for legacy records that may not have hedefKurumId
  */
-export function useLabStock(labIds: string[]) {
+export function useLabStock(labIds: string[], labNames: string[] = []) {
   return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(',')],
+    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(',')],
     queryFn: async () => {
       if (labIds.length === 0) return [];
       // We can only use 'in' with up to 30 values
       const ids = labIds.slice(0, 30);
-      const q = query(
+      const names = labNames.slice(0, 30);
+
+      // Query by hedefKurumId
+      const idQuery = query(
         collection(db, 'depoStok'),
         where('hedefKurumId', 'in', ids),
         where('isShipped', '==', true)
       );
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      const idSnap = await getDocs(idQuery);
+      const idResults = idSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+
+      // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
+      let legacyResults: DepoStokItem[] = [];
+      if (names.length > 0) {
+        const nameQuery = query(
+          collection(db, 'depoStok'),
+          where('hedefKurum', 'in', names),
+          where('isShipped', '==', true)
+        );
+        const nameSnap = await getDocs(nameQuery);
+        legacyResults = nameSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      }
+
+      // Merge results, avoiding duplicates
+      const resultMap = new Map<string, DepoStokItem>();
+      idResults.forEach(item => resultMap.set(item.id, item));
+      legacyResults.forEach(item => {
+        if (!resultMap.has(item.id)) {
+          resultMap.set(item.id, item);
+        }
+      });
+
+      return Array.from(resultMap.values());
     },
     enabled: labIds.length > 0,
     staleTime: 2 * 60 * 1000,
