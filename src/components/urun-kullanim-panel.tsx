@@ -354,9 +354,10 @@ export default function UrunKullanimPanel() {
     }
 
     if (item.irsaliyeNumarasi !== 'İSTİSNA GİRİŞİ' && item.seriNumarasi) {
-        const alreadyConsumed = tuketimKayitlari.some(c => c.seriNumarasi === item!.seriNumarasi);
+        // Check by both stokKodu AND seriNumarasi since same serial can exist for different products
+        const alreadyConsumed = tuketimKayitlari.some(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
         if (alreadyConsumed) {
-            toast({ title: 'Zaten Tüketilmiş', description: `Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
+            toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
             playFeedback(true);
             setScanStatus('error');
             setTimeout(() => setScanStatus('idle'), 3000);
@@ -379,7 +380,9 @@ export default function UrunKullanimPanel() {
           toast({ title: 'Yanlış Lot', description: `Lütfen ${lotReplaceTarget.recommended.lotNumarasi} lotundan bir seri okutun.`, variant: 'destructive' });
           return;
         }
-        const newItem = findBySerial(parsed.stokKodu ?? '', parsed.seriNumarasi);
+        // Use stokKodu from the recommended item to ensure we find the correct product
+        const targetStokKodu = lotReplaceTarget.recommended.stokKodu;
+        const newItem = findBySerial(targetStokKodu, parsed.seriNumarasi);
         if (!newItem) {
           toast({ title: 'Depoda Bulunamadı', description: 'Bu seri lotta bulunamadı.', variant: 'destructive' });
           return;

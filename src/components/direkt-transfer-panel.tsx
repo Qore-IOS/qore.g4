@@ -248,7 +248,7 @@ export default function DirektTransferPanel() {
   const addDirectTransferItem = useCallback((itemToAdd: DepoStokItem) => {
     setDirectTransferItems(prevItems => {
         if (prevItems.some(item => item.id === itemToAdd.id)) {
-            toast({ title: 'Uyarı', description: 'Bu seri numarası zaten listeye eklendi.', variant: 'default' });
+            toast({ title: 'Uyarı', description: 'Bu ürün zaten listeye eklendi.', variant: 'default' });
             return prevItems;
         }
         return [{...itemToAdd, adet: 1, key: itemToAdd.id, isGroup: false}, ...prevItems];
@@ -258,9 +258,10 @@ export default function DirektTransferPanel() {
 
   const depotName = useMemo(() => depots.find(d => d.id === selectedDepotId)?.name || '', [depots, selectedDepotId]);
 
-  const countStockBySerial = useCallback(async (serial: string): Promise<DepoStokItem[]> => {
+  const countStockBySerial = useCallback(async (stokKodu: string, serial: string): Promise<DepoStokItem[]> => {
       if (!selectedDepotId) return [];
-      const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false), where('seriNumarasi', '==', serial));
+      // Query by both stokKodu AND seriNumarasi since same serial can exist for different products
+      const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false), where('stokKodu', '==', stokKodu), where('seriNumarasi', '==', serial));
       const snap = await getDocs(q);
       return snap.docs.map(d => ({id: d.id, ...d.data()} as DepoStokItem));
   }, [selectedDepotId]);
@@ -304,12 +305,6 @@ export default function DirektTransferPanel() {
         return;
       }
       
-      if (parsed.seriNumarasi && directTransferItems.some(item => item.seriNumarasi === parsed.seriNumarasi)) {
-          playFeedback(true);
-          toast({ title: 'Uyarı', description: 'Bu seri numarası zaten listeye eklendi.', variant: 'default' });
-          return;
-      }
-
       const resolved = resolveProductFromParsed(parsed, products);
       if (!resolved.product || !resolved.stokKodu) {
         playFeedback(true);
@@ -323,6 +318,13 @@ export default function DirektTransferPanel() {
       const miad = resolved.miadFormatted || '';
       const seri = resolved.seriNumarasi || '';
 
+      // Check for duplicate - must match both stokKodu AND seriNumarasi since same serial can exist for different products
+      if (seri && directTransferItems.some(item => item.stokKodu === stokKodu && item.seriNumarasi === seri)) {
+          playFeedback(true);
+          toast({ title: 'Uyarı', description: 'Bu ürün zaten listeye eklendi.', variant: 'default' });
+          return;
+      }
+
       const mode: TrackingMode = resolveDefaultTrackingMode(product as any);
 
       if (mode === 'serial') {
@@ -331,7 +333,7 @@ export default function DirektTransferPanel() {
           toast({ title: 'Seri Eksik', description: 'Seri no takipli üründe barkod seri içermiyor.', variant: 'destructive' });
           return;
         }
-        const items = await countStockBySerial(seri);
+        const items = await countStockBySerial(stokKodu, seri);
         if (items.length === 0) {
           playFeedback(true);
           toast({ title: 'Depoda Bulunamadı', description: `Seri No ${seri} bu depoda yok.`, variant: 'destructive' });
