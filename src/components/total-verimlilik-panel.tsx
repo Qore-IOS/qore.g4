@@ -101,12 +101,35 @@ export default function TotalVerimlilikPanel({
           return;
         }
 
-        // Havuzdaki laboratuvarların ID'lerini al
-        // Eğer bir laboratuvar ortak havuzun ana laboratuvarı ise, o havuzdaki tüm laboratuvarların min-max'ını birleştir
-        const labIdsToProcess = new Set<string>();
-        const labIdToDisplayName = new Map<string, { name: string; kod: string }>();
+        // Önce skip edilecek laboratuvarları belirle
+        // Eğer bir laboratuvar bir ortak stok havuzuna dahilse ve o havuzun ana laboratuvarı
+        // verimlilik havuzunda ise, bu laboratuvar skip edilmeli (ana lab zaten temsil ediyor)
+        const labsToSkip = new Set<string>();
 
         for (const labId of selectedPool.memberIds) {
+          // Bu laboratuvar herhangi bir ortak stok havuzuna dahil mi?
+          const sharedPool = labPools.find(p => p.memberIds.includes(labId));
+
+          if (sharedPool && sharedPool.mainLabId) {
+            // Bu ortak stok havuzunun ana laboratuvarı verimlilik havuzunda mı?
+            if (selectedPool.memberIds.includes(sharedPool.mainLabId)) {
+              // Eğer bu laboratuvar ana lab değilse, skip et
+              if (labId !== sharedPool.mainLabId) {
+                labsToSkip.add(labId);
+              }
+            }
+          }
+        }
+
+        // Havuzdaki laboratuvarların ID'lerini al (skip edilenler hariç)
+        const labIdsToProcess = new Set<string>();
+        const labIdToDisplayName = new Map<string, { name: string; kod: string }>();
+        const labIdToMinMaxLabIds = new Map<string, string[]>();
+
+        for (const labId of selectedPool.memberIds) {
+          // Skip listesindeki laboratuvarları atla - bunlar zaten ana lab tarafından temsil ediliyor
+          if (labsToSkip.has(labId)) continue;
+
           const lab = hospitals.find(h => h.id === labId);
           if (!lab) continue;
 
@@ -115,10 +138,12 @@ export default function TotalVerimlilikPanel({
           if (sharedPool) {
             // Ana laboratuvar olarak görüntüle ama tüm havuz üyelerinin min-max'ını al
             labIdToDisplayName.set(labId, { name: lab.name, kod: lab.kod || '' });
+            labIdToMinMaxLabIds.set(labId, sharedPool.memberIds);
             sharedPool.memberIds.forEach(memberId => labIdsToProcess.add(memberId));
           } else {
             labIdsToProcess.add(labId);
             labIdToDisplayName.set(labId, { name: lab.name, kod: lab.kod || '' });
+            labIdToMinMaxLabIds.set(labId, [labId]);
           }
         }
 
@@ -139,15 +164,14 @@ export default function TotalVerimlilikPanel({
         const newRows: TableRow[] = [];
 
         for (const labId of selectedPool.memberIds) {
-          const lab = hospitals.find(h => h.id === labId);
-          if (!lab) continue;
+          // Skip listesindeki laboratuvarları atla
+          if (labsToSkip.has(labId)) continue;
 
           const displayInfo = labIdToDisplayName.get(labId);
           if (!displayInfo) continue;
 
           // Bu laboratuvar (veya ortak havuz) için tüm min-max ürünlerini topla
-          const sharedPool = labPools.find(p => p.mainLabId === labId);
-          const labIdsForMinMax = sharedPool ? sharedPool.memberIds : [labId];
+          const labIdsForMinMax = labIdToMinMaxLabIds.get(labId) || [labId];
 
           const uniqueProductCodes = new Set<string>();
           labIdsForMinMax.forEach(lid => {
