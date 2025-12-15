@@ -5,7 +5,7 @@ import { googleAI } from '@genkit-ai/googleai';
 export const ai = genkit({
   plugins: [
     googleAI({
-      apiKey: process.env.GOOGLE_AI_API_KEY,
+      apiKey: process.env.GEMINI_API_KEY,
     }),
   ],
 });
