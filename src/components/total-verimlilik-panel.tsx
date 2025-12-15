@@ -59,6 +59,11 @@ interface TableRow {
   donemSonuCihazUstuTest: number; // Sütun 17 - Dönem Sonu Cihaz Üstü (Test)
   donemSonuToplamTest: number; // Sütun 18 - Hesaplanan: (16 * ambalaj) + 17
   hakEdis: number; // Sütun 19 - Hak Ediş (Test)
+  // Phase 4 - Sütunlar 20-21
+  stokDogrulukFark: number; // Sütun 20 - (14-18) - 15 = Fark (Test)
+  stokDogrulukYuzde: number; // Sütun 20 - Fark/15 * 100 = Sapma %
+  kitVerimlilikFark: number; // Sütun 21 - 15 - 19 = Fark (Test)
+  kitVerimlilikYuzde: number; // Sütun 21 - Fark/15 * 100 = Sapma %
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -251,6 +256,11 @@ export default function TotalVerimlilikPanel({
               donemSonuCihazUstuTest: 0,
               donemSonuToplamTest: 0,
               hakEdis: 0,
+              // Phase 4 alanları
+              stokDogrulukFark: 0,
+              stokDogrulukYuzde: 0,
+              kitVerimlilikFark: 0,
+              kitVerimlilikYuzde: 0,
             });
           });
         }
@@ -305,11 +315,23 @@ export default function TotalVerimlilikPanel({
           const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
           const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
           const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
+
+          // Phase 4 hesaplamaları
+          const beklenenTuketim = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
+          const stokDogrulukFark = beklenenTuketim - row.kumulatifTotal;
+          const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
+          const kitVerimlilikFark = row.kumulatifTotal - row.hakEdis;
+          const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
+
           return {
             ...row,
             totalAyBasiStok,
             sevkiyatlarSonrasiTotalTest,
             donemSonuToplamTest,
+            stokDogrulukFark,
+            stokDogrulukYuzde,
+            kitVerimlilikFark,
+            kitVerimlilikYuzde,
           };
         });
 
@@ -354,11 +376,29 @@ export default function TotalVerimlilikPanel({
     // Formül: (Dönem Sonu Stok Kutu * Ambalaj) + Dönem Sonu Cihaz Üstü Test
     const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
 
+    // Phase 4 - Sütun 20: Stok Doğruluk
+    // Beklenen tüketim: 14 - 18 = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest
+    // Fark: Beklenen - Kümülatif = (14-18) - 15
+    const beklenenTuketim = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
+    const stokDogrulukFark = beklenenTuketim - row.kumulatifTotal;
+    // Sapma yüzdesi: Fark / Kümülatif * 100 (kümülatif 0 ise 0)
+    const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
+
+    // Phase 4 - Sütun 21: Kit Verimlilik
+    // Fark: Kümülatif - Hak Ediş = 15 - 19
+    const kitVerimlilikFark = row.kumulatifTotal - row.hakEdis;
+    // Sapma yüzdesi: Fark / Kümülatif * 100 (kümülatif 0 ise 0)
+    const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
+
     return {
       ...row,
       totalAyBasiStok,
       sevkiyatlarSonrasiTotalTest,
       donemSonuToplamTest,
+      stokDogrulukFark,
+      stokDogrulukYuzde,
+      kitVerimlilikFark,
+      kitVerimlilikYuzde,
     };
   }, []);
 
@@ -548,6 +588,11 @@ export default function TotalVerimlilikPanel({
       'Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest,
       'Dönem Sonu Toplam Test': r.donemSonuToplamTest,
       'Hak Ediş (Test)': r.hakEdis,
+      // Phase 4
+      'Stok Doğruluk Fark (Test)': r.stokDogrulukFark,
+      'Stok Doğruluk Sapma (%)': Number(r.stokDogrulukYuzde.toFixed(2)),
+      'Kit Verimlilik Fark (Test)': r.kitVerimlilikFark,
+      'Kit Verimlilik Sapma (%)': Number(r.kitVerimlilikYuzde.toFixed(2)),
     }));
 
     const fileName = `Total_Verimlilik_${selectedPool?.name || 'Rapor'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
@@ -711,7 +756,7 @@ export default function TotalVerimlilikPanel({
               </div>
             ) : (
               <ScrollArea className="w-full">
-                <div className="min-w-[3000px]">
+                <div className="min-w-[3400px]">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -763,6 +808,13 @@ export default function TotalVerimlilikPanel({
                         </TableHead>
                         <TableHead className="min-w-[140px] bg-yellow-50 dark:bg-yellow-950">
                           19. Hak Ediş (Test)
+                        </TableHead>
+                        {/* Phase 4 - Sütunlar 20-21 */}
+                        <TableHead className="min-w-[180px] bg-red-50 dark:bg-red-950 text-center">
+                          20. Stok Doğruluk
+                        </TableHead>
+                        <TableHead className="min-w-[180px] bg-emerald-50 dark:bg-emerald-950 text-center">
+                          21. Kit Verimlilik
                         </TableHead>
                       </TableRow>
                     </TableHeader>
@@ -912,6 +964,29 @@ export default function TotalVerimlilikPanel({
                                 onChange={e => handleValueChange(row.id, 'hakEdis', e.target.value)}
                                 placeholder="0"
                               />
+                            </TableCell>
+                            {/* Phase 4 - Sütunlar 20-21 */}
+                            {/* Sütun 20: Stok Doğruluk (Fark + Yüzde) */}
+                            <TableCell className="bg-red-50/50 dark:bg-red-950/50 text-center">
+                              <div className="flex flex-col items-center gap-1">
+                                <span className={`font-semibold ${row.stokDogrulukFark !== 0 ? (row.stokDogrulukFark > 0 ? 'text-red-600' : 'text-green-600') : ''}`}>
+                                  {row.stokDogrulukFark > 0 ? '+' : ''}{row.stokDogrulukFark.toLocaleString('tr-TR')} test
+                                </span>
+                                <span className={`text-xs ${row.stokDogrulukYuzde !== 0 ? (row.stokDogrulukYuzde > 0 ? 'text-red-500' : 'text-green-500') : 'text-muted-foreground'}`}>
+                                  ({row.stokDogrulukYuzde > 0 ? '+' : ''}{row.stokDogrulukYuzde.toFixed(1)}%)
+                                </span>
+                              </div>
+                            </TableCell>
+                            {/* Sütun 21: Kit Verimlilik (Fark + Yüzde) */}
+                            <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
+                              <div className="flex flex-col items-center gap-1">
+                                <span className={`font-semibold ${row.kitVerimlilikFark !== 0 ? (row.kitVerimlilikFark > 0 ? 'text-orange-600' : 'text-green-600') : ''}`}>
+                                  {row.kitVerimlilikFark > 0 ? '+' : ''}{row.kitVerimlilikFark.toLocaleString('tr-TR')} test
+                                </span>
+                                <span className={`text-xs ${row.kitVerimlilikYuzde !== 0 ? (row.kitVerimlilikYuzde > 0 ? 'text-orange-500' : 'text-green-500') : 'text-muted-foreground'}`}>
+                                  ({row.kitVerimlilikYuzde > 0 ? '+' : ''}{row.kitVerimlilikYuzde.toFixed(1)}%)
+                                </span>
+                              </div>
                             </TableCell>
                           </TableRow>
                         );
