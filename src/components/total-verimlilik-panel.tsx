@@ -8,8 +8,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save } from 'lucide-react';
-import { collection, getDocs, query, orderBy, doc, setDoc, Timestamp } from 'firebase/firestore';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { collection, getDocs, query, orderBy, doc, setDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -31,11 +41,18 @@ interface TableRow {
   testAdi: string;
   ambalajDegeri: number;
   cihazGrubu: string;
-  // Manuel giriş alanları
+  // Manuel giriş alanları (Sütun 7-8)
   baslangicStokuKutu: number;
   ayBasiCihazUstuTest: number;
-  // Hesaplanan alan
+  // Hesaplanan alan (Sütun 9)
   totalAyBasiStok: number;
+  // Phase 2 - Sütunlar 10-14
+  ayBasiSevkiyatKutu: number; // Sütun 10 - Ay Başı Sevkiyat (Kutu)
+  goztepeSevkiyat: number; // Sütun 11 - Göztepe Sevkiyat (Kutu)
+  kurumlarArasiSevk: number; // Sütun 12 - Kurumlar Arası Sevk (Kutu)
+  kurumlarArasiSevkKaynakLabId?: string; // Sütun 12 için kaynak lab
+  lojistikAraTransfer: number; // Sütun 13 - Lojistik Ara Transfer (Kutu)
+  sevkiyatlarSonrasiTotalTest: number; // Sütun 14 - Hesaplanan
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -64,17 +81,35 @@ export default function TotalVerimlilikPanel({
 
   const [rows, setRows] = useState<TableRow[]>([]);
 
-  // Verimlilik havuzlarını ve ortak lab havuzlarını çek
+  // Phase 2 State'leri
+  const [depots, setDepots] = useState<{ id: string; name: string }[]>([]);
+
+  // Göztepe Sevkiyat Modal State'leri (Sütun 11)
+  const [showGoztepeSevkiyatModal, setShowGoztepeSevkiyatModal] = useState(false);
+  const [selectedLabsForSevkiyat, setSelectedLabsForSevkiyat] = useState<Set<string>>(new Set());
+  const [isFetchingSevkiyat, setIsFetchingSevkiyat] = useState(false);
+
+  // Kurumlar Arası Sevk Modal State'leri (Sütun 12)
+  const [showKurumlarArasiModal, setShowKurumlarArasiModal] = useState(false);
+  const [kurumlarArasiEditingRow, setKurumlarArasiEditingRow] = useState<{ rowId: string; value: number } | null>(null);
+
+  // Kurumlar arası transfer bilgisi - hangi labdan ne kadar alındığını takip eder
+  // Key: "targetRowId" -> { sourceLabId, kutuAdet }
+  const [interLabTransfers, setInterLabTransfers] = useState<Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>>({});
+
+  // Verimlilik havuzlarını, ortak lab havuzlarını ve depoları çek
   useEffect(() => {
     const fetchPools = async () => {
       setIsLoading(true);
       try {
-        const [effPoolsSnap, labPoolsSnap] = await Promise.all([
+        const [effPoolsSnap, labPoolsSnap, depotsSnap] = await Promise.all([
           getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
           getDocs(collection(db, 'labPools')),
+          getDocs(collection(db, 'depots')),
         ]);
         setEfficiencyPools(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)));
         setLabPools(labPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
+        setDepots(depotsSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name || d.id })));
       } catch (error) {
         console.error('Error fetching pools:', error);
         toast({ title: 'Hata', description: 'Havuzlar yüklenemedi.', variant: 'destructive' });
@@ -198,6 +233,12 @@ export default function TotalVerimlilikPanel({
               baslangicStokuKutu: 0,
               ayBasiCihazUstuTest: 0,
               totalAyBasiStok: 0,
+              // Phase 2 alanları
+              ayBasiSevkiyatKutu: 0,
+              goztepeSevkiyat: 0,
+              kurumlarArasiSevk: 0,
+              lojistikAraTransfer: 0,
+              sevkiyatlarSonrasiTotalTest: 0,
             });
           });
         }
@@ -222,28 +263,194 @@ export default function TotalVerimlilikPanel({
   }, [selectedPoolId, efficiencyPools, labPools, hospitals, productCodes, toast]);
 
   // Hesaplama fonksiyonu
-  const computeRow = useCallback((row: TableRow): TableRow => {
+  const computeRow = useCallback((row: TableRow, allRows?: TableRow[], transfers?: Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>): TableRow => {
     // Total Ay Başı Stok = (Başlangıç Stoğu Kutu * Ambalaj Değeri) + Ay Başı Cihaz Üstü Test
     const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
+
+    // Sütun 14: Sevkiyatlar Sonrası Total Test Adet
+    // Formül: ((10+11+12+13) * ambalaj) + 9 (Total Ay Başı Stok)
+    const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
+    let sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
+
+    // Eğer bu satır başka bir laboratuvara ürün verdiyse, o miktarı düş
+    if (transfers && allRows) {
+      // Bu lab'ın bu ürününden başka lab'a transfer edilen miktarı bul
+      for (const [targetRowId, transfer] of Object.entries(transfers)) {
+        if (transfer.sourceLabId === row.labId) {
+          // Aynı ürün mü kontrol et
+          const targetRow = allRows.find(r => r.id === targetRowId);
+          if (targetRow && targetRow.stokKodu === row.stokKodu) {
+            // Kaynak labdan düşülecek test adedi = kutu * ambalaj
+            sevkiyatlarSonrasiTotalTest -= transfer.kutuAdet * row.ambalajDegeri;
+          }
+        }
+      }
+    }
+
     return {
       ...row,
       totalAyBasiStok,
+      sevkiyatlarSonrasiTotalTest,
     };
   }, []);
 
+  // Tüm satırları yeniden hesapla (inter-lab transfer değiştiğinde)
+  const recomputeAllRows = useCallback((currentRows: TableRow[], transfers: Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>) => {
+    return currentRows.map(row => computeRow(row, currentRows, transfers));
+  }, [computeRow]);
+
   // Değer değişikliği handler'ı
-  const handleValueChange = useCallback((rowId: string, field: 'baslangicStokuKutu' | 'ayBasiCihazUstuTest', value: string) => {
+  type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer';
+
+  const handleValueChange = useCallback((rowId: string, field: EditableField, value: string) => {
     const numValue = value === '' ? 0 : parseFloat(value);
     if (isNaN(numValue)) return;
 
     setRows(prevRows => {
-      return prevRows.map(row => {
+      const updatedRows = prevRows.map(row => {
         if (row.id !== rowId) return row;
-        const updatedRow = { ...row, [field]: numValue };
-        return computeRow(updatedRow);
+        return { ...row, [field]: numValue };
       });
+      return recomputeAllRows(updatedRows, interLabTransfers);
     });
-  }, [computeRow]);
+  }, [recomputeAllRows, interLabTransfers]);
+
+  // Kurumlar Arası Sevk değişikliği - modal açar
+  const handleKurumlarArasiSevkChange = useCallback((rowId: string, value: string) => {
+    const numValue = value === '' ? 0 : parseFloat(value);
+    if (isNaN(numValue)) return;
+
+    if (numValue > 0) {
+      // Modal aç, kaynak lab seçimi için
+      setKurumlarArasiEditingRow({ rowId, value: numValue });
+      setShowKurumlarArasiModal(true);
+    } else {
+      // Sıfırlandıysa, inter-lab transfer'i de temizle
+      const newTransfers = { ...interLabTransfers };
+      delete newTransfers[rowId];
+      setInterLabTransfers(newTransfers);
+
+      setRows(prevRows => {
+        const updatedRows = prevRows.map(row => {
+          if (row.id !== rowId) return row;
+          return { ...row, kurumlarArasiSevk: 0 };
+        });
+        return recomputeAllRows(updatedRows, newTransfers);
+      });
+    }
+  }, [interLabTransfers, recomputeAllRows]);
+
+  // Kaynak lab seçildikten sonra Kurumlar Arası Sevk'i uygula
+  const handleConfirmKurumlarArasi = useCallback((sourceLabId: string) => {
+    if (!kurumlarArasiEditingRow) return;
+
+    const { rowId, value } = kurumlarArasiEditingRow;
+    const sourceLab = hospitals.find(h => h.id === sourceLabId);
+
+    // Inter-lab transfer bilgisini kaydet
+    const newTransfers = {
+      ...interLabTransfers,
+      [rowId]: {
+        sourceLabId,
+        sourceLabName: sourceLab?.name || sourceLabId,
+        kutuAdet: value,
+      },
+    };
+    setInterLabTransfers(newTransfers);
+
+    // Satırı güncelle
+    setRows(prevRows => {
+      const updatedRows = prevRows.map(row => {
+        if (row.id !== rowId) return row;
+        return { ...row, kurumlarArasiSevk: value, kurumlarArasiSevkKaynakLabId: sourceLabId };
+      });
+      return recomputeAllRows(updatedRows, newTransfers);
+    });
+
+    setShowKurumlarArasiModal(false);
+    setKurumlarArasiEditingRow(null);
+  }, [kurumlarArasiEditingRow, hospitals, interLabTransfers, recomputeAllRows]);
+
+  // Göztepe Sevkiyat - depo transferlerinden çek
+  const handleFetchGoztepeSevkiyat = useCallback(async () => {
+    if (selectedLabsForSevkiyat.size === 0) {
+      toast({ title: 'Uyarı', description: 'Lütfen en az bir laboratuvar seçin.', variant: 'destructive' });
+      return;
+    }
+
+    setIsFetchingSevkiyat(true);
+    try {
+      // Seçilen ay için tarih aralığı oluştur
+      const startDate = new Date(selectedYear, selectedMonth, 1);
+      const endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
+
+      // Transfer kayıtlarını çek
+      const transfersQuery = query(
+        collection(db, 'transfers'),
+        where('timestamp', '>=', Timestamp.fromDate(startDate)),
+        where('timestamp', '<=', Timestamp.fromDate(endDate))
+      );
+      const transfersSnap = await getDocs(transfersQuery);
+
+      // Her transfer için item'ları çek ve lab'a göre grupla
+      const labProductCounts: Record<string, Record<string, number>> = {}; // labId -> stokKodu -> kutu sayısı
+
+      for (const transferDoc of transfersSnap.docs) {
+        const transferData = transferDoc.data();
+        const targetLabId = transferData.targetHospitalId;
+
+        // Sadece seçilen lab'lara yapılan transferleri say
+        if (!targetLabId || !selectedLabsForSevkiyat.has(targetLabId)) continue;
+
+        // Transfer item'larını çek
+        const itemsSnap = await getDocs(collection(db, 'transfers', transferDoc.id, 'items'));
+
+        for (const itemDoc of itemsSnap.docs) {
+          const itemData = itemDoc.data();
+          const stokKodu = itemData.stokKodu;
+
+          if (!labProductCounts[targetLabId]) {
+            labProductCounts[targetLabId] = {};
+          }
+          if (!labProductCounts[targetLabId][stokKodu]) {
+            labProductCounts[targetLabId][stokKodu] = 0;
+          }
+          // Her seri numarası 1 adet (1 kutu değil, ama seri bazlı transfer için adet sayısı)
+          labProductCounts[targetLabId][stokKodu] += 1;
+        }
+      }
+
+      // Satırları güncelle - seri sayısını kutuya çevir (ambalaj ile böl)
+      setRows(prevRows => {
+        const updatedRows = prevRows.map(row => {
+          const counts = labProductCounts[row.labId]?.[row.stokKodu] || 0;
+          // Seri sayısını kutuya çevir (ambalaj değerine böl, yuvarla)
+          const kutuSayisi = row.ambalajDegeri > 0 ? Math.round(counts / row.ambalajDegeri) : counts;
+          return { ...row, goztepeSevkiyat: kutuSayisi };
+        });
+        return recomputeAllRows(updatedRows, interLabTransfers);
+      });
+
+      toast({ title: 'Başarılı', description: 'Göztepe sevkiyat verileri çekildi.' });
+    } catch (error) {
+      console.error('Error fetching sevkiyat:', error);
+      toast({ title: 'Hata', description: 'Sevkiyat verileri çekilirken hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsFetchingSevkiyat(false);
+      setShowGoztepeSevkiyatModal(false);
+      setSelectedLabsForSevkiyat(new Set());
+    }
+  }, [selectedLabsForSevkiyat, selectedYear, selectedMonth, toast, recomputeAllRows, interLabTransfers]);
+
+  // Listedeki laboratuvarlar (verimlilik havuzundaki)
+  const poolLabIds = useMemo(() => {
+    const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
+    return selectedPool?.memberIds || [];
+  }, [selectedPoolId, efficiencyPools]);
+
+  const poolLabs = useMemo(() => {
+    return hospitals.filter(h => poolLabIds.includes(h.id));
+  }, [hospitals, poolLabIds]);
 
   // Excel export
   const handleExportExcel = useCallback(() => {
@@ -261,11 +468,17 @@ export default function TotalVerimlilikPanel({
       'Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu,
       'Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest,
       'Total Ay Başı Stok (Test)': r.totalAyBasiStok,
+      'Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu,
+      'Göztepe Sevkiyat (Kutu)': r.goztepeSevkiyat,
+      'Kurumlar Arası Sevk (Kutu)': r.kurumlarArasiSevk,
+      'Kaynak Lab': interLabTransfers[r.id]?.sourceLabName || '',
+      'Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer,
+      'Sevkiyatlar Sonrası Total Test': r.sevkiyatlarSonrasiTotalTest,
     }));
 
     const fileName = `Total_Verimlilik_${selectedPool?.name || 'Rapor'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
-  }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast]);
+  }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast, interLabTransfers]);
 
   // Kaydetme
   const handleSave = useCallback(async () => {
@@ -382,7 +595,7 @@ export default function TotalVerimlilikPanel({
           </div>
 
           {selectedPoolId && (
-            <div className="flex items-center gap-2 pt-4 border-t">
+            <div className="flex items-center gap-2 pt-4 border-t flex-wrap">
               <Button onClick={handleSave} disabled={isSaving || rows.length === 0}>
                 {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
                 Kaydet
@@ -390,6 +603,14 @@ export default function TotalVerimlilikPanel({
               <Button variant="outline" onClick={handleExportExcel} disabled={rows.length === 0}>
                 <FileSpreadsheet className="h-4 w-4 mr-2" />
                 Excel'e Aktar
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setShowGoztepeSevkiyatModal(true)}
+                disabled={rows.length === 0}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Göztepe Sevkiyat Çek
               </Button>
             </div>
           )}
@@ -401,7 +622,8 @@ export default function TotalVerimlilikPanel({
           <CardHeader>
             <CardTitle>Veri Tablosu</CardTitle>
             <CardDescription>
-              İlk 6 sütun otomatik doldurulur. 7-8. sütunlara manuel veri girişi yapın. 9. sütun otomatik hesaplanır.
+              İlk 6 sütun otomatik doldurulur. Mavi alanlar manuel giriş, yeşil alanlar otomatik hesaplanır.
+              Sütun 11 için "Göztepe Sevkiyat Çek" butonunu kullanın. Sütun 12 için kaynak lab seçimi yapılır.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -415,7 +637,7 @@ export default function TotalVerimlilikPanel({
               </div>
             ) : (
               <ScrollArea className="w-full">
-                <div className="min-w-[1200px]">
+                <div className="min-w-[2200px]">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -435,6 +657,22 @@ export default function TotalVerimlilikPanel({
                         </TableHead>
                         <TableHead className="min-w-[150px] bg-green-50 dark:bg-green-950 text-center">
                           9. Total Ay Başı Stok (Test)
+                        </TableHead>
+                        {/* Phase 2 - Sütunlar 10-14 */}
+                        <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
+                          10. Ay Başı Sevkiyat (Kutu)
+                        </TableHead>
+                        <TableHead className="min-w-[130px] bg-purple-50 dark:bg-purple-950">
+                          11. Göztepe Sevkiyat (Kutu)
+                        </TableHead>
+                        <TableHead className="min-w-[180px] bg-orange-50 dark:bg-orange-950">
+                          12. Kurumlar Arası Sevk (Kutu)
+                        </TableHead>
+                        <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
+                          13. Lojistik Ara Transfer (Kutu)
+                        </TableHead>
+                        <TableHead className="min-w-[180px] bg-green-50 dark:bg-green-950 text-center">
+                          14. Sevkiyatlar Sonrası Total Test
                         </TableHead>
                       </TableRow>
                     </TableHeader>
@@ -480,6 +718,62 @@ export default function TotalVerimlilikPanel({
                             <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
                               {row.totalAyBasiStok.toLocaleString('tr-TR')}
                             </TableCell>
+                            {/* Phase 2 - Sütunlar 10-14 */}
+                            {/* Sütun 10: Ay Başı Sevkiyat (Kutu) */}
+                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                              <Input
+                                type="number"
+                                min="0"
+                                className="h-8 w-24"
+                                value={row.ayBasiSevkiyatKutu || ''}
+                                onChange={e => handleValueChange(row.id, 'ayBasiSevkiyatKutu', e.target.value)}
+                                placeholder="0"
+                              />
+                            </TableCell>
+                            {/* Sütun 11: Göztepe Sevkiyat (Kutu) */}
+                            <TableCell className="bg-purple-50/50 dark:bg-purple-950/50">
+                              <Input
+                                type="number"
+                                min="0"
+                                className="h-8 w-24"
+                                value={row.goztepeSevkiyat || ''}
+                                onChange={e => handleValueChange(row.id, 'goztepeSevkiyat', e.target.value)}
+                                placeholder="0"
+                              />
+                            </TableCell>
+                            {/* Sütun 12: Kurumlar Arası Sevk (Kutu) */}
+                            <TableCell className="bg-orange-50/50 dark:bg-orange-950/50">
+                              <div className="flex flex-col gap-1">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  className="h-8 w-24"
+                                  value={row.kurumlarArasiSevk || ''}
+                                  onChange={e => handleKurumlarArasiSevkChange(row.id, e.target.value)}
+                                  placeholder="0"
+                                />
+                                {interLabTransfers[row.id] && (
+                                  <span className="text-xs text-orange-600 dark:text-orange-400">
+                                    ← {interLabTransfers[row.id].sourceLabName}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            {/* Sütun 13: Lojistik Ara Transfer (Kutu) */}
+                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                              <Input
+                                type="number"
+                                min="0"
+                                className="h-8 w-24"
+                                value={row.lojistikAraTransfer || ''}
+                                onChange={e => handleValueChange(row.id, 'lojistikAraTransfer', e.target.value)}
+                                placeholder="0"
+                              />
+                            </TableCell>
+                            {/* Sütun 14: Sevkiyatlar Sonrası Total Test */}
+                            <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
+                              {row.sevkiyatlarSonrasiTotalTest.toLocaleString('tr-TR')}
+                            </TableCell>
                           </TableRow>
                         );
                       })}
@@ -503,6 +797,121 @@ export default function TotalVerimlilikPanel({
           </CardContent>
         </Card>
       )}
+
+      {/* Göztepe Sevkiyat Modal - Sütun 11 */}
+      <Dialog open={showGoztepeSevkiyatModal} onOpenChange={setShowGoztepeSevkiyatModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Göztepe Sevkiyat Çek</DialogTitle>
+            <DialogDescription>
+              Seçilen laboratuvarlara {MONTHS[selectedMonth]?.label} {selectedYear} döneminde depodan yapılan transferleri çeker.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="selectAll"
+                checked={selectedLabsForSevkiyat.size === poolLabs.length && poolLabs.length > 0}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedLabsForSevkiyat(new Set(poolLabs.map(l => l.id)));
+                  } else {
+                    setSelectedLabsForSevkiyat(new Set());
+                  }
+                }}
+              />
+              <Label htmlFor="selectAll" className="font-medium">Tümünü Seç</Label>
+            </div>
+            <div className="border rounded-md p-3 max-h-60 overflow-y-auto space-y-2">
+              {poolLabs.map(lab => (
+                <div key={lab.id} className="flex items-center gap-2">
+                  <Checkbox
+                    id={lab.id}
+                    checked={selectedLabsForSevkiyat.has(lab.id)}
+                    onCheckedChange={(checked) => {
+                      const newSet = new Set(selectedLabsForSevkiyat);
+                      if (checked) {
+                        newSet.add(lab.id);
+                      } else {
+                        newSet.delete(lab.id);
+                      }
+                      setSelectedLabsForSevkiyat(newSet);
+                    }}
+                  />
+                  <Label htmlFor={lab.id} className="text-sm">{lab.name}</Label>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowGoztepeSevkiyatModal(false)}>
+              İptal
+            </Button>
+            <Button onClick={handleFetchGoztepeSevkiyat} disabled={isFetchingSevkiyat}>
+              {isFetchingSevkiyat ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Çekiliyor...
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-2" />
+                  Verileri Çek
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Kurumlar Arası Sevk Modal - Sütun 12 */}
+      <Dialog open={showKurumlarArasiModal} onOpenChange={(open) => {
+        if (!open) {
+          setKurumlarArasiEditingRow(null);
+        }
+        setShowKurumlarArasiModal(open);
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Kaynak Laboratuvar Seç</DialogTitle>
+            <DialogDescription>
+              {kurumlarArasiEditingRow && (
+                <>
+                  {kurumlarArasiEditingRow.value} kutu ürün hangi laboratuvardan alındı?
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="border rounded-md p-3 max-h-60 overflow-y-auto space-y-2">
+            {poolLabs
+              .filter(lab => {
+                // Kendi kendine transfer yapılamaz
+                if (!kurumlarArasiEditingRow) return true;
+                const editingRow = rows.find(r => r.id === kurumlarArasiEditingRow.rowId);
+                return lab.id !== editingRow?.labId;
+              })
+              .map(lab => (
+                <Button
+                  key={lab.id}
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => handleConfirmKurumlarArasi(lab.id)}
+                >
+                  <ChevronRight className="h-4 w-4 mr-2" />
+                  {lab.name}
+                </Button>
+              ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setShowKurumlarArasiModal(false);
+              setKurumlarArasiEditingRow(null);
+            }}>
+              İptal
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
