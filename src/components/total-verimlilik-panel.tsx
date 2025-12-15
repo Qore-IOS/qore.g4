@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import type { Hospital, ProductCode, EfficiencyPool, LabPool, MinMaxRule } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -107,6 +108,11 @@ export default function TotalVerimlilikPanel({
   // Kurumlar arası transfer bilgisi - hangi labdan ne kadar alındığını takip eder
   // Key: "targetRowId" -> { sourceLabId, kutuAdet }
   const [interLabTransfers, setInterLabTransfers] = useState<Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>>({});
+
+  // Phase 5 - Excel Import Modal State'leri
+  const [showExcelImportModal, setShowExcelImportModal] = useState(false);
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Verimlilik havuzlarını, ortak lab havuzlarını ve depoları çek
   useEffect(() => {
@@ -599,6 +605,123 @@ export default function TotalVerimlilikPanel({
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
   }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast, interLabTransfers]);
 
+  // Phase 5 - Excel Şablon İndir
+  const handleDownloadTemplate = useCallback(() => {
+    if (rows.length === 0) return;
+
+    const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
+
+    // Şablonda sadece veri girilebilir alanlar olacak (11 ve 12 hariç)
+    // Değerler 0 yerine boş olacak
+    const templateData = rows.map(r => ({
+      'Laboratuvar': r.labName,
+      'Lab Kodu': r.labKod,
+      'Stok Kodu': r.stokKodu,
+      'Ürün Adı': r.stokAdi,
+      'Test Adı': r.testAdi,
+      'Ambalaj Miktarı': r.ambalajDegeri,
+      '7. Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu || '', // 0 yerine boş
+      '8. Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest || '',
+      '10. Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu || '',
+      '13. Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer || '',
+      '15. Kümülatif Total (Test)': r.kumulatifTotal || '',
+      '16. Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu || '',
+      '17. Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest || '',
+      '19. Hak Ediş (Test)': r.hakEdis || '',
+    }));
+
+    // XLSX worksheet oluştur
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Şablon');
+
+    // Dosyayı indir
+    const fileName = `Verimlilik_Sablon_${selectedPool?.name || 'Havuz'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+
+    toast({ title: 'Şablon İndirildi', description: 'Excel şablonu indirildi. Verileri girdikten sonra yükleyebilirsiniz.' });
+    setShowExcelImportModal(false);
+  }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast]);
+
+  // Phase 5 - Excel Dosyası Yükle ve Verileri Aktar
+  const handleExcelImport = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImportingExcel(true);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
+
+        // Excel verilerini satırlara eşle
+        let updatedCount = 0;
+
+        setRows(prevRows => {
+          const updatedRows = prevRows.map(row => {
+            // Excel'de aynı stok kodunu ve lab kodunu bul
+            const excelRow = jsonData.find((excelR) =>
+              excelR['Stok Kodu'] === row.stokKodu &&
+              (excelR['Lab Kodu'] === row.labKod || excelR['Laboratuvar'] === row.labName)
+            );
+
+            if (!excelRow) return row;
+
+            updatedCount++;
+
+            // Sadece belirtilen sütunları güncelle
+            const getNumValue = (key: string): number => {
+              const val = excelRow[key];
+              if (val === '' || val === null || val === undefined) return row[key as keyof TableRow] as number || 0;
+              const num = parseFloat(String(val));
+              return isNaN(num) ? 0 : num;
+            };
+
+            return {
+              ...row,
+              baslangicStokuKutu: getNumValue('7. Başlangıç Stoğu (Kutu)'),
+              ayBasiCihazUstuTest: getNumValue('8. Ay Başı Cihaz Üstü (Test)'),
+              ayBasiSevkiyatKutu: getNumValue('10. Ay Başı Sevkiyat (Kutu)'),
+              lojistikAraTransfer: getNumValue('13. Lojistik Ara Transfer (Kutu)'),
+              kumulatifTotal: getNumValue('15. Kümülatif Total (Test)'),
+              donemSonuStokKutu: getNumValue('16. Dönem Sonu Stok (Kutu)'),
+              donemSonuCihazUstuTest: getNumValue('17. Dönem Sonu Cihaz Üstü (Test)'),
+              hakEdis: getNumValue('19. Hak Ediş (Test)'),
+            };
+          });
+
+          return recomputeAllRows(updatedRows, interLabTransfers);
+        });
+
+        toast({
+          title: 'Veriler Aktarıldı',
+          description: `${updatedCount} satır güncellendi.`,
+        });
+      } catch (error) {
+        console.error('Error importing Excel:', error);
+        toast({
+          title: 'Hata',
+          description: 'Excel dosyası okunurken bir hata oluştu.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsImportingExcel(false);
+        setShowExcelImportModal(false);
+        // File input'u temizle
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      }
+    };
+
+    reader.readAsBinaryString(file);
+  }, [toast, recomputeAllRows, interLabTransfers]);
+
   // Kaydetme
   const handleSave = useCallback(async () => {
     if (!selectedPoolId || rows.length === 0) return;
@@ -730,6 +853,14 @@ export default function TotalVerimlilikPanel({
               >
                 <Download className="h-4 w-4 mr-2" />
                 Göztepe Sevkiyat Çek
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setShowExcelImportModal(true)}
+                disabled={rows.length === 0}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Excel ile Veri Gir
               </Button>
             </div>
           )}
@@ -1126,6 +1257,80 @@ export default function TotalVerimlilikPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Phase 5 - Excel Import Modal */}
+      <Dialog open={showExcelImportModal} onOpenChange={setShowExcelImportModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Excel ile Veri Gir</DialogTitle>
+            <DialogDescription>
+              Şablonu indirip verileri girdikten sonra dosyayı yükleyerek verileri aktarabilirsiniz.
+              Sadece manuel giriş alanları (7, 8, 10, 13, 15, 16, 17, 19) aktarılır.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-1 gap-3">
+              <Button
+                variant="outline"
+                className="h-20 flex flex-col gap-2"
+                onClick={handleDownloadTemplate}
+                disabled={rows.length === 0}
+              >
+                <Download className="h-6 w-6" />
+                <span>Şablon İndir</span>
+              </Button>
+              <Button
+                variant="default"
+                className="h-20 flex flex-col gap-2"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={rows.length === 0 || isImportingExcel}
+              >
+                {isImportingExcel ? (
+                  <>
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                    <span>Yükleniyor...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-6 w-6" />
+                    <span>Verileri Aktar</span>
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p><strong>Not:</strong> Excel'de şu sütunlar aktarılacak:</p>
+              <ul className="list-disc list-inside ml-2">
+                <li>7. Başlangıç Stoğu (Kutu)</li>
+                <li>8. Ay Başı Cihaz Üstü (Test)</li>
+                <li>10. Ay Başı Sevkiyat (Kutu)</li>
+                <li>13. Lojistik Ara Transfer (Kutu)</li>
+                <li>15. Kümülatif Total (Test)</li>
+                <li>16. Dönem Sonu Stok (Kutu)</li>
+                <li>17. Dönem Sonu Cihaz Üstü (Test)</li>
+                <li>19. Hak Ediş (Test)</li>
+              </ul>
+              <p className="text-orange-600 dark:text-orange-400 mt-2">
+                11. Göztepe Sevkiyat ve 12. Kurumlar Arası Sevk sütunları sadece panel üzerinden yönetilir.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExcelImportModal(false)}>
+              Kapat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hidden file input for Excel import */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleExcelImport}
+        accept=".xlsx,.xls"
+        className="hidden"
+      />
     </div>
   );
 }
