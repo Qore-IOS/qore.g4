@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -113,6 +113,9 @@ export default function TotalVerimlilikPanel({
   const [showExcelImportModal, setShowExcelImportModal] = useState(false);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Phase 6 - Sonuç Odaklı Görünüm
+  const [showResultsOnly, setShowResultsOnly] = useState(false);
 
   // Verimlilik havuzlarını, ortak lab havuzlarını ve depoları çek
   useEffect(() => {
@@ -870,10 +873,30 @@ export default function TotalVerimlilikPanel({
       {selectedPoolId && (
         <Card>
           <CardHeader>
-            <CardTitle>Veri Tablosu</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Veri Tablosu</CardTitle>
+              <Button
+                variant={showResultsOnly ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowResultsOnly(!showResultsOnly)}
+              >
+                {showResultsOnly ? (
+                  <>
+                    <EyeOff className="h-4 w-4 mr-2" />
+                    Tüm Sütunları Göster
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-4 w-4 mr-2" />
+                    Sadece Sonuçları Göster
+                  </>
+                )}
+              </Button>
+            </div>
             <CardDescription>
-              İlk 6 sütun otomatik doldurulur. Mavi alanlar manuel giriş, yeşil alanlar otomatik hesaplanır.
-              Sütun 11 için "Göztepe Sevkiyat Çek" butonunu kullanın. Sütun 12 için kaynak lab seçimi yapılır.
+              {showResultsOnly
+                ? 'Sonuç odaklı görünüm - sadece özet ve hesaplama sütunları gösteriliyor.'
+                : 'İlk 6 sütun otomatik doldurulur. Mavi alanlar manuel giriş, yeşil alanlar otomatik hesaplanır. Sütun 11 için "Göztepe Sevkiyat Çek" butonunu kullanın. Sütun 12 için kaynak lab seçimi yapılır.'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -887,7 +910,7 @@ export default function TotalVerimlilikPanel({
               </div>
             ) : (
               <ScrollArea className="w-full">
-                <div className="min-w-[3400px]">
+                <div className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'}>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -896,31 +919,39 @@ export default function TotalVerimlilikPanel({
                         </TableHead>
                         <TableHead className="min-w-[120px]">2. Stok Kodu</TableHead>
                         <TableHead className="min-w-[200px]">3. Ürün Adı</TableHead>
-                        <TableHead className="min-w-[150px]">4. Test Adı</TableHead>
-                        <TableHead className="min-w-[100px] text-center">5. Ambalaj</TableHead>
-                        <TableHead className="min-w-[150px]">6. Cihaz Grubu</TableHead>
-                        <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
-                          7. Başlangıç Stoğu (Kutu)
-                        </TableHead>
-                        <TableHead className="min-w-[150px] bg-blue-50 dark:bg-blue-950">
-                          8. Ay Başı Cihaz Üstü (Test)
-                        </TableHead>
+                        {!showResultsOnly && (
+                          <>
+                            <TableHead className="min-w-[150px]">4. Test Adı</TableHead>
+                            <TableHead className="min-w-[100px] text-center">5. Ambalaj</TableHead>
+                            <TableHead className="min-w-[150px]">6. Cihaz Grubu</TableHead>
+                            <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
+                              7. Başlangıç Stoğu (Kutu)
+                            </TableHead>
+                            <TableHead className="min-w-[150px] bg-blue-50 dark:bg-blue-950">
+                              8. Ay Başı Cihaz Üstü (Test)
+                            </TableHead>
+                          </>
+                        )}
                         <TableHead className="min-w-[150px] bg-green-50 dark:bg-green-950 text-center">
                           9. Total Ay Başı Stok (Test)
                         </TableHead>
-                        {/* Phase 2 - Sütunlar 10-14 */}
-                        <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
-                          10. Ay Başı Sevkiyat (Kutu)
-                        </TableHead>
-                        <TableHead className="min-w-[130px] bg-purple-50 dark:bg-purple-950">
-                          11. Göztepe Sevkiyat (Kutu)
-                        </TableHead>
-                        <TableHead className="min-w-[180px] bg-orange-50 dark:bg-orange-950">
-                          12. Kurumlar Arası Sevk (Kutu)
-                        </TableHead>
-                        <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
-                          13. Lojistik Ara Transfer (Kutu)
-                        </TableHead>
+                        {!showResultsOnly && (
+                          <>
+                            {/* Phase 2 - Sütunlar 10-14 */}
+                            <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
+                              10. Ay Başı Sevkiyat (Kutu)
+                            </TableHead>
+                            <TableHead className="min-w-[130px] bg-purple-50 dark:bg-purple-950">
+                              11. Göztepe Sevkiyat (Kutu)
+                            </TableHead>
+                            <TableHead className="min-w-[180px] bg-orange-50 dark:bg-orange-950">
+                              12. Kurumlar Arası Sevk (Kutu)
+                            </TableHead>
+                            <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
+                              13. Lojistik Ara Transfer (Kutu)
+                            </TableHead>
+                          </>
+                        )}
                         <TableHead className="min-w-[180px] bg-green-50 dark:bg-green-950 text-center">
                           14. Sevkiyatlar Sonrası Total Test
                         </TableHead>
@@ -928,12 +959,16 @@ export default function TotalVerimlilikPanel({
                         <TableHead className="min-w-[140px] bg-cyan-50 dark:bg-cyan-950">
                           15. Kümülatif Total (Test)
                         </TableHead>
-                        <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
-                          16. Dönem Sonu Stok (Kutu)
-                        </TableHead>
-                        <TableHead className="min-w-[160px] bg-blue-50 dark:bg-blue-950">
-                          17. Dönem Sonu Cihaz Üstü (Test)
-                        </TableHead>
+                        {!showResultsOnly && (
+                          <>
+                            <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
+                              16. Dönem Sonu Stok (Kutu)
+                            </TableHead>
+                            <TableHead className="min-w-[160px] bg-blue-50 dark:bg-blue-950">
+                              17. Dönem Sonu Cihaz Üstü (Test)
+                            </TableHead>
+                          </>
+                        )}
                         <TableHead className="min-w-[180px] bg-green-50 dark:bg-green-950 text-center">
                           18. Dönem Sonu Toplam Test
                         </TableHead>
@@ -941,11 +976,17 @@ export default function TotalVerimlilikPanel({
                           19. Hak Ediş (Test)
                         </TableHead>
                         {/* Phase 4 - Sütunlar 20-21 */}
-                        <TableHead className="min-w-[180px] bg-red-50 dark:bg-red-950 text-center">
-                          20. Stok Doğruluk
+                        <TableHead className="min-w-[200px] bg-red-50 dark:bg-red-950 text-center">
+                          <div className="flex flex-col">
+                            <span>20. Stok Doğruluk</span>
+                            <span className="text-xs font-normal text-muted-foreground">(14-18) - 15</span>
+                          </div>
                         </TableHead>
-                        <TableHead className="min-w-[180px] bg-emerald-50 dark:bg-emerald-950 text-center">
-                          21. Kit Verimlilik
+                        <TableHead className="min-w-[200px] bg-emerald-50 dark:bg-emerald-950 text-center">
+                          <div className="flex flex-col">
+                            <span>21. Kit Verimlilik</span>
+                            <span className="text-xs font-normal text-muted-foreground">15 - 19</span>
+                          </div>
                         </TableHead>
                       </TableRow>
                     </TableHeader>
@@ -965,84 +1006,92 @@ export default function TotalVerimlilikPanel({
                             </TableCell>
                             <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
                             <TableCell>{row.stokAdi}</TableCell>
-                            <TableCell className="text-muted-foreground">{row.testAdi || '-'}</TableCell>
-                            <TableCell className="text-center">{row.ambalajDegeri || '-'}</TableCell>
-                            <TableCell className="text-muted-foreground">{row.cihazGrubu || '-'}</TableCell>
-                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-24"
-                                value={row.baslangicStokuKutu || ''}
-                                onChange={e => handleValueChange(row.id, 'baslangicStokuKutu', e.target.value)}
-                                placeholder="0"
-                              />
-                            </TableCell>
-                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-28"
-                                value={row.ayBasiCihazUstuTest || ''}
-                                onChange={e => handleValueChange(row.id, 'ayBasiCihazUstuTest', e.target.value)}
-                                placeholder="0"
-                              />
-                            </TableCell>
+                            {!showResultsOnly && (
+                              <>
+                                <TableCell className="text-muted-foreground">{row.testAdi || '-'}</TableCell>
+                                <TableCell className="text-center">{row.ambalajDegeri || '-'}</TableCell>
+                                <TableCell className="text-muted-foreground">{row.cihazGrubu || '-'}</TableCell>
+                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-24"
+                                    value={row.baslangicStokuKutu || ''}
+                                    onChange={e => handleValueChange(row.id, 'baslangicStokuKutu', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-28"
+                                    value={row.ayBasiCihazUstuTest || ''}
+                                    onChange={e => handleValueChange(row.id, 'ayBasiCihazUstuTest', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                              </>
+                            )}
                             <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
                               {row.totalAyBasiStok.toLocaleString('tr-TR')}
                             </TableCell>
-                            {/* Phase 2 - Sütunlar 10-14 */}
-                            {/* Sütun 10: Ay Başı Sevkiyat (Kutu) */}
-                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-24"
-                                value={row.ayBasiSevkiyatKutu || ''}
-                                onChange={e => handleValueChange(row.id, 'ayBasiSevkiyatKutu', e.target.value)}
-                                placeholder="0"
-                              />
-                            </TableCell>
-                            {/* Sütun 11: Göztepe Sevkiyat (Kutu) */}
-                            <TableCell className="bg-purple-50/50 dark:bg-purple-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-24"
-                                value={row.goztepeSevkiyat || ''}
-                                onChange={e => handleValueChange(row.id, 'goztepeSevkiyat', e.target.value)}
-                                placeholder="0"
-                              />
-                            </TableCell>
-                            {/* Sütun 12: Kurumlar Arası Sevk (Kutu) */}
-                            <TableCell className="bg-orange-50/50 dark:bg-orange-950/50">
-                              <div className="flex flex-col gap-1">
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  className="h-8 w-24"
-                                  value={row.kurumlarArasiSevk || ''}
-                                  onChange={e => handleKurumlarArasiSevkChange(row.id, e.target.value)}
-                                  placeholder="0"
-                                />
-                                {interLabTransfers[row.id] && (
-                                  <span className="text-xs text-orange-600 dark:text-orange-400">
-                                    ← {interLabTransfers[row.id].sourceLabName}
-                                  </span>
-                                )}
-                              </div>
-                            </TableCell>
-                            {/* Sütun 13: Lojistik Ara Transfer (Kutu) */}
-                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-24"
-                                value={row.lojistikAraTransfer || ''}
-                                onChange={e => handleValueChange(row.id, 'lojistikAraTransfer', e.target.value)}
-                                placeholder="0"
-                              />
-                            </TableCell>
+                            {!showResultsOnly && (
+                              <>
+                                {/* Phase 2 - Sütunlar 10-14 */}
+                                {/* Sütun 10: Ay Başı Sevkiyat (Kutu) */}
+                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-24"
+                                    value={row.ayBasiSevkiyatKutu || ''}
+                                    onChange={e => handleValueChange(row.id, 'ayBasiSevkiyatKutu', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                                {/* Sütun 11: Göztepe Sevkiyat (Kutu) */}
+                                <TableCell className="bg-purple-50/50 dark:bg-purple-950/50">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-24"
+                                    value={row.goztepeSevkiyat || ''}
+                                    onChange={e => handleValueChange(row.id, 'goztepeSevkiyat', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                                {/* Sütun 12: Kurumlar Arası Sevk (Kutu) */}
+                                <TableCell className="bg-orange-50/50 dark:bg-orange-950/50">
+                                  <div className="flex flex-col gap-1">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      className="h-8 w-24"
+                                      value={row.kurumlarArasiSevk || ''}
+                                      onChange={e => handleKurumlarArasiSevkChange(row.id, e.target.value)}
+                                      placeholder="0"
+                                    />
+                                    {interLabTransfers[row.id] && (
+                                      <span className="text-xs text-orange-600 dark:text-orange-400">
+                                        ← {interLabTransfers[row.id].sourceLabName}
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                {/* Sütun 13: Lojistik Ara Transfer (Kutu) */}
+                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-24"
+                                    value={row.lojistikAraTransfer || ''}
+                                    onChange={e => handleValueChange(row.id, 'lojistikAraTransfer', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                              </>
+                            )}
                             {/* Sütun 14: Sevkiyatlar Sonrası Total Test */}
                             <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
                               {row.sevkiyatlarSonrasiTotalTest.toLocaleString('tr-TR')}
@@ -1050,72 +1099,84 @@ export default function TotalVerimlilikPanel({
                             {/* Phase 3 - Sütunlar 15-19 */}
                             {/* Sütun 15: Kümülatif Total (Test) */}
                             <TableCell className="bg-cyan-50/50 dark:bg-cyan-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-28"
-                                value={row.kumulatifTotal || ''}
-                                onChange={e => handleValueChange(row.id, 'kumulatifTotal', e.target.value)}
-                                placeholder="0"
-                              />
+                              {showResultsOnly ? (
+                                <span className="font-semibold">{row.kumulatifTotal.toLocaleString('tr-TR')}</span>
+                              ) : (
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  className="h-8 w-28"
+                                  value={row.kumulatifTotal || ''}
+                                  onChange={e => handleValueChange(row.id, 'kumulatifTotal', e.target.value)}
+                                  placeholder="0"
+                                />
+                              )}
                             </TableCell>
-                            {/* Sütun 16: Dönem Sonu Stok (Kutu) */}
-                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-24"
-                                value={row.donemSonuStokKutu || ''}
-                                onChange={e => handleValueChange(row.id, 'donemSonuStokKutu', e.target.value)}
-                                placeholder="0"
-                              />
-                            </TableCell>
-                            {/* Sütun 17: Dönem Sonu Cihaz Üstü (Test) */}
-                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-28"
-                                value={row.donemSonuCihazUstuTest || ''}
-                                onChange={e => handleValueChange(row.id, 'donemSonuCihazUstuTest', e.target.value)}
-                                placeholder="0"
-                              />
-                            </TableCell>
+                            {!showResultsOnly && (
+                              <>
+                                {/* Sütun 16: Dönem Sonu Stok (Kutu) */}
+                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-24"
+                                    value={row.donemSonuStokKutu || ''}
+                                    onChange={e => handleValueChange(row.id, 'donemSonuStokKutu', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                                {/* Sütun 17: Dönem Sonu Cihaz Üstü (Test) */}
+                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-28"
+                                    value={row.donemSonuCihazUstuTest || ''}
+                                    onChange={e => handleValueChange(row.id, 'donemSonuCihazUstuTest', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                              </>
+                            )}
                             {/* Sütun 18: Dönem Sonu Toplam Test (Hesaplanan) */}
                             <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
                               {row.donemSonuToplamTest.toLocaleString('tr-TR')}
                             </TableCell>
                             {/* Sütun 19: Hak Ediş (Test) */}
                             <TableCell className="bg-yellow-50/50 dark:bg-yellow-950/50">
-                              <Input
-                                type="number"
-                                min="0"
-                                className="h-8 w-28"
-                                value={row.hakEdis || ''}
-                                onChange={e => handleValueChange(row.id, 'hakEdis', e.target.value)}
-                                placeholder="0"
-                              />
+                              {showResultsOnly ? (
+                                <span className="font-semibold">{row.hakEdis.toLocaleString('tr-TR')}</span>
+                              ) : (
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  className="h-8 w-28"
+                                  value={row.hakEdis || ''}
+                                  onChange={e => handleValueChange(row.id, 'hakEdis', e.target.value)}
+                                  placeholder="0"
+                                />
+                              )}
                             </TableCell>
                             {/* Phase 4 - Sütunlar 20-21 */}
                             {/* Sütun 20: Stok Doğruluk (Fark + Yüzde) */}
                             <TableCell className="bg-red-50/50 dark:bg-red-950/50 text-center">
-                              <div className="flex flex-col items-center gap-1">
+                              <div className="flex flex-col items-center gap-0.5">
                                 <span className={`font-semibold ${row.stokDogrulukFark !== 0 ? (row.stokDogrulukFark > 0 ? 'text-red-600' : 'text-green-600') : ''}`}>
-                                  {row.stokDogrulukFark > 0 ? '+' : ''}{row.stokDogrulukFark.toLocaleString('tr-TR')} test
+                                  Fark {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} test
                                 </span>
                                 <span className={`text-xs ${row.stokDogrulukYuzde !== 0 ? (row.stokDogrulukYuzde > 0 ? 'text-red-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  ({row.stokDogrulukYuzde > 0 ? '+' : ''}{row.stokDogrulukYuzde.toFixed(1)}%)
+                                  {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
                                 </span>
                               </div>
                             </TableCell>
                             {/* Sütun 21: Kit Verimlilik (Fark + Yüzde) */}
                             <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
-                              <div className="flex flex-col items-center gap-1">
+                              <div className="flex flex-col items-center gap-0.5">
                                 <span className={`font-semibold ${row.kitVerimlilikFark !== 0 ? (row.kitVerimlilikFark > 0 ? 'text-orange-600' : 'text-green-600') : ''}`}>
-                                  {row.kitVerimlilikFark > 0 ? '+' : ''}{row.kitVerimlilikFark.toLocaleString('tr-TR')} test
+                                  Fark {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} test
                                 </span>
                                 <span className={`text-xs ${row.kitVerimlilikYuzde !== 0 ? (row.kitVerimlilikYuzde > 0 ? 'text-orange-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  ({row.kitVerimlilikYuzde > 0 ? '+' : ''}{row.kitVerimlilikYuzde.toFixed(1)}%)
+                                  {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
                                 </span>
                               </div>
                             </TableCell>
