@@ -53,6 +53,12 @@ interface TableRow {
   kurumlarArasiSevkKaynakLabId?: string; // Sütun 12 için kaynak lab
   lojistikAraTransfer: number; // Sütun 13 - Lojistik Ara Transfer (Kutu)
   sevkiyatlarSonrasiTotalTest: number; // Sütun 14 - Hesaplanan
+  // Phase 3 - Sütunlar 15-19
+  kumulatifTotal: number; // Sütun 15 - Kümülatif Total (Test)
+  donemSonuStokKutu: number; // Sütun 16 - Dönem Sonu Stok (Kutu)
+  donemSonuCihazUstuTest: number; // Sütun 17 - Dönem Sonu Cihaz Üstü (Test)
+  donemSonuToplamTest: number; // Sütun 18 - Hesaplanan: (16 * ambalaj) + 17
+  hakEdis: number; // Sütun 19 - Hak Ediş (Test)
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -239,6 +245,12 @@ export default function TotalVerimlilikPanel({
               kurumlarArasiSevk: 0,
               lojistikAraTransfer: 0,
               sevkiyatlarSonrasiTotalTest: 0,
+              // Phase 3 alanları
+              kumulatifTotal: 0,
+              donemSonuStokKutu: 0,
+              donemSonuCihazUstuTest: 0,
+              donemSonuToplamTest: 0,
+              hakEdis: 0,
             });
           });
         }
@@ -287,10 +299,15 @@ export default function TotalVerimlilikPanel({
       }
     }
 
+    // Phase 3 - Sütun 18: Dönem Sonu Toplam Test
+    // Formül: (Dönem Sonu Stok Kutu * Ambalaj) + Dönem Sonu Cihaz Üstü Test
+    const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
+
     return {
       ...row,
       totalAyBasiStok,
       sevkiyatlarSonrasiTotalTest,
+      donemSonuToplamTest,
     };
   }, []);
 
@@ -300,7 +317,7 @@ export default function TotalVerimlilikPanel({
   }, [computeRow]);
 
   // Değer değişikliği handler'ı
-  type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer';
+  type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer' | 'kumulatifTotal' | 'donemSonuStokKutu' | 'donemSonuCihazUstuTest' | 'hakEdis';
 
   const handleValueChange = useCallback((rowId: string, field: EditableField, value: string) => {
     const numValue = value === '' ? 0 : parseFloat(value);
@@ -474,6 +491,12 @@ export default function TotalVerimlilikPanel({
       'Kaynak Lab': interLabTransfers[r.id]?.sourceLabName || '',
       'Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer,
       'Sevkiyatlar Sonrası Total Test': r.sevkiyatlarSonrasiTotalTest,
+      // Phase 3
+      'Kümülatif Total (Test)': r.kumulatifTotal,
+      'Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu,
+      'Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest,
+      'Dönem Sonu Toplam Test': r.donemSonuToplamTest,
+      'Hak Ediş (Test)': r.hakEdis,
     }));
 
     const fileName = `Total_Verimlilik_${selectedPool?.name || 'Rapor'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
@@ -637,7 +660,7 @@ export default function TotalVerimlilikPanel({
               </div>
             ) : (
               <ScrollArea className="w-full">
-                <div className="min-w-[2200px]">
+                <div className="min-w-[3000px]">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -673,6 +696,22 @@ export default function TotalVerimlilikPanel({
                         </TableHead>
                         <TableHead className="min-w-[180px] bg-green-50 dark:bg-green-950 text-center">
                           14. Sevkiyatlar Sonrası Total Test
+                        </TableHead>
+                        {/* Phase 3 - Sütunlar 15-19 */}
+                        <TableHead className="min-w-[140px] bg-cyan-50 dark:bg-cyan-950">
+                          15. Kümülatif Total (Test)
+                        </TableHead>
+                        <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
+                          16. Dönem Sonu Stok (Kutu)
+                        </TableHead>
+                        <TableHead className="min-w-[160px] bg-blue-50 dark:bg-blue-950">
+                          17. Dönem Sonu Cihaz Üstü (Test)
+                        </TableHead>
+                        <TableHead className="min-w-[180px] bg-green-50 dark:bg-green-950 text-center">
+                          18. Dönem Sonu Toplam Test
+                        </TableHead>
+                        <TableHead className="min-w-[140px] bg-yellow-50 dark:bg-yellow-950">
+                          19. Hak Ediş (Test)
                         </TableHead>
                       </TableRow>
                     </TableHeader>
@@ -773,6 +812,55 @@ export default function TotalVerimlilikPanel({
                             {/* Sütun 14: Sevkiyatlar Sonrası Total Test */}
                             <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
                               {row.sevkiyatlarSonrasiTotalTest.toLocaleString('tr-TR')}
+                            </TableCell>
+                            {/* Phase 3 - Sütunlar 15-19 */}
+                            {/* Sütun 15: Kümülatif Total (Test) */}
+                            <TableCell className="bg-cyan-50/50 dark:bg-cyan-950/50">
+                              <Input
+                                type="number"
+                                min="0"
+                                className="h-8 w-28"
+                                value={row.kumulatifTotal || ''}
+                                onChange={e => handleValueChange(row.id, 'kumulatifTotal', e.target.value)}
+                                placeholder="0"
+                              />
+                            </TableCell>
+                            {/* Sütun 16: Dönem Sonu Stok (Kutu) */}
+                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                              <Input
+                                type="number"
+                                min="0"
+                                className="h-8 w-24"
+                                value={row.donemSonuStokKutu || ''}
+                                onChange={e => handleValueChange(row.id, 'donemSonuStokKutu', e.target.value)}
+                                placeholder="0"
+                              />
+                            </TableCell>
+                            {/* Sütun 17: Dönem Sonu Cihaz Üstü (Test) */}
+                            <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
+                              <Input
+                                type="number"
+                                min="0"
+                                className="h-8 w-28"
+                                value={row.donemSonuCihazUstuTest || ''}
+                                onChange={e => handleValueChange(row.id, 'donemSonuCihazUstuTest', e.target.value)}
+                                placeholder="0"
+                              />
+                            </TableCell>
+                            {/* Sütun 18: Dönem Sonu Toplam Test (Hesaplanan) */}
+                            <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
+                              {row.donemSonuToplamTest.toLocaleString('tr-TR')}
+                            </TableCell>
+                            {/* Sütun 19: Hak Ediş (Test) */}
+                            <TableCell className="bg-yellow-50/50 dark:bg-yellow-950/50">
+                              <Input
+                                type="number"
+                                min="0"
+                                className="h-8 w-28"
+                                value={row.hakEdis || ''}
+                                onChange={e => handleValueChange(row.id, 'hakEdis', e.target.value)}
+                                placeholder="0"
+                              />
                             </TableCell>
                           </TableRow>
                         );
