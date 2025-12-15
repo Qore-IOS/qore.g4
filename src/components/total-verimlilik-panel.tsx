@@ -102,20 +102,22 @@ export default function TotalVerimlilikPanel({
         }
 
         // Önce skip edilecek laboratuvarları belirle
-        // Eğer bir laboratuvar, verimlilik havuzunda bulunan başka bir laboratuvarın
-        // ortak stok havuzunda ise, o laboratuvar zaten ana lab tarafından temsil ediliyor
+        // Eğer bir laboratuvar bir ortak stok havuzuna dahilse ve o havuzun ana laboratuvarı
+        // verimlilik havuzunda ise, bu laboratuvar skip edilmeli (ana lab zaten temsil ediyor)
         const labsToSkip = new Set<string>();
 
         for (const labId of selectedPool.memberIds) {
-          // Bu laboratuvar bir ortak stok havuzunun ana laboratuvarı mı?
-          const sharedPool = labPools.find(p => p.mainLabId === labId);
-          if (sharedPool) {
-            // Bu ana laboratuvarın ortak havuzundaki diğer üyeleri skip listesine ekle
-            sharedPool.memberIds.forEach(memberId => {
-              if (memberId !== labId) {
-                labsToSkip.add(memberId);
+          // Bu laboratuvar herhangi bir ortak stok havuzuna dahil mi?
+          const sharedPool = labPools.find(p => p.memberIds.includes(labId));
+
+          if (sharedPool && sharedPool.mainLabId) {
+            // Bu ortak stok havuzunun ana laboratuvarı verimlilik havuzunda mı?
+            if (selectedPool.memberIds.includes(sharedPool.mainLabId)) {
+              // Eğer bu laboratuvar ana lab değilse, skip et
+              if (labId !== sharedPool.mainLabId) {
+                labsToSkip.add(labId);
               }
-            });
+            }
           }
         }
 
