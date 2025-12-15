@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { collection, getDocs, query, orderBy, doc, setDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -262,7 +262,58 @@ export default function TotalVerimlilikPanel({
           return a.stokAdi.localeCompare(b.stokAdi, 'tr');
         });
 
-        setRows(newRows);
+        // Phase 3.5: Önceki ayın dönem sonu verilerini çek ve devret
+        // Önceki ay/yıl hesapla
+        let prevMonth = selectedMonth - 1;
+        let prevYear = selectedYear;
+        if (prevMonth < 0) {
+          prevMonth = 11; // Aralık
+          prevYear = selectedYear - 1;
+        }
+
+        // Önceki ayın kaydını kontrol et
+        const prevDocId = `${selectedPoolId}-${prevYear}-${prevMonth}`;
+        try {
+          const prevDocSnap = await getDoc(doc(db, 'totalEfficiencyRecords', prevDocId));
+          if (prevDocSnap.exists()) {
+            const prevData = prevDocSnap.data();
+            const prevRows = prevData.rows as TableRow[] || [];
+
+            // Önceki ayın dönem sonu değerlerini bu ayın başlangıç değerlerine aktar
+            newRows.forEach(row => {
+              const prevRow = prevRows.find(pr => pr.id === row.id);
+              if (prevRow) {
+                // Sütun 16 -> Sütun 7, Sütun 17 -> Sütun 8
+                row.baslangicStokuKutu = prevRow.donemSonuStokKutu || 0;
+                row.ayBasiCihazUstuTest = prevRow.donemSonuCihazUstuTest || 0;
+              }
+            });
+
+            toast({
+              title: 'Devir Yapıldı',
+              description: `${MONTHS[prevMonth]?.label} ${prevYear} döneminden stok devri alındı.`,
+            });
+          }
+        } catch (e) {
+          console.error('Error fetching previous month data:', e);
+          // Hata olursa sessizce devam et, devir yapılmaz
+        }
+
+        // Hesaplanan alanları güncelle
+        const computedRows = newRows.map(row => {
+          const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
+          const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
+          const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
+          const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
+          return {
+            ...row,
+            totalAyBasiStok,
+            sevkiyatlarSonrasiTotalTest,
+            donemSonuToplamTest,
+          };
+        });
+
+        setRows(computedRows);
       } catch (error) {
         console.error('Error building rows:', error);
         toast({ title: 'Hata', description: 'Veriler yüklenirken bir sorun oluştu.', variant: 'destructive' });
@@ -272,7 +323,7 @@ export default function TotalVerimlilikPanel({
     };
 
     fetchMinMaxAndBuildRows();
-  }, [selectedPoolId, efficiencyPools, labPools, hospitals, productCodes, toast]);
+  }, [selectedPoolId, selectedMonth, selectedYear, efficiencyPools, labPools, hospitals, productCodes, toast]);
 
   // Hesaplama fonksiyonu
   const computeRow = useCallback((row: TableRow, allRows?: TableRow[], transfers?: Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>): TableRow => {
