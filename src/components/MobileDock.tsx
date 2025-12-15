@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Bell } from "lucide-react";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { MobileProfileButton } from "@/components/ui/MobileProfileButton";
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
+import { useAI } from "@/contexts/ai-context";
 import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
 import Image from "next/image";
 
@@ -26,11 +27,14 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-const triggerHaptic = () => {
+const triggerHaptic = (pattern: number | number[] = 10) => {
   if (typeof navigator !== "undefined" && navigator.vibrate) {
-    navigator.vibrate(10);
+    navigator.vibrate(pattern);
   }
 };
+
+// Long press duration in milliseconds
+const LONG_PRESS_DURATION = 500;
 
 // --- MAIN COMPONENT ---
 
@@ -39,6 +43,40 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const { openAI } = useAI();
+
+  // Long press handling
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const isLongPress = useRef(false);
+
+  const handleTouchStart = useCallback(() => {
+    isLongPress.current = false;
+    longPressTimer.current = setTimeout(() => {
+      isLongPress.current = true;
+      triggerHaptic([50, 30, 50]); // Distinctive haptic for AI
+      openAI();
+    }, LONG_PRESS_DURATION);
+  }, [openAI]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    // If it wasn't a long press, open the menu
+    if (!isLongPress.current) {
+      triggerHaptic();
+      setIsOpen(true);
+    }
+  }, []);
+
+  const handleTouchMove = useCallback(() => {
+    // Cancel long press if user moves finger
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
 
   if (!isMobile) return null;
 
@@ -72,21 +110,30 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             <MobileProfileButton isDark={isDark} />
 
             {/* Center - Logo Button (Floating Above) */}
+            {/* Tap: Open menu | Long press: Open AI */}
             <div className="absolute left-1/2 -translate-x-1/2 -top-[2.375rem]">
               <motion.button
                 whileTap={{ scale: 0.9 }}
-                onClick={() => {
-                  triggerHaptic();
-                  setIsOpen(true);
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+                onTouchMove={handleTouchMove}
+                onMouseDown={handleTouchStart}
+                onMouseUp={handleTouchEnd}
+                onMouseLeave={() => {
+                  if (longPressTimer.current) {
+                    clearTimeout(longPressTimer.current);
+                    longPressTimer.current = null;
+                  }
                 }}
-                className="w-20 h-20 flex items-center justify-center transition-all duration-300"
+                className="w-20 h-20 flex items-center justify-center transition-all duration-300 select-none"
               >
                 <Image
                   src={isDark ? "/newlogoblk.png" : "/newlogowh.png"}
-                  alt="Qore"
+                  alt="Qore - Basılı tut: AI"
                   width={80}
                   height={80}
-                  className="w-20 h-20 object-contain"
+                  className="w-20 h-20 object-contain pointer-events-none"
+                  draggable={false}
                 />
               </motion.button>
             </div>

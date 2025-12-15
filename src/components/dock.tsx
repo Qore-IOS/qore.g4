@@ -10,6 +10,7 @@ import { ChevronRight } from 'lucide-react';
 import NotificationsBell from '@/components/notifications/NotificationsBell';
 import type { DockItemData } from '@/hooks/use-dock';
 import { useAuth } from '@/contexts/auth-context';
+import { useAI } from '@/contexts/ai-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock"
@@ -149,6 +150,7 @@ const DockItem = ({
 
 const DockLogo = () => {
   const { resolvedTheme } = useTheme();
+  const { openAI } = useAI();
   const [logoSrc, setLogoSrc] = useState('/wt.png');
 
   useEffect(() => {
@@ -156,9 +158,22 @@ const DockLogo = () => {
   }, [resolvedTheme]);
 
   return (
-    <div className="flex items-center justify-center h-10 w-10 px-2">
-      <Image src={logoSrc} alt="Logo" width={28} height={28} className="object-contain" />
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <motion.button
+          whileHover={{ scale: 1.15, y: -4 }}
+          whileTap={{ scale: 0.95 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 10 }}
+          onClick={openAI}
+          className="flex items-center justify-center h-10 w-10 px-2 cursor-pointer rounded-full hover:bg-white/10 transition-colors"
+        >
+          <Image src={logoSrc} alt="Qore AI" width={28} height={28} className="object-contain" />
+        </motion.button>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="center" className="mb-2 glass-card">
+        <p>Qore AI</p>
+      </TooltipContent>
+    </Tooltip>
   );
 };
 
