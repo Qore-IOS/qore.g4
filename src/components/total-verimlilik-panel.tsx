@@ -415,29 +415,19 @@ export default function TotalVerimlilikPanel({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rows.map((row, index) => {
-                        // İlk satır mı veya farklı bir laboratuvara mı geçtik?
-                        const isFirstRowOfLab = index === 0 || rows[index - 1].labId !== row.labId;
-                        const labGroup = labGroups.find(g => g.labId === row.labId);
-                        const rowSpan = labGroup?.count || 1;
-
+                      {rows.map((row) => {
                         return (
                           <TableRow key={row.id} className="text-sm">
-                            {isFirstRowOfLab && (
-                              <TableCell
-                                rowSpan={rowSpan}
-                                className="font-medium bg-muted/30 sticky left-0 z-10 align-top pt-3"
-                              >
-                                <div>
-                                  <span>{row.labName}</span>
-                                  {row.labKod && (
-                                    <span className="block text-xs font-mono text-muted-foreground">
-                                      ({row.labKod})
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
-                            )}
+                            <TableCell className="font-medium bg-muted/30 sticky left-0 z-10">
+                              <div>
+                                <span>{row.labName}</span>
+                                {row.labKod && (
+                                  <span className="ml-1 text-xs font-mono text-muted-foreground">
+                                    ({row.labKod})
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
                             <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
                             <TableCell>{row.stokAdi}</TableCell>
                             <TableCell className="text-muted-foreground">{row.testAdi || '-'}</TableCell>
