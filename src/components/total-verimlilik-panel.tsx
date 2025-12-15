@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import BackButton from '@/components/BackButton';
 import { exportDataToExcel } from '@/lib/utils';
+import Link from 'next/link';
 
 interface TotalVerimlilikPanelProps {
   hospitals: Hospital[];
@@ -865,6 +866,12 @@ export default function TotalVerimlilikPanel({
                 <Upload className="h-4 w-4 mr-2" />
                 Excel ile Veri Gir
               </Button>
+              <Link href="/total-verimlilik/gecmis">
+                <Button variant="outline">
+                  <History className="h-4 w-4 mr-2" />
+                  Geçmiş
+                </Button>
+              </Link>
             </div>
           )}
         </CardContent>
