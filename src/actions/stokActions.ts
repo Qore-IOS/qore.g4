@@ -18,6 +18,7 @@ import {
   startAfter,
   orderBy,
   getCountFromServer,
+  documentId,
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import fs from 'fs/promises';
@@ -146,15 +147,23 @@ export async function getPaginatedDepotStock(
     if (lastDocId) {
       // Get the last document for cursor-based pagination
       const lastDocRef = doc(db, 'depoStok', lastDocId);
-      const lastDocSnap = await getDocs(query(ref, where('depotId', '==', depotId), where('isShipped', '==', false)));
-      const lastDoc = lastDocSnap.docs.find(d => d.id === lastDocId);
+      const lastDocSnap = await getDoc(lastDocRef);
 
-      if (lastDoc) {
+      if (lastDocSnap.exists()) {
         q = query(
           ref,
           where('depotId', '==', depotId),
           where('isShipped', '==', false),
-          startAfter(lastDoc),
+          orderBy(documentId()),
+          startAfter(lastDocSnap),
+          limit(fetchLimit)
+        );
+      } else {
+        q = query(
+          ref,
+          where('depotId', '==', depotId),
+          where('isShipped', '==', false),
+          orderBy(documentId()),
           limit(fetchLimit)
         );
       }
@@ -163,6 +172,7 @@ export async function getPaginatedDepotStock(
         ref,
         where('depotId', '==', depotId),
         where('isShipped', '==', false),
+        orderBy(documentId()),
         limit(fetchLimit)
       );
     }
@@ -213,6 +223,7 @@ export async function getDepotStockPage(
 
     let q;
 
+    // Cursor-based pagination için orderBy gerekli - documentId() kullanıyoruz
     if (lastDocId) {
       // Cursor-based pagination: önce son dokümanı al (1 read), sonra startAfter ile devam et
       const lastDocRef = doc(db, 'depoStok', lastDocId);
@@ -224,6 +235,7 @@ export async function getDepotStockPage(
           ref,
           where('depotId', '==', depotId),
           where('isShipped', '==', false),
+          orderBy(documentId()),
           limit(fetchLimit)
         );
       } else {
@@ -232,6 +244,7 @@ export async function getDepotStockPage(
           ref,
           where('depotId', '==', depotId),
           where('isShipped', '==', false),
+          orderBy(documentId()),
           startAfter(lastDocSnap),
           limit(fetchLimit)
         );
@@ -242,6 +255,7 @@ export async function getDepotStockPage(
         ref,
         where('depotId', '==', depotId),
         where('isShipped', '==', false),
+        orderBy(documentId()),
         limit(fetchLimit)
       );
     }

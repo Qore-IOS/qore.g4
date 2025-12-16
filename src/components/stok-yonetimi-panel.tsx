@@ -246,6 +246,8 @@ export default function StokYonetimiPanel() {
       setHasMoreStock(result.hasMore);
     } catch (e) {
       console.error('Error fetching depot stock:', e);
+      // Hata durumunda sonsuz döngüyü önlemek için daha fazla yüklemeyi durdur
+      setHasMoreStock(false);
       toast({ title: 'Stok Yükleme Hatası', description: 'Depo stoğu yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsStockLoading(false);
