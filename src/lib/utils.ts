@@ -461,5 +461,3 @@ export async function readExcelDataSmart(
     reader.readAsArrayBuffer(file);
   });
 }
-
-    

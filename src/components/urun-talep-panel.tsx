@@ -54,7 +54,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem } from '@/lib/types';
-import { generateId } from '@/lib/utils';
+import { generateId, playNotificationSound } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { cn } from '@/lib/utils';
@@ -181,7 +181,7 @@ export default function UrunTalepPanel() {
     setLoading(true);
     try {
       const orderId = generateId();
-      const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Lab';
+      const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
       const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
       
       const newOrder = {
@@ -215,6 +215,7 @@ export default function UrunTalepPanel() {
         }
       });
       
+      playNotificationSound(); // Play notification sound on success
       toast({ title: 'Talep Oluşturuldu', description: `Siparişiniz "${depotName}" deposuna iletildi.` });
       
       // Reset form
@@ -360,3 +361,4 @@ export default function UrunTalepPanel() {
     </div>
   );
 }
+
