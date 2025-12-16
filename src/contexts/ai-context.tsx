@@ -17,7 +17,7 @@ const useAISound = () => {
 
   useEffect(() => {
     // Create and preload audio
-    audioRef.current = new Audio('/ai-open.mp3');
+    audioRef.current = new Audio('/ai-open.wav');
     audioRef.current.volume = 0.5;
     audioRef.current.preload = 'auto';
   }, []);
