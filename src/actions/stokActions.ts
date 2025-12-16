@@ -8,11 +8,16 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   Timestamp,
   QueryDocumentSnapshot,
   DocumentData,
   doc,
   updateDoc,
+  limit,
+  startAfter,
+  orderBy,
+  getCountFromServer,
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import fs from 'fs/promises';
@@ -92,6 +97,167 @@ export async function getDeviceImages(): Promise<string[]> {
     console.error("Could not read device images from /public directory:", error);
     // Return an empty array if reading fails.
     return [];
+  }
+}
+
+/**
+ * Paginated stock query for inventory management panel.
+ * Fetches stock items for a specific depot with pagination support.
+ * Groups are created client-side, but we limit raw items fetched.
+ */
+export interface PaginatedStockResult {
+  items: DepoStokItem[];
+  totalCount: number;
+  hasMore: boolean;
+}
+
+export async function getPaginatedDepotStock(
+  depotId: string,
+  pageSize: number = 20,
+  lastDocId?: string | null,
+  fetchAll: boolean = false
+): Promise<PaginatedStockResult> {
+  try {
+    const ref = collection(db, 'depoStok');
+
+    // Base query: filter by depotId and isShipped=false
+    let q = query(
+      ref,
+      where('depotId', '==', depotId),
+      where('isShipped', '==', false)
+    );
+
+    // Get total count for pagination info
+    const countSnap = await getCountFromServer(q);
+    const totalCount = countSnap.data().count;
+
+    // If fetchAll is true, get all items (for exports, etc.)
+    if (fetchAll) {
+      const snap = await getDocs(q);
+      const items = snap.docs.map(processDoc);
+      return { items, totalCount, hasMore: false };
+    }
+
+    // For paginated queries, we need to fetch enough items to fill groups
+    // Since grouping happens client-side, fetch more raw items to ensure enough groups
+    // Multiplier accounts for items that may group together
+    const fetchLimit = pageSize * 5; // Fetch 5x to account for grouping
+
+    if (lastDocId) {
+      // Get the last document for cursor-based pagination
+      const lastDocRef = doc(db, 'depoStok', lastDocId);
+      const lastDocSnap = await getDocs(query(ref, where('depotId', '==', depotId), where('isShipped', '==', false)));
+      const lastDoc = lastDocSnap.docs.find(d => d.id === lastDocId);
+
+      if (lastDoc) {
+        q = query(
+          ref,
+          where('depotId', '==', depotId),
+          where('isShipped', '==', false),
+          startAfter(lastDoc),
+          limit(fetchLimit)
+        );
+      }
+    } else {
+      q = query(
+        ref,
+        where('depotId', '==', depotId),
+        where('isShipped', '==', false),
+        limit(fetchLimit)
+      );
+    }
+
+    const snap = await getDocs(q);
+    const items = snap.docs.map(processDoc);
+    const hasMore = items.length === fetchLimit || snap.docs.length < totalCount;
+
+    return { items, totalCount, hasMore };
+  } catch (err) {
+    console.error('Error fetching paginated depot stock:', err);
+    throw new Error('Failed to fetch paginated depot stock.');
+  }
+}
+
+/**
+ * Get stock items for a depot with cursor-based pagination.
+ * Fetches only the required number of items for the current page.
+ *
+ * @param depotId - The depot ID to fetch stock for
+ * @param fetchLimit - Number of raw items to fetch (should be rowsPerPage * multiplier for grouping buffer)
+ * @param lastDocId - Last document ID for cursor-based pagination (optional)
+ * @returns Items, total count, last doc ID for next page, and hasMore flag
+ */
+export async function getDepotStockPage(
+  depotId: string,
+  fetchLimit: number = 100,
+  lastDocId?: string | null
+): Promise<{
+  items: DepoStokItem[];
+  totalCount: number;
+  lastDocId: string | null;
+  hasMore: boolean;
+}> {
+  try {
+    const ref = collection(db, 'depoStok');
+
+    // Base query for counting
+    const baseQuery = query(
+      ref,
+      where('depotId', '==', depotId),
+      where('isShipped', '==', false)
+    );
+
+    // Get total count (bu sadece 1 read maliyeti)
+    const countSnap = await getCountFromServer(baseQuery);
+    const totalCount = countSnap.data().count;
+
+    let q;
+
+    if (lastDocId) {
+      // Cursor-based pagination: önce son dokümanı al (1 read), sonra startAfter ile devam et
+      const lastDocRef = doc(db, 'depoStok', lastDocId);
+      const lastDocSnap = await getDoc(lastDocRef);
+
+      if (!lastDocSnap.exists()) {
+        // Doküman bulunamadı, baştan başla
+        q = query(
+          ref,
+          where('depotId', '==', depotId),
+          where('isShipped', '==', false),
+          limit(fetchLimit)
+        );
+      } else {
+        // startAfter ile cursor'dan sonrasını al
+        q = query(
+          ref,
+          where('depotId', '==', depotId),
+          where('isShipped', '==', false),
+          startAfter(lastDocSnap),
+          limit(fetchLimit)
+        );
+      }
+    } else {
+      // İlk sayfa: limit ile çek
+      q = query(
+        ref,
+        where('depotId', '==', depotId),
+        where('isShipped', '==', false),
+        limit(fetchLimit)
+      );
+    }
+
+    const snap = await getDocs(q);
+    const items = snap.docs.map(processDoc);
+    const newLastDocId = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null;
+
+    // Eğer dönen kayıt sayısı fetchLimit'e eşitse ve toplam kayıttan azsa, daha fazla var demektir
+    // Ayrıca daha önce çekilen kayıtları da hesaba katmamız gerekiyor
+    const hasMore = snap.docs.length === fetchLimit;
+
+    return { items, totalCount, lastDocId: newLastDocId, hasMore };
+  } catch (err) {
+    console.error('Error fetching depot stock page:', err);
+    throw new Error('Failed to fetch depot stock page.');
   }
 }
 
