@@ -41,7 +41,7 @@ import {
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, query, where, writeBatch, doc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { getDepotStockPage } from '@/actions/stokActions';
+import { getFullDepotStock } from '@/actions/stokActions';
 import { db } from '@/lib/firebase';
 import { AlertTriangle, PackageSearch, Search, Warehouse, Trash2, FileSpreadsheet, Loader2, Map as MapIcon, SlidersHorizontal, X, Building, ShoppingCart, Truck, ChevronUp, ChevronDown, History, Pencil, Save, XCircle, Filter, Nfc, ListChecks, Undo } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
@@ -178,8 +178,6 @@ export default function StokYonetimiPanel() {
   const [isStockLoading, setIsStockLoading] = useState(false);
   const [fullDepotStok, setFullDepotStok] = useState<DepoStokItem[]>([]);
   const [totalStockCount, setTotalStockCount] = useState(0);
-  const [lastDocId, setLastDocId] = useState<string | null>(null);
-  const [hasMoreStock, setHasMoreStock] = useState(true);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
@@ -225,57 +223,35 @@ export default function StokYonetimiPanel() {
     }
   }, [toast, selectedDepotId]);
 
-  // İlk sayfa için stok çek - sadece rowsPerPage * 5 kadar (gruplandırma buffer'ı için)
-  const fetchDepotStock = useCallback(async (depotId: string, reset: boolean = true) => {
+  // Tüm stok verilerini çek ve client-side filtrele (isShipped=false)
+  const fetchDepotStock = useCallback(async (depotId: string) => {
     if (!depotId) return;
     setIsStockLoading(true);
     try {
-      // İlk sayfa için rowsPerPage * 5 kayıt çek (gruplandırma buffer'ı)
-      const fetchLimit = rowsPerPage * 5;
-      const result = await getDepotStockPage(depotId, fetchLimit, reset ? null : lastDocId);
-
-      if (reset) {
-        setFullDepotStok(result.items);
-      } else {
-        // Mevcut verilere ekle
-        setFullDepotStok(prev => [...prev, ...result.items]);
-      }
-
-      setTotalStockCount(result.totalCount);
-      setLastDocId(result.lastDocId);
-      setHasMoreStock(result.hasMore);
+      const result = await getFullDepotStock(depotId);
+      // Client-side'da isShipped=false filtresi uygula
+      const unshippedItems = result.items.filter(item => !item.isShipped);
+      setFullDepotStok(unshippedItems);
+      setTotalStockCount(unshippedItems.length);
     } catch (e) {
       console.error('Error fetching depot stock:', e);
-      // Hata durumunda sonsuz döngüyü önlemek için daha fazla yüklemeyi durdur
-      setHasMoreStock(false);
       toast({ title: 'Stok Yükleme Hatası', description: 'Depo stoğu yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsStockLoading(false);
     }
-  }, [toast, rowsPerPage, lastDocId]);
-
-  // Daha fazla stok yükle (lazy loading)
-  const loadMoreStock = useCallback(async () => {
-    if (!selectedDepotId || !hasMoreStock || isStockLoading) return;
-    await fetchDepotStock(selectedDepotId, false);
-  }, [selectedDepotId, hasMoreStock, isStockLoading, fetchDepotStock]);
+  }, [toast]);
 
   useEffect(() => {
     fetchInitialData();
   }, [fetchInitialData]);
 
-  // Depo değiştiğinde stok verisi çek ve state'leri resetle
+  // Depo değiştiğinde stok verisi çek
   useEffect(() => {
     if (selectedDepotId) {
-      // State'leri resetle
-      setFullDepotStok([]);
-      setLastDocId(null);
-      setHasMoreStock(true);
       setCurrentPage(1);
-      // Yeni deponun stoğunu çek
-      fetchDepotStock(selectedDepotId, true);
+      fetchDepotStock(selectedDepotId);
     }
-  }, [selectedDepotId]); // fetchDepotStock'u dependency'den çıkardık çünkü reset=true ile çağırıyoruz
+  }, [selectedDepotId, fetchDepotStock]);
 
   useEffect(() => {
     if (!selectedDepotId) return;
@@ -496,17 +472,6 @@ export default function StokYonetimiPanel() {
   useEffect(() => {
     setCurrentPage(1);
   }, [rowsPerPage, debouncedSearchTerm, activeFilters, sortBy, sortOrder]);
-
-  // Sayfa değiştiğinde veya yeterli grup yoksa daha fazla veri yükle
-  useEffect(() => {
-    const requiredGroups = currentPage * rowsPerPage;
-    const currentGroups = sortedAndGroupedStock.length;
-
-    // Eğer gösterilecek sayfa için yeterli grup yoksa ve daha fazla veri varsa, yükle
-    if (currentGroups < requiredGroups && hasMoreStock && !isStockLoading && selectedDepotId) {
-      loadMoreStock();
-    }
-  }, [currentPage, rowsPerPage, sortedAndGroupedStock.length, hasMoreStock, isStockLoading, selectedDepotId, loadMoreStock]);
 
   const handleLabCountExport = async () => {
     if (selectedLabsForReport.length === 0) {
