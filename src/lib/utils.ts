@@ -1,5 +1,4 @@
 
-
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { BarcodeFormat, ProductCode, ParsedResult } from './types';
@@ -330,23 +329,19 @@ export const playFeedback = (isError = false) => {
   if (typeof window === 'undefined') return;
   if (navigator.vibrate) navigator.vibrate(isError ? [200, 100, 200] : 100);
 
-  // Play custom notification sound for success, oscillator beep for error
-  if (!isError) {
-    playNotificationSound();
-    return;
-  }
-
-  // Error sound - use oscillator beep
+  // Play browser-generated beep for both success and error
   try {
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContext) return;
     const ctx = new AudioContext();
     const oscillator = ctx.createOscillator();
-    oscillator.type = 'square';
-    oscillator.frequency.setValueAtTime(220, ctx.currentTime);
+    
+    oscillator.type = isError ? 'square' : 'sine';
+    oscillator.frequency.setValueAtTime(isError ? 220 : 440, ctx.currentTime);
     oscillator.connect(ctx.destination);
     oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.2);
+    oscillator.stop(ctx.currentTime + 0.15); // Short beep
+
   } catch {
     // fallback silently if sound is not supported
   }
@@ -466,3 +461,5 @@ export async function readExcelDataSmart(
     reader.readAsArrayBuffer(file);
   });
 }
+
+    
