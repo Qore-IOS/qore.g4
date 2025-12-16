@@ -80,6 +80,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
   const [record, setRecord] = useState<TotalEfficiencyRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showResultsOnly, setShowResultsOnly] = useState(false);
+  const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
 
   useEffect(() => {
     const fetchRecord = async () => {
@@ -415,6 +416,39 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                           <span className="text-xs font-normal text-muted-foreground">15 - 19</span>
                         </div>
                       </TableHead>
+                      {/* Sütun 22: Kutu Kayıp */}
+                      <TableHead className="min-w-[180px] bg-violet-50 dark:bg-violet-950 text-center p-0">
+                        <div className="flex flex-col">
+                          <div className="flex">
+                            <button
+                              onClick={() => setColumn22Mode('kumulatif')}
+                              className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                column22Mode === 'kumulatif'
+                                  ? 'bg-violet-500 text-white'
+                                  : 'bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-800'
+                              }`}
+                            >
+                              Kümülatife Göre
+                            </button>
+                            <button
+                              onClick={() => setColumn22Mode('hakedis')}
+                              className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                column22Mode === 'hakedis'
+                                  ? 'bg-violet-500 text-white'
+                                  : 'bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-800'
+                              }`}
+                            >
+                              Hak Edişe Göre
+                            </button>
+                          </div>
+                          <div className="py-1.5 px-2">
+                            <span>22. Kutu Kayıp</span>
+                            <div className="text-xs font-normal text-muted-foreground">
+                              {column22Mode === 'kumulatif' ? '((14-18)-15)/Amb' : '((14-18)-19)/Amb'}
+                            </div>
+                          </div>
+                        </div>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -511,6 +545,44 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                               K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark.toLocaleString('tr-TR')}
                             </span>
                           </div>
+                        </TableCell>
+                        {/* Sütun 22: Kutu Kayıp */}
+                        <TableCell className="bg-violet-50/50 dark:bg-violet-950/50 text-center">
+                          {(() => {
+                            const testFark = column22Mode === 'kumulatif'
+                              ? row.stokDogrulukFark
+                              : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - row.hakEdis;
+
+                            const ambalaj = row.ambalajDegeri || 1;
+                            const kutuFark = testFark / ambalaj;
+                            const absKutuFark = Math.abs(kutuFark);
+
+                            if (absKutuFark < 1) {
+                              return (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span className="text-muted-foreground">0 kutu</span>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {Math.abs(testFark).toLocaleString('tr-TR')} test / {ambalaj} amb
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            const colorClass = absKutuFark >= 2
+                              ? 'text-red-600 font-bold'
+                              : 'text-yellow-600 font-semibold';
+
+                            return (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className={colorClass}>
+                                  {kutuFark > 0 ? '+' : '-'}{absKutuFark.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {Math.abs(testFark).toLocaleString('tr-TR')} test / {ambalaj} amb
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                       </TableRow>
                     ))}
