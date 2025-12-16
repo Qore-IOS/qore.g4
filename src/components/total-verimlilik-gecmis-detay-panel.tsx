@@ -43,6 +43,17 @@ interface TableRowData {
   kitVerimlilikYuzde: number;
 }
 
+interface EfficiencyMetrics {
+  toplamKumulatif: number;
+  toplamBeklenenTuketim: number;
+  toplamHakEdis: number;
+  stokSapmaYuzde: number;
+  kitSapmaYuzde: number;
+  stokDogrulukSkoru: number;
+  kitVerimlilikSkoru: number;
+  genelVerimlilik: number;
+}
+
 interface TotalEfficiencyRecord {
   id: string;
   poolId: string;
@@ -52,6 +63,7 @@ interface TotalEfficiencyRecord {
   rows: TableRowData[];
   createdAt: { seconds: number; nanoseconds: number } | null;
   createdByName: string;
+  efficiencyMetrics?: EfficiencyMetrics;
 }
 
 const MONTHS = [
@@ -86,6 +98,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
             rows: data.rows || [],
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
+            efficiencyMetrics: data.efficiencyMetrics || undefined,
           });
         } else {
           toast({
@@ -193,6 +206,109 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                 )}
               </CardDescription>
             </div>
+
+            {/* Genel Verimlilik Dairesel Grafik */}
+            {record.efficiencyMetrics && (
+              <div className="flex items-center gap-6 px-6 py-4 bg-muted/30 rounded-xl">
+                {/* Ana Dairesel Grafik */}
+                <div className="relative w-28 h-28">
+                  <svg className="w-28 h-28 transform -rotate-90">
+                    <circle
+                      cx="56"
+                      cy="56"
+                      r="48"
+                      stroke="currentColor"
+                      strokeWidth="10"
+                      fill="none"
+                      className="text-muted"
+                    />
+                    <circle
+                      cx="56"
+                      cy="56"
+                      r="48"
+                      stroke="currentColor"
+                      strokeWidth="10"
+                      fill="none"
+                      strokeDasharray={`${(record.efficiencyMetrics.genelVerimlilik / 100) * 301.6} 301.6`}
+                      strokeLinecap="round"
+                      className={
+                        record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-500' :
+                        record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-500' :
+                        record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-500' : 'text-red-500'
+                      }
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className={`text-2xl font-bold ${
+                      record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
+                      record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
+                      record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
+                    }`}>
+                      %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">Genel</span>
+                  </div>
+                </div>
+
+                {/* Detay Skorları */}
+                <div className="flex flex-col gap-3">
+                  {/* Stok Doğruluk */}
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-12 h-12">
+                      <svg className="w-12 h-12 transform -rotate-90">
+                        <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="4" fill="none" className="text-muted" />
+                        <circle
+                          cx="24" cy="24" r="20"
+                          stroke="currentColor" strokeWidth="4" fill="none"
+                          strokeDasharray={`${(record.efficiencyMetrics.stokDogrulukSkoru / 100) * 125.7} 125.7`}
+                          strokeLinecap="round"
+                          className={record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-500' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-500' : 'text-red-500'}
+                        />
+                      </svg>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium">Stok Doğruluk</span>
+                      <span className={`text-lg font-bold ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Kit Verimlilik */}
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-12 h-12">
+                      <svg className="w-12 h-12 transform -rotate-90">
+                        <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="4" fill="none" className="text-muted" />
+                        <circle
+                          cx="24" cy="24" r="20"
+                          stroke="currentColor" strokeWidth="4" fill="none"
+                          strokeDasharray={`${(record.efficiencyMetrics.kitVerimlilikSkoru / 100) * 125.7} 125.7`}
+                          strokeLinecap="round"
+                          className={record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-500' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-500' : 'text-red-500'}
+                        />
+                      </svg>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium">Kit Verimlilik</span>
+                      <span className={`text-lg font-bold ${record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        %{record.efficiencyMetrics.kitVerimlilikSkoru.toFixed(1)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.kitSapmaYuzde.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Toplam Test */}
+                <div className="flex flex-col items-center justify-center px-4 border-l">
+                  <span className="text-2xl font-bold text-primary">
+                    {record.efficiencyMetrics.toplamKumulatif.toLocaleString('tr-TR')}
+                  </span>
+                  <span className="text-sm text-muted-foreground">Toplam Test</span>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button variant="outline" onClick={handleExportExcel}>
                 <FileSpreadsheet className="h-4 w-4 mr-2" />
@@ -378,6 +494,9 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                             <span className={`text-xs ${row.stokDogrulukYuzde !== 0 ? (row.stokDogrulukYuzde > 0 ? 'text-red-500' : 'text-green-500') : 'text-muted-foreground'}`}>
                               {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
                             </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              S({(row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest).toLocaleString('tr-TR')}) - K({row.kumulatifTotal.toLocaleString('tr-TR')}) = {row.stokDogrulukFark.toLocaleString('tr-TR')}
+                            </span>
                           </div>
                         </TableCell>
                         <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
@@ -387,6 +506,9 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                             </span>
                             <span className={`text-xs ${row.kitVerimlilikYuzde !== 0 ? (row.kitVerimlilikYuzde > 0 ? 'text-orange-500' : 'text-green-500') : 'text-muted-foreground'}`}>
                               {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark.toLocaleString('tr-TR')}
                             </span>
                           </div>
                         </TableCell>

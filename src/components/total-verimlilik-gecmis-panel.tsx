@@ -15,6 +15,17 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
+interface EfficiencyMetrics {
+  toplamKumulatif: number;
+  toplamBeklenenTuketim: number;
+  toplamHakEdis: number;
+  stokSapmaYuzde: number;
+  kitSapmaYuzde: number;
+  stokDogrulukSkoru: number;
+  kitVerimlilikSkoru: number;
+  genelVerimlilik: number;
+}
+
 interface TotalEfficiencyRecord {
   id: string;
   poolId: string;
@@ -24,6 +35,7 @@ interface TotalEfficiencyRecord {
   createdAt: { seconds: number; nanoseconds: number } | null;
   createdByName: string;
   rowCount: number;
+  efficiencyMetrics?: EfficiencyMetrics;
 }
 
 const MONTHS = [
@@ -57,6 +69,7 @@ export default function TotalVerimlilikGecmisPanel() {
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
             rowCount: data.rows?.length || 0,
+            efficiencyMetrics: data.efficiencyMetrics || undefined,
           };
         });
 
@@ -128,6 +141,7 @@ export default function TotalVerimlilikGecmisPanel() {
                   <TableRow>
                     <TableHead className="min-w-[200px]">Havuz</TableHead>
                     <TableHead className="min-w-[150px]">Dönem</TableHead>
+                    <TableHead className="min-w-[120px] text-center">Verimlilik</TableHead>
                     <TableHead className="min-w-[100px] text-center">Satır Sayısı</TableHead>
                     <TableHead className="min-w-[180px]">Kayıt Tarihi</TableHead>
                     <TableHead className="min-w-[150px]">Kaydeden</TableHead>
@@ -148,6 +162,50 @@ export default function TotalVerimlilikGecmisPanel() {
                           <Calendar className="h-4 w-4 text-muted-foreground" />
                           <span>{MONTHS[record.month]} {record.year}</span>
                         </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {record.efficiencyMetrics ? (
+                          <div className="flex items-center justify-center gap-2">
+                            {/* Mini Circular Progress */}
+                            <div className="relative w-10 h-10">
+                              <svg className="w-10 h-10 transform -rotate-90">
+                                <circle
+                                  cx="20"
+                                  cy="20"
+                                  r="16"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                  fill="none"
+                                  className="text-muted"
+                                />
+                                <circle
+                                  cx="20"
+                                  cy="20"
+                                  r="16"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                  fill="none"
+                                  strokeDasharray={`${(record.efficiencyMetrics.genelVerimlilik / 100) * 100.5} 100.5`}
+                                  strokeLinecap="round"
+                                  className={
+                                    record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-500' :
+                                    record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-500' :
+                                    record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-500' : 'text-red-500'
+                                  }
+                                />
+                              </svg>
+                            </div>
+                            <span className={`text-sm font-semibold ${
+                              record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
+                              record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
+                              record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
+                            }`}>
+                              %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-center">
                         <span className="bg-muted px-2 py-1 rounded text-sm">
