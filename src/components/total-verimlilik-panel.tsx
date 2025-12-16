@@ -1626,6 +1626,9 @@ export default function TotalVerimlilikPanel({
                                 <span className={`text-xs ${row.stokDogrulukYuzde !== 0 ? (row.stokDogrulukYuzde > 0 ? 'text-red-500' : 'text-green-500') : 'text-muted-foreground'}`}>
                                   {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
                                 </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  S({(row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest).toLocaleString('tr-TR')}) - K({row.kumulatifTotal.toLocaleString('tr-TR')}) = {row.stokDogrulukFark.toLocaleString('tr-TR')}
+                                </span>
                               </div>
                             </TableCell>
                             {/* Sütun 21: Kit Verimlilik (Fark + Yüzde) */}
@@ -1636,6 +1639,9 @@ export default function TotalVerimlilikPanel({
                                 </span>
                                 <span className={`text-xs ${row.kitVerimlilikYuzde !== 0 ? (row.kitVerimlilikYuzde > 0 ? 'text-orange-500' : 'text-green-500') : 'text-muted-foreground'}`}>
                                   {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark.toLocaleString('tr-TR')}
                                 </span>
                               </div>
                             </TableCell>
