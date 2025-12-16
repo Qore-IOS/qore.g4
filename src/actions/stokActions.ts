@@ -13,6 +13,10 @@ import {
   DocumentData,
   doc,
   updateDoc,
+  limit,
+  startAfter,
+  orderBy,
+  getCountFromServer,
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import fs from 'fs/promises';
@@ -92,6 +96,119 @@ export async function getDeviceImages(): Promise<string[]> {
     console.error("Could not read device images from /public directory:", error);
     // Return an empty array if reading fails.
     return [];
+  }
+}
+
+/**
+ * Paginated stock query for inventory management panel.
+ * Fetches stock items for a specific depot with pagination support.
+ * Groups are created client-side, but we limit raw items fetched.
+ */
+export interface PaginatedStockResult {
+  items: DepoStokItem[];
+  totalCount: number;
+  hasMore: boolean;
+}
+
+export async function getPaginatedDepotStock(
+  depotId: string,
+  pageSize: number = 20,
+  lastDocId?: string | null,
+  fetchAll: boolean = false
+): Promise<PaginatedStockResult> {
+  try {
+    const ref = collection(db, 'depoStok');
+
+    // Base query: filter by depotId and isShipped=false
+    let q = query(
+      ref,
+      where('depotId', '==', depotId),
+      where('isShipped', '==', false)
+    );
+
+    // Get total count for pagination info
+    const countSnap = await getCountFromServer(q);
+    const totalCount = countSnap.data().count;
+
+    // If fetchAll is true, get all items (for exports, etc.)
+    if (fetchAll) {
+      const snap = await getDocs(q);
+      const items = snap.docs.map(processDoc);
+      return { items, totalCount, hasMore: false };
+    }
+
+    // For paginated queries, we need to fetch enough items to fill groups
+    // Since grouping happens client-side, fetch more raw items to ensure enough groups
+    // Multiplier accounts for items that may group together
+    const fetchLimit = pageSize * 5; // Fetch 5x to account for grouping
+
+    if (lastDocId) {
+      // Get the last document for cursor-based pagination
+      const lastDocRef = doc(db, 'depoStok', lastDocId);
+      const lastDocSnap = await getDocs(query(ref, where('depotId', '==', depotId), where('isShipped', '==', false)));
+      const lastDoc = lastDocSnap.docs.find(d => d.id === lastDocId);
+
+      if (lastDoc) {
+        q = query(
+          ref,
+          where('depotId', '==', depotId),
+          where('isShipped', '==', false),
+          startAfter(lastDoc),
+          limit(fetchLimit)
+        );
+      }
+    } else {
+      q = query(
+        ref,
+        where('depotId', '==', depotId),
+        where('isShipped', '==', false),
+        limit(fetchLimit)
+      );
+    }
+
+    const snap = await getDocs(q);
+    const items = snap.docs.map(processDoc);
+    const hasMore = items.length === fetchLimit || snap.docs.length < totalCount;
+
+    return { items, totalCount, hasMore };
+  } catch (err) {
+    console.error('Error fetching paginated depot stock:', err);
+    throw new Error('Failed to fetch paginated depot stock.');
+  }
+}
+
+/**
+ * Get stock items for a depot with offset-based pagination.
+ * More suitable for UI pagination with page numbers.
+ */
+export async function getDepotStockPage(
+  depotId: string,
+  page: number = 1,
+  pageSize: number = 100
+): Promise<{ items: DepoStokItem[]; totalCount: number }> {
+  try {
+    const ref = collection(db, 'depoStok');
+
+    // Query for this depot's unshipped items
+    const q = query(
+      ref,
+      where('depotId', '==', depotId),
+      where('isShipped', '==', false)
+    );
+
+    // Get total count
+    const countSnap = await getCountFromServer(q);
+    const totalCount = countSnap.data().count;
+
+    // Fetch all items for this depot (Firestore doesn't support offset)
+    // We filter/paginate client-side after grouping
+    const snap = await getDocs(q);
+    const items = snap.docs.map(processDoc);
+
+    return { items, totalCount };
+  } catch (err) {
+    console.error('Error fetching depot stock page:', err);
+    throw new Error('Failed to fetch depot stock page.');
   }
 }
 
