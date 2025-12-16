@@ -24,6 +24,12 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
@@ -759,12 +765,44 @@ export default function TotalVerimlilikPanel({
       const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
       const docId = `${selectedPoolId}-${selectedYear}-${selectedMonth}`;
 
+      // Verimlilik metriklerini hesapla
+      let toplamKumulatif = 0;
+      let toplamBeklenenTuketim = 0;
+      let toplamHakEdis = 0;
+
+      rows.forEach(row => {
+        toplamKumulatif += row.kumulatifTotal;
+        toplamBeklenenTuketim += (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest);
+        toplamHakEdis += row.hakEdis;
+      });
+
+      const stokSapmaYuzde = toplamKumulatif !== 0
+        ? ((toplamBeklenenTuketim - toplamKumulatif) / toplamKumulatif) * 100
+        : 0;
+      const kitSapmaYuzde = toplamKumulatif !== 0
+        ? ((toplamKumulatif - toplamHakEdis) / toplamKumulatif) * 100
+        : 0;
+      const stokDogrulukSkoru = Math.max(0, Math.min(100, 100 - Math.abs(stokSapmaYuzde)));
+      const kitVerimlilikSkoru = Math.max(0, Math.min(100, 100 - Math.abs(kitSapmaYuzde)));
+      const genelVerimlilik = (stokDogrulukSkoru + kitVerimlilikSkoru) / 2;
+
       const dataToSave = {
         poolId: selectedPoolId,
         poolName: selectedPool?.name || '',
         month: selectedMonth,
         year: selectedYear,
         rows: rows,
+        // Verimlilik metrikleri
+        efficiencyMetrics: {
+          toplamKumulatif,
+          toplamBeklenenTuketim,
+          toplamHakEdis,
+          stokSapmaYuzde,
+          kitSapmaYuzde,
+          stokDogrulukSkoru,
+          kitVerimlilikSkoru,
+          genelVerimlilik,
+        },
         createdAt: Timestamp.now(),
         createdByUid: currentUser?.uid || '',
         createdByName: currentUser?.name || currentUser?.email || '',
@@ -772,7 +810,7 @@ export default function TotalVerimlilikPanel({
       };
 
       await setDoc(doc(db, 'totalEfficiencyRecords', docId), dataToSave, { merge: true });
-      toast({ title: 'Kaydedildi', description: 'Total verimlilik verileri kaydedildi.' });
+      toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${genelVerimlilik.toFixed(1)}` });
     } catch (error) {
       console.error('Error saving:', error);
       toast({ title: 'Hata', description: 'Kayıt sırasında bir sorun oluştu.', variant: 'destructive' });
@@ -940,6 +978,60 @@ export default function TotalVerimlilikPanel({
       searchTerm.trim() !== '';
   }, [columnFilters, sortConfig, searchTerm]);
 
+  // Genel Verimlilik Hesaplaması
+  const efficiencyMetrics = useMemo(() => {
+    if (rows.length === 0) {
+      return {
+        toplamKumulatif: 0,
+        toplamBeklenenTuketim: 0,
+        toplamHakEdis: 0,
+        stokSapmaYuzde: 0,
+        kitSapmaYuzde: 0,
+        stokDogrulukSkoru: 100,
+        kitVerimlilikSkoru: 100,
+        genelVerimlilik: 100,
+      };
+    }
+
+    // Toplam değerleri hesapla
+    let toplamKumulatif = 0;
+    let toplamBeklenenTuketim = 0;
+    let toplamHakEdis = 0;
+
+    rows.forEach(row => {
+      toplamKumulatif += row.kumulatifTotal;
+      toplamBeklenenTuketim += (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest);
+      toplamHakEdis += row.hakEdis;
+    });
+
+    // Sapma oranlarını hesapla (kümülatif 0 ise 0 sapma)
+    const stokSapmaYuzde = toplamKumulatif !== 0
+      ? ((toplamBeklenenTuketim - toplamKumulatif) / toplamKumulatif) * 100
+      : 0;
+
+    const kitSapmaYuzde = toplamKumulatif !== 0
+      ? ((toplamKumulatif - toplamHakEdis) / toplamKumulatif) * 100
+      : 0;
+
+    // Verimlilik skorları (sapma → verimlilik dönüşümü, 0-100 arası)
+    const stokDogrulukSkoru = Math.max(0, Math.min(100, 100 - Math.abs(stokSapmaYuzde)));
+    const kitVerimlilikSkoru = Math.max(0, Math.min(100, 100 - Math.abs(kitSapmaYuzde)));
+
+    // Genel verimlilik
+    const genelVerimlilik = (stokDogrulukSkoru + kitVerimlilikSkoru) / 2;
+
+    return {
+      toplamKumulatif,
+      toplamBeklenenTuketim,
+      toplamHakEdis,
+      stokSapmaYuzde,
+      kitSapmaYuzde,
+      stokDogrulukSkoru,
+      kitVerimlilikSkoru,
+      genelVerimlilik,
+    };
+  }, [rows]);
+
   return (
     <div className="p-4 space-y-6">
       <BackButton fallback="/" />
@@ -997,37 +1089,116 @@ export default function TotalVerimlilikPanel({
           </div>
 
           {selectedPoolId && (
-            <div className="flex items-center gap-2 pt-4 border-t flex-wrap">
-              <Button onClick={handleSave} disabled={isSaving || rows.length === 0}>
-                {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                Kaydet
-              </Button>
-              <Button variant="outline" onClick={handleExportExcel} disabled={rows.length === 0}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
-                Excel'e Aktar
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setShowGoztepeSevkiyatModal(true)}
-                disabled={rows.length === 0}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Göztepe Sevkiyat Çek
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setShowExcelImportModal(true)}
-                disabled={rows.length === 0}
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Excel ile Veri Gir
-              </Button>
-              <Link href="/total-verimlilik/gecmis">
-                <Button variant="outline">
-                  <History className="h-4 w-4 mr-2" />
-                  Geçmiş
+            <div className="flex items-center justify-between gap-4 pt-4 border-t flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button onClick={handleSave} disabled={isSaving || rows.length === 0}>
+                  {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                  Kaydet
                 </Button>
-              </Link>
+                <Button variant="outline" onClick={handleExportExcel} disabled={rows.length === 0}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Excel'e Aktar
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowGoztepeSevkiyatModal(true)}
+                  disabled={rows.length === 0}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Göztepe Sevkiyat Çek
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowExcelImportModal(true)}
+                  disabled={rows.length === 0}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Excel ile Veri Gir
+                </Button>
+                <Link href="/total-verimlilik/gecmis">
+                  <Button variant="outline">
+                    <History className="h-4 w-4 mr-2" />
+                    Geçmiş
+                  </Button>
+                </Link>
+              </div>
+
+              {/* Genel Verimlilik Göstergesi */}
+              {rows.length > 0 && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-3 px-4 py-2 bg-muted/50 rounded-lg cursor-help">
+                        {/* Circular Progress */}
+                        <div className="relative w-16 h-16">
+                          <svg className="w-16 h-16 transform -rotate-90">
+                            <circle
+                              cx="32"
+                              cy="32"
+                              r="28"
+                              stroke="currentColor"
+                              strokeWidth="6"
+                              fill="none"
+                              className="text-muted"
+                            />
+                            <circle
+                              cx="32"
+                              cy="32"
+                              r="28"
+                              stroke="currentColor"
+                              strokeWidth="6"
+                              fill="none"
+                              strokeDasharray={`${(efficiencyMetrics.genelVerimlilik / 100) * 175.9} 175.9`}
+                              strokeLinecap="round"
+                              className={
+                                efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-500' :
+                                efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-500' :
+                                efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-500' : 'text-red-500'
+                              }
+                            />
+                          </svg>
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <span className={`text-sm font-bold ${
+                              efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
+                              efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
+                              efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
+                            }`}>
+                              %{efficiencyMetrics.genelVerimlilik.toFixed(1)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold">Genel Verimlilik</span>
+                          <span className="text-xs text-muted-foreground">
+                            {efficiencyMetrics.toplamKumulatif.toLocaleString('tr-TR')} test
+                          </span>
+                        </div>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="max-w-xs">
+                      <div className="space-y-2 text-sm">
+                        <div className="font-semibold border-b pb-1">Verimlilik Detayları</div>
+                        <div className="flex justify-between gap-4">
+                          <span>Stok Doğruluk Skoru:</span>
+                          <span className={`font-medium ${efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            %{efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Kit Verimlilik Skoru:</span>
+                          <span className={`font-medium ${efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-600' : efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            %{efficiencyMetrics.kitVerimlilikSkoru.toFixed(1)}
+                          </span>
+                        </div>
+                        <div className="border-t pt-1 text-xs text-muted-foreground">
+                          <div>Stok Sapma: %{efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</div>
+                          <div>Kit Sapma: %{efficiencyMetrics.kitSapmaYuzde.toFixed(2)}</div>
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
           )}
         </CardContent>
