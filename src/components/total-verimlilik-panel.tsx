@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History, Filter, ArrowUpDown, ArrowUp, ArrowDown, Search, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
@@ -117,6 +123,24 @@ export default function TotalVerimlilikPanel({
 
   // Phase 6 - Sonuç Odaklı Görünüm
   const [showResultsOnly, setShowResultsOnly] = useState(false);
+
+  // Filter, Sort ve Search State'leri
+  const [columnFilters, setColumnFilters] = useState<{
+    labName: Set<string>;
+    stokAdi: Set<string>;
+    testAdi: Set<string>;
+    cihazGrubu: Set<string>;
+  }>({
+    labName: new Set(),
+    stokAdi: new Set(),
+    testAdi: new Set(),
+    cihazGrubu: new Set(),
+  });
+  const [sortConfig, setSortConfig] = useState<{
+    column: 'stokDogrulukFark' | 'kitVerimlilikFark' | null;
+    direction: 'asc' | 'desc';
+  }>({ column: null, direction: 'asc' });
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Verimlilik havuzlarını, ortak lab havuzlarını ve depoları çek
   useEffect(() => {
@@ -784,6 +808,138 @@ export default function TotalVerimlilikPanel({
     return groups;
   }, [rows]);
 
+  // Filter için benzersiz değerleri hesapla
+  const uniqueFilterValues = useMemo(() => {
+    const labNames = new Set<string>();
+    const stokAdlari = new Set<string>();
+    const testAdlari = new Set<string>();
+    const cihazGruplari = new Set<string>();
+
+    rows.forEach(row => {
+      if (row.labName) labNames.add(row.labName);
+      if (row.stokAdi) stokAdlari.add(row.stokAdi);
+      if (row.testAdi) testAdlari.add(row.testAdi);
+      if (row.cihazGrubu) cihazGruplari.add(row.cihazGrubu);
+    });
+
+    return {
+      labName: Array.from(labNames).sort((a, b) => a.localeCompare(b, 'tr')),
+      stokAdi: Array.from(stokAdlari).sort((a, b) => a.localeCompare(b, 'tr')),
+      testAdi: Array.from(testAdlari).sort((a, b) => a.localeCompare(b, 'tr')),
+      cihazGrubu: Array.from(cihazGruplari).sort((a, b) => a.localeCompare(b, 'tr')),
+    };
+  }, [rows]);
+
+  // Filtrelenmiş ve sıralanmış satırlar
+  const filteredAndSortedRows = useMemo(() => {
+    let result = [...rows];
+
+    // Search filter
+    if (searchTerm.trim()) {
+      const lowerSearch = searchTerm.toLowerCase();
+      result = result.filter(row =>
+        row.labName.toLowerCase().includes(lowerSearch) ||
+        row.stokKodu.toLowerCase().includes(lowerSearch) ||
+        row.stokAdi.toLowerCase().includes(lowerSearch) ||
+        row.testAdi.toLowerCase().includes(lowerSearch) ||
+        row.cihazGrubu.toLowerCase().includes(lowerSearch)
+      );
+    }
+
+    // Column filters
+    if (columnFilters.labName.size > 0) {
+      result = result.filter(row => columnFilters.labName.has(row.labName));
+    }
+    if (columnFilters.stokAdi.size > 0) {
+      result = result.filter(row => columnFilters.stokAdi.has(row.stokAdi));
+    }
+    if (columnFilters.testAdi.size > 0) {
+      result = result.filter(row => columnFilters.testAdi.has(row.testAdi));
+    }
+    if (columnFilters.cihazGrubu.size > 0) {
+      result = result.filter(row => columnFilters.cihazGrubu.has(row.cihazGrubu));
+    }
+
+    // Sorting
+    if (sortConfig.column) {
+      result.sort((a, b) => {
+        const aVal = Math.abs(a[sortConfig.column!]);
+        const bVal = Math.abs(b[sortConfig.column!]);
+        if (sortConfig.direction === 'asc') {
+          return aVal - bVal;
+        } else {
+          return bVal - aVal;
+        }
+      });
+    }
+
+    return result;
+  }, [rows, searchTerm, columnFilters, sortConfig]);
+
+  // Filter toggle helper
+  const toggleFilterValue = useCallback((
+    filterKey: 'labName' | 'stokAdi' | 'testAdi' | 'cihazGrubu',
+    value: string
+  ) => {
+    setColumnFilters(prev => {
+      const newSet = new Set(prev[filterKey]);
+      if (newSet.has(value)) {
+        newSet.delete(value);
+      } else {
+        newSet.add(value);
+      }
+      return { ...prev, [filterKey]: newSet };
+    });
+  }, []);
+
+  // Select all / deselect all helper
+  const setAllFilterValues = useCallback((
+    filterKey: 'labName' | 'stokAdi' | 'testAdi' | 'cihazGrubu',
+    values: string[],
+    select: boolean
+  ) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [filterKey]: select ? new Set(values) : new Set(),
+    }));
+  }, []);
+
+  // Clear all filters
+  const clearAllFilters = useCallback(() => {
+    setColumnFilters({
+      labName: new Set(),
+      stokAdi: new Set(),
+      testAdi: new Set(),
+      cihazGrubu: new Set(),
+    });
+    setSortConfig({ column: null, direction: 'asc' });
+    setSearchTerm('');
+  }, []);
+
+  // Toggle sort
+  const toggleSort = useCallback((column: 'stokDogrulukFark' | 'kitVerimlilikFark') => {
+    setSortConfig(prev => {
+      if (prev.column === column) {
+        if (prev.direction === 'asc') {
+          return { column, direction: 'desc' };
+        } else {
+          return { column: null, direction: 'asc' };
+        }
+      }
+      return { column, direction: 'asc' };
+    });
+  }, []);
+
+  // Check if any filter is active
+  const hasActiveFilters = useMemo(() => {
+    return columnFilters.labName.size > 0 ||
+      columnFilters.stokAdi.size > 0 ||
+      columnFilters.testAdi.size > 0 ||
+      columnFilters.cihazGrubu.size > 0 ||
+      sortConfig.column !== null ||
+      searchTerm.trim() !== '';
+  }, [columnFilters, sortConfig, searchTerm]);
+
   return (
     <div className="p-4 space-y-6">
       <BackButton fallback="/" />
@@ -880,30 +1036,68 @@ export default function TotalVerimlilikPanel({
       {selectedPoolId && (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle>Veri Tablosu</CardTitle>
-              <Button
-                variant={showResultsOnly ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setShowResultsOnly(!showResultsOnly)}
-              >
-                {showResultsOnly ? (
-                  <>
-                    <EyeOff className="h-4 w-4 mr-2" />
-                    Tüm Sütunları Göster
-                  </>
-                ) : (
-                  <>
-                    <Eye className="h-4 w-4 mr-2" />
-                    Sadece Sonuçları Göster
-                  </>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Ara..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8 w-48 h-9"
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {/* Clear Filters Button */}
+                {hasActiveFilters && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearAllFilters}
+                    className="text-muted-foreground"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Filtreleri Temizle
+                  </Button>
                 )}
-              </Button>
+                {/* Results Only Toggle */}
+                <Button
+                  variant={showResultsOnly ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setShowResultsOnly(!showResultsOnly)}
+                >
+                  {showResultsOnly ? (
+                    <>
+                      <EyeOff className="h-4 w-4 mr-2" />
+                      Tüm Sütunları Göster
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="h-4 w-4 mr-2" />
+                      Sadece Sonuçları Göster
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
             <CardDescription>
               {showResultsOnly
                 ? 'Sonuç odaklı görünüm - sadece özet ve hesaplama sütunları gösteriliyor.'
                 : 'İlk 6 sütun otomatik doldurulur. Mavi alanlar manuel giriş, yeşil alanlar otomatik hesaplanır. Sütun 11 için "Göztepe Sevkiyat Çek" butonunu kullanın. Sütun 12 için kaynak lab seçimi yapılır.'}
+              {hasActiveFilters && (
+                <span className="ml-2 text-primary font-medium">
+                  ({filteredAndSortedRows.length}/{rows.length} satır gösteriliyor)
+                </span>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -922,15 +1116,241 @@ export default function TotalVerimlilikPanel({
                     <TableHeader>
                       <TableRow>
                         <TableHead className="min-w-[180px] bg-muted/50 sticky left-0 z-10">
-                          1. Laboratuvar
+                          <div className="flex items-center gap-1">
+                            <span>1. Laboratuvar</span>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button className={`p-1 rounded hover:bg-muted ${columnFilters.labName.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                                  <Filter className="h-3.5 w-3.5" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-64 p-2" align="start">
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between pb-2 border-b">
+                                    <span className="text-sm font-medium">Laboratuvar Filtrele</span>
+                                    {columnFilters.labName.size > 0 && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        {columnFilters.labName.size} seçili
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-xs flex-1"
+                                      onClick={() => setAllFilterValues('labName', uniqueFilterValues.labName, true)}
+                                    >
+                                      Tümünü Seç
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-xs flex-1"
+                                      onClick={() => setAllFilterValues('labName', [], false)}
+                                    >
+                                      Temizle
+                                    </Button>
+                                  </div>
+                                  <ScrollArea className="h-48">
+                                    <div className="space-y-1">
+                                      {uniqueFilterValues.labName.map(value => (
+                                        <div key={value} className="flex items-center gap-2">
+                                          <Checkbox
+                                            id={`lab-${value}`}
+                                            checked={columnFilters.labName.has(value)}
+                                            onCheckedChange={() => toggleFilterValue('labName', value)}
+                                          />
+                                          <Label htmlFor={`lab-${value}`} className="text-sm cursor-pointer flex-1 truncate">
+                                            {value}
+                                          </Label>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </ScrollArea>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
                         </TableHead>
                         <TableHead className="min-w-[120px]">2. Stok Kodu</TableHead>
-                        <TableHead className="min-w-[200px]">3. Ürün Adı</TableHead>
+                        <TableHead className="min-w-[200px]">
+                          <div className="flex items-center gap-1">
+                            <span>3. Ürün Adı</span>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button className={`p-1 rounded hover:bg-muted ${columnFilters.stokAdi.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                                  <Filter className="h-3.5 w-3.5" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-72 p-2" align="start">
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between pb-2 border-b">
+                                    <span className="text-sm font-medium">Ürün Adı Filtrele</span>
+                                    {columnFilters.stokAdi.size > 0 && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        {columnFilters.stokAdi.size} seçili
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-xs flex-1"
+                                      onClick={() => setAllFilterValues('stokAdi', uniqueFilterValues.stokAdi, true)}
+                                    >
+                                      Tümünü Seç
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-xs flex-1"
+                                      onClick={() => setAllFilterValues('stokAdi', [], false)}
+                                    >
+                                      Temizle
+                                    </Button>
+                                  </div>
+                                  <ScrollArea className="h-48">
+                                    <div className="space-y-1">
+                                      {uniqueFilterValues.stokAdi.map(value => (
+                                        <div key={value} className="flex items-center gap-2">
+                                          <Checkbox
+                                            id={`stok-${value}`}
+                                            checked={columnFilters.stokAdi.has(value)}
+                                            onCheckedChange={() => toggleFilterValue('stokAdi', value)}
+                                          />
+                                          <Label htmlFor={`stok-${value}`} className="text-sm cursor-pointer flex-1 truncate">
+                                            {value}
+                                          </Label>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </ScrollArea>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </TableHead>
                         {!showResultsOnly && (
                           <>
-                            <TableHead className="min-w-[150px]">4. Test Adı</TableHead>
+                            <TableHead className="min-w-[150px]">
+                              <div className="flex items-center gap-1">
+                                <span>4. Test Adı</span>
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button className={`p-1 rounded hover:bg-muted ${columnFilters.testAdi.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                                      <Filter className="h-3.5 w-3.5" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-64 p-2" align="start">
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between pb-2 border-b">
+                                        <span className="text-sm font-medium">Test Adı Filtrele</span>
+                                        {columnFilters.testAdi.size > 0 && (
+                                          <Badge variant="secondary" className="text-xs">
+                                            {columnFilters.testAdi.size} seçili
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <div className="flex gap-1">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="text-xs flex-1"
+                                          onClick={() => setAllFilterValues('testAdi', uniqueFilterValues.testAdi, true)}
+                                        >
+                                          Tümünü Seç
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="text-xs flex-1"
+                                          onClick={() => setAllFilterValues('testAdi', [], false)}
+                                        >
+                                          Temizle
+                                        </Button>
+                                      </div>
+                                      <ScrollArea className="h-48">
+                                        <div className="space-y-1">
+                                          {uniqueFilterValues.testAdi.map(value => (
+                                            <div key={value} className="flex items-center gap-2">
+                                              <Checkbox
+                                                id={`test-${value}`}
+                                                checked={columnFilters.testAdi.has(value)}
+                                                onCheckedChange={() => toggleFilterValue('testAdi', value)}
+                                              />
+                                              <Label htmlFor={`test-${value}`} className="text-sm cursor-pointer flex-1 truncate">
+                                                {value}
+                                              </Label>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </ScrollArea>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                            </TableHead>
                             <TableHead className="min-w-[100px] text-center">5. Ambalaj</TableHead>
-                            <TableHead className="min-w-[150px]">6. Cihaz Grubu</TableHead>
+                            <TableHead className="min-w-[150px]">
+                              <div className="flex items-center gap-1">
+                                <span>6. Cihaz Grubu</span>
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button className={`p-1 rounded hover:bg-muted ${columnFilters.cihazGrubu.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                                      <Filter className="h-3.5 w-3.5" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-64 p-2" align="start">
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between pb-2 border-b">
+                                        <span className="text-sm font-medium">Cihaz Grubu Filtrele</span>
+                                        {columnFilters.cihazGrubu.size > 0 && (
+                                          <Badge variant="secondary" className="text-xs">
+                                            {columnFilters.cihazGrubu.size} seçili
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <div className="flex gap-1">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="text-xs flex-1"
+                                          onClick={() => setAllFilterValues('cihazGrubu', uniqueFilterValues.cihazGrubu, true)}
+                                        >
+                                          Tümünü Seç
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="text-xs flex-1"
+                                          onClick={() => setAllFilterValues('cihazGrubu', [], false)}
+                                        >
+                                          Temizle
+                                        </Button>
+                                      </div>
+                                      <ScrollArea className="h-48">
+                                        <div className="space-y-1">
+                                          {uniqueFilterValues.cihazGrubu.map(value => (
+                                            <div key={value} className="flex items-center gap-2">
+                                              <Checkbox
+                                                id={`cihaz-${value}`}
+                                                checked={columnFilters.cihazGrubu.has(value)}
+                                                onCheckedChange={() => toggleFilterValue('cihazGrubu', value)}
+                                              />
+                                              <Label htmlFor={`cihaz-${value}`} className="text-sm cursor-pointer flex-1 truncate">
+                                                {value}
+                                              </Label>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </ScrollArea>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                            </TableHead>
                             <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
                               7. Başlangıç Stoğu (Kutu)
                             </TableHead>
@@ -984,21 +1404,53 @@ export default function TotalVerimlilikPanel({
                         </TableHead>
                         {/* Phase 4 - Sütunlar 20-21 */}
                         <TableHead className="min-w-[200px] bg-red-50 dark:bg-red-950 text-center">
-                          <div className="flex flex-col">
-                            <span>20. Stok Doğruluk</span>
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1">
+                              <span>20. Stok Doğruluk</span>
+                              <button
+                                onClick={() => toggleSort('stokDogrulukFark')}
+                                className={`p-1 rounded hover:bg-red-100 dark:hover:bg-red-900 ${sortConfig.column === 'stokDogrulukFark' ? 'text-primary' : 'text-muted-foreground'}`}
+                              >
+                                {sortConfig.column === 'stokDogrulukFark' ? (
+                                  sortConfig.direction === 'asc' ? (
+                                    <ArrowUp className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </div>
                             <span className="text-xs font-normal text-muted-foreground">(14-18) - 15</span>
                           </div>
                         </TableHead>
                         <TableHead className="min-w-[200px] bg-emerald-50 dark:bg-emerald-950 text-center">
-                          <div className="flex flex-col">
-                            <span>21. Kit Verimlilik</span>
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1">
+                              <span>21. Kit Verimlilik</span>
+                              <button
+                                onClick={() => toggleSort('kitVerimlilikFark')}
+                                className={`p-1 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900 ${sortConfig.column === 'kitVerimlilikFark' ? 'text-primary' : 'text-muted-foreground'}`}
+                              >
+                                {sortConfig.column === 'kitVerimlilikFark' ? (
+                                  sortConfig.direction === 'asc' ? (
+                                    <ArrowUp className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </div>
                             <span className="text-xs font-normal text-muted-foreground">15 - 19</span>
                           </div>
                         </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rows.map((row) => {
+                      {filteredAndSortedRows.map((row) => {
                         return (
                           <TableRow key={row.id} className="text-sm">
                             <TableCell className="font-medium bg-muted/30 sticky left-0 z-10">
@@ -1204,7 +1656,11 @@ export default function TotalVerimlilikPanel({
         <Card>
           <CardContent className="py-4">
             <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>Toplam {rows.length} satır</span>
+              <span>
+                {hasActiveFilters
+                  ? `${filteredAndSortedRows.length}/${rows.length} satır gösteriliyor`
+                  : `Toplam ${rows.length} satır`}
+              </span>
               <span>{labGroups.length} laboratuvar</span>
             </div>
           </CardContent>
