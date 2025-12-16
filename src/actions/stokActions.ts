@@ -16,9 +16,7 @@ import {
   updateDoc,
   limit,
   startAfter,
-  orderBy,
   getCountFromServer,
-  documentId,
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import fs from 'fs/promises';
@@ -154,7 +152,6 @@ export async function getPaginatedDepotStock(
           ref,
           where('depotId', '==', depotId),
           where('isShipped', '==', false),
-          orderBy(documentId()),
           startAfter(lastDocSnap),
           limit(fetchLimit)
         );
@@ -163,7 +160,6 @@ export async function getPaginatedDepotStock(
           ref,
           where('depotId', '==', depotId),
           where('isShipped', '==', false),
-          orderBy(documentId()),
           limit(fetchLimit)
         );
       }
@@ -172,7 +168,6 @@ export async function getPaginatedDepotStock(
         ref,
         where('depotId', '==', depotId),
         where('isShipped', '==', false),
-        orderBy(documentId()),
         limit(fetchLimit)
       );
     }
@@ -223,7 +218,8 @@ export async function getDepotStockPage(
 
     let q;
 
-    // Cursor-based pagination için orderBy gerekli - documentId() kullanıyoruz
+    // Basit pagination - composite index gerektirmemek için orderBy kullanmıyoruz
+    // Firestore varsayılan olarak document path'e göre sıralar
     if (lastDocId) {
       // Cursor-based pagination: önce son dokümanı al (1 read), sonra startAfter ile devam et
       const lastDocRef = doc(db, 'depoStok', lastDocId);
@@ -235,7 +231,6 @@ export async function getDepotStockPage(
           ref,
           where('depotId', '==', depotId),
           where('isShipped', '==', false),
-          orderBy(documentId()),
           limit(fetchLimit)
         );
       } else {
@@ -244,7 +239,6 @@ export async function getDepotStockPage(
           ref,
           where('depotId', '==', depotId),
           where('isShipped', '==', false),
-          orderBy(documentId()),
           startAfter(lastDocSnap),
           limit(fetchLimit)
         );
@@ -255,7 +249,6 @@ export async function getDepotStockPage(
         ref,
         where('depotId', '==', depotId),
         where('isShipped', '==', false),
-        orderBy(documentId()),
         limit(fetchLimit)
       );
     }
