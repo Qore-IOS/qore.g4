@@ -1,4 +1,5 @@
 
+
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { BarcodeFormat, ProductCode, ParsedResult } from './types';

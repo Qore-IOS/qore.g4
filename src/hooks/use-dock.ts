@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, {
@@ -62,6 +63,7 @@ import {
   PlusCircle,
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
+import { playNotificationSound } from "@/lib/utils";
 
 export type NotificationItem = { id: string } & NotificationDoc;
 
@@ -436,17 +438,22 @@ export function useDock() {
           id: d.id,
           ...(d.data() as any),
         })) as NotificationItem[];
-        setNotificationItems(newItems);
-        setLoadingNotifications(false);
-
+        
         const newUnreadCount = newItems.filter(
           (i) => !(i.readBy || []).includes(uid)
         ).length;
-        // Use prevUnreadCountRef to track changes without triggering re-renders
+
+        // Check if there is a *new* unread notification
         if (newUnreadCount > prevUnreadCountRef.current) {
+          const latestUnread = newItems.find(i => !(i.readBy || []).includes(uid));
+          if (latestUnread && (latestUnread.type === 'fefo_override' || latestUnread.type === 'fault_opened')) {
+            playNotificationSound();
+          }
           peekDockStable();
         }
         prevUnreadCountRef.current = newUnreadCount;
+        setNotificationItems(newItems);
+        setLoadingNotifications(false);
       },
       (err) => {
         console.error("Notification subscribe error", err);
