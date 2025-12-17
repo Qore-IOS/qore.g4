@@ -133,6 +133,10 @@ export default function TotalVerimlilikPanel({
   // Sütun 22 - Kutu Kayıp Görünüm Modu
   const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
 
+  // Sütun 23 - Maliyet Hesabı için Para Birimi ve Döviz Kurları
+  const [costCurrency, setCostCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
+  const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
+
   // Filter, Sort ve Search State'leri
   const [columnFilters, setColumnFilters] = useState<{
     labName: Set<string>;
@@ -173,6 +177,70 @@ export default function TotalVerimlilikPanel({
     };
     fetchPools();
   }, [toast]);
+
+  // Sütun 23 için döviz kurlarını çek
+  useEffect(() => {
+    const PRIMARY_API_KEY = 'e69314b14644080788775553';
+    const CACHE_KEY = 'exchange_rates_cache';
+    const CACHE_TTL = 1000 * 60 * 60; // 1 saat
+
+    const fetchExchangeRates = async () => {
+      // Önce cache kontrol et
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        try {
+          const { rates, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < CACHE_TTL) {
+            setExchangeRates(rates);
+            return;
+          }
+        } catch (e) {
+          // Cache bozuksa devam et
+        }
+      }
+
+      // Primary API (ExchangeRate-API)
+      try {
+        const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/EUR`);
+        if (res.ok) {
+          const data = await res.json();
+          const rates = {
+            EUR: 1,
+            USD: data.conversion_rates.USD,
+            TRY: data.conversion_rates.TRY,
+          };
+          setExchangeRates(rates);
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ rates, timestamp: Date.now() }));
+          return;
+        }
+      } catch (e) {
+        console.error('Primary exchange rate API failed:', e);
+      }
+
+      // Backup API (Frankfurter)
+      try {
+        const res = await fetch('https://api.frankfurter.app/latest?from=EUR&to=USD,TRY');
+        if (res.ok) {
+          const data = await res.json();
+          const rates = {
+            EUR: 1,
+            USD: data.rates.USD,
+            TRY: data.rates.TRY,
+          };
+          setExchangeRates(rates);
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ rates, timestamp: Date.now() }));
+          return;
+        }
+      } catch (e) {
+        console.error('Backup exchange rate API failed:', e);
+      }
+
+      // Fallback değerler
+      setExchangeRates({ EUR: 1, USD: 1.08, TRY: 38.5 });
+    };
+
+    fetchExchangeRates();
+  }, []);
 
   // Seçilen havuz değiştiğinde min-max kurallarını çek ve satırları oluştur
   useEffect(() => {
@@ -1035,6 +1103,57 @@ export default function TotalVerimlilikPanel({
     };
   }, [rows]);
 
+  // Sütun 23: Maliyet hesaplama yardımcı fonksiyonu
+  const calculateRowCost = useCallback((row: TableRow): { cost: number; hasData: boolean } => {
+    if (!exchangeRates) return { cost: 0, hasData: false };
+
+    // Ürün bilgisini bul
+    const product = productCodes.find(p => p.stokKodu === row.stokKodu);
+    if (!product || !product.cost || product.cost === 0) {
+      return { cost: 0, hasData: false };
+    }
+
+    // Dönem içi sarfiyat (test cinsinden) = Sütun 14 - Sütun 18
+    const sarfiyat = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+    if (sarfiyat <= 0) return { cost: 0, hasData: true };
+
+    // Ambalaj değeri (1 kutuda kaç test var)
+    const ambalaj = row.ambalajDegeri || 1;
+
+    // Test başına maliyet = Kutu maliyeti / Ambalaj
+    const productCurrency = product.currency || 'EUR';
+    const productCostInEur = productCurrency === 'EUR'
+      ? product.cost
+      : productCurrency === 'USD'
+        ? product.cost / exchangeRates.USD
+        : product.cost / exchangeRates.TRY; // TRY
+
+    const costPerTestInEur = productCostInEur / ambalaj;
+
+    // Toplam maliyet (EUR cinsinden)
+    const totalCostInEur = sarfiyat * costPerTestInEur;
+
+    // Seçilen para birimine çevir
+    let finalCost = totalCostInEur;
+    if (costCurrency === 'USD') {
+      finalCost = totalCostInEur * exchangeRates.USD;
+    } else if (costCurrency === 'TRY') {
+      finalCost = totalCostInEur * exchangeRates.TRY;
+    }
+
+    return { cost: finalCost, hasData: true };
+  }, [productCodes, exchangeRates, costCurrency]);
+
+  // Toplam maliyet hesapla
+  const totalCost = useMemo(() => {
+    let total = 0;
+    rows.forEach(row => {
+      const { cost } = calculateRowCost(row);
+      total += cost;
+    });
+    return total;
+  }, [rows, calculateRowCost]);
+
   return (
     <div className="p-4 space-y-6">
       <BackButton fallback="/" />
@@ -1654,6 +1773,49 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        {/* Sütun 23: Dönem İçi Sarfiyat Maliyeti */}
+                        <TableHead className="min-w-[180px] bg-emerald-50 dark:bg-emerald-950 text-center p-0">
+                          <div className="flex flex-col">
+                            <div className="flex">
+                              <button
+                                onClick={() => setCostCurrency('TRY')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'TRY'
+                                    ? 'bg-emerald-500 text-white'
+                                    : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800'
+                                }`}
+                              >
+                                TL
+                              </button>
+                              <button
+                                onClick={() => setCostCurrency('USD')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'USD'
+                                    ? 'bg-emerald-500 text-white'
+                                    : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800'
+                                }`}
+                              >
+                                USD
+                              </button>
+                              <button
+                                onClick={() => setCostCurrency('EUR')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'EUR'
+                                    ? 'bg-emerald-500 text-white'
+                                    : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800'
+                                }`}
+                              >
+                                EUR
+                              </button>
+                            </div>
+                            <div className="py-1.5 px-2">
+                              <span>23. Sarfiyat Maliyeti</span>
+                              <div className="text-xs font-normal text-muted-foreground">
+                                (14-18) × (Maliyet/Amb)
+                              </div>
+                            </div>
+                          </div>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1889,6 +2051,40 @@ export default function TotalVerimlilikPanel({
                                     </span>
                                     <span className="text-[10px] text-muted-foreground">
                                       {Math.abs(testFark).toLocaleString('tr-TR')} test / {ambalaj} amb
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                            </TableCell>
+                            {/* Sütun 23: Sarfiyat Maliyeti */}
+                            <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
+                              {(() => {
+                                const { cost, hasData } = calculateRowCost(row);
+
+                                if (!hasData) {
+                                  return (
+                                    <span className="text-muted-foreground text-xs">
+                                      Maliyet yok
+                                    </span>
+                                  );
+                                }
+
+                                if (cost === 0) {
+                                  return (
+                                    <span className="text-muted-foreground">-</span>
+                                  );
+                                }
+
+                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
+                                const sarfiyat = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+
+                                return (
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                                      {currencySymbol}{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {sarfiyat.toLocaleString('tr-TR')} test
                                     </span>
                                   </div>
                                 );
