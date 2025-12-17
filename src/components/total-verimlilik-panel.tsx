@@ -137,11 +137,10 @@ export default function TotalVerimlilikPanel({
   const [costCurrency, setCostCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
 
-  // Maliyet Checkpoint Sistemi
+  // Maliyet Checkpoint Sistemi (Checkpoint'ler Ürün Kodu Yönetimi'nden kaydedilir)
   const [costCheckpoints, setCostCheckpoints] = useState<{ id: string; year: number; month: number; createdAt: Date }[]>([]);
   const [selectedCostCheckpoint, setSelectedCostCheckpoint] = useState<string>(''); // 'YYYY-MM' format
   const [costCheckpointData, setCostCheckpointData] = useState<Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> | null>(null);
-  const [isSavingCostCheckpoint, setIsSavingCostCheckpoint] = useState(false);
 
   // Filter, Sort ve Search State'leri
   const [columnFilters, setColumnFilters] = useState<{
@@ -951,69 +950,6 @@ export default function TotalVerimlilikPanel({
     }
   }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, toast]);
 
-  // Maliyet Checkpoint Kaydetme
-  const handleSaveCostCheckpoint = useCallback(async () => {
-    if (productCodes.length === 0) {
-      toast({ title: 'Hata', description: 'Ürün kodları yüklenemedi.', variant: 'destructive' });
-      return;
-    }
-
-    setIsSavingCostCheckpoint(true);
-    try {
-      // Tüm ürünlerin maliyet bilgilerini topla
-      const costs: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> = {};
-
-      productCodes.forEach(product => {
-        if (product.cost && product.cost > 0) {
-          costs[product.stokKodu] = {
-            cost: product.cost,
-            currency: (product.currency as 'EUR' | 'USD' | 'TRY') || 'EUR',
-          };
-        }
-      });
-
-      const now = new Date();
-      const checkpointYear = now.getFullYear();
-      const checkpointMonth = now.getMonth();
-      const docId = `${checkpointYear}-${String(checkpointMonth).padStart(2, '0')}`;
-
-      const checkpointData = {
-        year: checkpointYear,
-        month: checkpointMonth,
-        costs,
-        productCount: Object.keys(costs).length,
-        createdAt: Timestamp.now(),
-        createdByUid: currentUser?.uid || '',
-        createdByName: currentUser?.name || currentUser?.email || '',
-      };
-
-      await setDoc(doc(db, 'costCheckpoints', docId), checkpointData);
-
-      // Checkpoint listesini güncelle
-      const newCheckpoint = {
-        id: docId,
-        year: checkpointYear,
-        month: checkpointMonth,
-        createdAt: now,
-      };
-      setCostCheckpoints(prev => {
-        const filtered = prev.filter(c => c.id !== docId);
-        return [newCheckpoint, ...filtered];
-      });
-      setSelectedCostCheckpoint(docId);
-
-      toast({
-        title: 'Maliyet Checkpoint Kaydedildi',
-        description: `${MONTHS[checkpointMonth]?.label} ${checkpointYear} - ${Object.keys(costs).length} ürün maliyeti kaydedildi.`,
-      });
-    } catch (error) {
-      console.error('Error saving cost checkpoint:', error);
-      toast({ title: 'Hata', description: 'Maliyet checkpoint kaydedilemedi.', variant: 'destructive' });
-    } finally {
-      setIsSavingCostCheckpoint(false);
-    }
-  }, [productCodes, currentUser, toast]);
-
   // Laboratuvar gruplarını hesapla (aynı laboratuvarın satırlarını gruplamak için)
   const labGroups = useMemo(() => {
     const groups: { labId: string; labName: string; startIndex: number; count: number }[] = [];
@@ -1366,35 +1302,16 @@ export default function TotalVerimlilikPanel({
             </div>
           </div>
 
-          {/* Maliyet Checkpoint Yönetimi */}
-          <div className="flex items-center justify-between gap-4 pt-2 pb-2 border-t border-dashed">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span>
-                {costCheckpoints.length > 0
-                  ? `${costCheckpoints.length} maliyet checkpoint'i mevcut`
-                  : 'Henüz maliyet checkpoint\'i yok'}
-              </span>
-              {selectedCostCheckpoint && costCheckpointData && (
-                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                  {Object.keys(costCheckpointData).length} ürün maliyeti
-                </Badge>
-              )}
+          {/* Maliyet Checkpoint Bilgisi */}
+          {selectedCostCheckpoint && costCheckpointData && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2 pb-2 border-t border-dashed">
+              <span>Seçili maliyet dönemi:</span>
+              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                {Object.keys(costCheckpointData).length} ürün maliyeti yüklendi
+              </Badge>
+              <span className="text-xs">(Checkpoint yönetimi: Yönetim Paneli → Ürün Kodu Yönetimi)</span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSaveCostCheckpoint}
-              disabled={isSavingCostCheckpoint}
-              className="border-emerald-200 hover:bg-emerald-50 dark:border-emerald-800 dark:hover:bg-emerald-950"
-            >
-              {isSavingCostCheckpoint ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4 mr-2 text-emerald-600" />
-              )}
-              Bu Ay İçin Maliyet Checkpoint Al
-            </Button>
-          </div>
+          )}
 
           {selectedPoolId && (
             <div className="flex items-center justify-between gap-4 pt-4 border-t flex-wrap">
