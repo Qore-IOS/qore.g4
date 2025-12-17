@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, BookText, Search, Filter, X, Type } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, BookText, Search, Filter, X, Type, Save, Calendar } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { collection, getDocs, deleteDoc, doc, writeBatch, setDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, writeBatch, setDoc, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode } from '@/lib/types';
@@ -26,6 +26,15 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent as FilterDialogContent, DialogHeader as FilterDialogHeader, DialogTitle as FilterDialogTitle, DialogFooter as FilterDialogFooter, DialogDescription as FilterDialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
+import { Badge } from '../ui/badge';
+import { useAuth } from '@/contexts/auth-context';
+
+const MONTHS = Array.from({ length: 12 }, (_, i) => ({
+  value: i,
+  label: new Date(2000, i, 1).toLocaleString('tr-TR', { month: 'long' })
+}));
+const CURRENT_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 import { Checkbox } from '../ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
@@ -147,7 +156,14 @@ const FiltreDialog: React.FC<{
 export default function UrunKoduPanel() {
   const { toast } = useToast();
   const router = useRouter();
+  const { currentUser } = useAuth();
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+
+  // Maliyet Checkpoint State'leri
+  const [costCheckpoints, setCostCheckpoints] = useState<{ id: string; year: number; month: number; productCount: number; createdAt: Date }[]>([]);
+  const [selectedCheckpointMonth, setSelectedCheckpointMonth] = useState<number>(new Date().getMonth());
+  const [selectedCheckpointYear, setSelectedCheckpointYear] = useState<number>(new Date().getFullYear());
+  const [isSavingCheckpoint, setIsSavingCheckpoint] = useState(false);
   const [definitions, setDefinitions] = useState<Definitions>({
     brands: [], labGroups: [], testGroups: [], deviceGroups: [], productGroups: [], mainUnits: []
   });
@@ -201,6 +217,94 @@ export default function UrunKoduPanel() {
   useEffect(() => {
     fetchAllData();
   }, [fetchAllData]);
+
+  // Maliyet checkpoint'lerini çek
+  useEffect(() => {
+    const fetchCostCheckpoints = async () => {
+      try {
+        const checkpointsSnap = await getDocs(
+          query(collection(db, 'costCheckpoints'), orderBy('year', 'desc'), orderBy('month', 'desc'))
+        );
+        const checkpointsList = checkpointsSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            year: data.year as number,
+            month: data.month as number,
+            productCount: data.productCount as number || 0,
+            createdAt: data.createdAt?.toDate() || new Date(),
+          };
+        });
+        setCostCheckpoints(checkpointsList);
+      } catch (error) {
+        console.error('Error fetching cost checkpoints:', error);
+      }
+    };
+    fetchCostCheckpoints();
+  }, []);
+
+  // Maliyet Checkpoint Kaydetme
+  const handleSaveCostCheckpoint = async () => {
+    if (productCodes.length === 0) {
+      toast({ title: 'Hata', description: 'Önce ürün kodları yüklenmelidir.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingCheckpoint(true);
+    try {
+      // Maliyeti tanımlı ürünlerin listesini topla
+      const costs: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> = {};
+
+      productCodes.forEach(product => {
+        if (product.cost && product.cost > 0) {
+          costs[product.stokKodu] = {
+            cost: product.cost,
+            currency: (product.currency as 'EUR' | 'USD' | 'TRY') || 'EUR',
+          };
+        }
+      });
+
+      const docId = `${selectedCheckpointYear}-${String(selectedCheckpointMonth).padStart(2, '0')}`;
+
+      const checkpointData = {
+        year: selectedCheckpointYear,
+        month: selectedCheckpointMonth,
+        costs,
+        productCount: Object.keys(costs).length,
+        createdAt: Timestamp.now(),
+        createdByUid: currentUser?.uid || '',
+        createdByName: currentUser?.name || currentUser?.email || '',
+      };
+
+      await setDoc(doc(db, 'costCheckpoints', docId), checkpointData);
+
+      // Checkpoint listesini güncelle
+      const newCheckpoint = {
+        id: docId,
+        year: selectedCheckpointYear,
+        month: selectedCheckpointMonth,
+        productCount: Object.keys(costs).length,
+        createdAt: new Date(),
+      };
+      setCostCheckpoints(prev => {
+        const filtered = prev.filter(c => c.id !== docId);
+        return [newCheckpoint, ...filtered].sort((a, b) => {
+          if (b.year !== a.year) return b.year - a.year;
+          return b.month - a.month;
+        });
+      });
+
+      toast({
+        title: 'Maliyet Checkpoint Kaydedildi',
+        description: `${MONTHS[selectedCheckpointMonth]?.label} ${selectedCheckpointYear} - ${Object.keys(costs).length} ürün maliyeti kaydedildi.`,
+      });
+    } catch (error) {
+      console.error('Error saving cost checkpoint:', error);
+      toast({ title: 'Hata', description: 'Maliyet checkpoint kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingCheckpoint(false);
+    }
+  };
 
   const openModal = (product?: ProductCode) => {
     setSelectedProduct(product || {});
@@ -673,6 +777,101 @@ export default function UrunKoduPanel() {
             )}
           </CardContent>
         </Card>
+
+        {/* Maliyet Checkpoint Yönetimi */}
+        <Card className="shadow-lg mt-6">
+          <CardHeader>
+            <CardTitle className="text-lg font-headline flex items-center">
+              <Calendar className="mr-2 h-5 w-5 text-emerald-500" />
+              Maliyet Checkpoint Yönetimi
+            </CardTitle>
+            <CardDescription>
+              Aylık maliyet snapshot'ları alarak verimlilik hesaplamalarında tarihsel maliyet verilerini kullanın.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="text-sm font-medium mb-1 block">Dönem Ayı</label>
+                <Select value={String(selectedCheckpointMonth)} onValueChange={v => setSelectedCheckpointMonth(Number(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {MONTHS.map((m, i) => (
+                      <SelectItem key={i} value={String(i)}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">Dönem Yılı</label>
+                <Select value={String(selectedCheckpointYear)} onValueChange={v => setSelectedCheckpointYear(Number(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {YEARS.map(y => (
+                      <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-2">
+                <Button
+                  onClick={handleSaveCostCheckpoint}
+                  disabled={isSavingCheckpoint || productCodes.length === 0}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {isSavingCheckpoint ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  {MONTHS[selectedCheckpointMonth]?.label} {selectedCheckpointYear} Checkpoint Kaydet
+                </Button>
+              </div>
+            </div>
+
+            {/* Mevcut Checkpoint'ler Listesi */}
+            <div className="border rounded-md">
+              <div className="p-3 bg-muted/50 border-b">
+                <h4 className="font-medium text-sm">Kayıtlı Checkpoint'ler ({costCheckpoints.length})</h4>
+              </div>
+              <ScrollArea className="h-48">
+                {costCheckpoints.length === 0 ? (
+                  <div className="p-4 text-center text-muted-foreground text-sm">
+                    Henüz maliyet checkpoint'i kaydedilmemiş.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Dönem</TableHead>
+                        <TableHead>Ürün Sayısı</TableHead>
+                        <TableHead>Kayıt Tarihi</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {costCheckpoints.map(cp => (
+                        <TableRow key={cp.id}>
+                          <TableCell className="font-medium">
+                            {MONTHS[cp.month]?.label} {cp.year}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700">
+                              {cp.productCount} ürün
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {cp.createdAt.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </ScrollArea>
+            </div>
+          </CardContent>
+        </Card>
+
       {isModalOpen && (
         <ProductFormatModal
           open={isModalOpen}
