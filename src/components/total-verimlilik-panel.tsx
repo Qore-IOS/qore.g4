@@ -137,6 +137,12 @@ export default function TotalVerimlilikPanel({
   const [costCurrency, setCostCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
 
+  // Maliyet Checkpoint Sistemi
+  const [costCheckpoints, setCostCheckpoints] = useState<{ id: string; year: number; month: number; createdAt: Date }[]>([]);
+  const [selectedCostCheckpoint, setSelectedCostCheckpoint] = useState<string>(''); // 'YYYY-MM' format
+  const [costCheckpointData, setCostCheckpointData] = useState<Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> | null>(null);
+  const [isSavingCostCheckpoint, setIsSavingCostCheckpoint] = useState(false);
+
   // Filter, Sort ve Search State'leri
   const [columnFilters, setColumnFilters] = useState<{
     labName: Set<string>;
@@ -241,6 +247,61 @@ export default function TotalVerimlilikPanel({
 
     fetchExchangeRates();
   }, []);
+
+  // Maliyet checkpoint'lerini çek
+  useEffect(() => {
+    const fetchCostCheckpoints = async () => {
+      try {
+        const checkpointsSnap = await getDocs(
+          query(collection(db, 'costCheckpoints'), orderBy('year', 'desc'), orderBy('month', 'desc'))
+        );
+        const checkpointsList = checkpointsSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            year: data.year as number,
+            month: data.month as number,
+            createdAt: data.createdAt?.toDate() || new Date(),
+          };
+        });
+        setCostCheckpoints(checkpointsList);
+
+        // Varsayılan olarak en güncel checkpoint'i seç
+        if (checkpointsList.length > 0 && !selectedCostCheckpoint) {
+          setSelectedCostCheckpoint(checkpointsList[0].id);
+        }
+      } catch (error) {
+        console.error('Error fetching cost checkpoints:', error);
+      }
+    };
+
+    fetchCostCheckpoints();
+  }, [selectedCostCheckpoint]);
+
+  // Seçilen maliyet checkpoint'inin verilerini çek
+  useEffect(() => {
+    if (!selectedCostCheckpoint) {
+      setCostCheckpointData(null);
+      return;
+    }
+
+    const fetchCheckpointData = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'costCheckpoints', selectedCostCheckpoint));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setCostCheckpointData(data.costs as Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }>);
+        } else {
+          setCostCheckpointData(null);
+        }
+      } catch (error) {
+        console.error('Error fetching checkpoint data:', error);
+        setCostCheckpointData(null);
+      }
+    };
+
+    fetchCheckpointData();
+  }, [selectedCostCheckpoint]);
 
   // Seçilen havuz değiştiğinde min-max kurallarını çek ve satırları oluştur
   useEffect(() => {
@@ -890,6 +951,69 @@ export default function TotalVerimlilikPanel({
     }
   }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, toast]);
 
+  // Maliyet Checkpoint Kaydetme
+  const handleSaveCostCheckpoint = useCallback(async () => {
+    if (productCodes.length === 0) {
+      toast({ title: 'Hata', description: 'Ürün kodları yüklenemedi.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingCostCheckpoint(true);
+    try {
+      // Tüm ürünlerin maliyet bilgilerini topla
+      const costs: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> = {};
+
+      productCodes.forEach(product => {
+        if (product.cost && product.cost > 0) {
+          costs[product.stokKodu] = {
+            cost: product.cost,
+            currency: (product.currency as 'EUR' | 'USD' | 'TRY') || 'EUR',
+          };
+        }
+      });
+
+      const now = new Date();
+      const checkpointYear = now.getFullYear();
+      const checkpointMonth = now.getMonth();
+      const docId = `${checkpointYear}-${String(checkpointMonth).padStart(2, '0')}`;
+
+      const checkpointData = {
+        year: checkpointYear,
+        month: checkpointMonth,
+        costs,
+        productCount: Object.keys(costs).length,
+        createdAt: Timestamp.now(),
+        createdByUid: currentUser?.uid || '',
+        createdByName: currentUser?.name || currentUser?.email || '',
+      };
+
+      await setDoc(doc(db, 'costCheckpoints', docId), checkpointData);
+
+      // Checkpoint listesini güncelle
+      const newCheckpoint = {
+        id: docId,
+        year: checkpointYear,
+        month: checkpointMonth,
+        createdAt: now,
+      };
+      setCostCheckpoints(prev => {
+        const filtered = prev.filter(c => c.id !== docId);
+        return [newCheckpoint, ...filtered];
+      });
+      setSelectedCostCheckpoint(docId);
+
+      toast({
+        title: 'Maliyet Checkpoint Kaydedildi',
+        description: `${MONTHS[checkpointMonth]?.label} ${checkpointYear} - ${Object.keys(costs).length} ürün maliyeti kaydedildi.`,
+      });
+    } catch (error) {
+      console.error('Error saving cost checkpoint:', error);
+      toast({ title: 'Hata', description: 'Maliyet checkpoint kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingCostCheckpoint(false);
+    }
+  }, [productCodes, currentUser, toast]);
+
   // Laboratuvar gruplarını hesapla (aynı laboratuvarın satırlarını gruplamak için)
   const labGroups = useMemo(() => {
     const groups: { labId: string; labName: string; startIndex: number; count: number }[] = [];
@@ -1107,9 +1231,24 @@ export default function TotalVerimlilikPanel({
   const calculateRowCost = useCallback((row: TableRow): { cost: number; hasData: boolean } => {
     if (!exchangeRates) return { cost: 0, hasData: false };
 
-    // Ürün bilgisini bul
-    const product = productCodes.find(p => p.stokKodu === row.stokKodu);
-    if (!product || !product.cost || product.cost === 0) {
+    // Öncelikle checkpoint'ten maliyet bilgisini al, yoksa ürün bilgisinden al
+    let productCost: number | undefined;
+    let productCurrency: 'EUR' | 'USD' | 'TRY' = 'EUR';
+
+    if (costCheckpointData && costCheckpointData[row.stokKodu]) {
+      // Checkpoint'ten maliyet al
+      productCost = costCheckpointData[row.stokKodu].cost;
+      productCurrency = costCheckpointData[row.stokKodu].currency;
+    } else {
+      // Ürün bilgisinden al (fallback)
+      const product = productCodes.find(p => p.stokKodu === row.stokKodu);
+      if (product && product.cost && product.cost > 0) {
+        productCost = product.cost;
+        productCurrency = (product.currency as 'EUR' | 'USD' | 'TRY') || 'EUR';
+      }
+    }
+
+    if (!productCost || productCost === 0) {
       return { cost: 0, hasData: false };
     }
 
@@ -1121,12 +1260,11 @@ export default function TotalVerimlilikPanel({
     const ambalaj = row.ambalajDegeri || 1;
 
     // Test başına maliyet = Kutu maliyeti / Ambalaj
-    const productCurrency = product.currency || 'EUR';
     const productCostInEur = productCurrency === 'EUR'
-      ? product.cost
+      ? productCost
       : productCurrency === 'USD'
-        ? product.cost / exchangeRates.USD
-        : product.cost / exchangeRates.TRY; // TRY
+        ? productCost / exchangeRates.USD
+        : productCost / exchangeRates.TRY; // TRY
 
     const costPerTestInEur = productCostInEur / ambalaj;
 
@@ -1142,7 +1280,7 @@ export default function TotalVerimlilikPanel({
     }
 
     return { cost: finalCost, hasData: true };
-  }, [productCodes, exchangeRates, costCurrency]);
+  }, [productCodes, exchangeRates, costCurrency, costCheckpointData]);
 
   // Toplam maliyet hesapla
   const totalCost = useMemo(() => {
@@ -1170,7 +1308,7 @@ export default function TotalVerimlilikPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <label className="text-sm font-medium mb-1 block">Verimlilik Havuzu</label>
               <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
@@ -1208,6 +1346,54 @@ export default function TotalVerimlilikPanel({
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block">Maliyet Dönemi</label>
+              <Select
+                value={selectedCostCheckpoint}
+                onValueChange={setSelectedCostCheckpoint}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={costCheckpoints.length === 0 ? "Checkpoint yok" : "Seçin..."} />
+                </SelectTrigger>
+                <SelectContent>
+                  {costCheckpoints.map(cp => (
+                    <SelectItem key={cp.id} value={cp.id}>
+                      {MONTHS[cp.month]?.label} {cp.year}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Maliyet Checkpoint Yönetimi */}
+          <div className="flex items-center justify-between gap-4 pt-2 pb-2 border-t border-dashed">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>
+                {costCheckpoints.length > 0
+                  ? `${costCheckpoints.length} maliyet checkpoint'i mevcut`
+                  : 'Henüz maliyet checkpoint\'i yok'}
+              </span>
+              {selectedCostCheckpoint && costCheckpointData && (
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                  {Object.keys(costCheckpointData).length} ürün maliyeti
+                </Badge>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSaveCostCheckpoint}
+              disabled={isSavingCostCheckpoint}
+              className="border-emerald-200 hover:bg-emerald-50 dark:border-emerald-800 dark:hover:bg-emerald-950"
+            >
+              {isSavingCostCheckpoint ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-2 text-emerald-600" />
+              )}
+              Bu Ay İçin Maliyet Checkpoint Al
+            </Button>
           </div>
 
           {selectedPoolId && (
@@ -2061,6 +2247,9 @@ export default function TotalVerimlilikPanel({
                               {(() => {
                                 const { cost, hasData } = calculateRowCost(row);
 
+                                // Maliyet kaynağını belirle
+                                const isFromCheckpoint = costCheckpointData && costCheckpointData[row.stokKodu];
+
                                 if (!hasData) {
                                   return (
                                     <span className="text-muted-foreground text-xs">
@@ -2085,6 +2274,9 @@ export default function TotalVerimlilikPanel({
                                     </span>
                                     <span className="text-[10px] text-muted-foreground">
                                       {sarfiyat.toLocaleString('tr-TR')} test
+                                      {isFromCheckpoint && (
+                                        <span className="ml-1 text-emerald-600" title="Checkpoint'ten">●</span>
+                                      )}
                                     </span>
                                   </div>
                                 );
