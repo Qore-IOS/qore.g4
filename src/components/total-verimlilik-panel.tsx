@@ -1358,14 +1358,24 @@ export default function TotalVerimlilikPanel({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl flex items-center gap-2">
-            <BarChart3 className="h-6 w-6 text-primary" />
-            Total Verimlilik Paneli
-          </CardTitle>
-          <CardDescription>
-            Verimlilik havuzundaki laboratuvarların stok doğruluk oranı ve hak ediş verimliliği hesaplaması.
-            Tüm veriler manuel olarak girilecektir.
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-xl flex items-center gap-2">
+                <BarChart3 className="h-6 w-6 text-primary" />
+                Total Verimlilik Paneli
+              </CardTitle>
+              <CardDescription>
+                Verimlilik havuzundaki laboratuvarların stok doğruluk oranı ve hak ediş verimliliği hesaplaması.
+                Tüm veriler manuel olarak girilecektir.
+              </CardDescription>
+            </div>
+            <Link href="/total-dashboard">
+              <Button variant="outline" className="gap-2 bg-gradient-to-r from-primary/10 to-primary/5 hover:from-primary/20 hover:to-primary/10 border-primary/20">
+                <BarChart3 className="h-4 w-4" />
+                Total Dashboard
+              </Button>
+            </Link>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
