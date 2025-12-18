@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import type { Hospital, EfficiencyPool } from '@/lib/types';
+import type { Hospital, EfficiencyPool, DeviceFaultReport } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import {
   Loader2,
@@ -32,7 +32,9 @@ import {
   Coins,
   Percent,
   Box,
-  LineChart as LineChartIcon
+  LineChart as LineChartIcon,
+  Wrench,
+  AlertOctagon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -240,11 +242,13 @@ const CircularProgress = ({
 
   return (
     <div className="flex flex-col items-center">
-      <div className="relative" style={{ width: size, height: size }}>
+      <div className="relative p-3" style={{ width: size + 24, height: size + 24 }}>
         <svg
-          className="transform -rotate-90"
+          className="transform -rotate-90 overflow-visible"
           width={size}
           height={size}
+          style={{ margin: 12 }}
+          viewBox={`0 0 ${size} ${size}`}
         >
           {/* Background circle */}
           <circle
@@ -525,6 +529,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
   const [isLoading, setIsLoading] = useState(true);
   const [efficiencyPools, setEfficiencyPools] = useState<EfficiencyPool[]>([]);
   const [efficiencyRecords, setEfficiencyRecords] = useState<EfficiencyRecord[]>([]);
+  const [deviceFaults, setDeviceFaults] = useState<DeviceFaultReport[]>([]);
 
   // Filters
   const [selectedPoolId, setSelectedPoolId] = useState<string>('all');
@@ -574,6 +579,21 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
             return b.month - a.month;
           });
         setEfficiencyRecords(records);
+
+        // Fetch device fault reports
+        const faultsSnap = await getDocs(
+          query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))
+        );
+        const faults = faultsSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            openedAt: data.openedAt?.toDate?.() || null,
+            closedAt: data.closedAt?.toDate?.() || null,
+          } as DeviceFaultReport;
+        });
+        setDeviceFaults(faults);
 
         // Set default periods to last 6 months
         const defaultPeriods = new Set(last6Months.map(m => m.key));
@@ -638,6 +658,93 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
 
     return filtered;
   }, [efficiencyRecords, selectedPoolId, selectedPeriods]);
+
+  // Get lab IDs for selected pool
+  const selectedPoolLabIds = useMemo(() => {
+    if (selectedPoolId === 'all') {
+      // All labs from all pools
+      const allLabIds = new Set<string>();
+      efficiencyPools.forEach(pool => {
+        pool.memberIds.forEach(id => allLabIds.add(id));
+      });
+      return allLabIds;
+    }
+    const pool = efficiencyPools.find(p => p.id === selectedPoolId);
+    return new Set(pool?.memberIds || []);
+  }, [selectedPoolId, efficiencyPools]);
+
+  // Filter and calculate fault metrics
+  const faultMetrics = useMemo(() => {
+    // Filter faults by lab and period
+    const filteredFaults = deviceFaults.filter(fault => {
+      // Filter by lab
+      if (selectedLabId !== 'all') {
+        if (fault.labId !== selectedLabId) return false;
+      } else if (selectedPoolLabIds.size > 0) {
+        if (!selectedPoolLabIds.has(fault.labId)) return false;
+      }
+
+      // Filter by period
+      if (selectedPeriods.size > 0 && fault.openedAt) {
+        const faultDate = new Date(fault.openedAt);
+        const faultKey = `${faultDate.getFullYear()}-${faultDate.getMonth()}`;
+        if (!selectedPeriods.has(faultKey)) return false;
+      }
+
+      return true;
+    });
+
+    // Calculate monthly fault counts
+    const monthlyFaults: Record<string, { open: number; closed: number; total: number }> = {};
+
+    // Initialize with last 6 months
+    last6Months.forEach(m => {
+      monthlyFaults[m.key] = { open: 0, closed: 0, total: 0 };
+    });
+
+    filteredFaults.forEach(fault => {
+      if (!fault.openedAt) return;
+      const faultDate = new Date(fault.openedAt);
+      const key = `${faultDate.getFullYear()}-${faultDate.getMonth()}`;
+
+      if (monthlyFaults[key]) {
+        monthlyFaults[key].total++;
+        if (fault.status === 'open') {
+          monthlyFaults[key].open++;
+        } else {
+          monthlyFaults[key].closed++;
+        }
+      }
+    });
+
+    // Convert to array for chart
+    const monthlyData = last6Months.map(m => ({
+      month: m.label.split(' ')[0].substring(0, 3),
+      fullLabel: m.label,
+      open: monthlyFaults[m.key]?.open || 0,
+      closed: monthlyFaults[m.key]?.closed || 0,
+      total: monthlyFaults[m.key]?.total || 0,
+    })).reverse();
+
+    // Calculate totals
+    const totalFaults = filteredFaults.length;
+    const openFaults = filteredFaults.filter(f => f.status === 'open').length;
+    const closedFaults = filteredFaults.filter(f => f.status === 'closed').length;
+
+    // By type
+    const teknikServisFaults = filteredFaults.filter(f => f.faultType === 'teknik_servis').length;
+    const aplikasyonFaults = filteredFaults.filter(f => f.faultType === 'aplikasyon').length;
+
+    return {
+      totalFaults,
+      openFaults,
+      closedFaults,
+      teknikServisFaults,
+      aplikasyonFaults,
+      monthlyData,
+      closeRate: totalFaults > 0 ? (closedFaults / totalFaults) * 100 : 0,
+    };
+  }, [deviceFaults, selectedPoolLabIds, selectedLabId, selectedPeriods, last6Months]);
 
   // Calculate aggregated metrics
   const metrics = useMemo(() => {
@@ -970,6 +1077,117 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
           </div>
         </NeumorphicCard>
       </div>
+
+      {/* Cihaz Arızaları Grafiği */}
+      <NeumorphicCard className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Wrench className="h-5 w-5 text-orange-500" />
+            Cihaz Arızaları
+          </h3>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-full bg-red-500" />
+                <span className="text-muted-foreground">Açık ({faultMetrics.openFaults})</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-full bg-green-500" />
+                <span className="text-muted-foreground">Kapalı ({faultMetrics.closedFaults})</span>
+              </div>
+            </div>
+            <Badge variant="outline" className={cn(
+              "font-semibold",
+              faultMetrics.closeRate >= 80 ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300" :
+              faultMetrics.closeRate >= 50 ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300" :
+              "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+            )}>
+              Çözüm Oranı: %{faultMetrics.closeRate.toFixed(0)}
+            </Badge>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Stacked Bar Chart */}
+          <div className="lg:col-span-3">
+            <div className="h-[180px] flex items-end justify-between gap-2">
+              {faultMetrics.monthlyData.map((item, index) => {
+                const maxTotal = Math.max(...faultMetrics.monthlyData.map(d => d.total), 1);
+                const totalHeight = (item.total / maxTotal) * 150;
+                const openHeight = item.total > 0 ? (item.open / item.total) * totalHeight : 0;
+                const closedHeight = item.total > 0 ? (item.closed / item.total) * totalHeight : 0;
+
+                return (
+                  <div key={index} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full flex flex-col-reverse rounded-t-md overflow-hidden" style={{ height: totalHeight || 4 }}>
+                      {item.total > 0 ? (
+                        <>
+                          <div
+                            className="w-full bg-green-500 transition-all duration-500"
+                            style={{ height: closedHeight }}
+                            title={`Kapalı: ${item.closed}`}
+                          />
+                          <div
+                            className="w-full bg-red-500 transition-all duration-500"
+                            style={{ height: openHeight }}
+                            title={`Açık: ${item.open}`}
+                          />
+                        </>
+                      ) : (
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 h-1" />
+                      )}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">{item.month}</span>
+                    <span className="text-xs font-medium">{item.total}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Fault Summary Cards */}
+          <div className="space-y-3">
+            <div className="p-3 rounded-xl bg-muted/50">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Toplam Arıza</span>
+                <AlertOctagon className="h-4 w-4 text-orange-500" />
+              </div>
+              <p className="text-2xl font-bold mt-1">{faultMetrics.totalFaults}</p>
+            </div>
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-red-600 dark:text-red-400">Açık Arıza</span>
+                <XCircle className="h-4 w-4 text-red-500" />
+              </div>
+              <p className="text-xl font-bold text-red-600 dark:text-red-400 mt-1">{faultMetrics.openFaults}</p>
+            </div>
+            <div className="p-3 rounded-xl bg-green-50 dark:bg-green-950/50">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-green-600 dark:text-green-400">Kapalı Arıza</span>
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              </div>
+              <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">{faultMetrics.closedFaults}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Fault Type Breakdown */}
+        {faultMetrics.totalFaults > 0 && (
+          <div className="mt-4 pt-4 border-t border-dashed flex items-center gap-6">
+            <span className="text-sm text-muted-foreground">Arıza Türü:</span>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-blue-500" />
+                <span className="text-sm">Teknik Servis: <strong>{faultMetrics.teknikServisFaults}</strong></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FlaskConical className="h-4 w-4 text-purple-500" />
+                <span className="text-sm">Aplikasyon: <strong>{faultMetrics.aplikasyonFaults}</strong></span>
+              </div>
+            </div>
+          </div>
+        )}
+      </NeumorphicCard>
 
       {/* KPI Cards Row 1 - Verimlilik Metrikleri */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
