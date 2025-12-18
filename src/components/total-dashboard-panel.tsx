@@ -564,11 +564,15 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         const pools = poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool));
         setEfficiencyPools(pools);
 
-        // Fetch all efficiency records
-        const recordsSnap = await getDocs(
-          query(collection(db, 'totalEfficiencyRecords'), orderBy('year', 'desc'), orderBy('month', 'desc'))
-        );
-        const records = recordsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyRecord));
+        // Fetch all efficiency records (without compound index - sort in JS)
+        const recordsSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        const records = recordsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as EfficiencyRecord))
+          .sort((a, b) => {
+            // Sort by year desc, then month desc
+            if (b.year !== a.year) return b.year - a.year;
+            return b.month - a.month;
+          });
         setEfficiencyRecords(records);
 
         // Set default periods to last 6 months
