@@ -80,6 +80,14 @@ interface TableRow {
   kitVerimlilikYuzde: number; // Sütun 21 - Fark/15 * 100 = Sapma %
 }
 
+interface HakEdisDefinition {
+  id: string;
+  sutKodu: string;
+  sutTestAdi: string;
+  linkedStokKodu: string;
+  hakEdisMiktari: number; // TL cinsinden
+}
+
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
@@ -141,6 +149,9 @@ export default function TotalVerimlilikPanel({
   const [costCheckpoints, setCostCheckpoints] = useState<{ id: string; year: number; month: number; createdAt: Date }[]>([]);
   const [selectedCostCheckpoint, setSelectedCostCheckpoint] = useState<string>(''); // 'YYYY-MM' format
   const [costCheckpointData, setCostCheckpointData] = useState<Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> | null>(null);
+
+  // Sütun 24-25 - Hak Ediş Karşılığı ve Kâr için laboratuvar bazlı hak ediş tanımları
+  const [labHakEdisDefinitions, setLabHakEdisDefinitions] = useState<Record<string, HakEdisDefinition[]>>({});
 
   // Filter, Sort ve Search State'leri
   const [columnFilters, setColumnFilters] = useState<{
@@ -301,6 +312,48 @@ export default function TotalVerimlilikPanel({
 
     fetchCheckpointData();
   }, [selectedCostCheckpoint]);
+
+  // Sütun 24-25: Seçilen havuzdaki tüm laboratuvarların hak ediş tanımlarını çek
+  useEffect(() => {
+    if (!selectedPoolId) {
+      setLabHakEdisDefinitions({});
+      return;
+    }
+
+    const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
+    if (!selectedPool || selectedPool.memberIds.length === 0) {
+      setLabHakEdisDefinitions({});
+      return;
+    }
+
+    const fetchHakEdisDefinitions = async () => {
+      try {
+        const hakEdisMap: Record<string, HakEdisDefinition[]> = {};
+
+        // Her laboratuvar için hak ediş tanımlarını çek
+        for (const labId of selectedPool.memberIds) {
+          try {
+            const hakEdisSnap = await getDocs(
+              query(collection(db, 'hospitals', labId, 'hakEdisDefinitions'), orderBy('sutKodu', 'asc'))
+            );
+            hakEdisMap[labId] = hakEdisSnap.docs.map(d => ({
+              id: d.id,
+              ...d.data()
+            } as HakEdisDefinition));
+          } catch (e) {
+            console.error(`Error fetching hakEdis for lab ${labId}:`, e);
+            hakEdisMap[labId] = [];
+          }
+        }
+
+        setLabHakEdisDefinitions(hakEdisMap);
+      } catch (error) {
+        console.error('Error fetching hak ediş definitions:', error);
+      }
+    };
+
+    fetchHakEdisDefinitions();
+  }, [selectedPoolId, efficiencyPools]);
 
   // Seçilen havuz değiştiğinde min-max kurallarını çek ve satırları oluştur
   useEffect(() => {
@@ -1228,6 +1281,77 @@ export default function TotalVerimlilikPanel({
     return total;
   }, [rows, calculateRowCost]);
 
+  // Sütun 24: Hak Ediş Karşılığı hesaplama yardımcı fonksiyonu
+  // hakEdisMiktari (TL) × row.hakEdis (test sayısı) = toplam TL karşılık
+  const calculateHakEdisKarsiligi = useCallback((row: TableRow): { amount: number; hasData: boolean } => {
+    if (!exchangeRates) return { amount: 0, hasData: false };
+
+    // Bu laboratuvarın hak ediş tanımlarından ilgili ürünü bul
+    const labDefinitions = labHakEdisDefinitions[row.labId] || [];
+    const hakEdisDefinition = labDefinitions.find(d => d.linkedStokKodu === row.stokKodu);
+
+    if (!hakEdisDefinition || hakEdisDefinition.hakEdisMiktari <= 0) {
+      return { amount: 0, hasData: false };
+    }
+
+    // Hak ediş test sayısı (Sütun 19)
+    const hakEdisTestSayisi = row.hakEdis || 0;
+    if (hakEdisTestSayisi <= 0) {
+      return { amount: 0, hasData: true };
+    }
+
+    // Toplam TL karşılık = test başına TL × test sayısı
+    const toplamTL = hakEdisDefinition.hakEdisMiktari * hakEdisTestSayisi;
+
+    // Seçilen para birimine çevir
+    let finalAmount = toplamTL;
+    if (costCurrency === 'USD') {
+      // TL -> EUR -> USD
+      finalAmount = (toplamTL / exchangeRates.TRY) * exchangeRates.USD;
+    } else if (costCurrency === 'EUR') {
+      // TL -> EUR
+      finalAmount = toplamTL / exchangeRates.TRY;
+    }
+    // TRY ise zaten TL cinsinden
+
+    return { amount: finalAmount, hasData: true };
+  }, [labHakEdisDefinitions, exchangeRates, costCurrency]);
+
+  // Toplam hak ediş karşılığı hesapla
+  const totalHakEdisKarsiligi = useMemo(() => {
+    let total = 0;
+    rows.forEach(row => {
+      const { amount } = calculateHakEdisKarsiligi(row);
+      total += amount;
+    });
+    return total;
+  }, [rows, calculateHakEdisKarsiligi]);
+
+  // Sütun 25: Kâr hesaplama yardımcı fonksiyonu (24 - 23)
+  const calculateKar = useCallback((row: TableRow): { kar: number; hasData: boolean } => {
+    const { amount: hakEdisKarsiligi, hasData: hasHakEdis } = calculateHakEdisKarsiligi(row);
+    const { cost: sarfiyatMaliyeti, hasData: hasCost } = calculateRowCost(row);
+
+    if (!hasHakEdis && !hasCost) {
+      return { kar: 0, hasData: false };
+    }
+
+    // Kâr = Hak Ediş Karşılığı - Sarfiyat Maliyeti
+    const kar = hakEdisKarsiligi - sarfiyatMaliyeti;
+
+    return { kar, hasData: true };
+  }, [calculateHakEdisKarsiligi, calculateRowCost]);
+
+  // Toplam kâr hesapla
+  const totalKar = useMemo(() => {
+    let total = 0;
+    rows.forEach(row => {
+      const { kar } = calculateKar(row);
+      total += kar;
+    });
+    return total;
+  }, [rows, calculateKar]);
+
   return (
     <div className="p-4 space-y-6">
       <BackButton fallback="/" />
@@ -1919,6 +2043,92 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        {/* Sütun 24: Hak Ediş Karşılığı */}
+                        <TableHead className="min-w-[180px] bg-amber-50 dark:bg-amber-950 text-center p-0">
+                          <div className="flex flex-col">
+                            <div className="flex">
+                              <button
+                                onClick={() => setCostCurrency('TRY')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'TRY'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800'
+                                }`}
+                              >
+                                TL
+                              </button>
+                              <button
+                                onClick={() => setCostCurrency('USD')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'USD'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800'
+                                }`}
+                              >
+                                USD
+                              </button>
+                              <button
+                                onClick={() => setCostCurrency('EUR')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'EUR'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800'
+                                }`}
+                              >
+                                EUR
+                              </button>
+                            </div>
+                            <div className="py-1.5 px-2">
+                              <span>24. Hak Ediş Karşılığı</span>
+                              <div className="text-xs font-normal text-muted-foreground">
+                                HakEdişTL × TestSayısı(19)
+                              </div>
+                            </div>
+                          </div>
+                        </TableHead>
+                        {/* Sütun 25: Kâr */}
+                        <TableHead className="min-w-[180px] bg-sky-50 dark:bg-sky-950 text-center p-0">
+                          <div className="flex flex-col">
+                            <div className="flex">
+                              <button
+                                onClick={() => setCostCurrency('TRY')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'TRY'
+                                    ? 'bg-sky-500 text-white'
+                                    : 'bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-800'
+                                }`}
+                              >
+                                TL
+                              </button>
+                              <button
+                                onClick={() => setCostCurrency('USD')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'USD'
+                                    ? 'bg-sky-500 text-white'
+                                    : 'bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-800'
+                                }`}
+                              >
+                                USD
+                              </button>
+                              <button
+                                onClick={() => setCostCurrency('EUR')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
+                                  costCurrency === 'EUR'
+                                    ? 'bg-sky-500 text-white'
+                                    : 'bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-800'
+                                }`}
+                              >
+                                EUR
+                              </button>
+                            </div>
+                            <div className="py-1.5 px-2">
+                              <span>25. Kâr</span>
+                              <div className="text-xs font-normal text-muted-foreground">
+                                Sütun 24 - Sütun 23
+                              </div>
+                            </div>
+                          </div>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2194,6 +2404,77 @@ export default function TotalVerimlilikPanel({
                                       {isFromCheckpoint && (
                                         <span className="ml-1 text-emerald-600" title="Checkpoint'ten">●</span>
                                       )}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                            </TableCell>
+                            {/* Sütun 24: Hak Ediş Karşılığı */}
+                            <TableCell className="bg-amber-50/50 dark:bg-amber-950/50 text-center">
+                              {(() => {
+                                const { amount, hasData } = calculateHakEdisKarsiligi(row);
+
+                                // Hak ediş tanımının olup olmadığını kontrol et
+                                const labDefinitions = labHakEdisDefinitions[row.labId] || [];
+                                const hakEdisDefinition = labDefinitions.find(d => d.linkedStokKodu === row.stokKodu);
+
+                                if (!hasData) {
+                                  return (
+                                    <span className="text-muted-foreground text-xs">
+                                      Tanım yok
+                                    </span>
+                                  );
+                                }
+
+                                if (amount === 0) {
+                                  return (
+                                    <span className="text-muted-foreground">-</span>
+                                  );
+                                }
+
+                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
+
+                                return (
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="font-semibold text-amber-700 dark:text-amber-400">
+                                      {currencySymbol}{amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {row.hakEdis.toLocaleString('tr-TR')} test × ₺{hakEdisDefinition?.hakEdisMiktari.toFixed(2)}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                            </TableCell>
+                            {/* Sütun 25: Kâr */}
+                            <TableCell className="bg-sky-50/50 dark:bg-sky-950/50 text-center">
+                              {(() => {
+                                const { kar, hasData } = calculateKar(row);
+
+                                if (!hasData) {
+                                  return (
+                                    <span className="text-muted-foreground text-xs">
+                                      Veri yok
+                                    </span>
+                                  );
+                                }
+
+                                if (kar === 0) {
+                                  return (
+                                    <span className="text-muted-foreground">-</span>
+                                  );
+                                }
+
+                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
+                                const isProfit = kar > 0;
+
+                                return (
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className={`font-semibold ${isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                      {isProfit ? '+' : ''}{currencySymbol}{kar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {isProfit ? 'Kâr' : 'Zarar'}
                                     </span>
                                   </div>
                                 );
