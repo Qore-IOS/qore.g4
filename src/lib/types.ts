@@ -429,6 +429,7 @@ export type AppView =
   | 'personel-islemleri'
   | 'is-analizi'
   | 'total-verimlilik'
+  | 'cihazdan-cikan-kit'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
@@ -662,4 +663,4 @@ export interface Rack {
   [k: string]: any;
 }
 
-  
+

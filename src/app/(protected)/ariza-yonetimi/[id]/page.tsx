@@ -1,4 +1,5 @@
 
+
 'use client';
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -11,14 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-import { closeDeviceFaultReport } from '@/lib/faults';
+import { closeDeviceFaultReport, resolveEjectedKitFault } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
-import type { Device } from '@/lib/types';
+import type { Device, DeviceFaultReport } from '@/lib/types';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import {
@@ -30,24 +31,7 @@ import {
 import { useTheme } from 'next-themes';
 
 
-type FaultDoc = {
-  id: string;
-  title?: string;
-  hospitalId: string;
-  labName: string;
-  deviceId: string;
-  model: string;
-  serial: string;
-  faultType: 'teknik_servis' | 'aplikasyon';
-  status: 'open' | 'closed';
-  openedAt?: Date | null;
-  openedByUid?: string;
-  openedByName?: string;
-  closedAt?: Date | null;
-  closedByUid?: string;
-  closedByName?: string;
-  closeDescription?: string;
-};
+type FaultDoc = DeviceFaultReport;
 
 type HistoryEvent = {
   id: string;
@@ -164,6 +148,22 @@ export default function FaultDetailPage() {
       toast({ title: 'Hata', description: 'Arıza kapatılamadı.', variant: 'destructive' });
     }
   }, [fault, closeDescription, currentUser, currentUserProfile, toast]);
+
+  const handleKitResolution = async (resolution: 'imha' | 'tekrar_kullanim') => {
+    if (!fault) return;
+    try {
+        await resolveEjectedKitFault(fault.id, resolution, {
+            uid: currentUser?.uid || '',
+            name: currentUserProfile?.name || ''
+        }, closeDescription);
+        setIsCloseDialogOpen(false);
+        setCloseDescription('');
+        toast({ title: 'Arıza Çözüldü', description: `Kit durumu "${resolution === 'imha' ? 'imha' : 'tekrar kullanım'}" olarak güncellendi.` });
+    } catch (e) {
+        console.error(e);
+        toast({ title: 'Hata', description: 'Kit arızası çözümlenirken hata oluştu.', variant: 'destructive' });
+    }
+  };
 
   const handleShare = async () => {
     if (!fault) return;
@@ -379,12 +379,33 @@ export default function FaultDetailPage() {
               <div><p className="font-medium">Kapatan:</p><p>{fault.closedByName} {fault.closedAt && (<span className="text-xs text-muted-foreground">({format(fault.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr })})</span>)}</p></div>
             )}
           </div>
+
+          {fault.isEjectedKitFault && (
+            <div className="pt-4 border-t">
+                <p className="font-medium mb-2 text-amber-600">İlişkili Kit Bilgisi</p>
+                <div className="text-sm grid grid-cols-2 gap-4">
+                    <div><p className="font-medium">Ürün:</p><p>{fault.productStokAdi} ({fault.productStokKodu})</p></div>
+                    <div><p className="font-medium">Test Sayısı:</p><p>{fault.testCount}</p></div>
+                </div>
+            </div>
+          )}
             
           {fault.status === 'open' && (
              <div className="pt-4 border-t">
-                 <Button variant="default" size="sm" onClick={() => setIsCloseDialogOpen(true)} className="w-full sm:w-auto">
-                    <CheckCircle className="h-4 w-4 mr-2" /> Arızayı Kapat
-                </Button>
+                {fault.isEjectedKitFault ? (
+                    <div className="flex flex-col sm:flex-row gap-2">
+                        <Button variant="destructive" size="sm" onClick={() => handleKitResolution('imha')} className="flex-1">
+                            <Recycle className="h-4 w-4 mr-2" /> Kit İmhaya Gönderildi
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => handleKitResolution('tekrar_kullanim')} className="flex-1">
+                            <CornerDownRight className="h-4 w-4 mr-2" /> Kit Tekrar Kullanılabildi
+                        </Button>
+                    </div>
+                ) : (
+                    <Button variant="default" size="sm" onClick={() => setIsCloseDialogOpen(true)} className="w-full sm:w-auto">
+                        <CheckCircle className="h-4 w-4 mr-2" /> Arızayı Kapat
+                    </Button>
+                )}
              </div>
            )}
 

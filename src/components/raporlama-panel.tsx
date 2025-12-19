@@ -1,3 +1,4 @@
+
 'use client';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -33,6 +34,7 @@ import {
   Database,
   FileCode,
   Barcode,
+  Trash2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -103,7 +105,7 @@ export default function RaporlamaPanel() {
               </CardDescription>
             </div>
             <div className="flex space-x-2 flex-wrap mt-2 sm:mt-0">
-               <Button
+              <Button
                 variant="default"
                 className="bg-black text-white hover:bg-gray-800"
                 size="sm"
@@ -112,6 +114,9 @@ export default function RaporlamaPanel() {
                 <FileCode className="mr-2 h-4 w-4" />
                 Arıza Raporu
               </Button>
+               <Button variant="outline" size="sm" onClick={() => router.push('/raporlama/imha-edilen-kitler')}>
+                  <Trash2 className="mr-2 h-4 w-4" /> İmha Edilen Kitler
+                </Button>
               <Button
                 variant="outline"
                 size="sm"
