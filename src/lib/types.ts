@@ -627,7 +627,7 @@ export interface EjectedKitRecord {
   createdAt: TimestampLike;
   createdByUid: string;
   createdByName: string;
-  faultReportId: string; // Link to created fault report
+  faultReportId: string; // Link to created fault reports
 }
 
 // Destroyed kits report for "imha" resolution
@@ -662,5 +662,3 @@ export interface Rack {
   createdAt?: any;
   [k: string]: any;
 }
-
-
