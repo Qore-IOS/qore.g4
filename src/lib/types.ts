@@ -47,7 +47,7 @@ export interface LaboratoryProductTrackingRule {
 }
 
 export interface Hospital {
-  id:string;
+  id: string;
   name: string;
   ad?: string;
   kod?: string;
@@ -104,10 +104,10 @@ export interface Depot {
 }
 
 export interface MinMaxRule {
-    stokKodu: string; // Add stokKodu to be able to identify the rule
-    min: number;
-    max: number;
-    aylikTuketimLimiti?: number; // Monthly consumption limit
+  stokKodu: string; // Add stokKodu to be able to identify the rule
+  min: number;
+  max: number;
+  aylikTuketimLimiti?: number; // Monthly consumption limit
 }
 
 export interface User {
@@ -288,12 +288,12 @@ export interface AssignedDevice {
 }
 
 export interface DeviceGroup {
-    id: string;
-    name: string;
-    deviceIds: string[];
-    order: number;
-    subPointId?: string;
-    subPointName?: string;
+  id: string;
+  name: string;
+  deviceIds: string[];
+  order: number;
+  subPointId?: string;
+  subPointName?: string;
 }
 
 
@@ -390,6 +390,14 @@ export interface DeviceFaultReport {
   closedBy?: string;
   closedByName?: string;
   source: string;
+  // Ejected kit fault fields
+  isEjectedKitFault?: boolean;
+  productStokKodu?: string;
+  productStokAdi?: string;
+  productCihazGrubu?: string;
+  kitResolution?: 'imha' | 'tekrar_kullanim' | null;
+  ejectedKitRecordId?: string;
+  testCount?: number;
 }
 
 
@@ -465,21 +473,21 @@ export type PositionDef = { start: number; length: number };
 
 
 export type BarcodeFormat = {
-    id: string;
-    name: string;
-    strategy: 'positional' | 'regex' | 'legacy_roche';
-    active: boolean;
-    priority: number;
-    totalLength?: number;
-    reference?: { start: number; length: number };
-    lot?: { start: number; length: number };
-    expiry?: { start: number; length: number; pattern: ExpiryPattern };
-    serial?: { start: number; length: number };
-    trackSerial?: boolean;
-    trackLot?: boolean;
-    regex?: string;
-    fields?: { reference?: number; lot?: number; expiry?: number; serial?: number };
-    parseTarget?: ParseTarget;
+  id: string;
+  name: string;
+  strategy: 'positional' | 'regex' | 'legacy_roche';
+  active: boolean;
+  priority: number;
+  totalLength?: number;
+  reference?: { start: number; length: number };
+  lot?: { start: number; length: number };
+  expiry?: { start: number; length: number; pattern: ExpiryPattern };
+  serial?: { start: number; length: number };
+  trackSerial?: boolean;
+  trackLot?: boolean;
+  regex?: string;
+  fields?: { reference?: number; lot?: number; expiry?: number; serial?: number };
+  parseTarget?: ParseTarget;
 };
 
 
@@ -600,6 +608,45 @@ export interface LabResultExcelRow {
   tupAdi?: string;
 }
 
+// Cihazdan çıkan kit (ejected kit) records
+export interface EjectedKitRecord {
+  id: string;
+  laboratoryId: string;
+  laboratoryName: string;
+  deviceId: string;
+  deviceModel: string;
+  deviceSerial: string;
+  deviceImageUrl: string;
+  stokKodu: string;
+  stokAdi: string;
+  cihazGrubu?: string;
+  quantityType: 'kutu' | 'test';
+  testCount: number; // ambalajDegeri if kutu, manual entry if test
+  aciklama: string;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  faultReportId: string; // Link to created fault report
+}
+
+// Destroyed kits report for "imha" resolution
+export interface DestroyedKitRecord {
+  id: string;
+  ejectedKitRecordId: string;
+  faultReportId: string;
+  laboratoryId: string;
+  laboratoryName: string;
+  deviceId: string;
+  deviceModel: string;
+  stokKodu: string;
+  stokAdi: string;
+  testCount: number;
+  aciklama: string;
+  resolvedAt: TimestampLike;
+  resolvedByUid: string;
+  resolvedByName: string;
+}
+
 export interface Rack {
   id: string;
   labId: string;
@@ -614,3 +661,5 @@ export interface Rack {
   createdAt?: any;
   [k: string]: any;
 }
+
+  
