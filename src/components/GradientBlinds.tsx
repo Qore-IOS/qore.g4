@@ -1,3 +1,5 @@
+
+'use client';
 import React, { useEffect, useRef } from 'react';
 import { Renderer, Program, Mesh, Triangle } from 'ogl';
 
@@ -338,9 +340,10 @@ void main() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       canvas.removeEventListener('pointermove', onPointerMove);
       ro.disconnect();
-      if (container && canvas.parentElement === container) {
-        container.removeChild(canvas);
-      }
+      // Let React handle the removal of the canvas element from the DOM
+      // if (container && canvas.parentElement === container) {
+      //   container.removeChild(canvas);
+      // }
       const callIfFn = <T extends object, K extends keyof T>(obj: T | null, key: K) => {
         if (obj && typeof obj[key] === 'function') {
           (obj[key] as unknown as () => void).call(obj);
@@ -349,7 +352,7 @@ void main() {
       callIfFn(programRef.current, 'remove');
       callIfFn(geometryRef.current, 'remove');
       callIfFn(meshRef.current as unknown as { remove?: () => void }, 'remove');
-      
+
       try {
         if (rendererRef.current && (rendererRef.current as any).destroy) {
           (rendererRef.current as any).destroy();
@@ -357,7 +360,7 @@ void main() {
       } catch (e) {
         console.error('Error during renderer destruction:', e);
       }
-      
+
       programRef.current = null;
       geometryRef.current = null;
       meshRef.current = null;
