@@ -18,6 +18,7 @@ import type { DestroyedKitRecord, Hospital } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { exportDataToExcel } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 
 export default function ImhaEdilenKitlerPanel() {
     const { toast } = useToast();
@@ -62,8 +63,9 @@ export default function ImhaEdilenKitlerPanel() {
 
     const filteredRecords = useMemo(() => {
         return records.filter(record => {
-            const isInDateRange = dateRange?.from && dateRange?.to && record.resolvedAt
-                ? (record.resolvedAt >= dateRange.from && record.resolvedAt <= dateRange.to)
+            const resolvedAtDate = record.resolvedAt instanceof Timestamp ? record.resolvedAt.toDate() : record.resolvedAt;
+            const isInDateRange = dateRange?.from && dateRange?.to && resolvedAtDate
+                ? (resolvedAtDate >= dateRange.from && resolvedAtDate <= dateRange.to)
                 : true;
             
             const matchesLab = labFilter === 'all' || record.laboratoryId === labFilter;
@@ -77,16 +79,19 @@ export default function ImhaEdilenKitlerPanel() {
             toast({ title: 'Veri Yok', description: 'Dışa aktarılacak kayıt bulunmuyor.', variant: 'default' });
             return;
         }
-        const dataToExport = filteredRecords.map(r => ({
-            'Laboratuvar': r.laboratoryName,
-            'Cihaz': r.deviceModel,
-            'Stok Kodu': r.stokKodu,
-            'Stok Adı': r.stokAdi,
-            'Test Adedi': r.testCount,
-            'İmha Tarihi': r.resolvedAt ? format(r.resolvedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
-            'Onaylayan': r.resolvedByName,
-            'Açıklama': r.aciklama,
-        }));
+        const dataToExport = filteredRecords.map(r => {
+            const resolvedAtDate = r.resolvedAt instanceof Timestamp ? r.resolvedAt.toDate() : r.resolvedAt;
+            return {
+                'Laboratuvar': r.laboratoryName,
+                'Cihaz': r.deviceModel,
+                'Stok Kodu': r.stokKodu,
+                'Stok Adı': r.stokAdi,
+                'Test Adedi': r.testCount,
+                'İmha Tarihi': resolvedAtDate ? format(resolvedAtDate, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
+                'Onaylayan': r.resolvedByName,
+                'Açıklama': r.aciklama,
+            }
+        });
         exportDataToExcel(dataToExport, 'Imha_Edilen_Kitler_Raporu', 'İmha Listesi', toast);
     };
 
@@ -144,7 +149,7 @@ export default function ImhaEdilenKitlerPanel() {
                                 ) : (
                                     filteredRecords.map(record => (
                                         <TableRow key={record.id}>
-                                            <TableCell className="text-xs">{record.resolvedAt ? format(record.resolvedAt, 'dd.MM.yy HH:mm', {locale: tr}) : '-'}</TableCell>
+                                            <TableCell className="text-xs">{record.resolvedAt ? format(record.resolvedAt instanceof Timestamp ? record.resolvedAt.toDate() : record.resolvedAt, 'dd.MM.yy HH:mm', {locale: tr}) : '-'}</TableCell>
                                             <TableCell>{record.laboratoryName}</TableCell>
                                             <TableCell>{record.deviceModel}</TableCell>
                                             <TableCell>
