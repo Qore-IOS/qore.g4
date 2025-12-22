@@ -518,6 +518,7 @@ export interface EfficiencyPool {
   id: string;
   name: string;
   memberIds: string[]; // Havuza dahil laboratuvar ID'leri
+  centerLabId?: string; // Merkez laboratuvar ID'si - hak ediş hesaplamalarında kullanılır
   active: boolean;
   createdAt: any;
   createdByUid: string;

@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Users, Building2 } from 'lucide-react';
+import { Loader2, Users, Building2, Crown } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { collection, getDocs, addDoc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +31,7 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
   const [labPools, setLabPools] = useState<LabPool[]>([]);
   const [poolName, setPoolName] = useState('');
   const [selectedLabIds, setSelectedLabIds] = useState<Set<string>>(new Set());
+  const [centerLabId, setCenterLabId] = useState<string>('');
 
   useEffect(() => {
     if (open) {
@@ -69,6 +71,10 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
         }
       } else {
         newSet.delete(labId);
+        // Eğer silinen lab merkez lab ise, merkez lab seçimini temizle
+        if (centerLabId === labId) {
+          setCenterLabId('');
+        }
       }
       return newSet;
     });
@@ -89,6 +95,7 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
       const poolData: Omit<EfficiencyPool, 'id'> = {
         name: poolName.trim(),
         memberIds: Array.from(selectedLabIds),
+        centerLabId: centerLabId || undefined,
         active: true,
         createdAt: Timestamp.now(),
         createdByUid: currentUser?.uid || '',
@@ -101,6 +108,7 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
       onOpenChange(false);
       setPoolName('');
       setSelectedLabIds(new Set());
+      setCenterLabId('');
       onPoolCreated?.();
     } catch (error) {
       console.error('Error saving pool:', error);
@@ -199,9 +207,43 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
           </div>
 
           {selectedLabIds.size > 0 && (
-            <p className="text-sm text-muted-foreground">
-              {selectedLabIds.size} laboratuvar seçildi
-            </p>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {selectedLabIds.size} laboratuvar seçildi
+              </p>
+
+              {/* Merkez Laboratuvar Seçimi */}
+              <div className="p-3 border rounded-md bg-amber-50/50 dark:bg-amber-950/20">
+                <Label className="flex items-center gap-2 mb-2">
+                  <Crown className="h-4 w-4 text-amber-600" />
+                  Merkez Laboratuvar (İsteğe Bağlı)
+                </Label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Diğer laboratuvarlardan merkeze gönderilen testler için hak ediş hesaplamasında kullanılır.
+                </p>
+                <Select value={centerLabId} onValueChange={setCenterLabId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Merkez laboratuvar seçin..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Seçilmedi</SelectItem>
+                    {hospitals
+                      .filter(h => selectedLabIds.has(h.id))
+                      .map(lab => (
+                        <SelectItem key={lab.id} value={lab.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{lab.name}</span>
+                            {lab.kod && (
+                              <span className="text-xs font-mono text-muted-foreground">({lab.kod})</span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           )}
         </div>
 
