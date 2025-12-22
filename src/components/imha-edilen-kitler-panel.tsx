@@ -3,26 +3,18 @@
 import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, orderBy, query, where, Timestamp, addDoc, serverTimestamp, writeBatch, doc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, where, writeBatch, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Trash2, FileSpreadsheet, Upload, Camera, Eye, Download, AlertTriangle } from 'lucide-react';
+import { Loader2, Trash2, Upload, Camera, Download, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DatePickerWithRange } from '@/components/ui/date-range-picker';
-import type { DateRange } from 'react-day-picker';
-import { addDays, format, startOfDay, endOfDay } from 'date-fns';
-import { tr } from 'date-fns/locale';
-import type { DestroyedKitRecord, Hospital, Depot, ProductCode, DepoStokItem } from '@/lib/types';
+import type { Hospital, Depot, ProductCode, DepoStokItem } from '@/lib/types';
 import BackButton from '@/components/BackButton';
-import { exportDataToExcel, playFeedback, generateId } from '@/lib/utils';
+import { playFeedback, generateId } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
@@ -31,7 +23,8 @@ import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
 import * as XLSX from 'xlsx';
-import { cn } from '@/lib/utils';
+import { serverTimestamp } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
     ssr: false,
@@ -50,7 +43,7 @@ interface DestroyedItem {
     depotName?: string;
     laboratoryId?: string;
     laboratoryName?: string;
-    sourceType: 'barcode' | 'excel' | 'fault';
+    sourceType: 'barcode' | 'excel';
     isGroup?: boolean;
     key: string;
 }
@@ -63,13 +56,13 @@ interface GroupedDestroyedItem {
     miad: string;
     adet: number;
     serials: { id: string; seriNumarasi: string }[];
-    sourceType: 'barcode' | 'excel' | 'fault';
+    sourceType: 'barcode' | 'excel';
 }
 
 export default function ImhaEdilenKitlerPanel() {
     const { toast } = useToast();
     const { currentUser, currentUserProfile } = useAuth();
-    const [activeTab, setActiveTab] = useState<'giris' | 'liste'>('giris');
+    const router = useRouter();
 
     // Master Data
     const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -77,9 +70,6 @@ export default function ImhaEdilenKitlerPanel() {
     const [products, setProducts] = useState<ProductCode[]>([]);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
-
-    // Destroyed Records from DB
-    const [dbDestroyedRecords, setDbDestroyedRecords] = useState<DestroyedKitRecord[]>([]);
 
     // Selection State
     const [selectedSourceType, setSelectedSourceType] = useState<'depot' | 'laboratory'>('laboratory');
@@ -94,16 +84,6 @@ export default function ImhaEdilenKitlerPanel() {
     const { parseAnyBarcode, resolveProductFromParsed } = useBarcodeParser();
     const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
     const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
-
-    // Excel upload
-    const [excelFile, setExcelFile] = useState<File | null>(null);
-
-    // Filters for viewing
-    const [dateRange, setDateRange] = useState<DateRange | undefined>({
-        from: startOfDay(addDays(new Date(), -30)),
-        to: endOfDay(new Date()),
-    });
-    const [labFilter, setLabFilter] = useState<string>('all');
 
     // Fetch master data
     useEffect(() => {
@@ -128,20 +108,6 @@ export default function ImhaEdilenKitlerPanel() {
         };
         fetchData();
     }, [toast]);
-
-    // Listen to destroyed records from DB
-    useEffect(() => {
-        const q = query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const records: DestroyedKitRecord[] = snapshot.docs.map(d => ({
-                id: d.id,
-                ...d.data(),
-                resolvedAt: (d.data().resolvedAt as Timestamp)?.toDate()
-            } as DestroyedKitRecord));
-            setDbDestroyedRecords(records);
-        });
-        return () => unsubscribe();
-    }, []);
 
     // Get selected source name
     const selectedSourceName = useMemo(() => {
@@ -357,7 +323,7 @@ export default function ImhaEdilenKitlerPanel() {
     }, [selectedSourceType, selectedDepotId, selectedLabId, selectedFormatId, barcodeFormats, products, destroyedItems, parseAnyBarcode, resolveProductFromParsed, toast, selectedSourceName, countStockBySerial, countStockByLot]);
 
     useHidScanner({
-        enabled: activeTab === 'giris',
+        enabled: true,
         onScan: ({ raw }) => {
             if (raw) handleScan(raw.trim(), 'hid');
         },
@@ -578,45 +544,6 @@ export default function ImhaEdilenKitlerPanel() {
         }
     };
 
-    // Filter DB records
-    const filteredDbRecords = useMemo(() => {
-        return dbDestroyedRecords.filter(record => {
-            const resolvedAtDate = record.resolvedAt instanceof Date ? record.resolvedAt : new Date(record.resolvedAt);
-            const isInDateRange = dateRange?.from && dateRange?.to && resolvedAtDate
-                ? (resolvedAtDate >= dateRange.from && resolvedAtDate <= dateRange.to)
-                : true;
-
-            const matchesLab = labFilter === 'all' || record.laboratoryId === labFilter;
-
-            return isInDateRange && matchesLab;
-        });
-    }, [dbDestroyedRecords, dateRange, labFilter]);
-
-    // Export
-    const handleExport = () => {
-        if (filteredDbRecords.length === 0) {
-            toast({ title: 'Veri Yok', description: 'Dışa aktarılacak kayıt bulunmuyor.', variant: 'default' });
-            return;
-        }
-        const dataToExport = filteredDbRecords.map(r => {
-            const resolvedAtDate = r.resolvedAt instanceof Date ? r.resolvedAt : new Date(r.resolvedAt);
-            return {
-                'Laboratuvar': r.laboratoryName || r.depotName || '-',
-                'Cihaz': r.deviceModel || '-',
-                'Stok Kodu': r.stokKodu,
-                'Stok Adı': r.stokAdi,
-                'Lot': r.lotNumarasi || '-',
-                'Miad': r.miad || '-',
-                'Seri No': r.seriNumarasi || '-',
-                'Test Adedi': r.testCount,
-                'İmha Tarihi': resolvedAtDate ? format(resolvedAtDate, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
-                'Onaylayan': r.resolvedByName,
-                'Açıklama': r.aciklama,
-            }
-        });
-        exportDataToExcel(dataToExport, 'Imha_Edilen_Kitler_Raporu', 'İmha Listesi', toast);
-    };
-
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -629,256 +556,176 @@ export default function ImhaEdilenKitlerPanel() {
         <div className="p-4 space-y-4">
             <BackButton fallback="/raporlama" />
             <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Trash2 className="h-6 w-6 text-destructive" />
-                        İmha Edilen Kitler
-                    </CardTitle>
-                    <CardDescription>
-                        Barkod okutarak, excel ile yükleyerek veya arıza kaydı üzerinden imha işlemlerini gerçekleştirin.
-                    </CardDescription>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                        <CardTitle className="flex items-center gap-2">
+                            <Trash2 className="h-6 w-6 text-destructive" />
+                            İmha Edilen Kitler - Giriş
+                        </CardTitle>
+                        <CardDescription>
+                            Barkod okutarak veya excel ile yükleyerek imha işlemlerini gerçekleştirin.
+                        </CardDescription>
+                    </div>
+                    <Button variant="outline" onClick={() => router.push('/raporlama/imha-edilen-kitler/liste')}>
+                        <Eye className="mr-2 h-4 w-4" />
+                        İmha Olan Kitleri Göster
+                    </Button>
                 </CardHeader>
-                <CardContent>
-                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'giris' | 'liste')}>
-                        <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="giris">İmha Girişi</TabsTrigger>
-                            <TabsTrigger value="liste">
-                                <Eye className="mr-2 h-4 w-4" />
-                                İmha Olan Kitleri Göster
-                            </TabsTrigger>
-                        </TabsList>
+                <CardContent className="space-y-6">
+                    {/* Source Selection */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                            <Label>Kaynak Tipi</Label>
+                            <Select value={selectedSourceType} onValueChange={(v) => setSelectedSourceType(v as 'depot' | 'laboratory')}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="laboratory">Laboratuvar</SelectItem>
+                                    <SelectItem value="depot">Depo</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
 
-                        {/* Tab 1: İmha Girişi */}
-                        <TabsContent value="giris" className="space-y-6 pt-4">
-                            {/* Source Selection */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Kaynak Tipi</Label>
-                                    <Select value={selectedSourceType} onValueChange={(v) => setSelectedSourceType(v as 'depot' | 'laboratory')}>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="laboratory">Laboratuvar</SelectItem>
-                                            <SelectItem value="depot">Depo</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                {selectedSourceType === 'laboratory' && (
-                                    <div className="space-y-2">
-                                        <Label>Laboratuvar</Label>
-                                        <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Laboratuvar seçin" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {hospitals.map(h => (
-                                                    <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                )}
-
-                                {selectedSourceType === 'depot' && (
-                                    <div className="space-y-2">
-                                        <Label>Depo</Label>
-                                        <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Depo seçin" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {depots.map(d => (
-                                                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                )}
-
-                                <div className="flex items-end gap-2">
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => setIsCameraScannerOpen(true)}
-                                        disabled={!selectedSourceName}
-                                    >
-                                        <Camera className="mr-2 h-4 w-4" />
-                                        Kamera ile Tara
-                                    </Button>
-                                </div>
-                            </div>
-
-                            {/* Barcode Format Selection */}
-                            <BarcodeFormatSelect
-                                value={selectedFormatId || '__auto__'}
-                                onChange={v => setSelectedFormatId(v)}
-                                disabled={formatsLoading}
-                            />
-
-                            {/* Excel Upload */}
+                        {selectedSourceType === 'laboratory' && (
                             <div className="space-y-2">
-                                <Label>Excel ile Yükleme</Label>
-                                <div className="flex gap-2">
-                                    <Button variant="outline" onClick={handleDownloadTemplate}>
-                                        <Download className="mr-2 h-4 w-4" />
-                                        Şablon İndir
-                                    </Button>
-                                    <label htmlFor="excel-upload">
-                                        <Button variant="outline" disabled={!selectedSourceName} asChild>
-                                            <span>
-                                                <Upload className="mr-2 h-4 w-4" />
-                                                Excel Yükle
-                                            </span>
-                                        </Button>
-                                    </label>
-                                    <input
-                                        id="excel-upload"
-                                        type="file"
-                                        accept=".xlsx,.xls"
-                                        className="hidden"
-                                        onChange={handleExcelUpload}
-                                    />
-                                </div>
+                                <Label>Laboratuvar</Label>
+                                <Select value={selectedLabId} onValueChange={setSelectedLabId}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Laboratuvar seçin" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {hospitals.map(h => (
+                                            <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
+                        )}
 
-                            {/* Destroyed Items List */}
-                            {destroyedItems.length > 0 && (
-                                <>
-                                    <div className="flex justify-between items-center">
-                                        <Label>İmha Edilecek Ürünler ({destroyedItems.reduce((sum, item) => sum + item.adet, 0)} Adet)</Label>
-                                        <Button onClick={handleSubmit} disabled={submitting}>
-                                            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                            İmha Et ve Stoktan Düş
-                                        </Button>
-                                    </div>
+                        {selectedSourceType === 'depot' && (
+                            <div className="space-y-2">
+                                <Label>Depo</Label>
+                                <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Depo seçin" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {depots.map(d => (
+                                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
 
-                                    <ScrollArea className="h-96 border rounded-md p-2">
-                                        <Accordion type="multiple" className="w-full">
-                                            {groupedDestroyedItems.map(group => (
-                                                <AccordionItem value={group.key} key={group.key}>
-                                                    <AccordionTrigger>
-                                                        <div className="flex-1 text-left font-medium">
-                                                            {group.stokAdi} <span className="text-xs text-muted-foreground">({group.stokKodu})</span>
-                                                        </div>
-                                                        <div className="flex-1 text-left text-sm">Lot: {group.lotNumarasi || '-'}</div>
-                                                        <div className="flex-1 text-left text-sm">Miad: {group.miad || '-'}</div>
-                                                        <div className="font-bold flex items-center gap-2">
-                                                            <span>{group.adet} Adet</span>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    removeDestroyedItem(group.key, true);
-                                                                }}
-                                                            >
-                                                                <Trash2 className="h-4 w-4 text-destructive" />
-                                                            </Button>
-                                                        </div>
-                                                    </AccordionTrigger>
-                                                    <AccordionContent className="p-2 bg-muted/50">
-                                                        {group.serials.length > 0 ? (
-                                                            <ul className="space-y-1">
-                                                                {group.serials.map(serial => (
-                                                                    <li key={serial.id} className="flex justify-between items-center text-xs font-mono">
-                                                                        {serial.seriNumarasi}
-                                                                        <Button
-                                                                            variant="ghost"
-                                                                            size="icon"
-                                                                            className="h-6 w-6"
-                                                                            onClick={() => removeDestroyedItem(serial.id, false)}
-                                                                        >
-                                                                            <Trash2 className="h-3 w-3 text-destructive" />
-                                                                        </Button>
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        ) : (
-                                                            <p className="text-xs text-muted-foreground">Bu grup manuel olarak eklendi, seri numarası detayı yok.</p>
-                                                        )}
-                                                    </AccordionContent>
-                                                </AccordionItem>
-                                            ))}
-                                        </Accordion>
-                                    </ScrollArea>
-                                </>
-                            )}
-                        </TabsContent>
+                        <div className="flex items-end gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={() => setIsCameraScannerOpen(true)}
+                                disabled={!selectedSourceName}
+                            >
+                                <Camera className="mr-2 h-4 w-4" />
+                                Kamera ile Tara
+                            </Button>
+                        </div>
+                    </div>
 
-                        {/* Tab 2: İmha Olan Kitleri Göster */}
-                        <TabsContent value="liste" className="pt-4">
-                            <div className="flex flex-wrap gap-4 items-end mb-4">
-                                <div className="flex-grow">
-                                    <label className="text-sm font-medium">Tarih Aralığı</label>
-                                    <DatePickerWithRange date={dateRange} setDate={setDateRange} className="w-full" />
-                                </div>
-                                <div className="flex-grow">
-                                    <label className="text-sm font-medium">Laboratuvar</label>
-                                    <Select value={labFilter} onValueChange={setLabFilter}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
-                                            {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <Button onClick={handleExport} variant="outline" disabled={filteredDbRecords.length === 0}>
-                                    <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
+                    {/* Barcode Format Selection */}
+                    <BarcodeFormatSelect
+                        value={selectedFormatId || '__auto__'}
+                        onChange={v => setSelectedFormatId(v)}
+                        disabled={formatsLoading}
+                    />
+
+                    {/* Excel Upload */}
+                    <div className="space-y-2">
+                        <Label>Excel ile Yükleme</Label>
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={handleDownloadTemplate}>
+                                <Download className="mr-2 h-4 w-4" />
+                                Şablon İndir
+                            </Button>
+                            <label htmlFor="excel-upload">
+                                <Button variant="outline" disabled={!selectedSourceName} asChild>
+                                    <span>
+                                        <Upload className="mr-2 h-4 w-4" />
+                                        Excel Yükle
+                                    </span>
+                                </Button>
+                            </label>
+                            <input
+                                id="excel-upload"
+                                type="file"
+                                accept=".xlsx,.xls"
+                                className="hidden"
+                                onChange={handleExcelUpload}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Destroyed Items List */}
+                    {destroyedItems.length > 0 && (
+                        <>
+                            <div className="flex justify-between items-center">
+                                <Label>İmha Edilecek Ürünler ({destroyedItems.reduce((sum, item) => sum + item.adet, 0)} Adet)</Label>
+                                <Button onClick={handleSubmit} disabled={submitting}>
+                                    {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    İmha Et ve Stoktan Düş
                                 </Button>
                             </div>
 
-                            <ScrollArea className="h-[60vh] border rounded-md">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>İmha Tarihi</TableHead>
-                                            <TableHead>Kaynak</TableHead>
-                                            <TableHead>Ürün</TableHead>
-                                            <TableHead>Lot</TableHead>
-                                            <TableHead>Miad</TableHead>
-                                            <TableHead>Seri No</TableHead>
-                                            <TableHead>Adet</TableHead>
-                                            <TableHead>Onaylayan</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {filteredDbRecords.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={8} className="text-center py-8">
-                                                    Kayıt bulunamadı.
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            filteredDbRecords.map(record => (
-                                                <TableRow key={record.id}>
-                                                    <TableCell className="text-xs">
-                                                        {record.resolvedAt
-                                                            ? format(record.resolvedAt instanceof Date ? record.resolvedAt : new Date(record.resolvedAt), 'dd.MM.yy HH:mm', { locale: tr })
-                                                            : '-'}
-                                                    </TableCell>
-                                                    <TableCell>{record.laboratoryName || record.depotName || '-'}</TableCell>
-                                                    <TableCell>
-                                                        <div>
-                                                            <div className="font-medium">{record.stokAdi}</div>
-                                                            <div className="text-xs text-muted-foreground">{record.stokKodu}</div>
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell>{record.lotNumarasi || '-'}</TableCell>
-                                                    <TableCell>{record.miad || '-'}</TableCell>
-                                                    <TableCell className="font-mono text-xs">{record.seriNumarasi || '-'}</TableCell>
-                                                    <TableCell>
-                                                        <Badge variant="secondary">{record.testCount}</Badge>
-                                                    </TableCell>
-                                                    <TableCell>{record.resolvedByName}</TableCell>
-                                                </TableRow>
-                                            ))
-                                        )}
-                                    </TableBody>
-                                </Table>
+                            <ScrollArea className="h-96 border rounded-md p-2">
+                                <Accordion type="multiple" className="w-full">
+                                    {groupedDestroyedItems.map(group => (
+                                        <AccordionItem value={group.key} key={group.key}>
+                                            <AccordionTrigger>
+                                                <div className="flex-1 text-left font-medium">
+                                                    {group.stokAdi} <span className="text-xs text-muted-foreground">({group.stokKodu})</span>
+                                                </div>
+                                                <div className="flex-1 text-left text-sm">Lot: {group.lotNumarasi || '-'}</div>
+                                                <div className="flex-1 text-left text-sm">Miad: {group.miad || '-'}</div>
+                                                <div className="font-bold flex items-center gap-2">
+                                                    <span>{group.adet} Adet</span>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            removeDestroyedItem(group.key, true);
+                                                        }}
+                                                    >
+                                                        <Trash2 className="h-4 w-4 text-destructive" />
+                                                    </Button>
+                                                </div>
+                                            </AccordionTrigger>
+                                            <AccordionContent className="p-2 bg-muted/50">
+                                                {group.serials.length > 0 ? (
+                                                    <ul className="space-y-1">
+                                                        {group.serials.map(serial => (
+                                                            <li key={serial.id} className="flex justify-between items-center text-xs font-mono">
+                                                                {serial.seriNumarasi}
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-6 w-6"
+                                                                    onClick={() => removeDestroyedItem(serial.id, false)}
+                                                                >
+                                                                    <Trash2 className="h-3 w-3 text-destructive" />
+                                                                </Button>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                ) : (
+                                                    <p className="text-xs text-muted-foreground">Bu grup manuel olarak eklendi, seri numarası detayı yok.</p>
+                                                )}
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    ))}
+                                </Accordion>
                             </ScrollArea>
-                        </TabsContent>
-                    </Tabs>
+                        </>
+                    )}
                 </CardContent>
             </Card>
 
