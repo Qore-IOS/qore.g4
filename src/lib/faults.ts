@@ -277,15 +277,21 @@ export async function resolveEjectedKitFault(
       faultReportId: reportId,
       laboratoryId: reportData.hospitalId,
       laboratoryName: reportData.labName,
+      depotId: null,
+      depotName: '',
       deviceId: reportData.deviceId,
       deviceModel: reportData.model,
       stokKodu: reportData.productStokKodu,
       stokAdi: reportData.productStokAdi,
+      lotNumarasi: '',
+      miad: '',
+      seriNumarasi: '',
       testCount: reportData.testCount,
       aciklama: reportData.description,
       resolvedAt: serverTimestamp(),
       resolvedByUid: actor.uid,
       resolvedByName: actor.name,
+      sourceType: 'fault',
     });
   }
 

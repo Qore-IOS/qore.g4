@@ -633,19 +633,25 @@ export interface EjectedKitRecord {
 // Destroyed kits report for "imha" resolution
 export interface DestroyedKitRecord {
   id: string;
-  ejectedKitRecordId: string;
-  faultReportId: string;
-  laboratoryId: string;
+  ejectedKitRecordId: string | null;
+  faultReportId: string | null;
+  laboratoryId: string | null;
   laboratoryName: string;
-  deviceId: string;
+  depotId?: string | null; // NEW: For depot-sourced destructions
+  depotName?: string; // NEW: For depot-sourced destructions
+  deviceId: string | null;
   deviceModel: string;
   stokKodu: string;
   stokAdi: string;
+  lotNumarasi?: string; // NEW: Lot number
+  miad?: string; // NEW: Expiry date
+  seriNumarasi?: string; // NEW: Serial number
   testCount: number;
   aciklama: string;
   resolvedAt: TimestampLike;
   resolvedByUid: string;
   resolvedByName: string;
+  sourceType?: 'barcode' | 'excel' | 'fault'; // NEW: Source of destruction
 }
 
 export interface Rack {
