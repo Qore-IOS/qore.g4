@@ -221,12 +221,12 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
                 <p className="text-xs text-muted-foreground mb-2">
                   Diğer laboratuvarlardan merkeze gönderilen testler için hak ediş hesaplamasında kullanılır.
                 </p>
-                <Select value={centerLabId} onValueChange={setCenterLabId}>
+                <Select value={centerLabId || '__none__'} onValueChange={(val) => setCenterLabId(val === '__none__' ? '' : val)}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Merkez laboratuvar seçin..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Seçilmedi</SelectItem>
+                    <SelectItem value="__none__">Seçilmedi</SelectItem>
                     {hospitals
                       .filter(h => selectedLabIds.has(h.id))
                       .map(lab => (
