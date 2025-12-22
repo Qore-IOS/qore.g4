@@ -31,10 +31,9 @@ import {
   History as HistoryIcon,
   Activity,
   Archive,
-  Database,
-  FileCode,
   Barcode,
   Trash2,
+  Package,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -44,6 +43,7 @@ export default function RaporlamaPanel() {
   const [isExporting, setIsExporting] = useState(false);
   const [isCumulativeModalOpen, setIsCumulativeModalOpen] = useState(false);
   const [isCihazUstuModalOpen, setIsCihazUstuModalOpen] = useState(false);
+  const [isStokIslemleriModalOpen, setIsStokIslemleriModalOpen] = useState(false);
 
   const handleExport = async (format: 'json' | 'csv') => {
     setIsExporting(true);
@@ -90,6 +90,11 @@ export default function RaporlamaPanel() {
     setIsCihazUstuModalOpen(false);
   };
 
+  const handleStokIslemleriNavigation = (path: string) => {
+    router.push(path);
+    setIsStokIslemleriModalOpen(false);
+  };
+
   return (
     <>
       <div className="space-y-6">
@@ -104,61 +109,35 @@ export default function RaporlamaPanel() {
                 Harici PDF raporlarını yönetin veya özel stok raporlarına ulaşın.
               </CardDescription>
             </div>
-            <div className="flex space-x-2 flex-wrap mt-2 sm:mt-0">
-              <Button
-                variant="default"
-                className="bg-black text-white hover:bg-gray-800"
-                size="sm"
-                onClick={() => router.push('/ariza-yonetimi/html')}
-              >
-                <FileCode className="mr-2 h-4 w-4" />
-                Arıza Raporu
-              </Button>
-               <Button variant="outline" size="sm" onClick={() => router.push('/raporlama/imha-edilen-kitler')}>
-                  <Trash2 className="mr-2 h-4 w-4" /> İmha Edilen Kitler
-                </Button>
+            <div className="flex gap-2 flex-wrap mt-4 sm:mt-0">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/raporlama/hareketsiz-stok-raporu')}
+                onClick={() => setIsCumulativeModalOpen(true)}
               >
-                <CalendarClock className="mr-2 h-4 w-4" />
-                Hareketsiz Stok Raporu
+                <Archive className="h-4 w-4 mr-2" /> Kümülatif
               </Button>
-               <Button
+              <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/raporlama/minmax-urun-grafik')}
+                onClick={() => setIsCihazUstuModalOpen(true)}
               >
-                Min-Max Ürün Grafiği
+                <Activity className="h-4 w-4 mr-2" /> Cihaz Üstü
               </Button>
-               <Button
+              <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/raporlama/gecmis-stok-raporu')}
+                onClick={() => setIsStokIslemleriModalOpen(true)}
               >
-                <HistoryIcon className="mr-2 h-4 w-4" />
-                Geçmiş Stok Raporu
+                <Package className="h-4 w-4 mr-2" /> Stok İşlemleri
               </Button>
-               <Button
+              <Button
                 variant="outline"
                 size="sm"
                 onClick={() => router.push('/raporlama/seri-no-format')}
               >
                 <Barcode className="mr-2 h-4 w-4" />
                 Seri No Format Tanımla
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => setIsCumulativeModalOpen(true)}
-              >
-                <Archive className="h-4 w-4 mr-2" /> Kümülatif
-              </Button>
-              <Button size="sm" onClick={() => setIsCihazUstuModalOpen(true)}>
-                <Activity className="h-4 w-4 mr-2" /> Cihaz Üstü
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => router.push('/raporlama/lbys-veri-yonetimi')}>
-                <Database className="h-4 w-4 mr-2" /> LBYS Veri Yönetimi
               </Button>
             </div>
           </CardHeader>
@@ -225,6 +204,30 @@ export default function RaporlamaPanel() {
             </Button>
             <Button variant="outline" onClick={() => navigateTo('/raporlama/cihaz-ustu-gecmisi')}>
               Cihaz Üstü Geçmişi
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isStokIslemleriModalOpen} onOpenChange={setIsStokIslemleriModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-headline flex items-center">
+              <Package className="mr-2 h-6 w-6" /> Stok İşlemleri
+            </DialogTitle>
+            <DialogDescription>
+              Stok raporları ve analizlerine erişin.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <Button variant="outline" onClick={() => handleStokIslemleriNavigation('/raporlama/imha-edilen-kitler')}>
+              <Trash2 className="h-4 w-4 mr-2" /> İmha Edilen Kitler
+            </Button>
+            <Button variant="outline" onClick={() => handleStokIslemleriNavigation('/raporlama/hareketsiz-stok-raporu')}>
+              <CalendarClock className="h-4 w-4 mr-2" /> Hareketsiz Stok Raporu
+            </Button>
+            <Button variant="outline" onClick={() => handleStokIslemleriNavigation('/raporlama/minmax-urun-grafik')}>
+              <Activity className="h-4 w-4 mr-2" /> Min-Max Ürün Grafiği
             </Button>
           </div>
         </DialogContent>
