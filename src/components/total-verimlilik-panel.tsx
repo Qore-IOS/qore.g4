@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History, Filter, ArrowUpDown, ArrowUp, ArrowDown, Search, X } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History, Filter, ArrowUpDown, ArrowUp, ArrowDown, Search, X, Crown, Building2, RotateCcw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -170,6 +170,14 @@ export default function TotalVerimlilikPanel({
     direction: 'asc' | 'desc';
   }>({ column: null, direction: 'asc' });
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Merkez Hak Edişi Hesaplama State'leri
+  const [centerHakEdisMode, setCenterHakEdisMode] = useState(false);
+  const [isCalculatingCenterHakEdis, setIsCalculatingCenterHakEdis] = useState(false);
+  // Key: rowId (labId-stokKodu), Value: merkeze gönderilen test sayısı
+  const [testsSentToCenter, setTestsSentToCenter] = useState<Record<string, number>>({});
+  // İş analizi raw data cache
+  const [isAnaliziRawData, setIsAnaliziRawData] = useState<any[] | null>(null);
 
   // Verimlilik havuzlarını, ortak lab havuzlarını ve depoları çek
   useEffect(() => {
@@ -1283,7 +1291,7 @@ export default function TotalVerimlilikPanel({
 
   // Sütun 24: Hak Ediş Karşılığı hesaplama yardımcı fonksiyonu
   // hakEdisMiktari (TL) × row.hakEdis (test sayısı) = toplam TL karşılık
-  const calculateHakEdisKarsiligi = useCallback((row: TableRow): { amount: number; hasData: boolean } => {
+  const calculateHakEdisKarsiligi = useCallback((row: TableRow, useAdjusted: boolean = false): { amount: number; hasData: boolean } => {
     if (!exchangeRates) return { amount: 0, hasData: false };
 
     // Bu laboratuvarın hak ediş tanımlarından ilgili ürünü bul
@@ -1294,8 +1302,12 @@ export default function TotalVerimlilikPanel({
       return { amount: 0, hasData: false };
     }
 
-    // Hak ediş test sayısı (Sütun 19)
-    const hakEdisTestSayisi = row.hakEdis || 0;
+    // Hak ediş test sayısı (Sütun 19) - merkez hak ediş modu aktifse düzeltilmiş değeri kullan
+    let hakEdisTestSayisi = row.hakEdis || 0;
+    if (useAdjusted && centerHakEdisMode) {
+      const sentCount = testsSentToCenter[row.id] || 0;
+      hakEdisTestSayisi = Math.max(0, hakEdisTestSayisi - sentCount);
+    }
     if (hakEdisTestSayisi <= 0) {
       return { amount: 0, hasData: true };
     }
@@ -1315,7 +1327,7 @@ export default function TotalVerimlilikPanel({
     // TRY ise zaten TL cinsinden
 
     return { amount: finalAmount, hasData: true };
-  }, [labHakEdisDefinitions, exchangeRates, costCurrency]);
+  }, [labHakEdisDefinitions, exchangeRates, costCurrency, centerHakEdisMode, testsSentToCenter]);
 
   // Toplam hak ediş karşılığı hesapla
   const totalHakEdisKarsiligi = useMemo(() => {
@@ -1328,8 +1340,8 @@ export default function TotalVerimlilikPanel({
   }, [rows, calculateHakEdisKarsiligi]);
 
   // Sütun 25: Kâr hesaplama yardımcı fonksiyonu (24 - 23)
-  const calculateKar = useCallback((row: TableRow): { kar: number; hasData: boolean } => {
-    const { amount: hakEdisKarsiligi, hasData: hasHakEdis } = calculateHakEdisKarsiligi(row);
+  const calculateKar = useCallback((row: TableRow, useAdjusted: boolean = false): { kar: number; hasData: boolean } => {
+    const { amount: hakEdisKarsiligi, hasData: hasHakEdis } = calculateHakEdisKarsiligi(row, useAdjusted);
     const { cost: sarfiyatMaliyeti, hasData: hasCost } = calculateRowCost(row);
 
     if (!hasHakEdis && !hasCost) {
@@ -1352,6 +1364,147 @@ export default function TotalVerimlilikPanel({
     return total;
   }, [rows, calculateKar]);
 
+  // Merkez laboratuvar bilgisi
+  const selectedPool = useMemo(() => {
+    return efficiencyPools.find(p => p.id === selectedPoolId);
+  }, [efficiencyPools, selectedPoolId]);
+
+  const centerLab = useMemo(() => {
+    if (!selectedPool?.centerLabId) return null;
+    return hospitals.find(h => h.id === selectedPool.centerLabId) || null;
+  }, [selectedPool, hospitals]);
+
+  // Merkez Hak Edişi Hesaplama Fonksiyonu
+  const calculateCenterHakEdis = useCallback(async () => {
+    if (!selectedPool?.centerLabId) {
+      toast({ title: 'Uyarı', description: 'Bu havuzda merkez laboratuvar tanımlanmamış.', variant: 'destructive' });
+      return;
+    }
+
+    const centerLabInfo = hospitals.find(h => h.id === selectedPool.centerLabId);
+    if (!centerLabInfo?.kod) {
+      toast({ title: 'Uyarı', description: 'Merkez laboratuvarın kodu tanımlı değil.', variant: 'destructive' });
+      return;
+    }
+
+    setIsCalculatingCenterHakEdis(true);
+
+    try {
+      // İş analizi raw verisini çek (eğer cache'de yoksa)
+      let rawData = isAnaliziRawData;
+      if (!rawData) {
+        const analysisDocRef = doc(db, 'isAnaliziVerileri', 'sonVeri');
+        const docSnap = await getDoc(analysisDocRef);
+        if (docSnap.exists()) {
+          rawData = docSnap.data().rawData || [];
+          setIsAnaliziRawData(rawData);
+        } else {
+          toast({ title: 'Uyarı', description: 'İş analizi verisi bulunamadı.', variant: 'destructive' });
+          setIsCalculatingCenterHakEdis(false);
+          return;
+        }
+      }
+
+      // Seçilen dönemin başlangıç ve bitiş tarihlerini hesapla
+      const periodStart = new Date(selectedYear, selectedMonth, 1);
+      const periodEnd = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
+
+      // Her satır için merkeze gönderilen test sayısını hesapla
+      const sentToCenter: Record<string, number> = {};
+
+      for (const row of rows) {
+        // Merkez laboratuvarı atla (merkez kendi kendine test göndermez)
+        if (row.labId === selectedPool.centerLabId) {
+          sentToCenter[row.id] = 0;
+          continue;
+        }
+
+        // Bu satırın laboratuvarının kodunu bul
+        const labInfo = hospitals.find(h => h.id === row.labId);
+        if (!labInfo?.kod) {
+          sentToCenter[row.id] = 0;
+          continue;
+        }
+
+        // 999 kodlu ASM'leri atla (kullanıcı istediği gibi)
+        if (labInfo.kod === '999') {
+          sentToCenter[row.id] = 0;
+          continue;
+        }
+
+        // Bu ürüne bağlı hak ediş tanımından SUT kodunu bul
+        const labDefinitions = labHakEdisDefinitions[row.labId] || [];
+        const hakEdisDefinition = labDefinitions.find(d => d.linkedStokKodu === row.stokKodu);
+
+        if (!hakEdisDefinition) {
+          sentToCenter[row.id] = 0;
+          continue;
+        }
+
+        // İş analizi verisinde:
+        // - hastaneId = bu laboratuvarın kodu (nereden istek geldi)
+        // - testId = SUT kodu (hangi test)
+        // - İlgili dönem içindeki kayıtları say
+        let testCount = 0;
+        for (const record of rawData) {
+          // Hastane ID kontrolü - bu laboratuvardan gelen istekler
+          if (String(record.hastaneId || '').trim() !== labInfo.kod) continue;
+
+          // Test ID kontrolü - SUT kodu eşleşmesi
+          if (String(record.testId || '').trim() !== hakEdisDefinition.sutKodu) continue;
+
+          // Tarih kontrolü - seçilen dönem içinde mi?
+          const recordDate = record.labKabulTarihi || record.istemTarihi;
+          if (recordDate) {
+            let dateObj: Date | null = null;
+            if (typeof recordDate === 'number') {
+              // Excel date number
+              dateObj = new Date(Math.round((recordDate - 25569) * 86400 * 1000));
+            } else if (recordDate instanceof Date) {
+              dateObj = recordDate;
+            } else if (typeof recordDate === 'string') {
+              dateObj = new Date(recordDate);
+            }
+
+            if (dateObj && !isNaN(dateObj.getTime())) {
+              if (dateObj < periodStart || dateObj > periodEnd) continue;
+            }
+          }
+
+          testCount++;
+        }
+
+        sentToCenter[row.id] = testCount;
+      }
+
+      setTestsSentToCenter(sentToCenter);
+      setCenterHakEdisMode(true);
+
+      toast({
+        title: 'Hesaplama Tamamlandı',
+        description: 'Merkeze gönderilen test sayıları hesaplandı. Hak ediş değerleri güncellendi.',
+      });
+    } catch (error) {
+      console.error('Error calculating center hakediş:', error);
+      toast({ title: 'Hata', description: 'Merkez hak ediş hesaplaması yapılırken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsCalculatingCenterHakEdis(false);
+    }
+  }, [selectedPool, hospitals, rows, labHakEdisDefinitions, isAnaliziRawData, selectedYear, selectedMonth, toast]);
+
+  // Düzeltilmiş hak ediş değerini hesapla (merkez hak ediş modu aktifken)
+  const getAdjustedHakEdis = useCallback((row: TableRow): number => {
+    if (!centerHakEdisMode) return row.hakEdis;
+    const sentCount = testsSentToCenter[row.id] || 0;
+    return Math.max(0, row.hakEdis - sentCount);
+  }, [centerHakEdisMode, testsSentToCenter]);
+
+  // Merkez hak ediş modunu sıfırla
+  const resetCenterHakEdisMode = useCallback(() => {
+    setCenterHakEdisMode(false);
+    setTestsSentToCenter({});
+  }, []);
+
   return (
     <div className="p-4 space-y-6">
       <BackButton fallback="/" />
@@ -1369,13 +1522,57 @@ export default function TotalVerimlilikPanel({
                 Tüm veriler manuel olarak girilecektir.
               </CardDescription>
             </div>
-            <Link href="/total-dashboard">
-              <Button variant="outline" className="gap-2 bg-gradient-to-r from-primary/10 to-primary/5 hover:from-primary/20 hover:to-primary/10 border-primary/20">
-                <BarChart3 className="h-4 w-4" />
-                Total Dashboard
-              </Button>
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link href="/total-dashboard">
+                <Button variant="outline" className="gap-2 bg-gradient-to-r from-primary/10 to-primary/5 hover:from-primary/20 hover:to-primary/10 border-primary/20">
+                  <BarChart3 className="h-4 w-4" />
+                  Total Dashboard
+                </Button>
+              </Link>
+              {selectedPool?.centerLabId && (
+                <>
+                  {centerHakEdisMode ? (
+                    <Button
+                      variant="outline"
+                      className="gap-2 bg-amber-100 dark:bg-amber-950 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
+                      onClick={resetCenterHakEdisMode}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Merkez Modunu Sıfırla
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="gap-2 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950 dark:to-orange-950 border-amber-200 dark:border-amber-800"
+                      onClick={calculateCenterHakEdis}
+                      disabled={isCalculatingCenterHakEdis || rows.length === 0}
+                    >
+                      {isCalculatingCenterHakEdis ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Crown className="h-4 w-4 text-amber-600" />
+                      )}
+                      Merkez Hak Edişi Hesapla
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
+          {/* Merkez Lab Bilgisi */}
+          {selectedPool?.centerLabId && centerLab && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${centerHakEdisMode ? 'bg-amber-100 dark:bg-amber-950 border border-amber-300 dark:border-amber-700' : 'bg-muted'}`}>
+              <Crown className="h-4 w-4 text-amber-600" />
+              <span className="font-medium">Merkez Laboratuvar:</span>
+              <span>{centerLab.name}</span>
+              {centerLab.kod && <Badge variant="outline" className="ml-1 font-mono text-xs">{centerLab.kod}</Badge>}
+              {centerHakEdisMode && (
+                <Badge className="ml-2 bg-amber-500 text-white">
+                  Merkez Hak Ediş Modu Aktif
+                </Badge>
+              )}
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2139,6 +2336,20 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        {/* Sütun 26: Merkeze Gönderilen Test */}
+                        {centerHakEdisMode && (
+                          <TableHead className="min-w-[160px] bg-orange-50 dark:bg-orange-950 text-center">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center justify-center gap-1">
+                                <Building2 className="h-3.5 w-3.5 text-orange-600" />
+                                <span>26. Merkeze Gönderilen</span>
+                              </div>
+                              <div className="text-xs font-normal text-muted-foreground">
+                                Test Sayısı
+                              </div>
+                            </div>
+                          </TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2294,18 +2505,33 @@ export default function TotalVerimlilikPanel({
                               {row.donemSonuToplamTest.toLocaleString('tr-TR')}
                             </TableCell>
                             {/* Sütun 19: Hak Ediş (Test) */}
-                            <TableCell className="bg-yellow-50/50 dark:bg-yellow-950/50">
+                            <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-amber-100/50 dark:bg-amber-950/50' : 'bg-yellow-50/50 dark:bg-yellow-950/50'}`}>
                               {showResultsOnly ? (
-                                <span className="font-semibold">{row.hakEdis.toLocaleString('tr-TR')}</span>
+                                <div className="flex flex-col items-center">
+                                  <span className="font-semibold">{row.hakEdis.toLocaleString('tr-TR')}</span>
+                                  {centerHakEdisMode && testsSentToCenter[row.id] > 0 && (
+                                    <div className="flex flex-col items-center text-xs text-amber-600 dark:text-amber-400">
+                                      <span className="line-through text-muted-foreground">{row.hakEdis.toLocaleString('tr-TR')}</span>
+                                      <span className="font-semibold">→ {getAdjustedHakEdis(row).toLocaleString('tr-TR')}</span>
+                                    </div>
+                                  )}
+                                </div>
                               ) : (
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  className="h-8 w-28"
-                                  value={row.hakEdis || ''}
-                                  onChange={e => handleValueChange(row.id, 'hakEdis', e.target.value)}
-                                  placeholder="0"
-                                />
+                                <div className="flex flex-col gap-1">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    className="h-8 w-28"
+                                    value={row.hakEdis || ''}
+                                    onChange={e => handleValueChange(row.id, 'hakEdis', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                  {centerHakEdisMode && testsSentToCenter[row.id] > 0 && (
+                                    <div className="text-xs text-amber-600 dark:text-amber-400 text-center">
+                                      Düzeltilmiş: {getAdjustedHakEdis(row).toLocaleString('tr-TR')}
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </TableCell>
                             {/* Phase 4 - Sütunlar 20-21 */}
@@ -2338,13 +2564,15 @@ export default function TotalVerimlilikPanel({
                               </div>
                             </TableCell>
                             {/* Sütun 22: Kutu Kayıp */}
-                            <TableCell className="bg-violet-50/50 dark:bg-violet-950/50 text-center">
+                            <TableCell className={`${centerHakEdisMode && column22Mode === 'hakedis' && testsSentToCenter[row.id] ? 'bg-amber-100/50 dark:bg-amber-950/50' : 'bg-violet-50/50 dark:bg-violet-950/50'} text-center`}>
                               {(() => {
                                 // Kümülatife göre: (14-18) - 15 = stokDogrulukFark
                                 // Hak edişe göre: (14-18) - 19 = (sevkiyatlarSonrasiTotalTest - donemSonuToplamTest) - hakEdis
+                                // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
+                                const effectiveHakEdis = centerHakEdisMode ? getAdjustedHakEdis(row) : row.hakEdis;
                                 const testFark = column22Mode === 'kumulatif'
                                   ? row.stokDogrulukFark
-                                  : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - row.hakEdis;
+                                  : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - effectiveHakEdis;
 
                                 const ambalaj = row.ambalajDegeri || 1;
                                 const kutuFark = testFark / ambalaj;
@@ -2420,9 +2648,11 @@ export default function TotalVerimlilikPanel({
                               })()}
                             </TableCell>
                             {/* Sütun 24: Hak Ediş Karşılığı */}
-                            <TableCell className="bg-amber-50/50 dark:bg-amber-950/50 text-center">
+                            <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-amber-200/50 dark:bg-amber-900/50' : 'bg-amber-50/50 dark:bg-amber-950/50'} text-center`}>
                               {(() => {
-                                const { amount, hasData } = calculateHakEdisKarsiligi(row);
+                                // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
+                                const { amount, hasData } = calculateHakEdisKarsiligi(row, centerHakEdisMode);
+                                const { amount: originalAmount } = centerHakEdisMode ? calculateHakEdisKarsiligi(row, false) : { amount: 0 };
 
                                 // Hak ediş tanımının olup olmadığını kontrol et
                                 const labDefinitions = labHakEdisDefinitions[row.labId] || [];
@@ -2436,13 +2666,15 @@ export default function TotalVerimlilikPanel({
                                   );
                                 }
 
-                                if (amount === 0) {
+                                if (amount === 0 && !centerHakEdisMode) {
                                   return (
                                     <span className="text-muted-foreground">-</span>
                                   );
                                 }
 
                                 const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
+                                const adjustedHakEdis = getAdjustedHakEdis(row);
+                                const showAdjustment = centerHakEdisMode && testsSentToCenter[row.id] > 0;
 
                                 return (
                                   <div className="flex flex-col items-center gap-0.5">
@@ -2450,16 +2682,23 @@ export default function TotalVerimlilikPanel({
                                       {currencySymbol}{amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                     <span className="text-[10px] text-muted-foreground">
-                                      {row.hakEdis.toLocaleString('tr-TR')} test × ₺{hakEdisDefinition?.hakEdisMiktari.toFixed(2)}
+                                      {(showAdjustment ? adjustedHakEdis : row.hakEdis).toLocaleString('tr-TR')} test × ₺{hakEdisDefinition?.hakEdisMiktari.toFixed(2)}
                                     </span>
+                                    {showAdjustment && (
+                                      <span className="text-[9px] text-amber-600 line-through">
+                                        Önceki: {currencySymbol}{originalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    )}
                                   </div>
                                 );
                               })()}
                             </TableCell>
                             {/* Sütun 25: Kâr */}
-                            <TableCell className="bg-sky-50/50 dark:bg-sky-950/50 text-center">
+                            <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-sky-200/50 dark:bg-sky-900/50' : 'bg-sky-50/50 dark:bg-sky-950/50'} text-center`}>
                               {(() => {
-                                const { kar, hasData } = calculateKar(row);
+                                // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
+                                const { kar, hasData } = calculateKar(row, centerHakEdisMode);
+                                const { kar: originalKar } = centerHakEdisMode ? calculateKar(row, false) : { kar: 0 };
 
                                 if (!hasData) {
                                   return (
@@ -2469,7 +2708,7 @@ export default function TotalVerimlilikPanel({
                                   );
                                 }
 
-                                if (kar === 0) {
+                                if (kar === 0 && !centerHakEdisMode) {
                                   return (
                                     <span className="text-muted-foreground">-</span>
                                   );
@@ -2477,6 +2716,7 @@ export default function TotalVerimlilikPanel({
 
                                 const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
                                 const isProfit = kar > 0;
+                                const showAdjustment = centerHakEdisMode && testsSentToCenter[row.id] > 0;
 
                                 return (
                                   <div className="flex flex-col items-center gap-0.5">
@@ -2486,10 +2726,47 @@ export default function TotalVerimlilikPanel({
                                     <span className="text-[10px] text-muted-foreground">
                                       {isProfit ? 'Kâr' : 'Zarar'}
                                     </span>
+                                    {showAdjustment && (
+                                      <span className="text-[9px] text-sky-600 line-through">
+                                        Önceki: {currencySymbol}{originalKar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    )}
                                   </div>
                                 );
                               })()}
                             </TableCell>
+                            {/* Sütun 26: Merkeze Gönderilen Test */}
+                            {centerHakEdisMode && (
+                              <TableCell className="bg-orange-50/50 dark:bg-orange-950/50 text-center">
+                                {(() => {
+                                  const sentCount = testsSentToCenter[row.id] || 0;
+
+                                  // Merkez laboratuvar için gösterme
+                                  if (selectedPool?.centerLabId === row.labId) {
+                                    return (
+                                      <span className="text-muted-foreground text-xs">
+                                        Merkez Lab
+                                      </span>
+                                    );
+                                  }
+
+                                  if (sentCount === 0) {
+                                    return <span className="text-muted-foreground">-</span>;
+                                  }
+
+                                  return (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="font-semibold text-orange-600 dark:text-orange-400">
+                                        {sentCount.toLocaleString('tr-TR')}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground">
+                                        test
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
+                              </TableCell>
+                            )}
                           </TableRow>
                         );
                       })}
