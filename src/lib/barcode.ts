@@ -167,11 +167,21 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   const candidates = Array.from(new Set([raw, sanitizeGS1?.(raw) || raw]));
   const compiled = (formats || []).map(compileFormat);
 
-  const results: ParsedGeneric[] = [];
-  
-  const score = (p: ParsedGeneric | null): number => {
+  const results: Array<ParsedGeneric & { formatPriority?: number }> = [];
+
+  const score = (p: ParsedGeneric & { formatPriority?: number } | null): number => {
     if (!p) return -1;
     let s = 0;
+
+    // Priority bonus: Lower priority number = Higher score bonus
+    // Priority 1 gets +1000, Priority 2 gets +900, Priority 3 gets +800, etc.
+    // This ensures user-defined priority always wins over field completeness
+    const priorityBonus = p.formatPriority
+      ? Math.max(0, 1100 - (p.formatPriority * 100))
+      : 500; // Default bonus for formats without priority
+    s += priorityBonus;
+
+    // Field completeness scoring (secondary to priority)
     if (p.stokKodu || p.barcodeNumber) s += 20;
     if (p.lotNumarasi) s += 20;
     if (p.seriNumarasi) s += 25;
@@ -184,7 +194,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   for (const candidate of candidates) {
     for (const c of compiled) {
       try {
-        let parsed: ParsedGeneric | null = null;
+        let parsed: (ParsedGeneric & { formatPriority?: number }) | null = null;
         if (c.strategy === 'legacy_roche') {
           if (/^\d{61}$/.test(candidate)) {
             const out = legacyRocheParser(candidate);
@@ -195,6 +205,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
                 lotNumarasi: out.lotNumarasi,
                 miadFormatted: out.miadFormatted,
                 seriNumarasi: out.seriNumarasi,
+                formatPriority: c.f.priority,
               };
             }
           }
@@ -208,12 +219,12 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
             const lot = c.f.trackLot !== false && c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
             const expRaw = c.f.trackLot !== false && c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
             const miad = expRaw ? normalizeExpiry(expRaw, c.expiryPattern) : undefined;
-            
+
             let seriNumarasi: string | undefined;
 
             if (c.f.trackSerial === true) {
                 const serialFromRegex = c.fields.serial ? (m[c.fields.serial] || '').trim() : undefined;
-                
+
                 if (serialFromRegex) {
                     seriNumarasi = serialFromRegex;
                 } else {
@@ -224,7 +235,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
             }
 
             const udi = c.fields.barcodeNumber ? (m[c.fields.barcodeNumber] || '').trim() : undefined;
-            
+
             parsed = {
               matchedFormatId: c.f.id,
               stokKodu: c.f.parseTarget === 'barcodeNumber' ? undefined : (ref || undefined),
@@ -232,6 +243,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
               lotNumarasi: lot || undefined,
               miadFormatted: miad,
               seriNumarasi: seriNumarasi || undefined,
+              formatPriority: c.f.priority,
             };
           }
         }
@@ -244,7 +256,11 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   
   if (results.length === 0) return null;
 
-  return results.sort((a,b) => score(b) - score(a))[0];
+  const bestMatch = results.sort((a,b) => score(b) - score(a))[0];
+
+  // Remove formatPriority from the result as it's only used for scoring
+  const { formatPriority, ...result } = bestMatch;
+  return result;
 }
 
 export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: ProductCode[]) {
