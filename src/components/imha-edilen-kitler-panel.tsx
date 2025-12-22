@@ -432,73 +432,125 @@ export default function ImhaEdilenKitlerPanel() {
 
         setSubmitting(true);
         try {
-            const batch = writeBatch(db);
-
-            // Process stock deduction
-            for (const item of destroyedItems) {
+            // STEP 1: Group items by source and collection
+            const sourceGroups: Record<string, DestroyedItem[]> = {};
+            destroyedItems.forEach(item => {
                 const sourceId = item.depotId || item.laboratoryId;
                 const sourceType = item.depotId ? 'depot' : 'laboratory';
+                const key = `${sourceType}-${sourceId}`;
+                if (!sourceGroups[key]) sourceGroups[key] = [];
+                sourceGroups[key].push(item);
+            });
+
+            // STEP 2: Fetch all stocks in parallel (one query per source)
+            const stockQueries = Object.entries(sourceGroups).map(async ([key, items]) => {
+                const sourceType = key.startsWith('depot') ? 'depot' : 'laboratory';
+                const sourceId = items[0].depotId || items[0].laboratoryId;
                 const collectionName = sourceType === 'depot' ? 'depoStok' : 'labStock';
                 const idField = sourceType === 'depot' ? 'depotId' : 'laboratoryId';
 
-                if (item.seriNumarasi) {
-                    // Find and delete by serial
+                // Get unique stock codes for this source
+                const uniqueStockCodes = Array.from(new Set(items.map(i => i.stokKodu)));
+
+                // Fetch all relevant stock items for all products
+                // Note: Firestore 'in' operator supports max 10 values
+                const stockPromises = [];
+                for (let i = 0; i < uniqueStockCodes.length; i += 10) {
+                    const chunk = uniqueStockCodes.slice(i, i + 10);
                     const q = query(
                         collection(db, collectionName),
                         where(idField, '==', sourceId),
-                        where('stokKodu', '==', item.stokKodu),
-                        where('seriNumarasi', '==', item.seriNumarasi),
+                        where('stokKodu', 'in', chunk),
                         ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
                     );
-                    const snap = await getDocs(q);
-                    snap.docs.forEach(docSnap => {
-                        batch.delete(doc(db, collectionName, docSnap.id));
-                    });
-                } else if (item.lotNumarasi && item.isGroup) {
-                    // Find and delete by lot (up to adet count)
-                    const q = query(
-                        collection(db, collectionName),
-                        where(idField, '==', sourceId),
-                        where('stokKodu', '==', item.stokKodu),
-                        where('lotNumarasi', '==', item.lotNumarasi),
-                        ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
-                    );
-                    const snap = await getDocs(q);
-                    const toDelete = snap.docs.slice(0, item.adet);
-                    toDelete.forEach(docSnap => {
-                        batch.delete(doc(db, collectionName, docSnap.id));
-                    });
+                    stockPromises.push(getDocs(q));
                 }
 
-                // Create destroyed kit record
-                const destroyedKitRef = doc(collection(db, 'destroyedKitsReports'));
-                batch.set(destroyedKitRef, {
-                    id: destroyedKitRef.id,
-                    ejectedKitRecordId: null,
-                    faultReportId: null,
-                    laboratoryId: item.laboratoryId || null,
-                    laboratoryName: item.laboratoryName || '',
-                    depotId: item.depotId || null,
-                    depotName: item.depotName || '',
-                    deviceId: null,
-                    deviceModel: 'Manuel İmha',
-                    stokKodu: item.stokKodu,
-                    stokAdi: item.stokAdi,
-                    lotNumarasi: item.lotNumarasi,
-                    miad: item.miad,
-                    seriNumarasi: item.seriNumarasi,
-                    testCount: item.adet,
-                    aciklama: `${item.sourceType === 'barcode' ? 'Barkod ile' : 'Excel ile'} manuel olarak eklendi.`,
-                    resolvedAt: serverTimestamp(),
-                    resolvedByUid: currentUser?.uid || '',
-                    resolvedByName: currentUserProfile?.name || '',
-                    sourceType: item.sourceType,
-                });
+                const snapshots = await Promise.all(stockPromises);
+                const allStockItems = snapshots.flatMap(snap =>
+                    snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+                );
+
+                return { key, items, stockItems: allStockItems, sourceType, collectionName };
+            });
+
+            const stockResults = await Promise.all(stockQueries);
+
+            // STEP 3: Process deletions and create records
+            const batches: any[] = [writeBatch(db)];
+            let currentBatchIndex = 0;
+            let operationCount = 0;
+
+            for (const { items, stockItems, sourceType, collectionName } of stockResults) {
+                for (const item of items) {
+                    // Check if we need a new batch (Firestore limit: 500 operations)
+                    if (operationCount >= 450) { // Leave some margin
+                        currentBatchIndex++;
+                        batches.push(writeBatch(db));
+                        operationCount = 0;
+                    }
+
+                    const currentBatch = batches[currentBatchIndex];
+
+                    // Find matching stock items
+                    let toDelete: DepoStokItem[] = [];
+
+                    if (item.seriNumarasi) {
+                        // Match by serial
+                        toDelete = stockItems.filter(s =>
+                            s.stokKodu === item.stokKodu &&
+                            s.seriNumarasi === item.seriNumarasi
+                        );
+                    } else if (item.lotNumarasi && item.isGroup) {
+                        // Match by lot
+                        const matched = stockItems.filter(s =>
+                            s.stokKodu === item.stokKodu &&
+                            s.lotNumarasi === item.lotNumarasi
+                        );
+                        toDelete = matched.slice(0, item.adet);
+                    }
+
+                    // Delete stock items
+                    toDelete.forEach(stockItem => {
+                        currentBatch.delete(doc(db, collectionName, stockItem.id));
+                        operationCount++;
+                    });
+
+                    // Create destroyed kit record
+                    const destroyedKitRef = doc(collection(db, 'destroyedKitsReports'));
+                    currentBatch.set(destroyedKitRef, {
+                        id: destroyedKitRef.id,
+                        ejectedKitRecordId: null,
+                        faultReportId: null,
+                        laboratoryId: item.laboratoryId || null,
+                        laboratoryName: item.laboratoryName || '',
+                        depotId: item.depotId || null,
+                        depotName: item.depotName || '',
+                        deviceId: null,
+                        deviceModel: 'Manuel İmha',
+                        stokKodu: item.stokKodu,
+                        stokAdi: item.stokAdi,
+                        lotNumarasi: item.lotNumarasi,
+                        miad: item.miad,
+                        seriNumarasi: item.seriNumarasi,
+                        testCount: item.adet,
+                        aciklama: `${item.sourceType === 'barcode' ? 'Barkod ile' : 'Excel ile'} manuel olarak eklendi.`,
+                        resolvedAt: serverTimestamp(),
+                        resolvedByUid: currentUser?.uid || '',
+                        resolvedByName: currentUserProfile?.name || '',
+                        sourceType: item.sourceType,
+                    });
+                    operationCount++;
+                }
             }
 
-            await batch.commit();
+            // STEP 4: Commit all batches in parallel
+            await Promise.all(batches.map(b => b.commit()));
 
-            toast({ title: 'İmha Tamamlandı', description: `${destroyedItems.length} ürün imha edildi ve stoktan düşüldü.` });
+            toast({
+                title: 'İmha Tamamlandı',
+                description: `${destroyedItems.length} ürün imha edildi ve stoktan düşüldü. (${batches.length} batch işlem)`
+            });
             setDestroyedItems([]);
         } catch (error) {
             console.error('Submit error:', error);
