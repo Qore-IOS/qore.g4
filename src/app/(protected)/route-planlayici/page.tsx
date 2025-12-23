@@ -441,61 +441,64 @@ export default function RoutePlanlayiciPage() {
 
   return (
     <Card className="shadow-lg">
-      <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2 text-xl">
-          <MapIcon className="h-6 w-6 text-primary" />
-          <CardTitle>Route Planlayıcı</CardTitle>
+      <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-center gap-2">
+          <MapIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+          <CardTitle className="text-base sm:text-lg md:text-xl">Route Planlayıcı</CardTitle>
         </div>
-        <div className="flex sm:items-center gap-2 flex-wrap">
-            <div className="flex w-full sm:w-auto gap-2">
-                <Link href="/route-planlayici/gecmis" className="w-1/2 sm:w-auto">
-                    <Button variant="outline" className="w-full">
-                        <History className="h-4 w-4 mr-2" />Geçmiş
-                    </Button>
-                </Link>
-                <Button onClick={openPlanner} className="w-1/2 sm:w-auto">
-                    <CalendarDays className="h-4 w-4 mr-2" />Planla
+        {/* Action Buttons - Grid on mobile */}
+        <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 w-full sm:w-auto">
+            <Link href="/route-planlayici/gecmis" className="col-span-1">
+                <Button variant="outline" size="sm" className="w-full text-xs sm:text-sm">
+                    <History className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Geçmiş</span>
                 </Button>
-            </div>
-            <Button variant="outline" onClick={() => setRoutesOpen(true)} title="Şoföre atanan rotalar" className="w-full sm:w-auto">
-                <ListChecks className="inline h-4 w-4 mr-2" />
-                Rotalar
+            </Link>
+            <Button onClick={openPlanner} size="sm" className="col-span-1 text-xs sm:text-sm">
+                <CalendarDays className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Planla</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setRoutesOpen(true)} title="Şoföre atanan rotalar" className="col-span-1 text-xs sm:text-sm">
+                <ListChecks className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Rotalar</span>
             </Button>
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4 relative">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Şoför (görüntüleme):</span>
+      <CardContent className="space-y-3 sm:space-y-4 relative">
+        {/* Driver Selection - Mobile Responsive */}
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
+            <span className="text-xs sm:text-sm text-muted-foreground">Şoför (görüntüleme):</span>
             <Select value={viewDriverId} onValueChange={setViewDriverId}>
-              <SelectTrigger className="w-full sm:w-[240px]"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-[200px] md:w-[240px]"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
               <SelectContent>
                 {drivers.map(d => (<SelectItem key={d.id} value={d.id}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
               </SelectContent>
             </Select>
           </div>
           {activeRoute && (
-            <Badge variant={activeRoute.status === 'completed' ? 'default' : 'secondary'}>
+            <Badge variant={activeRoute.status === 'completed' ? 'default' : 'secondary'} className="w-fit">
               {activeRoute.status === 'completed' ? 'Tamamlandı' : (activeRoute.status === 'in_progress' ? 'Devam Ediyor' : 'Açık')}
             </Badge>
           )}
         </div>
 
+        {/* Route Action Buttons - Mobile Responsive */}
         {activeRoute?.stops?.length ? (
-          <div className="flex flex-col sm:flex-row items-center gap-4">
+          <div className="grid grid-cols-3 sm:flex sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
             <div className="flex flex-col items-center">
               <button type="button" onClick={handleDepart} disabled={!isDriverOwner || !canStartLeg}
-                className="w-full sm:w-12 h-12 rounded-xl bg-white/10 border border-white/15 backdrop-blur shadow-lg ring-1 ring-white/10 hover:bg-white/20 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
-                <LogOut className="h-5 w-5" />
+                className="w-full h-10 sm:h-12 px-3 sm:px-4 rounded-xl bg-white/10 border border-white/15 backdrop-blur shadow-lg ring-1 ring-white/10 hover:bg-white/20 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+                <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
               </button>
-              <div className="mt-1 text-xs text-center max-w-[9rem] text-white/90">{departFromLabel}</div>
+              <div className="mt-1 text-[10px] sm:text-xs text-center max-w-[6rem] sm:max-w-[9rem] text-white/90 truncate">{departFromLabel}</div>
             </div>
             <div className="flex flex-col items-center">
               <button type="button" onClick={handleArrive} disabled={!isDriverOwner || !canArrive}
-                className="h-12 px-5 rounded-2xl bg-white/10 border border-white/15 backdrop-blur shadow-lg ring-1 ring-white/10 hover:bg-white/20 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                <Flag className="h-5 w-5" />
-                <span className="max-w-[12rem] truncate">{arriveToLabel}</span>
+                className="h-10 sm:h-12 px-3 sm:px-5 rounded-xl sm:rounded-2xl bg-white/10 border border-white/15 backdrop-blur shadow-lg ring-1 ring-white/10 hover:bg-white/20 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2">
+                <Flag className="h-4 w-4 sm:h-5 sm:w-5" />
+                <span className="max-w-[4rem] sm:max-w-[12rem] truncate text-xs sm:text-sm">{arriveToLabel}</span>
               </button>
             </div>
             <div className="flex flex-col items-center">
@@ -509,14 +512,16 @@ export default function RoutePlanlayiciPage() {
                     });
                   }
                 }}
-                disabled={!isDriverOwner} variant="outline" className="h-12 px-4 rounded-xl">
-                Google Maps’te Aç
+                disabled={!isDriverOwner} variant="outline" size="sm" className="h-10 sm:h-12 px-2 sm:px-4 rounded-xl text-xs sm:text-sm">
+                <span className="hidden sm:inline">Google Maps'te Aç</span>
+                <span className="sm:hidden">Maps</span>
               </Button>
             </div>
           </div>
         ) : null}
 
-        <div className="h-[55vh] w-full rounded-xl overflow-hidden border border-white/10">
+        {/* Map Container - Responsive Height */}
+        <div className="h-[45vh] sm:h-[50vh] md:h-[55vh] w-full rounded-xl overflow-hidden border border-white/10 route-map">
             <LeafletRouteMap
                 stops={(activeRoute?.stops || []).sort((a, b) => a.order - b.order)}
                 segmentStates={segmentStates}
@@ -525,22 +530,22 @@ export default function RoutePlanlayiciPage() {
       </CardContent>
 
       <Dialog open={isPlannerOpen} onOpenChange={setIsPlannerOpen}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Rota Planla</DialogTitle>
-            <DialogDescription>Başlangıç seçin, otomatik sırala ya da el ile düzenleyin.</DialogDescription>
+            <DialogTitle className="text-base sm:text-lg">Rota Planla</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">Başlangıç seçin, otomatik sırala ya da el ile düzenleyin.</DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="border rounded-lg p-3">
-              <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+            <div className="border rounded-lg p-2 sm:p-3">
+              <div className="grid grid-cols-2 gap-2 mb-2 sm:mb-3">
                 <div>
-                  <span className="text-xs text-muted-foreground">Tarih</span>
-                  <Input type="date" value={format(planDate, 'yyyy-MM-dd')} onChange={(e) => setPlanDate(new Date(e.target.value))} className="mt-1" />
+                  <span className="text-[10px] sm:text-xs text-muted-foreground">Tarih</span>
+                  <Input type="date" value={format(planDate, 'yyyy-MM-dd')} onChange={(e) => setPlanDate(new Date(e.target.value))} className="mt-1 text-xs sm:text-sm" />
                 </div>
                 <div>
-                  <span className="text-xs text-muted-foreground">Şoför</span>
+                  <span className="text-[10px] sm:text-xs text-muted-foreground">Şoför</span>
                   <Select value={planDriverId} onValueChange={setPlanDriverId}>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
+                    <SelectTrigger className="mt-1 text-xs sm:text-sm"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
                     <SelectContent>
                       {drivers.map(d => (<SelectItem key={d.id} value={d.id}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
                     </SelectContent>
@@ -548,35 +553,38 @@ export default function RoutePlanlayiciPage() {
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-2 mb-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <Select value={startStopId} onValueChange={setStartStopId}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="Başlangıç durağı seçin" /></SelectTrigger>
+                    <SelectTrigger className="w-full text-xs sm:text-sm"><SelectValue placeholder="Başlangıç durağı seçin" /></SelectTrigger>
                     <SelectContent>
                       {draftStops.sort((a,b)=>a.order-b.order).map(s => (<SelectItem key={s.hospitalId} value={s.hospitalId}>{s.name}</SelectItem>))}
                     </SelectContent>
                   </Select>
-                  <Button variant="secondary" onClick={makeAutoRoute}>Route belirle</Button>
+                  <Button variant="secondary" onClick={makeAutoRoute} size="sm" className="text-xs sm:text-sm whitespace-nowrap">Route belirle</Button>
                 </div>
               </div>
-              <Input placeholder="Laboratuvar ara…" value={search} onChange={(e) => setSearch(e.target.value)} className="mb-2" />
-              <div className="h-[320px] overflow-auto space-y-2 pr-1">
+              <Input placeholder="Laboratuvar ara…" value={search} onChange={(e) => setSearch(e.target.value)} className="mb-2 text-xs sm:text-sm" />
+              <div className="h-[200px] sm:h-[280px] md:h-[320px] overflow-auto space-y-2 pr-1">
                 {hospitalsFiltered.map(h => {
                   const name = (h as any).name || (h as any).ad || h.id;
                   return (
-                    <div key={(h as any).id} className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-accent/30">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">{name}</div>
-                        <div className="text-xs text-muted-foreground truncate">{(h as any).address || (h as any).adres || '-'}</div>
+                    <div key={(h as any).id} className="flex items-center justify-between rounded-md border px-2 sm:px-3 py-1.5 sm:py-2 hover:bg-accent/30 gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs sm:text-sm font-medium truncate">{name}</div>
+                        <div className="text-[10px] sm:text-xs text-muted-foreground truncate">{(h as any).address || (h as any).adres || '-'}</div>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => addStop(h)}><Plus className="h-4 w-4 mr-1" />Ekle</Button>
+                      <Button variant="outline" size="sm" onClick={() => addStop(h)} className="text-xs flex-shrink-0">
+                        <Plus className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+                        <span className="hidden sm:inline">Ekle</span>
+                      </Button>
                     </div>
                   );
                 })}
               </div>
             </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-sm font-medium mb-2">Seçilen Duraklar (Sıralı)</div>
-              <div className="h-[370px] overflow-auto space-y-2 pr-1">
+            <div className="border rounded-lg p-2 sm:p-3">
+              <div className="text-xs sm:text-sm font-medium mb-2">Seçilen Duraklar (Sıralı)</div>
+              <div className="h-[200px] sm:h-[300px] md:h-[370px] overflow-auto space-y-2 pr-1">
                 {draftStops.sort((a,b)=>a.order-b.order).map((s, idx) => (
                   <div key={s.hospitalId} className="flex items-center justify-between rounded-md border px-3 py-2">
                     <div className="flex items-center gap-2">

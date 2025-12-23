@@ -255,38 +255,41 @@ export default function DashboardPanel({
 
   return (
     <>
-      <div className={cn("p-2 md:p-4 space-y-6 pt-16")}>
-      
+      <div className={cn("p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-12 sm:pt-16")}>
+
         <h1 className={cn(
-          "text-3xl md:text-4xl font-bold tracking-wide mt-10",
+          "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-6 sm:mt-10",
           theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-gradient-neon'
         )}>
           {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
         </h1>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        {/* Main KPI Grid - Mobile Responsive */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
           <motion.div {...motionProps} className="xl:col-span-2">
             <Card className="glass-card h-full flex flex-col">
-              <CardHeader>
+              <CardHeader className="space-y-2 sm:space-y-3">
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                  <CardTitle className="flex items-center gap-2"><TrendingUp/> Tüketim Trendi</CardTitle>
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg md:text-xl">
+                    <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" /> Tüketim Trendi
+                  </CardTitle>
                   <Tabs value={trendPeriod} onValueChange={(v) => setTrendPeriod(v as TrendPeriod)} className="w-full sm:w-auto">
-                    <TabsList>
-                      <TabsTrigger value="daily">Günlük</TabsTrigger>
-                      <TabsTrigger value="weekly">Haftalık</TabsTrigger>
-                      <TabsTrigger value="monthly">Aylık</TabsTrigger>
-                      <TabsTrigger value="yearly">Yıllık</TabsTrigger>
+                    <TabsList className="grid grid-cols-4 w-full sm:w-auto">
+                      <TabsTrigger value="daily" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Günlük</TabsTrigger>
+                      <TabsTrigger value="weekly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Haftalık</TabsTrigger>
+                      <TabsTrigger value="monthly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Aylık</TabsTrigger>
+                      <TabsTrigger value="yearly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Yıllık</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
-                <div className="flex items-center justify-between mt-2">
-                   <CardDescription>{trendTitle}</CardDescription>
+                <div className="flex items-center justify-between mt-1 sm:mt-2">
+                   <CardDescription className="text-[10px] sm:text-xs md:text-sm">{trendTitle}</CardDescription>
                    <div className="flex items-center gap-1">
-                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => handleTrendNav('prev')}>
-                        <ChevronLeft className="h-4 w-4" />
+                      <Button variant="outline" size="icon" className="h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('prev')}>
+                        <ChevronLeft className="h-3 w-3 sm:h-4 sm:w-4" />
                       </Button>
-                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => handleTrendNav('next')}>
-                        <ChevronRight className="h-4 w-4" />
+                      <Button variant="outline" size="icon" className="h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('next')}>
+                        <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4" />
                       </Button>
                    </div>
                 </div>
@@ -294,7 +297,7 @@ export default function DashboardPanel({
               <CardContent className="h-full flex-grow cursor-pointer" onClick={() => setIsConsumptionModalOpen(true)}>
                  <ChartContainer
                     config={{}}
-                    className="h-[250px] w-full"
+                    className="h-[180px] sm:h-[220px] md:h-[250px] w-full"
                   >
                   <AreaChart data={stockConsumptionTrend} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                     <defs>
@@ -384,7 +387,8 @@ export default function DashboardPanel({
           </motion.div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Bottom KPI Grid - Mobile Responsive */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
           <motion.div {...motionProps} className="xl:col-span-2 cursor-pointer" onClick={() => router.push('/laboratuvar-yonetimi')}>
               <Card className="glass-card h-full">
                 <CardHeader>
