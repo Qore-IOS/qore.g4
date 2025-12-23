@@ -6,91 +6,39 @@ Bu dokümantasyon, uygulamanıza eklenen global loading animasyonunun nasıl kul
 
 Global loading sistemi, kullanıcı işlemleri sırasında (mal kabul, transfer, arama vb.) uygulamanın "donmuş" görünmesini önler. Splash screen video animasyonundan bağımsız olarak çalışır ve sadece uygulama etkileşime geçilebilir haldeyken, arka planda bir işlem devam ediyorsa gösterilir.
 
-## 🎯 Ne Zaman Kullanılır?
+## ⚡ OTOMATİK ÇALIŞAN DURUMLAR
 
-- API çağrıları sırasında
-- Veri yükleme işlemlerinde
-- Form gönderme işlemlerinde
-- Toplu veri işleme operasyonlarında
-- Transfer, mal kabul, arama gibi uzun süren işlemlerde
+Aşağıdaki işlemler için **hiçbir kod değişikliği gerekmez**, loading animasyonu otomatik gösterilir:
+
+✅ **React Query Mutations** - Tüm `useMutation` çağrıları otomatik
+✅ **React Query Queries** - İlk yükleme sırasında otomatik
+✅ **Firebase Queries** - `useFirebaseQueries` ile yapılan tüm sorgular
+
+Yani sipariş, mal kabul, transfer, arama gibi sayfalarda **React Query kullanıyorsanız zaten otomatik çalışıyor!**
+
+## 🎯 Manuel Kullanım Gereken Durumlar
+
+Sadece şu durumlarda manuel olarak eklemeniz gerekir:
+
+- Direkt Firebase write işlemleri (setDoc, updateDoc, deleteDoc)
+- React Query dışında yapılan API çağrıları
+- Uzun hesaplama işlemleri
+- Custom async operasyonlar
 
 ## 💡 Kullanım Örnekleri
 
-### Yöntem 1: Temel Kullanım (Manuel)
+### Yöntem 1: React Query (OTOMATİK - ÖNERİLEN) ✨
 
 ```tsx
 'use client';
 
-import { useGlobalLoading } from '@/hooks/useGlobalLoading';
-
-export default function MyComponent() {
-  const { startLoading, stopLoading } = useGlobalLoading();
-
-  const handleMalKabul = async () => {
-    startLoading(); // Loading'i başlat
-
-    try {
-      await performMalKabulOperation();
-      // İşlem başarılı
-    } catch (error) {
-      console.error(error);
-    } finally {
-      stopLoading(); // Loading'i kapat (mutlaka finally içinde!)
-    }
-  };
-
-  return (
-    <button onClick={handleMalKabul}>
-      Mal Kabul Yap
-    </button>
-  );
-}
-```
-
-### Yöntem 2: Otomatik Kullanım (withLoading wrapper)
-
-```tsx
-'use client';
-
-import { useGlobalLoading } from '@/hooks/useGlobalLoading';
-
-export default function MyComponent() {
-  const { withLoading } = useGlobalLoading();
-
-  // withLoading fonksiyonu otomatik olarak loading'i yönetir
-  const handleTransfer = withLoading(async () => {
-    await performTransferOperation();
-    // Hata olsa bile loading otomatik olarak kapanır
-  });
-
-  return (
-    <button onClick={handleTransfer}>
-      Transfer Yap
-    </button>
-  );
-}
-```
-
-### Yöntem 3: React Query ile Kullanım
-
-```tsx
-'use client';
-
-import { useGlobalLoading } from '@/hooks/useGlobalLoading';
 import { useMutation } from '@tanstack/react-query';
 
 export default function SearchPanel() {
-  const { startLoading, stopLoading } = useGlobalLoading();
-
+  // Loading OTOMATİK olarak gösterilir!
   const searchMutation = useMutation({
     mutationFn: async (query: string) => {
       return await fetchSearchResults(query);
-    },
-    onMutate: () => {
-      startLoading(); // Sorgu başladığında
-    },
-    onSettled: () => {
-      stopLoading(); // Sorgu tamamlandığında (başarılı veya hatalı)
     },
   });
 
@@ -101,6 +49,91 @@ export default function SearchPanel() {
         placeholder="Ara..."
       />
     </div>
+  );
+}
+```
+
+**Hiçbir ek kod gerekmez! React Query otomatik loading'i halleder.**
+
+### Yöntem 2: Firebase Write İşlemleri
+
+```tsx
+'use client';
+
+import { useFirebaseOperation } from '@/hooks/useFirebaseOperation';
+import { setDoc, doc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+export default function MalKabulPage() {
+  const { executeWithLoading } = useFirebaseOperation();
+
+  const handleMalKabul = async (data: any) => {
+    await executeWithLoading(async () => {
+      await setDoc(doc(db, 'malKabul', data.id), data);
+      await setDoc(doc(db, 'inventory', data.stockCode), inventoryUpdate);
+    });
+  };
+
+  return (
+    <button onClick={() => handleMalKabul(data)}>
+      Mal Kabul Yap
+    </button>
+  );
+}
+```
+
+### Yöntem 3: Custom Async İşlemler
+
+```tsx
+'use client';
+
+import { useGlobalLoading } from '@/hooks/useGlobalLoading';
+
+export default function MyComponent() {
+  const { withLoading } = useGlobalLoading();
+
+  // withLoading fonksiyonu otomatik olarak loading'i yönetir
+  const handleComplexOperation = withLoading(async () => {
+    await step1();
+    await step2();
+    await step3();
+    // Hata olsa bile loading otomatik olarak kapanır
+  });
+
+  return (
+    <button onClick={handleComplexOperation}>
+      İşlemi Başlat
+    </button>
+  );
+}
+```
+
+### Yöntem 4: Manuel Kontrol (Nadiren Gerekir)
+
+```tsx
+'use client';
+
+import { useGlobalLoading } from '@/hooks/useGlobalLoading';
+
+export default function MyComponent() {
+  const { startLoading, stopLoading } = useGlobalLoading();
+
+  const handleOperation = async () => {
+    startLoading();
+
+    try {
+      await performOperation();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      stopLoading(); // Mutlaka finally içinde!
+    }
+  };
+
+  return (
+    <button onClick={handleOperation}>
+      İşlem Yap
+    </button>
   );
 }
 ```
