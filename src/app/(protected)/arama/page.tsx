@@ -20,6 +20,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { toDateSafe, formatMiad } from '@/lib/date';
 import { cn } from '@/lib/utils';
+import { useSyncedLoading } from '@/hooks/useSyncedLoading';
 
 
 // -----------------------------------------------------
@@ -62,6 +63,10 @@ export default function AramaPanel() {
   const { toast } = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
+
+  // Sync local loading with global loader - automatically shows/hides global loading animation
+  useSyncedLoading(isLoading);
+
   const [depots, setDepots] = useState<Depot[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
