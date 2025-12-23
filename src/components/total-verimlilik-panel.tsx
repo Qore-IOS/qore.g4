@@ -1390,20 +1390,29 @@ export default function TotalVerimlilikPanel({
     setIsCalculatingCenterHakEdis(true);
 
     try {
-      // İş analizi raw verisini çek (eğer cache'de yoksa)
-      let rawData = isAnaliziRawData;
-      if (!rawData) {
-        const analysisDocRef = doc(db, 'isAnaliziVerileri', 'sonVeri');
-        const docSnap = await getDoc(analysisDocRef);
-        if (docSnap.exists()) {
-          rawData = docSnap.data().rawData || [];
-          setIsAnaliziRawData(rawData);
-        } else {
-          toast({ title: 'Uyarı', description: 'İş analizi verisi bulunamadı.', variant: 'destructive' });
-          setIsCalculatingCenterHakEdis(false);
-          return;
-        }
+      // İş analizi raw verisini çek (her zaman güncel veri için yeniden çek)
+      const analysisDocRef = doc(db, 'isAnaliziVerileri', 'sonVeri');
+      const docSnap = await getDoc(analysisDocRef);
+
+      if (!docSnap.exists()) {
+        toast({ title: 'Uyarı', description: 'İş analizi verisi bulunamadı. Önce LBYS Veri Yönetimi panelinden veri yükleyin.', variant: 'destructive' });
+        setIsCalculatingCenterHakEdis(false);
+        return;
       }
+
+      const rawData = docSnap.data().rawData || [];
+      setIsAnaliziRawData(rawData);
+
+      if (rawData.length === 0) {
+        toast({ title: 'Uyarı', description: 'İş analizi verisinde kayıt bulunamadı.', variant: 'destructive' });
+        setIsCalculatingCenterHakEdis(false);
+        return;
+      }
+
+      console.log('=== Merkez Hak Ediş Hesaplama Debug ===');
+      console.log('Toplam rawData kayıt sayısı:', rawData.length);
+      console.log('Örnek rawData kayıt:', rawData[0]);
+      console.log('Seçili dönem:', selectedYear, '-', selectedMonth + 1);
 
       // Seçilen dönemin başlangıç ve bitiş tarihlerini hesapla
       const periodStart = new Date(selectedYear, selectedMonth, 1);
@@ -1411,6 +1420,7 @@ export default function TotalVerimlilikPanel({
 
       // Her satır için merkeze gönderilen test sayısını hesapla
       const sentToCenter: Record<string, number> = {};
+      let debugInfo: string[] = [];
 
       for (const row of rows) {
         // Merkez laboratuvarı atla (merkez kendi kendine test göndermez)
@@ -1422,11 +1432,12 @@ export default function TotalVerimlilikPanel({
         // Bu satırın laboratuvarının kodunu bul
         const labInfo = hospitals.find(h => h.id === row.labId);
         if (!labInfo?.kod) {
+          debugInfo.push(`${row.labName}: Lab kodu tanımlı değil`);
           sentToCenter[row.id] = 0;
           continue;
         }
 
-        // 999 kodlu ASM'leri atla (kullanıcı istediği gibi)
+        // 999 kodlu ASM'leri atla
         if (labInfo.kod === '999') {
           sentToCenter[row.id] = 0;
           continue;
@@ -1437,33 +1448,52 @@ export default function TotalVerimlilikPanel({
         const hakEdisDefinition = labDefinitions.find(d => d.linkedStokKodu === row.stokKodu);
 
         if (!hakEdisDefinition) {
+          debugInfo.push(`${row.labName} - ${row.stokAdi}: Hak ediş tanımı bulunamadı (stokKodu: ${row.stokKodu})`);
           sentToCenter[row.id] = 0;
           continue;
         }
 
-        // İş analizi verisinde:
-        // - hastaneId = bu laboratuvarın kodu (nereden istek geldi)
-        // - testId = SUT kodu (hangi test)
-        // - İlgili dönem içindeki kayıtları say
-        let testCount = 0;
-        for (const record of rawData) {
-          // Hastane ID kontrolü - bu laboratuvardan gelen istekler
-          if (String(record.hastaneId || '').trim() !== labInfo.kod) continue;
+        const sutKodu = String(hakEdisDefinition.sutKodu || '').trim();
+        const labKod = String(labInfo.kod || '').trim();
 
-          // Test ID kontrolü - SUT kodu eşleşmesi
-          if (String(record.testId || '').trim() !== hakEdisDefinition.sutKodu) continue;
+        console.log(`Aranan: Lab=${labKod}, SUT=${sutKodu}, Ürün=${row.stokAdi}`);
+
+        // İş analizi verisinde eşleşmeleri say
+        let testCount = 0;
+        let matchedRecords: any[] = [];
+
+        for (const record of rawData) {
+          // Hastane ID kontrolü - normalize et ve karşılaştır
+          const recordHastaneId = String(record.hastaneId || '').trim();
+          if (recordHastaneId !== labKod) continue;
+
+          // Test ID kontrolü - SUT kodu eşleşmesi (hem string hem number olabilir)
+          const recordTestId = String(record.testId || '').trim();
+          if (recordTestId !== sutKodu) continue;
 
           // Tarih kontrolü - seçilen dönem içinde mi?
-          const recordDate = record.labKabulTarihi || record.istemTarihi;
+          const recordDate = record.labKabulTarihi || record.istemTarihi || record.kayitTarihi;
           if (recordDate) {
             let dateObj: Date | null = null;
+
             if (typeof recordDate === 'number') {
-              // Excel date number
+              // Excel date number (serial date)
               dateObj = new Date(Math.round((recordDate - 25569) * 86400 * 1000));
             } else if (recordDate instanceof Date) {
               dateObj = recordDate;
             } else if (typeof recordDate === 'string') {
+              // Farklı tarih formatlarını dene
               dateObj = new Date(recordDate);
+              if (isNaN(dateObj.getTime())) {
+                // DD.MM.YYYY formatı dene
+                const parts = recordDate.split(/[./\-]/);
+                if (parts.length === 3) {
+                  dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+                }
+              }
+            } else if (recordDate?.toDate) {
+              // Firestore Timestamp
+              dateObj = recordDate.toDate();
             }
 
             if (dateObj && !isNaN(dateObj.getTime())) {
@@ -1472,17 +1502,37 @@ export default function TotalVerimlilikPanel({
           }
 
           testCount++;
+          if (matchedRecords.length < 3) {
+            matchedRecords.push(record);
+          }
+        }
+
+        if (testCount > 0) {
+          console.log(`✓ Eşleşme bulundu: ${row.labName} - ${row.stokAdi}: ${testCount} test`);
+          console.log('Örnek eşleşen kayıtlar:', matchedRecords);
         }
 
         sentToCenter[row.id] = testCount;
       }
 
+      // Debug bilgilerini konsola yaz
+      if (debugInfo.length > 0) {
+        console.log('Debug bilgileri:', debugInfo);
+      }
+
+      // rawData'daki benzersiz hastaneId ve testId değerlerini göster
+      const uniqueHastaneIds = [...new Set(rawData.map((r: any) => String(r.hastaneId || '').trim()))];
+      const uniqueTestIds = [...new Set(rawData.map((r: any) => String(r.testId || '').trim()))];
+      console.log('rawData benzersiz hastaneId değerleri:', uniqueHastaneIds);
+      console.log('rawData benzersiz testId değerleri (ilk 20):', uniqueTestIds.slice(0, 20));
+
       setTestsSentToCenter(sentToCenter);
       setCenterHakEdisMode(true);
 
+      const totalSent = Object.values(sentToCenter).reduce((a, b) => a + b, 0);
       toast({
         title: 'Hesaplama Tamamlandı',
-        description: 'Merkeze gönderilen test sayıları hesaplandı. Hak ediş değerleri güncellendi.',
+        description: `Toplam ${totalSent} test merkeze gönderilmiş olarak hesaplandı.`,
       });
     } catch (error) {
       console.error('Error calculating center hakediş:', error);
@@ -1490,7 +1540,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsCalculatingCenterHakEdis(false);
     }
-  }, [selectedPool, hospitals, rows, labHakEdisDefinitions, isAnaliziRawData, selectedYear, selectedMonth, toast]);
+  }, [selectedPool, hospitals, rows, labHakEdisDefinitions, selectedYear, selectedMonth, toast]);
 
   // Düzeltilmiş hak ediş değerini hesapla (merkez hak ediş modu aktifken)
   const getAdjustedHakEdis = useCallback((row: TableRow): number => {
