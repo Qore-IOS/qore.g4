@@ -690,14 +690,16 @@ export default function DirektTransferPanel() {
 
   return (
     <>
-      <div className="p-4 space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+        {/* Header Section - Mobile Responsive */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <BackButton fallback="/siparisler" />
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <AlertDialog>
                 <AlertDialogTrigger asChild>
-                    <Button variant="outline" disabled={!selectedDepotId}>
-                        <DatabaseZap className="mr-2 h-4 w-4"/> Tüm Stoğu Ekle
+                    <Button variant="outline" size="sm" disabled={!selectedDepotId} className="text-xs sm:text-sm">
+                        <DatabaseZap className="h-4 w-4 sm:mr-2"/>
+                        <span className="hidden sm:inline">Tüm Stoğu Ekle</span>
                     </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
@@ -713,36 +715,46 @@ export default function DirektTransferPanel() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-            <Button variant="outline" onClick={() => router.push(`/transfer-gecmis?depotId=${selectedDepotId}`)} disabled={!selectedDepotId}>
-                <History className="mr-2 h-4 w-4" /> Transfer Geçmişi
+            <Button variant="outline" size="sm" onClick={() => router.push(`/transfer-gecmis?depotId=${selectedDepotId}`)} disabled={!selectedDepotId} className="text-xs sm:text-sm">
+                <History className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Transfer Geçmişi</span>
             </Button>
           </div>
         </div>
       <Card>
-        <CardHeader className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+        <CardHeader className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 sm:gap-4">
           <div>
-            <CardTitle><Truck className="inline mr-2" />Direkt Transfer</CardTitle>
-            <CardDescription>Depodan doğrudan ürünleri laboratuvara veya firmaya sevk edin.</CardDescription>
+            <CardTitle className="flex items-center text-base sm:text-lg md:text-xl">
+              <Truck className="mr-2 h-5 w-5 sm:h-6 sm:w-6" />
+              Direkt Transfer
+            </CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Depodan doğrudan ürünleri laboratuvara veya firmaya sevk edin.</CardDescription>
           </div>
-          <Button onClick={handleCompleteDirectTransfer} disabled={directTransferItems.length === 0 || shipmentLoading}>
-            {shipmentLoading ? <Loader2 className="animate-spin mr-2" /> : <CheckCircle2 className="mr-2" />}
+          <Button
+            onClick={handleCompleteDirectTransfer}
+            disabled={directTransferItems.length === 0 || shipmentLoading}
+            className="w-full sm:w-auto text-xs sm:text-sm"
+            size="sm"
+          >
+            {shipmentLoading ? <Loader2 className="animate-spin mr-1.5 h-4 w-4" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
             {directTransferItems.reduce((sum, item) => sum + (item.adet ?? 1), 0)} Ürünü Transfer Et
           </Button>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
+        <CardContent className="space-y-3 sm:space-y-4">
+          {/* Form Grid - Mobile Responsive */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-end">
             <div className="space-y-1">
-                <Label>Kaynak depo seçin</Label>
+                <Label className="text-xs sm:text-sm">Kaynak depo seçin</Label>
                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={prereqsLoading}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Kaynak depo seçin" /></SelectTrigger>
                 <SelectContent> {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)} </SelectContent>
                 </Select>
             </div>
             <div className="space-y-1">
-              <Label>Hedef Laboratuvar</Label>
+              <Label className="text-xs sm:text-sm">Hedef Laboratuvar</Label>
               <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" role="combobox" aria-expanded={isLabPopoverOpen} className="w-full justify-between font-normal" disabled={isBorcMode || hospitals.length === 0}>
+                  <Button variant="outline" role="combobox" aria-expanded={isLabPopoverOpen} className="w-full justify-between font-normal text-xs sm:text-sm" disabled={isBorcMode || hospitals.length === 0}>
                     {selectedLabName || "Laboratuvar seçin."}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -772,14 +784,24 @@ export default function DirektTransferPanel() {
                 </PopoverContent>
               </Popover>
             </div>
-            <div className="flex items-center space-x-2 pt-6">
-              <Switch checked={isBorcMode} onCheckedChange={setIsBorcMode} id="borc-mode" />
-              <Label htmlFor="borc-mode" className="font-semibold">Borç Modu</Label>
-              <Button variant="outline" size="icon" onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Tekli Tara"><Camera /></Button>
-              <Button variant="default" size="icon" onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Seri Tarama"><Camera /></Button>
+            {/* Action Row - Switch and Buttons */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:pt-0 lg:pt-6">
+              <div className="flex items-center gap-2">
+                <Switch checked={isBorcMode} onCheckedChange={setIsBorcMode} id="borc-mode" />
+                <Label htmlFor="borc-mode" className="font-semibold text-xs sm:text-sm whitespace-nowrap">Borç Modu</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Tekli Tara" className="h-9 w-9 sm:h-10 sm:w-10"><Camera className="h-4 w-4" /></Button>
+                <Button variant="default" size="icon" onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Seri Tarama" className="h-9 w-9 sm:h-10 sm:w-10"><Camera className="h-4 w-4" /></Button>
+              </div>
             </div>
-            <div className="flex items-end gap-2 flex-wrap">
-              <Button variant="outline" onClick={() => setShowManualInline(v => !v)} title="Manuel Ürün Ekle"><Plus className="mr-2 h-4 w-4" /> Manuel Ürün</Button>
+            {/* Manuel Button */}
+            <div className="flex items-end gap-2">
+              <Button variant="outline" onClick={() => setShowManualInline(v => !v)} title="Manuel Ürün Ekle" size="sm" className="text-xs sm:text-sm">
+                <Plus className="mr-1.5 h-4 w-4" />
+                <span className="hidden sm:inline">Manuel Ürün</span>
+                <span className="sm:hidden">Manuel</span>
+              </Button>
             </div>
           </div>
           
