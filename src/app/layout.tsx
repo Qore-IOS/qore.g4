@@ -46,16 +46,16 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <QueryProvider>
-            <AuthProvider>
-              <LoadingProvider>
+          <AuthProvider>
+            <LoadingProvider>
+              <QueryProvider>
                 <MobileResponsiveFix />
                 <AppBackground />
                 {children}
                 <Toaster />
-              </LoadingProvider>
-            </AuthProvider>
-          </QueryProvider>
+              </QueryProvider>
+            </LoadingProvider>
+          </AuthProvider>
         </ThemeProvider>
         {/* PDF.js is loaded lazily where needed - see src/lib/pdf.ts */}
       </body>
