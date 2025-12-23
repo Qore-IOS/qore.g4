@@ -3,10 +3,11 @@
 import React from 'react';
 import DashboardPanel from '@/components/dashboard-panel';
 import { useDashboardData } from '@/components/dashboard/useDashboardData';
+import { useSyncedLoading } from '@/hooks/useSyncedLoading';
 import { Loader2 } from 'lucide-react';
 
 export default function DashboardPage() {
-    const { 
+    const {
         hospitals,
         devices,
         productCodes,
@@ -15,8 +16,11 @@ export default function DashboardPage() {
         shipments,
         efficiencyHistoryRecords,
         minMaxRulesByLab,
-        isLoading 
+        isLoading
     } = useDashboardData();
+
+    // Sync dashboard loading with global loader
+    useSyncedLoading(isLoading);
 
     if (isLoading) {
         return (
