@@ -1,448 +1,530 @@
 'use client';
 import React from 'react';
 
+/**
+ * Global Mobile UI Fix Component
+ *
+ * Bu komponent tüm uygulamaya global mobile CSS kuralları uygular.
+ * Panel-spesifik değişiklik gerektirmez - CSS selektörleri ile otomatik çalışır.
+ *
+ * Özellikler:
+ * - Safe zone padding (notch, dynamic island, bottom bar)
+ * - Responsive KPI kartları
+ * - Responsive butonlar ve buton grupları
+ * - Grid/flex layout otomatik stack
+ * - Responsive typography
+ * - Touch-friendly minimum boyutlar
+ */
 export default function MobileResponsiveFix() {
   return (
     <style
       dangerouslySetInnerHTML={{
         __html: `
-/* ========================================
-   GLOBAL MOBILE SAFE ZONES & CSS VARIABLES
-   ======================================== */
+/* ================================================================
+   GLOBAL MOBILE CSS - TÜM PANELLERE OTOMATİK UYGULANIR
+   ================================================================ */
+
+/* ================================================================
+   1. CSS DEĞİŞKENLERİ - MOBILE SAFE ZONES & SPACING
+   ================================================================ */
 :root {
-  /* Mobile safe zone padding - respects device notches, cameras, dynamic islands */
-  --mobile-safe-top: max(env(safe-area-inset-top, 0px), 12px);
-  --mobile-safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
-  --mobile-safe-left: max(env(safe-area-inset-left, 0px), 16px);
-  --mobile-safe-right: max(env(safe-area-inset-right, 0px), 16px);
+  /* Device safe areas - notch, dynamic island, bottom bar için */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 
-  /* Horizontal page padding */
-  --page-h-padding: 0rem;
+  /* Mobile padding değerleri */
+  --mobile-padding-page: 1rem;      /* 16px - sayfa kenar boşluğu */
+  --mobile-padding-card: 0.875rem;  /* 14px - kart içi padding */
+  --mobile-gap: 0.75rem;            /* 12px - elemanlar arası boşluk */
+  --mobile-gap-sm: 0.5rem;          /* 8px - küçük boşluk */
 
-  /* Mobile spacing scale */
-  --mobile-gap-xs: 0.5rem;  /* 8px */
-  --mobile-gap-sm: 0.75rem; /* 12px */
-  --mobile-gap-md: 1rem;    /* 16px */
-  --mobile-gap-lg: 1.25rem; /* 20px */
+  /* Touch target minimum boyut */
+  --touch-min: 44px;
 
-  /* Mobile card padding */
-  --mobile-card-padding: 1rem;
-
-  /* Mobile button min height for touch targets */
-  --mobile-btn-min-height: 44px;
-
-  /* Bottom dock height consideration */
-  --mobile-dock-height: 80px;
+  /* Bottom dock yüksekliği */
+  --dock-height: 80px;
 }
 
-/* ========================================
-   MOBILE BREAKPOINT STYLES (max-width: 768px)
-   ======================================== */
+/* ================================================================
+   2. MOBILE BREAKPOINT (<= 768px) - ANA KURALLAR
+   ================================================================ */
 @media (max-width: 768px) {
+
+  /* Yatay scroll engelle */
   html, body {
-    overflow-x: hidden;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
   }
 
-  /* ========================================
-     GLOBAL PAGE SHELL SAFE ZONES
-     ======================================== */
+  /* ============================================================
+     2.1 PAGE SHELL - GLOBAL SAFE ZONE PADDING
+     ============================================================ */
   .page-shell {
-    padding-left: var(--mobile-safe-left);
-    padding-right: var(--mobile-safe-right);
-    padding-bottom: calc(var(--mobile-dock-height) + var(--mobile-safe-bottom));
+    padding-left: max(var(--safe-left), var(--mobile-padding-page)) !important;
+    padding-right: max(var(--safe-right), var(--mobile-padding-page)) !important;
+    padding-bottom: calc(var(--dock-height) + var(--safe-bottom) + 1rem) !important;
   }
 
-  /* ========================================
-     CARD RESPONSIVE STYLING
-     ======================================== */
-  .page-shell .card,
-  .page-shell .shadcn-card,
-  .page-shell [class*="CardContent"],
-  .page-shell [class*="CardHeader"] {
+  /* ============================================================
+     2.2 GRID LAYOUTS - OTOMATİK TEK KOLON
+     ============================================================ */
+  /* 2+ kolonlu tüm gridler mobile'da tek kolona düşer */
+  [class*="grid-cols-2"],
+  [class*="grid-cols-3"],
+  [class*="grid-cols-4"],
+  [class*="md:grid-cols"],
+  [class*="lg:grid-cols"],
+  [class*="xl:grid-cols"] {
+    grid-template-columns: 1fr !important;
+    gap: var(--mobile-gap) !important;
+  }
+
+  /* xl:col-span-2 gibi span'lar mobile'da kaldırılır */
+  [class*="col-span-2"],
+  [class*="col-span-3"],
+  [class*="col-span-4"] {
+    grid-column: span 1 !important;
+  }
+
+  /* ============================================================
+     2.3 CARD BİLEŞENLERİ - RESPONSIVE PADDING
+     ============================================================ */
+  /* Tüm kartlara responsive padding */
+  [class*="rounded-"][class*="shadow"],
+  [class*="rounded-2xl"],
+  [class*="rounded-xl"],
+  [class*="glass-card"],
+  .card,
+  [class*="Card"] > div:first-child {
     overflow: hidden;
   }
 
-  /* Responsive card padding */
-  .page-shell .card > div,
-  .page-shell [class*="p-6"] {
-    padding: var(--mobile-card-padding) !important;
+  /* CardHeader, CardContent, CardFooter padding */
+  [class*="p-6"],
+  [class*="p-5"] {
+    padding: var(--mobile-padding-card) !important;
   }
 
-  .page-shell .card h1,
-  .page-shell .card h2,
-  .page-shell .card h3 {
+  [class*="pt-0"] {
+    padding-top: 0 !important;
+  }
+
+  /* Gap değerlerini küçült */
+  [class*="gap-6"],
+  [class*="gap-8"] {
+    gap: var(--mobile-gap) !important;
+  }
+
+  [class*="gap-4"],
+  [class*="gap-5"] {
+    gap: var(--mobile-gap-sm) !important;
+  }
+
+  [class*="space-y-6"] > * + *,
+  [class*="space-y-8"] > * + * {
+    margin-top: var(--mobile-gap) !important;
+  }
+
+  [class*="space-y-4"] > * + *,
+  [class*="space-y-5"] > * + * {
+    margin-top: var(--mobile-gap-sm) !important;
+  }
+
+  /* ============================================================
+     2.4 TYPOGRAPHY - RESPONSIVE FONT BOYUTLARI
+     ============================================================ */
+  /* Büyük başlıklar */
+  [class*="text-4xl"],
+  [class*="text-3xl"] {
+    font-size: 1.5rem !important;     /* 24px */
+    line-height: 1.3 !important;
+  }
+
+  [class*="text-2xl"] {
+    font-size: 1.25rem !important;    /* 20px */
+    line-height: 1.35 !important;
+  }
+
+  [class*="text-xl"] {
+    font-size: 1.125rem !important;   /* 18px */
+  }
+
+  [class*="text-lg"] {
+    font-size: 1rem !important;       /* 16px */
+  }
+
+  /* CardTitle özel */
+  h3[class*="text-2xl"],
+  [class*="CardTitle"],
+  .card-title {
+    font-size: 1.125rem !important;
+    line-height: 1.4 !important;
+  }
+
+  /* Tüm metinlerde word-break */
+  h1, h2, h3, h4, h5, h6,
+  p, span, label, div {
     word-break: break-word;
     overflow-wrap: anywhere;
-    font-size: clamp(1rem, 4vw, 1.5rem);
   }
 
-  /* ========================================
-     KPI CARDS - CONSISTENT RESPONSIVE SIZING
-     ======================================== */
-  /* Target KPI cards and ensure consistent sizing */
-  .page-shell [class*="grid"] > [class*="rounded-2xl"],
-  .page-shell [class*="grid"] > [class*="rounded-xl"],
-  .page-shell .kpi-card,
-  .page-shell .neu-card {
-    padding: var(--mobile-card-padding) !important;
-    min-height: auto;
+  /* ============================================================
+     2.5 BUTONLAR - TOUCH-FRIENDLY & RESPONSIVE
+     ============================================================ */
+  /* Tüm butonlara minimum touch target */
+  button,
+  [role="button"],
+  [type="button"],
+  [type="submit"],
+  .btn,
+  [class*="Button"] {
+    min-height: var(--touch-min) !important;
+    font-size: 0.8125rem !important;  /* 13px */
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
   }
 
-  /* KPI card value text - responsive sizing */
-  .page-shell [class*="text-2xl"],
-  .page-shell [class*="text-3xl"] {
-    font-size: clamp(1.25rem, 5vw, 1.75rem) !important;
+  /* Icon butonları */
+  button[class*="h-10"][class*="w-10"],
+  button[class*="size-icon"],
+  [class*="size-icon"] {
+    min-width: var(--touch-min) !important;
+    min-height: var(--touch-min) !important;
+    width: var(--touch-min) !important;
+    height: var(--touch-min) !important;
   }
 
-  /* KPI card title text */
-  .page-shell [class*="text-sm"] {
-    font-size: 0.75rem;
-    line-height: 1.25;
+  /* Küçük butonlar biraz büyüt */
+  [class*="h-7"],
+  [class*="h-8"],
+  [class*="h-9"] {
+    min-height: 36px !important;
   }
 
-  /* ========================================
-     BUTTON GROUP RESPONSIVE STYLING
-     ======================================== */
-  .page-shell .btn-group,
-  .page-shell [role="tablist"],
-  .page-shell .button-group,
-  .page-shell .flex.gap-2,
-  .page-shell .flex.gap-3,
-  .page-shell .flex.gap-4 {
-    flex-wrap: wrap;
-    row-gap: var(--mobile-gap-sm);
-    max-width: 100%;
-    overflow-x: visible;
+  /* ============================================================
+     2.6 BUTON GRUPLARI - OTOMATİK WRAP & GRID
+     ============================================================ */
+  /* Yan yana buton grupları wrap olsun */
+  .flex[class*="gap"] {
+    flex-wrap: wrap !important;
   }
 
-  /* Button responsive sizing */
-  .page-shell button,
-  .page-shell [role="button"],
-  .page-shell .btn {
-    min-height: var(--mobile-btn-min-height);
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
-    white-space: nowrap;
+  /* Belirli buton grubu patternleri 2x2 grid yap */
+  [class*="CardContent"] > .flex[class*="gap"] > button,
+  [class*="CardContent"] > div > .flex[class*="gap"] > button,
+  [class*="CardHeader"] .flex[class*="gap"] > button,
+  [class*="CardHeader"] .flex[class*="gap"] > a {
+    flex: 1 1 calc(50% - 0.5rem) !important;
+    min-width: calc(50% - 0.5rem) !important;
   }
 
-  /* Icon-only buttons on mobile - hide text when needed */
-  .page-shell .btn-icon-mobile span:not([class*="sr-only"]),
-  .page-shell .mobile-icon-only > span:not([class*="icon"]) {
-    display: none;
+  /* space-x'leri gap'e çevir */
+  [class*="space-x-2"],
+  [class*="space-x-3"],
+  [class*="space-x-4"] {
+    gap: var(--mobile-gap-sm) !important;
   }
 
-  /* Ensure icon buttons have proper sizing */
-  .page-shell button[class*="icon"],
-  .page-shell [class*="h-10"][class*="w-10"] {
-    min-width: var(--mobile-btn-min-height);
-    min-height: var(--mobile-btn-min-height);
+  [class*="space-x-2"] > * + *,
+  [class*="space-x-3"] > * + *,
+  [class*="space-x-4"] > * + * {
+    margin-left: 0 !important;
   }
 
-  /* ========================================
-     DIALOG/MODAL RESPONSIVE STYLING
-     ======================================== */
-  .page-shell .dialog-content,
-  [role="dialog"],
-  [data-state="open"][class*="DialogContent"] {
-    width: calc(100vw - var(--mobile-safe-left) - var(--mobile-safe-right)) !important;
-    max-width: calc(100vw - var(--mobile-safe-left) - var(--mobile-safe-right)) !important;
-    max-height: calc(100vh - var(--mobile-safe-top) - var(--mobile-safe-bottom) - 2rem);
-    overflow-y: auto;
-    border-radius: 0.75rem;
-    margin: 0 auto;
+  /* ============================================================
+     2.7 FLEX LAYOUT - MOBİL STACK
+     ============================================================ */
+  /* justify-between flex'ler column yap */
+  .flex[class*="justify-between"][class*="items-center"] {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--mobile-gap-sm) !important;
   }
 
-  /* ========================================
-     GRID LAYOUTS - RESPONSIVE COLUMN HANDLING
-     ======================================== */
-  /* Force single column on mobile for most grids */
-  .page-shell .stack-on-mobile,
-  .page-shell [class*="grid-cols-2"],
-  .page-shell [class*="grid-cols-3"],
-  .page-shell [class*="grid-cols-4"] {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: var(--mobile-gap-md) !important;
+  /* Header içindeki flex'ler */
+  [class*="CardHeader"] > .flex,
+  [class*="CardHeader"] > div > .flex {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: var(--mobile-gap-sm) !important;
   }
 
-  /* Allow 2-column for specific use cases */
-  .page-shell .mobile-2-col,
-  .page-shell [class*="grid-cols-2"].keep-2-col {
-    grid-template-columns: repeat(2, 1fr) !important;
+  /* ============================================================
+     2.8 FORM ELEMANLARI - TOUCH-FRIENDLY
+     ============================================================ */
+  input,
+  select,
+  textarea,
+  [role="combobox"],
+  [class*="SelectTrigger"],
+  [class*="Input"] {
+    min-height: var(--touch-min) !important;
+    font-size: 16px !important; /* iOS zoom engelle */
   }
 
-  .page-shell .stack-on-mobile > * {
-    min-width: 0;
+  /* Select genişliği */
+  [class*="SelectTrigger"] {
+    width: 100% !important;
   }
 
-  /* ========================================
-     TABLE TO CARD TRANSFORMATION
-     ======================================== */
-  .q-table {
-    width: 100%;
+  /* Label küçült */
+  label,
+  [class*="Label"] {
+    font-size: 0.75rem !important;
   }
 
-  .q-table thead {
-    display: none;
+  /* ============================================================
+     2.9 TABS - COMPACT MOBİL GÖRÜNÜM
+     ============================================================ */
+  [role="tablist"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.25rem !important;
+    width: 100% !important;
   }
 
-  .q-table tbody tr {
-    display: block;
-    border: 1px solid hsl(var(--border));
-    background: hsl(var(--background) / 0.6);
-    border-radius: 0.75rem;
-    padding: var(--mobile-gap-sm);
-    margin-bottom: var(--mobile-gap-md);
+  [role="tab"] {
+    flex: 1 1 auto !important;
+    min-width: fit-content !important;
+    padding: 0.5rem 0.5rem !important;
+    font-size: 0.6875rem !important; /* 11px */
   }
 
-  .q-table tbody td {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--mobile-gap-sm);
-    padding: var(--mobile-gap-sm) var(--mobile-gap-md);
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    white-space: normal;
+  /* TabsList background */
+  [class*="TabsList"] {
+    width: 100% !important;
+    padding: 0.25rem !important;
   }
 
-  .q-table tbody td::before {
+  /* ============================================================
+     2.10 TABLOLAR - KART GÖRÜNÜMÜNE DÖNÜŞÜM
+     ============================================================ */
+  table,
+  .q-table,
+  [class*="Table"] {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  thead,
+  [class*="TableHeader"] {
+    display: none !important;
+  }
+
+  tbody,
+  [class*="TableBody"] {
+    display: block !important;
+  }
+
+  tr,
+  [class*="TableRow"] {
+    display: block !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 0.75rem !important;
+    margin-bottom: var(--mobile-gap) !important;
+    padding: var(--mobile-gap-sm) !important;
+    background: hsl(var(--background) / 0.5) !important;
+  }
+
+  td,
+  [class*="TableCell"] {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: var(--mobile-gap-sm) !important;
+    border: none !important;
+    font-size: 0.8125rem !important;
+  }
+
+  td::before,
+  [class*="TableCell"]::before {
     content: attr(data-label);
     font-weight: 600;
-    color: hsl(var(--foreground));
-    opacity: 0.8;
-    text-align: left;
+    margin-right: 0.5rem;
+    flex-shrink: 0;
   }
 
-  .q-table tbody td[data-primary="true"] {
-    font-size: 0.95rem;
+  /* ============================================================
+     2.11 DIALOG/MODAL - MOBİL OPTİMİZE
+     ============================================================ */
+  [role="dialog"],
+  [class*="DialogContent"],
+  [data-state="open"][class*="Dialog"] {
+    width: calc(100vw - 2rem) !important;
+    max-width: calc(100vw - 2rem) !important;
+    max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - 2rem) !important;
+    margin: 1rem !important;
+    border-radius: 1rem !important;
+    overflow-y: auto !important;
   }
 
-  .q-table tbody td * {
-    min-width: 0;
+  [class*="DialogHeader"],
+  [class*="DialogFooter"] {
+    padding: var(--mobile-padding-card) !important;
   }
 
-  .q-table tbody td img {
-    max-width: 100%;
-    height: auto;
-    display: inline-block;
+  /* ============================================================
+     2.12 SCROLLABLE AREAS
+     ============================================================ */
+  [class*="ScrollArea"],
+  .scroll-area {
+    max-height: calc(100vh - var(--dock-height) - var(--safe-bottom) - 8rem) !important;
   }
 
-  /* ========================================
-     FORM ELEMENTS RESPONSIVE STYLING
-     ======================================== */
-  .page-shell input,
-  .page-shell select,
-  .page-shell textarea,
-  .page-shell [role="combobox"] {
-    min-height: var(--mobile-btn-min-height);
-    font-size: 16px; /* Prevents zoom on iOS */
+  /* Chart container yüksekliği */
+  [class*="h-\\[250px\\]"],
+  [class*="h-\\[300px\\]"] {
+    height: 180px !important;
   }
 
-  /* Select/Dropdown responsive */
-  .page-shell [class*="SelectTrigger"],
-  .page-shell [class*="select-trigger"] {
-    min-height: var(--mobile-btn-min-height);
-    padding: 0.5rem 0.75rem;
+  /* Map container */
+  [class*="h-\\[55vh\\]"],
+  [class*="h-\\[50vh\\]"] {
+    height: 45vh !important;
+    min-height: 280px !important;
   }
 
-  /* ========================================
-     FLEX LAYOUTS - RESPONSIVE STACKING
-     ======================================== */
-  .page-shell .flex-col-mobile,
-  .page-shell .flex.items-center.justify-between {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--mobile-gap-sm);
+  /* ============================================================
+     2.13 İKONLAR - MOBİL BOYUTLARI
+     ============================================================ */
+  [class*="h-6"][class*="w-6"],
+  [class*="h-7"][class*="w-7"] {
+    width: 1.25rem !important;
+    height: 1.25rem !important;
   }
 
-  /* Header sections - stack on mobile */
-  .page-shell [class*="CardHeader"] .flex {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--mobile-gap-sm);
+  [class*="h-5"][class*="w-5"] {
+    width: 1rem !important;
+    height: 1rem !important;
   }
 
-  /* ========================================
-     SCROLLABLE AREAS
-     ======================================== */
-  .page-shell .scroll-area,
-  .page-shell [class*="ScrollArea"] {
-    max-height: calc(100vh - var(--mobile-dock-height) - var(--mobile-safe-top) - var(--mobile-safe-bottom) - 4rem);
+  /* Buton içi ikonlar margin */
+  button > svg[class*="mr-2"],
+  [role="button"] > svg[class*="mr-2"] {
+    margin-right: 0.375rem !important;
   }
 
-  /* ========================================
-     SPECIFIC PANEL FIXES
-     ======================================== */
+  /* ============================================================
+     2.14 BADGE/CHIP - COMPACT
+     ============================================================ */
+  [class*="Badge"],
+  .badge {
+    font-size: 0.625rem !important; /* 10px */
+    padding: 0.125rem 0.375rem !important;
+  }
 
-  /* Mal Kabul Panel - Button Group */
-  .page-shell .mal-kabul-actions,
-  .page-shell [class*="islemler"] {
+  /* ============================================================
+     2.15 ACCORDION - COMPACT PADDING
+     ============================================================ */
+  [class*="AccordionTrigger"],
+  [class*="AccordionContent"] {
+    padding: var(--mobile-padding-card) !important;
+  }
+
+  /* ============================================================
+     2.16 SELECT/DROPDOWN POPOVER
+     ============================================================ */
+  [class*="SelectContent"],
+  [class*="PopoverContent"],
+  [class*="DropdownMenuContent"] {
+    max-height: 50vh !important;
+  }
+
+  /* ============================================================
+     2.17 ÖZEL MOBİL UTILITY CLASS'LARI
+     ============================================================ */
+  /* Masaüstünde gizle, mobilde göster */
+  .mobile-only {
+    display: flex !important;
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+
+  /* Mobilde metin gizle, sadece ikon göster */
+  .mobile-icon-only > span:not([class*="sr-only"]),
+  .mobile-icon-only > .btn-text {
+    display: none !important;
+  }
+
+  /* Mobilde tek satır (truncate) */
+  .mobile-truncate {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Mobilde 2 kolonlu grid zorla */
+  .mobile-grid-2 {
     display: grid !important;
     grid-template-columns: repeat(2, 1fr) !important;
     gap: var(--mobile-gap-sm) !important;
   }
-
-  /* Bekleyen Siparisler - Order Cards */
-  .page-shell .order-card,
-  .page-shell [class*="siparis-card"] {
-    padding: var(--mobile-card-padding);
-  }
-
-  .page-shell .order-card .flex,
-  .page-shell [class*="siparis-card"] .flex {
-    flex-wrap: wrap;
-    gap: var(--mobile-gap-sm);
-  }
-
-  /* Transfer Panel */
-  .page-shell .transfer-form,
-  .page-shell [class*="direkt-transfer"] {
-    padding: var(--mobile-card-padding);
-  }
-
-  /* Route Planner */
-  .page-shell .route-map {
-    height: 50vh;
-    min-height: 300px;
-  }
-
-  /* ========================================
-     BADGE/CHIP RESPONSIVE
-     ======================================== */
-  .page-shell [class*="Badge"],
-  .page-shell .badge {
-    font-size: 0.7rem;
-    padding: 0.25rem 0.5rem;
-    white-space: nowrap;
-  }
-
-  /* ========================================
-     TABS RESPONSIVE
-     ======================================== */
-  .page-shell [role="tablist"] {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--mobile-gap-xs);
-  }
-
-  .page-shell [role="tab"] {
-    flex: 1 1 auto;
-    min-width: fit-content;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.75rem;
-  }
-
-  /* ========================================
-     ACCORDION RESPONSIVE
-     ======================================== */
-  .page-shell [class*="AccordionTrigger"],
-  .page-shell [class*="AccordionContent"] {
-    padding: var(--mobile-card-padding);
-  }
-
-  /* ========================================
-     SPACING UTILITIES - MOBILE OVERRIDE
-     ======================================== */
-  .page-shell [class*="gap-6"] {
-    gap: var(--mobile-gap-md) !important;
-  }
-
-  .page-shell [class*="gap-8"] {
-    gap: var(--mobile-gap-lg) !important;
-  }
-
-  .page-shell [class*="p-6"] {
-    padding: var(--mobile-card-padding) !important;
-  }
-
-  .page-shell [class*="p-8"] {
-    padding: var(--mobile-gap-lg) !important;
-  }
-
-  .page-shell [class*="mb-6"] {
-    margin-bottom: var(--mobile-gap-md) !important;
-  }
-
-  .page-shell [class*="mb-8"] {
-    margin-bottom: var(--mobile-gap-lg) !important;
-  }
-
-  /* ========================================
-     ICON SIZING - MOBILE
-     ======================================== */
-  .page-shell [class*="h-6"][class*="w-6"],
-  .page-shell [class*="h-7"][class*="w-7"] {
-    width: 1.25rem;
-    height: 1.25rem;
-  }
-
-  /* ========================================
-     TEXT OVERFLOW HANDLING
-     ======================================== */
-  .page-shell h1, .page-shell h2, .page-shell h3, .page-shell h4 {
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  .page-shell p, .page-shell span, .page-shell label {
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  /* Truncate long text with ellipsis when needed */
-  .page-shell .truncate-mobile {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
 }
 
-/* ========================================
-   SMALL MOBILE BREAKPOINT (max-width: 480px)
-   Extra compact styling for very small screens
-   ======================================== */
-@media (max-width: 480px) {
+/* ================================================================
+   3. ÇOK KÜÇÜK EKRANLAR (<= 380px) - EXTRA COMPACT
+   ================================================================ */
+@media (max-width: 380px) {
   :root {
-    --mobile-card-padding: 0.75rem;
-    --mobile-gap-md: 0.75rem;
+    --mobile-padding-page: 0.75rem;
+    --mobile-padding-card: 0.625rem;
+    --mobile-gap: 0.5rem;
   }
 
-  .page-shell button,
-  .page-shell [role="button"] {
-    padding: 0.375rem 0.5rem;
-    font-size: 0.8125rem;
+  [class*="text-4xl"],
+  [class*="text-3xl"] {
+    font-size: 1.25rem !important;
   }
 
-  /* Force icon-only buttons on very small screens */
-  .page-shell .compact-btn span:not([class*="icon"]):not([class*="sr-only"]) {
-    display: none;
-  }
-
-  .page-shell [class*="text-2xl"],
-  .page-shell [class*="text-3xl"] {
+  [class*="text-2xl"] {
     font-size: 1.125rem !important;
   }
+
+  button,
+  [role="button"] {
+    font-size: 0.75rem !important;
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+
+  [role="tab"] {
+    font-size: 0.625rem !important;
+    padding: 0.375rem 0.375rem !important;
+  }
 }
 
-/* ========================================
-   UTILITY CLASSES FOR COMPONENTS
-   ======================================== */
-/* Mobile-only display */
-@media (max-width: 768px) {
-  .desktop-only { display: none !important; }
-  .mobile-only { display: flex !important; }
-}
-
+/* ================================================================
+   4. MASAÜSTÜ (>= 769px) - MOBİL OVERRIDE'LARI KALDIR
+   ================================================================ */
 @media (min-width: 769px) {
-  .mobile-only { display: none !important; }
-  .desktop-only { display: flex !important; }
+  .mobile-only {
+    display: none !important;
+  }
+
+  .desktop-only {
+    display: flex !important;
+  }
 }
 
-/* Touch-friendly spacing */
+/* ================================================================
+   5. TOUCH TARGET HELPER CLASS
+   ================================================================ */
 .touch-target {
   min-height: 44px;
   min-width: 44px;
+}
+
+/* ================================================================
+   6. İOS SAFE AREA SUPPORT
+   ================================================================ */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .page-shell {
+    padding-bottom: calc(var(--dock-height) + env(safe-area-inset-bottom) + 1rem) !important;
+  }
 }
 `
       }}
