@@ -131,7 +131,7 @@ const NeumorphicCard = ({
   </div>
 );
 
-// KPI Card Component
+// KPI Card Component - Mobile Responsive
 const KPICard = ({
   title,
   value,
@@ -164,38 +164,50 @@ const KPICard = ({
   };
 
   return (
-    <NeumorphicCard className={cn("p-5", size === 'large' && "p-6")}>
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <p className="text-sm font-medium text-muted-foreground mb-1">{title}</p>
+    <NeumorphicCard className={cn(
+      // Responsive padding: smaller on mobile, larger on desktop
+      "p-3 sm:p-4 md:p-5",
+      size === 'large' && "md:p-6",
+      "kpi-card"
+    )}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-0.5 sm:mb-1 truncate">{title}</p>
           <p className={cn(
             "font-bold tracking-tight",
-            size === 'large' ? "text-3xl" : "text-2xl"
+            // Responsive text size
+            size === 'large'
+              ? "text-xl sm:text-2xl md:text-3xl"
+              : "text-lg sm:text-xl md:text-2xl"
           )}>
             {value}
           </p>
           {subtitle && (
-            <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 truncate">{subtitle}</p>
           )}
           {trend && trendValue && (
             <div className={cn(
-              "flex items-center gap-1 mt-2 text-sm font-medium",
+              "flex items-center gap-1 mt-1 sm:mt-2 text-xs sm:text-sm font-medium",
               trend === 'up' && "text-green-500",
               trend === 'down' && "text-red-500",
               trend === 'neutral' && "text-muted-foreground"
             )}>
-              {trend === 'up' && <TrendingUp className="h-4 w-4" />}
-              {trend === 'down' && <TrendingDown className="h-4 w-4" />}
-              <span>{trendValue}</span>
+              {trend === 'up' && <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4" />}
+              {trend === 'down' && <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4" />}
+              <span className="truncate">{trendValue}</span>
             </div>
           )}
         </div>
         <div className={cn(
-          "p-3 rounded-xl",
+          // Responsive icon container padding
+          "p-2 sm:p-2.5 md:p-3 rounded-lg sm:rounded-xl flex-shrink-0",
           colorClasses[color]
         )}>
           <Icon className={cn(
-            size === 'large' ? "h-7 w-7" : "h-6 w-6"
+            // Responsive icon size
+            size === 'large'
+              ? "h-5 w-5 sm:h-6 sm:w-6 md:h-7 md:w-7"
+              : "h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6"
           )} />
         </div>
       </div>
