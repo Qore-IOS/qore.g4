@@ -1414,6 +1414,17 @@ export default function TotalVerimlilikPanel({
       console.log('Örnek rawData kayıt:', rawData[0]);
       console.log('Seçili dönem:', selectedYear, '-', selectedMonth + 1);
 
+      // labHakEdisDefinitions durumunu göster
+      console.log('labHakEdisDefinitions anahtarları:', Object.keys(labHakEdisDefinitions));
+      for (const labId of Object.keys(labHakEdisDefinitions)) {
+        const definitions = labHakEdisDefinitions[labId] || [];
+        const labName = hospitals.find(h => h.id === labId)?.name || labId;
+        console.log(`  - ${labName}: ${definitions.length} tanım`);
+        if (definitions.length > 0) {
+          console.log(`    Örnek: sutTestAdi="${definitions[0].sutTestAdi}", linkedStokKodu="${definitions[0].linkedStokKodu}"`);
+        }
+      }
+
       // Seçilen dönemin başlangıç ve bitiş tarihlerini hesapla
       const periodStart = new Date(selectedYear, selectedMonth, 1);
       const periodEnd = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
@@ -1453,10 +1464,10 @@ export default function TotalVerimlilikPanel({
           continue;
         }
 
-        const sutKodu = String(hakEdisDefinition.sutKodu || '').trim();
+        const sutTestAdi = String(hakEdisDefinition.sutTestAdi || '').trim().toLowerCase();
         const labKod = String(labInfo.kod || '').trim();
 
-        console.log(`Aranan: Lab=${labKod}, SUT=${sutKodu}, Ürün=${row.stokAdi}`);
+        console.log(`Aranan: Lab=${labKod}, SUT Test Adı="${hakEdisDefinition.sutTestAdi}", Ürün=${row.stokAdi}`);
 
         // İş analizi verisinde eşleşmeleri say
         let testCount = 0;
@@ -1467,9 +1478,10 @@ export default function TotalVerimlilikPanel({
           const recordHastaneId = String(record.hastaneId || '').trim();
           if (recordHastaneId !== labKod) continue;
 
-          // Test ID kontrolü - SUT kodu eşleşmesi (hem string hem number olabilir)
-          const recordTestId = String(record.testId || '').trim();
-          if (recordTestId !== sutKodu) continue;
+          // Test ADI kontrolü - test adı eşleşmesi (testId yerine testAdi kullan)
+          // rawData'daki testAdi ile hakEdisDefinition'daki sutTestAdi'yı karşılaştır
+          const recordTestAdi = String(record.testAdi || '').trim().toLowerCase();
+          if (recordTestAdi !== sutTestAdi && !recordTestAdi.includes(sutTestAdi) && !sutTestAdi.includes(recordTestAdi)) continue;
 
           // Tarih kontrolü - seçilen dönem içinde mi?
           const recordDate = record.labKabulTarihi || record.istemTarihi || record.kayitTarihi;
@@ -1520,11 +1532,19 @@ export default function TotalVerimlilikPanel({
         console.log('Debug bilgileri:', debugInfo);
       }
 
-      // rawData'daki benzersiz hastaneId ve testId değerlerini göster
+      // rawData'daki benzersiz hastaneId ve testAdi değerlerini göster
       const uniqueHastaneIds = [...new Set(rawData.map((r: any) => String(r.hastaneId || '').trim()))];
-      const uniqueTestIds = [...new Set(rawData.map((r: any) => String(r.testId || '').trim()))];
+      const uniqueTestAdis = [...new Set(rawData.map((r: any) => String(r.testAdi || '').trim()))];
       console.log('rawData benzersiz hastaneId değerleri:', uniqueHastaneIds);
-      console.log('rawData benzersiz testId değerleri (ilk 20):', uniqueTestIds.slice(0, 20));
+      console.log('rawData benzersiz testAdi değerleri (ilk 20):', uniqueTestAdis.slice(0, 20));
+
+      // hakEdisDefinitions'daki sutTestAdi değerlerini göster
+      const allSutTestAdis: string[] = [];
+      for (const labId of Object.keys(labHakEdisDefinitions)) {
+        const definitions = labHakEdisDefinitions[labId] || [];
+        definitions.forEach(d => allSutTestAdis.push(d.sutTestAdi || ''));
+      }
+      console.log('labHakEdisDefinitions benzersiz sutTestAdi değerleri:', [...new Set(allSutTestAdis)]);
 
       setTestsSentToCenter(sentToCenter);
       setCenterHakEdisMode(true);
