@@ -884,10 +884,11 @@ export default function AnaPanel(props: AnaPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="flex-1 max-w-sm">
-            <Label className="text-sm font-medium">Çalışma Deposu</Label>
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4">
+      {/* Header Section - Mobile Responsive */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+        <div className="flex-1 w-full sm:max-w-sm">
+            <Label className="text-xs sm:text-sm font-medium">Çalışma Deposu</Label>
             <Select value={selectedDepotId} onValueChange={(v: string) => setSelectedDepotId(v)}>
               <SelectTrigger className="w-full mt-1">
                 <SelectValue placeholder="Çalışma Deposu seçin" />
@@ -899,12 +900,13 @@ export default function AnaPanel(props: AnaPanelProps) {
               </SelectContent>
             </Select>
         </div>
-        <Button onClick={() => router.push('/mal-kabul/gecmis')} variant="outline" className="self-end">
-            <History className="mr-2 h-4 w-4" /> Geçmiş
+        <Button onClick={() => router.push('/mal-kabul/gecmis')} variant="outline" className="self-stretch sm:self-end">
+            <History className="h-4 w-4" /> <span className="ml-2">Geçmiş</span>
         </Button>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6">
+      {/* KPI Cards Grid - Mobile Responsive */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
         <Card>
             <CardHeader>
                 <CardTitle>Son Okutulan Ürün</CardTitle>
@@ -935,17 +937,47 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         <Card>
             <CardHeader><CardTitle>İşlemler</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-                <div className="flex gap-2">
-                    <Button onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} variant="outline" size="sm" className="flex-1"><Camera className="mr-2 h-4 w-4"/>Tekli Tara</Button>
-                    <Button onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} className="flex-1 bg-teal-600 hover:bg-teal-700 text-white" size="sm"><Camera className="mr-2 h-4 w-4"/>Seri Tarama</Button>
-                </div>
-                <div className="flex gap-2">
-                    <Button onClick={() => setShowManualInline(v => !v)} variant="outline" size="sm" className="flex-1">
-                        <PlusCircle className="mr-2 h-4 w-4"/> Manuel Ürün
+            <CardContent className="space-y-2 sm:space-y-3">
+                {/* Button Grid - 2x2 on mobile, row layout on larger screens */}
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 mal-kabul-actions">
+                    <Button
+                      onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
+                    >
+                      <Camera className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">Tekli Tara</span>
+                      <span className="xs:hidden sm:hidden">Tekli</span>
                     </Button>
-                    <Button onClick={() => setIsOcrModalOpen(true)} variant="outline" size="sm" className="flex-1">
-                        <ScanLine className="mr-2 h-4 w-4" /> İrsaliye Tara (OCR)
+                    <Button
+                      onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm"
+                      size="sm"
+                    >
+                      <Camera className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">Seri Tarama</span>
+                      <span className="xs:hidden sm:hidden">Seri</span>
+                    </Button>
+                    <Button
+                      onClick={() => setShowManualInline(v => !v)}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
+                    >
+                      <PlusCircle className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">Manuel Ürün</span>
+                      <span className="xs:hidden sm:hidden">Manuel</span>
+                    </Button>
+                    <Button
+                      onClick={() => setIsOcrModalOpen(true)}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
+                    >
+                      <ScanLine className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">İrsaliye (OCR)</span>
+                      <span className="xs:hidden sm:hidden">OCR</span>
                     </Button>
                 </div>
             </CardContent>
@@ -978,27 +1010,72 @@ export default function AnaPanel(props: AnaPanelProps) {
       )}
 
       <Card className="flex-1 flex flex-col">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle className="text-lg font-headline">Okutulan Ürünler ({scannedItems.length})</CardTitle>
-               <CardDescription>Stoğa eklenecek ürünlerin listesi.</CardDescription>
+        <CardHeader className="space-y-3 sm:space-y-4">
+          {/* Title and Actions - Mobile Responsive */}
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+            <div className="flex-shrink-0">
+              <CardTitle className="text-base sm:text-lg font-headline">Okutulan Ürünler ({scannedItems.length})</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">Stoğa eklenecek ürünlerin listesi.</CardDescription>
             </div>
-            <div className="flex items-center space-x-4">
-              <Button onClick={handleOpenAddressModal} variant="outline" disabled={malKabulIsLoading || selectedItemsCount === 0}>Adres Ata ({selectedItemsCount})</Button>
-              <Button onClick={handleOpenIrsaliyeModal} variant="outline" disabled={malKabulIsLoading || selectedItemsCount === 0}>İrsaliye No Ata ({selectedItemsCount})</Button>
-              <Button onClick={() => {
+            {/* Action Buttons - Grid on mobile, flex on larger screens */}
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3 sm:justify-end">
+              <Button
+                onClick={handleOpenAddressModal}
+                variant="outline"
+                size="sm"
+                disabled={malKabulIsLoading || selectedItemsCount === 0}
+                className="text-xs sm:text-sm"
+              >
+                <span className="hidden sm:inline">Adres Ata</span>
+                <span className="sm:hidden">Adres</span>
+                <span className="ml-1">({selectedItemsCount})</span>
+              </Button>
+              <Button
+                onClick={handleOpenIrsaliyeModal}
+                variant="outline"
+                size="sm"
+                disabled={malKabulIsLoading || selectedItemsCount === 0}
+                className="text-xs sm:text-sm"
+              >
+                <span className="hidden sm:inline">İrsaliye No Ata</span>
+                <span className="sm:hidden">İrsaliye</span>
+                <span className="ml-1">({selectedItemsCount})</span>
+              </Button>
+              <Button
+                onClick={() => {
                   const anySelected = scannedItems.some(i => !i.isProcessed && i.isSelected);
                   setScannedItems(prev => prev.map(item => (!item.isProcessed ? { ...item, isSelected: !anySelected } : item)));
-              }} variant="outline" disabled={malKabulIsLoading || unprocessedScannedItems === 0}>
-                  {scannedItems.some(i => !i.isProcessed && i.isSelected) ? 'Tüm Seçimi Kaldır' : `İşlenmemişleri Seç (${unprocessedScannedItems})`}
+                }}
+                variant="outline"
+                size="sm"
+                disabled={malKabulIsLoading || unprocessedScannedItems === 0}
+                className="text-xs sm:text-sm"
+              >
+                <CheckSquare className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">
+                  {scannedItems.some(i => !i.isProcessed && i.isSelected) ? 'Seçimi Kaldır' : `Seç (${unprocessedScannedItems})`}
+                </span>
+                <span className="sm:hidden ml-1">({unprocessedScannedItems})</span>
               </Button>
-              <Button onClick={clearAllScannedItems} variant="destructive" disabled={malKabulIsLoading || scannedItems.length === 0}>
-                  <Trash2 className="mr-2 h-4 w-4" /> Tüm Listeyi Temizle
+              <Button
+                onClick={clearAllScannedItems}
+                variant="destructive"
+                size="sm"
+                disabled={malKabulIsLoading || scannedItems.length === 0}
+                className="text-xs sm:text-sm"
+              >
+                <Trash2 className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Temizle</span>
               </Button>
-              <Button onClick={handlePreCheckAndDogrulamasizMalKabul} className="bg-green-600 hover:bg-green-700 text-white" disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0}>
-                  {(malKabulIsLoading || isLoading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Kabul Et ve Stoğa Ekle
+              <Button
+                onClick={handlePreCheckAndDogrulamasizMalKabul}
+                className="col-span-2 sm:col-span-1 bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm"
+                size="sm"
+                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0}
+              >
+                {(malKabulIsLoading || isLoading) && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                <span className="hidden sm:inline">Kabul Et ve Stoğa Ekle</span>
+                <span className="sm:hidden">Kabul Et</span>
               </Button>
             </div>
           </div>
