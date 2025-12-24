@@ -30,6 +30,7 @@ interface GroupedDestroyedRecord {
     lotNumarasi: string;
     miad: string;
     totalCount: number;
+    remainingTests?: number;
     records: DestroyedKitRecord[];
 }
 
@@ -121,6 +122,7 @@ export default function ImhaEdilenKitlerListePanel() {
                     lotNumarasi: record.lotNumarasi || '',
                     miad: record.miad || '',
                     totalCount: 0,
+                    remainingTests: record.remainingTests,
                     records: [],
                 };
             }
@@ -240,6 +242,9 @@ export default function ImhaEdilenKitlerListePanel() {
                                                         </div>
                                                         <div className="flex-1 text-left text-sm">
                                                             Miad: {group.miad || '-'}
+                                                        </div>
+                                                        <div className="flex-1 text-left text-sm">
+                                                            {group.remainingTests !== undefined ? `Kalan Test: ${group.remainingTests}` : '-'}
                                                         </div>
                                                         <div className="font-bold">
                                                             <Badge variant="secondary">{group.totalCount} Adet</Badge>
