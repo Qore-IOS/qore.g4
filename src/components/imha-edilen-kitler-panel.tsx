@@ -20,7 +20,7 @@ import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
-import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
+import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
 import * as XLSX from 'xlsx';
 import { serverTimestamp } from 'firebase/firestore';
@@ -200,7 +200,11 @@ export default function ImhaEdilenKitlerPanel() {
             return;
         }
 
-        const mode: TrackingMode = resolveDefaultTrackingMode(product as any);
+        // Determine tracking mode based on matched format (dynamic) or product settings (fallback)
+        const matchedFormat = parsed.matchedFormatId
+            ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+            : undefined;
+        const mode: TrackingMode = resolveEffectiveTrackingMode(matchedFormat, product as any);
 
         if (mode === 'serial') {
             if (!seri) {

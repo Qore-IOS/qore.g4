@@ -48,3 +48,35 @@ export const trackingModeFromExcel = (val?: string): TrackingMode => {
       return 'qty_barcode';
   }
 };
+
+/**
+ * Resolves the effective tracking mode based on the matched barcode format.
+ * This allows products to support multiple barcode formats with different tracking modes.
+ *
+ * @param matchedFormat - The barcode format that was matched during parsing
+ * @param product - The product data (for fallback to static tracking mode)
+ * @returns The effective tracking mode to use for this specific scan
+ */
+export function resolveEffectiveTrackingMode(
+  matchedFormat: { trackSerial?: boolean; trackLot?: boolean } | null | undefined,
+  product?: { trackingMode?: TrackingMode; marka?: string; manufacturer?: string; stokAdi?: string }
+): TrackingMode {
+  // If a format was matched, use its tracking capabilities
+  if (matchedFormat) {
+    if (matchedFormat.trackSerial === true) {
+      return 'serial';
+    }
+    if (matchedFormat.trackLot !== false) {
+      return 'lot_barcode';
+    }
+    return 'qty_barcode';
+  }
+
+  // Fall back to product's static tracking mode
+  if (product) {
+    return resolveDefaultTrackingMode(product);
+  }
+
+  // Ultimate fallback
+  return 'qty_barcode';
+}

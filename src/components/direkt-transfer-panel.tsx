@@ -29,7 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle } from 'lucide-react';
-import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
+import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
@@ -328,7 +328,11 @@ export default function DirektTransferPanel() {
           return;
       }
 
-      const mode: TrackingMode = resolveDefaultTrackingMode(product as any);
+      // Determine tracking mode based on matched format (dynamic) or product settings (fallback)
+      const matchedFormat = parsed.matchedFormatId
+        ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+        : undefined;
+      const mode: TrackingMode = resolveEffectiveTrackingMode(matchedFormat, product as any);
 
       if (mode === 'serial') {
         if (!seri) {
