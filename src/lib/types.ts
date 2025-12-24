@@ -647,6 +647,7 @@ export interface DestroyedKitRecord {
   miad?: string; // NEW: Expiry date
   seriNumarasi?: string; // NEW: Serial number
   testCount: number;
+  remainingTests?: number; // NEW: Remaining tests in the kit before destruction
   aciklama: string;
   resolvedAt: TimestampLike;
   resolvedByUid: string;
