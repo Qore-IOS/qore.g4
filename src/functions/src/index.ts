@@ -189,7 +189,7 @@ export const sendFaultReportEmail = functions
 
         let recipients: string[];
         if (faultType === 'teknik_servis') {
-            recipients = ['ysahan@nukleus.com.tr', 'dkilic@nukleus.com.tr', 'tdonmez@nukleus.com.tr', 'bbasar@nukleus.com.tr'];
+            recipients = ['ysahan@nukleus.com.tr', 'dkilic@nukleus.com.tr', 'bbasar@nukleus.com.tr', 'aturhan@nukleus.com.tr'];
         } else if (faultType === 'aplikasyon') {
             recipients = ['bkahraman@nukleus.com.tr', 'iertugrul@nukleus.com.tr', 'ehoscanli@nukleus.com.tr', 'helkoca@nukleus.com.tr', 'bbasar@nukleus.com.tr'];
         } else {
