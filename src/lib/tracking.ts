@@ -50,25 +50,35 @@ export const trackingModeFromExcel = (val?: string): TrackingMode => {
 };
 
 /**
- * Resolves the effective tracking mode based on the matched barcode format.
+ * Resolves the effective tracking mode based on what the barcode actually contains.
  * This allows products to support multiple barcode formats with different tracking modes.
  *
+ * @param parsed - The parsed barcode data (to check what it contains)
  * @param matchedFormat - The barcode format that was matched during parsing
  * @param product - The product data (for fallback to static tracking mode)
  * @returns The effective tracking mode to use for this specific scan
  */
 export function resolveEffectiveTrackingMode(
+  parsed: { seriNumarasi?: string; lotNumarasi?: string } | null | undefined,
   matchedFormat: { trackSerial?: boolean; trackLot?: boolean } | null | undefined,
   product?: { trackingMode?: TrackingMode; marka?: string; manufacturer?: string; stokAdi?: string }
 ): TrackingMode {
-  // If a format was matched, use its tracking capabilities
-  if (matchedFormat) {
-    if (matchedFormat.trackSerial === true) {
+  // If we have parsed data and a matched format, determine mode based on actual barcode content
+  if (parsed && matchedFormat) {
+    const hasSeri = !!(parsed.seriNumarasi && parsed.seriNumarasi.trim());
+    const hasLot = !!(parsed.lotNumarasi && parsed.lotNumarasi.trim());
+
+    // If barcode has serial number and format supports it
+    if (hasSeri && matchedFormat.trackSerial === true) {
       return 'serial';
     }
-    if (matchedFormat.trackLot !== false) {
+
+    // If barcode has lot (but no serial) and format supports it
+    if (hasLot && !hasSeri && matchedFormat.trackLot !== false) {
       return 'lot_barcode';
     }
+
+    // Otherwise quantity tracking
     return 'qty_barcode';
   }
 
