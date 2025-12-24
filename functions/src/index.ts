@@ -84,7 +84,8 @@ export const sendFaultReportEmail = functions
             'iertugrul@nukleus.com.tr',
             'ehoscanli@nukleus.com.tr',
             'helkoca@nukleus.com.tr',
-            'bbasar@nukleus.com.tr'
+            'bbasar@nukleus.com.tr',
+            'aturhan@nukleus.com.tr'
         ];
 
         // Kucuk harf kontrolu ile eslestirme yapalim
@@ -96,7 +97,8 @@ export const sendFaultReportEmail = functions
             recipients = aplikasyonListesi;
         } else {
             // Eger tip tanimsizsa veya baska bir seyse Adminlere gonder
-            recipients = ['bbasar@nukleus.com.tr', 'btubasar@gmail.com'];
+            recipients = ['bbasar@nukleus.com.tr',
+            'aturhan@nukleus.com.tr', 'btubasar@gmail.com'];
         }
 
         // 3. İÇERİK VE LİNK (YENİ)
