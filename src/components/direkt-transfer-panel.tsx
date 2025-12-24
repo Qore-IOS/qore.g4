@@ -270,7 +270,10 @@ export default function DirektTransferPanel() {
       if (!selectedDepotId) return [];
       const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false), where('stokKodu', '==', stokKodu), where('lotNumarasi', '==', lot));
       const snap = await getDocs(q);
-      return snap.docs.map(d => ({id: d.id, ...d.data()} as DepoStokItem));
+      const allItems = snap.docs.map(d => ({id: d.id, ...d.data()} as DepoStokItem));
+      // Lot okutulduğunda sadece seri numarası OLMAYAN kayıtları döndür
+      // Bu sayede seri nolu kayıtlar sadece seri no okutulduğunda işlem görür
+      return allItems.filter(item => !item.seriNumarasi || item.seriNumarasi.trim() === '');
   }, [selectedDepotId]);
 
   const countStockByCode = useCallback(async (stokKodu: string): Promise<DepoStokItem[]> => {
