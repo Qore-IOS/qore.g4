@@ -173,49 +173,93 @@ export default function MobileResponsiveFix() {
   /* ============================================================
      2.5 BUTONLAR - TOUCH-FRIENDLY & RESPONSIVE
      ============================================================ */
-  /* Tüm butonlara minimum touch target */
-  button,
-  [role="button"],
-  [type="button"],
-  [type="submit"],
-  .btn,
-  [class*="Button"] {
+  /* Tüm butonlara minimum touch target - DOCK HARİÇ */
+  .page-shell button,
+  .page-shell [role="button"],
+  .page-shell [type="button"],
+  .page-shell [type="submit"],
+  .page-shell .btn,
+  .page-shell [class*="Button"] {
     min-height: var(--touch-min) !important;
-    font-size: 0.8125rem !important;  /* 13px */
+    font-size: 0.875rem !important;  /* 14px - daha okunur */
     padding-left: 0.75rem !important;
     padding-right: 0.75rem !important;
+    /* Buton metinlerinin kesilmesini engelle */
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    line-height: 1.2 !important;
   }
 
-  /* Icon butonları */
-  button[class*="h-10"][class*="w-10"],
-  button[class*="size-icon"],
-  [class*="size-icon"] {
+  /* Icon butonları - DOCK HARİÇ */
+  .page-shell button[class*="h-10"][class*="w-10"],
+  .page-shell button[class*="size-icon"],
+  .page-shell [class*="size-icon"] {
     min-width: var(--touch-min) !important;
     min-height: var(--touch-min) !important;
     width: var(--touch-min) !important;
     height: var(--touch-min) !important;
   }
 
-  /* Küçük butonlar biraz büyüt */
-  [class*="h-7"],
-  [class*="h-8"],
-  [class*="h-9"] {
+  /* Küçük butonlar biraz büyüt - DOCK HARİÇ */
+  .page-shell [class*="h-7"],
+  .page-shell [class*="h-8"],
+  .page-shell [class*="h-9"] {
     min-height: 36px !important;
+  }
+
+  /* ============================================================
+     2.5.1 MOBİL DOCK - ÖZEL KORUMA
+     ============================================================ */
+  /* Mobil dock'un global CSS'den etkilenmemesi için */
+  .fixed[class*="bottom-0"] {
+    overflow: visible !important;
+    z-index: 40 !important;
+  }
+
+  /* Dock içindeki butonlar orijinal boyutlarını korusun */
+  .fixed[class*="bottom-0"] button {
+    min-height: unset !important;
+    font-size: unset !important;
+    padding: unset !important;
+    overflow: visible !important;
+  }
+
+  /* Dock içindeki bildirim butonu */
+  .fixed[class*="bottom-0"] button[class*="w-10"],
+  .fixed[class*="bottom-0"] button[class*="h-10"] {
+    width: 2.5rem !important;
+    height: 2.5rem !important;
+    min-width: 2.5rem !important;
+    min-height: 2.5rem !important;
+  }
+
+  /* Logo butonu - overflow ve z-index düzeltmesi */
+  .fixed[class*="bottom-0"] .absolute {
+    overflow: visible !important;
+    z-index: 50 !important;
+  }
+
+  .fixed[class*="bottom-0"] button[class*="w-20"] {
+    width: 5rem !important;
+    height: 5rem !important;
+    min-height: 5rem !important;
+    overflow: visible !important;
   }
 
   /* ============================================================
      2.6 BUTON GRUPLARI - OTOMATİK WRAP & GRID
      ============================================================ */
-  /* Yan yana buton grupları wrap olsun */
-  .flex[class*="gap"] {
+  /* Yan yana buton grupları wrap olsun - DOCK HARİÇ */
+  .page-shell .flex[class*="gap"] {
     flex-wrap: wrap !important;
   }
 
   /* Belirli buton grubu patternleri 2x2 grid yap */
-  [class*="CardContent"] > .flex[class*="gap"] > button,
-  [class*="CardContent"] > div > .flex[class*="gap"] > button,
-  [class*="CardHeader"] .flex[class*="gap"] > button,
-  [class*="CardHeader"] .flex[class*="gap"] > a {
+  .page-shell [class*="CardContent"] > .flex[class*="gap"] > button,
+  .page-shell [class*="CardContent"] > div > .flex[class*="gap"] > button,
+  .page-shell [class*="CardHeader"] .flex[class*="gap"] > button,
+  .page-shell [class*="CardHeader"] .flex[class*="gap"] > a {
     flex: 1 1 calc(50% - 0.5rem) !important;
     min-width: calc(50% - 0.5rem) !important;
   }
@@ -236,16 +280,16 @@ export default function MobileResponsiveFix() {
   /* ============================================================
      2.7 FLEX LAYOUT - MOBİL STACK
      ============================================================ */
-  /* justify-between flex'ler column yap */
-  .flex[class*="justify-between"][class*="items-center"] {
+  /* justify-between flex'ler column yap - DOCK HARİÇ */
+  .page-shell .flex[class*="justify-between"][class*="items-center"] {
     flex-direction: column !important;
     align-items: stretch !important;
     gap: var(--mobile-gap-sm) !important;
   }
 
-  /* Header içindeki flex'ler */
-  [class*="CardHeader"] > .flex,
-  [class*="CardHeader"] > div > .flex {
+  /* Header içindeki flex'ler - DOCK HARİÇ */
+  .page-shell [class*="CardHeader"] > .flex,
+  .page-shell [class*="CardHeader"] > div > .flex {
     flex-direction: column !important;
     align-items: flex-start !important;
     gap: var(--mobile-gap-sm) !important;
@@ -254,24 +298,24 @@ export default function MobileResponsiveFix() {
   /* ============================================================
      2.8 FORM ELEMANLARI - TOUCH-FRIENDLY
      ============================================================ */
-  input,
-  select,
-  textarea,
-  [role="combobox"],
-  [class*="SelectTrigger"],
-  [class*="Input"] {
+  .page-shell input,
+  .page-shell select,
+  .page-shell textarea,
+  .page-shell [role="combobox"],
+  .page-shell [class*="SelectTrigger"],
+  .page-shell [class*="Input"] {
     min-height: var(--touch-min) !important;
     font-size: 16px !important; /* iOS zoom engelle */
   }
 
   /* Select genişliği */
-  [class*="SelectTrigger"] {
+  .page-shell [class*="SelectTrigger"] {
     width: 100% !important;
   }
 
   /* Label küçült */
-  label,
-  [class*="Label"] {
+  .page-shell label,
+  .page-shell [class*="Label"] {
     font-size: 0.75rem !important;
   }
 
