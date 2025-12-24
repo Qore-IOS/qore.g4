@@ -154,6 +154,7 @@ export default function ImhaEdilenKitlerListePanel() {
                 'Miad': r.miad || '-',
                 'Seri No': r.seriNumarasi || '-',
                 'Test Adedi': r.testCount,
+                'Kalan Test': r.remainingTests !== undefined ? r.remainingTests : '-',
                 'İmha Tarihi': resolvedAtDate ? format(resolvedAtDate, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
                 'Onaylayan': r.resolvedByName,
                 'Kaynak': r.sourceType === 'fault' ? 'Arıza Kaydı' : 'Manuel',
@@ -253,7 +254,14 @@ export default function ImhaEdilenKitlerListePanel() {
                                                                         .filter(r => r.seriNumarasi)
                                                                         .map((record, idx) => (
                                                                             <li key={idx} className="text-xs font-mono flex justify-between items-center py-1 px-2 bg-background rounded">
-                                                                                <span>{record.seriNumarasi}</span>
+                                                                                <span>
+                                                                                    {record.seriNumarasi}
+                                                                                    {record.remainingTests !== undefined && (
+                                                                                        <span className="ml-2 text-muted-foreground">
+                                                                                            (Kalan Test: {record.remainingTests})
+                                                                                        </span>
+                                                                                    )}
+                                                                                </span>
                                                                                 <span className="text-muted-foreground">
                                                                                     {record.resolvedAt ? format(record.resolvedAt instanceof Date ? record.resolvedAt : new Date(record.resolvedAt), 'dd.MM.yy HH:mm', { locale: tr }) : '-'}
                                                                                 </span>
@@ -293,6 +301,7 @@ export default function ImhaEdilenKitlerListePanel() {
                                                     <TableHead>Cihaz</TableHead>
                                                     <TableHead>Ürün</TableHead>
                                                     <TableHead>Adet</TableHead>
+                                                    <TableHead>Kalan Test</TableHead>
                                                     <TableHead>Onaylayan</TableHead>
                                                 </TableRow>
                                             </TableHeader>
@@ -314,6 +323,9 @@ export default function ImhaEdilenKitlerListePanel() {
                                                         </TableCell>
                                                         <TableCell>
                                                             <Badge variant="secondary">{record.testCount}</Badge>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            {record.remainingTests !== undefined ? record.remainingTests : '-'}
                                                         </TableCell>
                                                         <TableCell>{record.resolvedByName}</TableCell>
                                                     </TableRow>

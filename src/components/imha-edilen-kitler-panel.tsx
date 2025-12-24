@@ -14,8 +14,9 @@ import BackButton from '@/components/BackButton';
 import { playFeedback, generateId } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -39,6 +40,7 @@ interface DestroyedItem {
     miad: string;
     seriNumarasi: string;
     adet: number;
+    remainingTests?: number;
     depotId?: string;
     depotName?: string;
     laboratoryId?: string;
@@ -55,7 +57,8 @@ interface GroupedDestroyedItem {
     lotNumarasi: string;
     miad: string;
     adet: number;
-    serials: { id: string; seriNumarasi: string }[];
+    remainingTests?: number;
+    serials: { id: string; seriNumarasi: string; remainingTests?: number }[];
     sourceType: 'barcode' | 'excel';
 }
 
@@ -84,6 +87,11 @@ export default function ImhaEdilenKitlerPanel() {
     const { parseAnyBarcode, resolveProductFromParsed } = useBarcodeParser();
     const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
     const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+
+    // Remaining tests dialog
+    const [isRemainingTestsDialogOpen, setIsRemainingTestsDialogOpen] = useState(false);
+    const [pendingItem, setPendingItem] = useState<DestroyedItem | null>(null);
+    const [remainingTestsInput, setRemainingTestsInput] = useState<string>('');
 
     // Fetch master data
     useEffect(() => {
@@ -117,6 +125,39 @@ export default function ImhaEdilenKitlerPanel() {
             return hospitals.find(h => h.id === selectedLabId)?.name || '';
         }
     }, [selectedSourceType, selectedDepotId, selectedLabId, depots, hospitals]);
+
+    // Handle remaining tests dialog confirmation
+    const handleRemainingTestsConfirm = () => {
+        if (!pendingItem) return;
+
+        const remainingTests = remainingTestsInput ? parseInt(remainingTestsInput, 10) : undefined;
+        const itemWithRemainingTests = { ...pendingItem, remainingTests };
+
+        if (pendingItem.isGroup) {
+            // Group item
+            setDestroyedItems(prev => {
+                const existing = prev.find(item => item.key === pendingItem.key && item.isGroup);
+                if (existing) {
+                    return prev.map(item =>
+                        item.key === pendingItem.key
+                            ? { ...item, adet: item.adet + 1 }
+                            : item
+                    );
+                }
+                return [itemWithRemainingTests, ...prev];
+            });
+        } else {
+            // Serial item
+            setDestroyedItems(prev => [itemWithRemainingTests, ...prev]);
+        }
+
+        playFeedback();
+        toast({ title: 'Ürün Eklendi', description: `${pendingItem.stokAdi} imha listesine eklendi.` });
+
+        setIsRemainingTestsDialogOpen(false);
+        setPendingItem(null);
+        setRemainingTestsInput('');
+    };
 
     // Count stock by serial
     const countStockBySerial = useCallback(async (stokKodu: string, serial: string, sourceId: string, sourceType: 'depot' | 'laboratory'): Promise<DepoStokItem[]> => {
@@ -223,7 +264,7 @@ export default function ImhaEdilenKitlerPanel() {
                 });
             }
 
-            // Add to list
+            // Prepare item and show dialog
             const newItem: DestroyedItem = {
                 id: generateId(),
                 stokKodu,
@@ -241,9 +282,11 @@ export default function ImhaEdilenKitlerPanel() {
                 )
             };
 
-            setDestroyedItems(prev => [newItem, ...prev]);
-            playFeedback();
-            toast({ title: 'Ürün Eklendi', description: `${stokAdi} imha listesine eklendi.` });
+            // Set default remaining tests to package quantity or 1
+            const defaultRemainingTests = product.ambalajDegeri || 1;
+            setPendingItem(newItem);
+            setRemainingTestsInput(String(defaultRemainingTests));
+            setIsRemainingTestsDialogOpen(true);
             return;
         }
 
@@ -264,53 +307,26 @@ export default function ImhaEdilenKitlerPanel() {
                 });
             }
 
-            // Add or increment group
+            // Prepare item and show dialog
             const key = `${stokKodu}__${lot}`;
-            setDestroyedItems(prev => {
-                const existing = prev.find(item => item.key === key && item.isGroup);
-                if (existing) {
-                    return prev.map(item => item.key === key ? { ...item, adet: item.adet + 1 } : item);
-                }
+            const existing = destroyedItems.find(item => item.key === key && item.isGroup);
 
-                const newItem: DestroyedItem = {
-                    id: generateId(),
-                    stokKodu,
-                    stokAdi,
-                    lotNumarasi: lot,
-                    miad,
-                    seriNumarasi: '',
-                    adet: 1,
-                    sourceType: 'barcode',
-                    key,
-                    isGroup: true,
-                    ...(selectedSourceType === 'depot'
-                        ? { depotId: selectedDepotId, depotName: selectedSourceName }
-                        : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName }
-                    )
-                };
-
-                return [newItem, ...prev];
-            });
-
-            playFeedback();
-            toast({ title: 'Ürün Eklendi', description: `${stokAdi} (Lot: ${lot}) imha listesine eklendi.` });
-            return;
-        }
-
-        // Quantity only mode
-        const key = stokKodu;
-        setDestroyedItems(prev => {
-            const existing = prev.find(item => item.key === key && item.isGroup);
             if (existing) {
-                return prev.map(item => item.key === key ? { ...item, adet: item.adet + 1 } : item);
+                // If group already exists, just increment without showing dialog
+                setDestroyedItems(prev =>
+                    prev.map(item => item.key === key ? { ...item, adet: item.adet + 1 } : item)
+                );
+                playFeedback();
+                toast({ title: 'Ürün Eklendi', description: `${stokAdi} (Lot: ${lot}) imha listesine eklendi.` });
+                return;
             }
 
             const newItem: DestroyedItem = {
                 id: generateId(),
                 stokKodu,
                 stokAdi,
-                lotNumarasi: '',
-                miad: '',
+                lotNumarasi: lot,
+                miad,
                 seriNumarasi: '',
                 adet: 1,
                 sourceType: 'barcode',
@@ -322,11 +338,50 @@ export default function ImhaEdilenKitlerPanel() {
                 )
             };
 
-            return [newItem, ...prev];
-        });
+            // Set default remaining tests to package quantity or 1
+            const defaultRemainingTests = product.ambalajDegeri || 1;
+            setPendingItem(newItem);
+            setRemainingTestsInput(String(defaultRemainingTests));
+            setIsRemainingTestsDialogOpen(true);
+            return;
+        }
 
-        playFeedback();
-        toast({ title: 'Ürün Eklendi', description: `${stokAdi} imha listesine eklendi.` });
+        // Quantity only mode
+        const key = stokKodu;
+        const existing = destroyedItems.find(item => item.key === key && item.isGroup);
+
+        if (existing) {
+            // If group already exists, just increment without showing dialog
+            setDestroyedItems(prev =>
+                prev.map(item => item.key === key ? { ...item, adet: item.adet + 1 } : item)
+            );
+            playFeedback();
+            toast({ title: 'Ürün Eklendi', description: `${stokAdi} imha listesine eklendi.` });
+            return;
+        }
+
+        const newItem: DestroyedItem = {
+            id: generateId(),
+            stokKodu,
+            stokAdi,
+            lotNumarasi: '',
+            miad: '',
+            seriNumarasi: '',
+            adet: 1,
+            sourceType: 'barcode',
+            key,
+            isGroup: true,
+            ...(selectedSourceType === 'depot'
+                ? { depotId: selectedDepotId, depotName: selectedSourceName }
+                : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName }
+            )
+        };
+
+        // Set default remaining tests to package quantity or 1
+        const defaultRemainingTests = product.ambalajDegeri || 1;
+        setPendingItem(newItem);
+        setRemainingTestsInput(String(defaultRemainingTests));
+        setIsRemainingTestsDialogOpen(true);
     }, [selectedSourceType, selectedDepotId, selectedLabId, selectedFormatId, barcodeFormats, products, destroyedItems, parseAnyBarcode, resolveProductFromParsed, toast, selectedSourceName, countStockBySerial, countStockByLot]);
 
     useHidScanner({
@@ -358,13 +413,14 @@ export default function ImhaEdilenKitlerPanel() {
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-            // Expected columns: stok kodu, lot, miad, seri no
+            // Expected columns: stok kodu, lot, miad, seri no, kalan test
             let addedCount = 0;
             for (const row of jsonData) {
                 const stokKodu = row['stok kodu'] || row['Stok Kodu'] || row['STOK KODU'];
                 const lot = row['lot'] || row['Lot'] || row['LOT'] || '';
                 const miad = row['miad'] || row['Miad'] || row['MIAD'] || '';
                 const seri = row['seri no'] || row['Seri No'] || row['SERI NO'] || '';
+                const kalanTest = row['kalan test'] || row['Kalan Test'] || row['KALAN TEST'] || '';
 
                 if (!stokKodu) continue;
 
@@ -381,6 +437,18 @@ export default function ImhaEdilenKitlerPanel() {
                     continue; // Skip duplicate
                 }
 
+                // Parse remaining tests or use default
+                let remainingTests: number | undefined;
+                if (kalanTest) {
+                    const parsed = parseInt(String(kalanTest), 10);
+                    if (!isNaN(parsed)) {
+                        remainingTests = parsed;
+                    }
+                } else {
+                    // Default to package quantity or 1
+                    remainingTests = product.ambalajDegeri || 1;
+                }
+
                 const newItem: DestroyedItem = {
                     id: generateId(),
                     stokKodu,
@@ -389,6 +457,7 @@ export default function ImhaEdilenKitlerPanel() {
                     miad,
                     seriNumarasi: seri,
                     adet: 1,
+                    remainingTests,
                     sourceType: 'excel',
                     key: seri ? generateId() : `${stokKodu}__${lot}`,
                     isGroup: !seri,
@@ -422,7 +491,7 @@ export default function ImhaEdilenKitlerPanel() {
     // Download excel template
     const handleDownloadTemplate = () => {
         const template = [
-            { 'stok kodu': '', 'lot': '', 'miad': '', 'seri no': '' }
+            { 'stok kodu': '', 'lot': '', 'miad': '', 'seri no': '', 'kalan test': '' }
         ];
         const ws = XLSX.utils.json_to_sheet(template);
         const wb = XLSX.utils.book_new();
@@ -541,6 +610,7 @@ export default function ImhaEdilenKitlerPanel() {
                         miad: item.miad,
                         seriNumarasi: item.seriNumarasi,
                         testCount: item.adet,
+                        remainingTests: item.remainingTests,
                         aciklama: `${item.sourceType === 'barcode' ? 'Barkod ile' : 'Excel ile'} manuel olarak eklendi.`,
                         resolvedAt: serverTimestamp(),
                         resolvedByUid: currentUser?.uid || '',
@@ -581,13 +651,18 @@ export default function ImhaEdilenKitlerPanel() {
                     lotNumarasi: item.lotNumarasi || '',
                     miad: item.miad || '',
                     adet: 0,
+                    remainingTests: item.remainingTests,
                     serials: [],
                     sourceType: item.sourceType,
                 };
             }
             groups[groupKey].adet += item.adet;
             if (!item.isGroup && item.seriNumarasi) {
-                groups[groupKey].serials.push({ id: item.id, seriNumarasi: item.seriNumarasi });
+                groups[groupKey].serials.push({
+                    id: item.id,
+                    seriNumarasi: item.seriNumarasi,
+                    remainingTests: item.remainingTests
+                });
             }
         });
 
@@ -744,6 +819,9 @@ export default function ImhaEdilenKitlerPanel() {
                                                 </div>
                                                 <div className="flex-1 text-left text-sm">Lot: {group.lotNumarasi || '-'}</div>
                                                 <div className="flex-1 text-left text-sm">Miad: {group.miad || '-'}</div>
+                                                <div className="flex-1 text-left text-sm">
+                                                    {group.remainingTests !== undefined ? `Kalan Test: ${group.remainingTests}` : '-'}
+                                                </div>
                                                 <div className="font-bold flex items-center gap-2">
                                                     <span>{group.adet} Adet</span>
                                                     <Button
@@ -763,7 +841,14 @@ export default function ImhaEdilenKitlerPanel() {
                                                     <ul className="space-y-1">
                                                         {group.serials.map(serial => (
                                                             <li key={serial.id} className="flex justify-between items-center text-xs font-mono">
-                                                                {serial.seriNumarasi}
+                                                                <span>
+                                                                    {serial.seriNumarasi}
+                                                                    {serial.remainingTests !== undefined && (
+                                                                        <span className="ml-2 text-muted-foreground">
+                                                                            (Kalan Test: {serial.remainingTests})
+                                                                        </span>
+                                                                    )}
+                                                                </span>
                                                                 <Button
                                                                     variant="ghost"
                                                                     size="icon"
@@ -800,6 +885,50 @@ export default function ImhaEdilenKitlerPanel() {
                             <CameraScanner onScanSuccess={handleCameraScan} onClose={() => setIsCameraScannerOpen(false)} />
                         </Suspense>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Remaining Tests Dialog */}
+            <Dialog open={isRemainingTestsDialogOpen} onOpenChange={setIsRemainingTestsDialogOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Kalan Test Adeti</DialogTitle>
+                        <DialogDescription>
+                            {pendingItem?.stokAdi} için kalan test adedini girin
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="remaining-tests">Kalan Test Adeti</Label>
+                            <Input
+                                id="remaining-tests"
+                                type="number"
+                                min="0"
+                                value={remainingTestsInput}
+                                onChange={(e) => setRemainingTestsInput(e.target.value)}
+                                placeholder="Test adedini girin"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleRemainingTestsConfirm();
+                                    }
+                                }}
+                                autoFocus
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => {
+                            setIsRemainingTestsDialogOpen(false);
+                            setPendingItem(null);
+                            setRemainingTestsInput('');
+                        }}>
+                            İptal
+                        </Button>
+                        <Button onClick={handleRemainingTestsConfirm}>
+                            Onayla
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>
