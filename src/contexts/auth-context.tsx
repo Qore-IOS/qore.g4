@@ -1,23 +1,26 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { 
-  getAuth, onAuthStateChanged, User as FirebaseUser, signOut as firebaseSignOut, 
-  createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider, 
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import {
+  getAuth, onAuthStateChanged, User as FirebaseUser, signOut as firebaseSignOut,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider,
   signInWithPopup, signInAnonymously, signInWithCustomToken
 } from 'firebase/auth';
 import { app, db } from '@/lib/firebase';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
-import type { User, AppView } from '@/lib/types'; 
-import { VIEWS } from '@/lib/constants'; 
+import { useTheme } from 'next-themes';
+import type { User, AppView } from '@/lib/types';
+import { VIEWS } from '@/lib/constants';
 import { safeSignOut } from '@/lib/presence-client';
+
+type ThemePreference = 'light' | 'dark' | 'system';
 
 type NavMode = 'dock' | 'sidebar';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
-  currentUserProfile: User | null; 
+  currentUserProfile: User | null;
   isLoadingAuth: boolean;
   isAdmin: boolean;
   permissions: AppView[];
@@ -25,6 +28,8 @@ interface AuthContextType {
   toggleOrbAnimation: () => void;
   navMode: NavMode;
   toggleNavMode: () => void;
+  themePreference: ThemePreference;
+  setUserTheme: (theme: ThemePreference) => Promise<void>;
   login: (email: string, pass: string) => Promise<FirebaseUser | null>;
   loginWithGoogle: () => Promise<FirebaseUser | null>;
   loginAnonymously: () => Promise<FirebaseUser | null>;
@@ -45,8 +50,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
+  const [themePreference, setThemePreference] = useState<ThemePreference>('dark');
   const router = useRouter();
   const auth = getAuth(app);
+  const { setTheme, theme } = useTheme();
 
   useEffect(() => {
     const savedOrbState = localStorage.getItem('orb_animation_enabled');
@@ -72,6 +79,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return newMode;
     });
   };
+
+  // Save theme preference to Firestore and apply it
+  const setUserTheme = useCallback(async (newTheme: ThemePreference) => {
+    setTheme(newTheme);
+    setThemePreference(newTheme);
+
+    // Save to Firestore if user is logged in
+    if (currentUser && !currentUser.isAnonymous) {
+      try {
+        const userDocRef = doc(db, "users", currentUser.uid);
+        await updateDoc(userDocRef, { themePreference: newTheme });
+      } catch (error) {
+        console.error("Error saving theme preference to Firestore:", error);
+      }
+    }
+  }, [currentUser, setTheme]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -99,10 +122,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               if (!userPermissions.includes('arama')) {
                   userPermissions.push('arama');
               }
-              
+
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
               setIsAdmin(userData.role === 'admin' || user.uid === ADMIN_USER_UID);
               setPermissions(userPermissions);
+
+              // Apply user's theme preference from Firestore
+              if (userData.themePreference) {
+                setTheme(userData.themePreference);
+                setThemePreference(userData.themePreference);
+              }
 
             } else {
               const defaultRole = user.uid === ADMIN_USER_UID ? 'admin' : 'user';
@@ -227,6 +256,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     toggleOrbAnimation,
     navMode,
     toggleNavMode,
+    themePreference,
+    setUserTheme,
     login,
     signup,
     logout,

@@ -125,6 +125,7 @@ export interface User {
   assignedBrands?: string[]; // Array of brand names
   notificationsEnabled?: boolean; // User notification preferences
   notificationPreferences?: string[]; // Array of notification types
+  themePreference?: 'light' | 'dark' | 'system'; // User's theme preference stored in Firestore
 }
 
 export interface ScannedItem {
