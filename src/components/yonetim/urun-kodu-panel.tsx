@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
 import { Badge } from '../ui/badge';
 import { useAuth } from '@/contexts/auth-context';
+import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -157,6 +158,7 @@ export default function UrunKoduPanel() {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser } = useAuth();
+  const { formats: barcodeFormats } = useSafeBarcodeFormats();
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
   // Maliyet Checkpoint State'leri
@@ -750,6 +752,7 @@ export default function UrunKoduPanel() {
                       <TableHead>Stok Adı</TableHead>
                       <TableHead>Ürün Grubu</TableHead>
                       <TableHead>Marka</TableHead>
+                      <TableHead>Barkod Formatları</TableHead>
                       <TableHead>Test Grubu</TableHead>
                       <TableHead>Cihaz Grubu</TableHead>
                       <TableHead className="text-right">İşlemler</TableHead>
@@ -769,6 +772,44 @@ export default function UrunKoduPanel() {
                         <TableCell className="font-medium">{p.stokAdi}</TableCell>
                         <TableCell>{p.urunGrubu}</TableCell>
                         <TableCell>{p.marka}</TableCell>
+                        <TableCell>
+                          {(() => {
+                            // Çoklu format desteği (yeni)
+                            const formatIds = (p as any).barcodeFormatIds;
+                            if (Array.isArray(formatIds) && formatIds.length > 0) {
+                              return (
+                                <div className="flex flex-wrap gap-1">
+                                  {formatIds.map((fmtId: string) => {
+                                    const fmt = barcodeFormats.find(f => f.id === fmtId);
+                                    return fmt ? (
+                                      <Badge key={fmtId} variant="secondary" className="text-xs">
+                                        {fmt.name}
+                                      </Badge>
+                                    ) : null;
+                                  })}
+                                </div>
+                              );
+                            }
+                            // Tek format (eski - geriye uyumluluk)
+                            const singleFormatId = (p as any).barcodeFormatId;
+                            if (singleFormatId && singleFormatId !== '__auto__') {
+                              const fmt = barcodeFormats.find(f => f.id === singleFormatId);
+                              return fmt ? (
+                                <Badge variant="outline" className="text-xs">
+                                  {fmt.name}
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">{singleFormatId}</span>
+                              );
+                            }
+                            // Otomatik veya tanımsız
+                            return (
+                              <span className="text-xs text-muted-foreground">
+                                {singleFormatId === '__auto__' ? 'Otomatik' : '—'}
+                              </span>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell>{p.testGrubu}</TableCell>
                         <TableCell>{p.cihazGrubu}</TableCell>
                         <TableCell className="text-right space-x-1">
