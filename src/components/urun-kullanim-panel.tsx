@@ -22,7 +22,7 @@ import Image from 'next/image';
 import { Label } from '@/components/ui/label';
 import { useUsageRouteSync } from '@/hooks/useUsageRouteSync';
 import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
-import { TrackingMode } from '@/lib/tracking';
+import { TrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { emitFaultOpened, emitFefoOverride } from '@/lib/notifications';
 import { Input } from './ui/input';
 import { openDeviceFaultReport } from '@/lib/faults';
@@ -317,11 +317,16 @@ export default function UrunKullanimPanel() {
       toast({ title: 'Ürün Bulunamadı', description: 'Barkoddan bir ürün çözümlenemedi.', variant: 'destructive' });
       return;
     }
-    
+
     const stokKodu = resolved.stokKodu!;
     const lot = resolved.lotNumarasi || '';
     const seri = resolved.seriNumarasi || '';
-    const mode = productTracking[stokKodu] ?? 'serial';
+
+    // Determine tracking mode based on matched format (dynamic) or product settings (fallback)
+    const matchedFormat = parsed.matchedFormatId
+      ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+      : undefined;
+    const mode = resolveEffectiveTrackingMode(matchedFormat, resolved.product as any);
 
     let item: DepoStokItem | undefined;
 

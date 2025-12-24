@@ -164,9 +164,6 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   const raw = (rawInput || '').trim();
   if (!raw) return null;
 
-  console.log('[parseAnyBarcode] Input:', raw, 'Length:', raw.length);
-  console.log('[parseAnyBarcode] Available formats:', formats.map(f => ({ id: f.id, name: f.name, strategy: f.strategy })));
-
   const candidates = Array.from(new Set([raw, sanitizeGS1?.(raw) || raw]));
   const compiled = (formats || []).map(compileFormat);
 
@@ -214,12 +211,10 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
           }
         } else if (c.re) {
           if (c.strategy === 'positional' && c.f.totalLength && candidate.length !== c.f.totalLength) {
-            console.log(`[parseAnyBarcode] Format "${c.f.name}" skipped - length mismatch (expected: ${c.f.totalLength}, got: ${candidate.length})`);
             continue;
           }
           const m = candidate.match(c.re);
           if (m) {
-            console.log(`[parseAnyBarcode] Format "${c.f.name}" MATCHED!`);
             const ref = c.fields.reference ? (m[c.fields.reference] || '').trim() : undefined;
             const lot = c.f.trackLot !== false && c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
             const expRaw = c.f.trackLot !== false && c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
@@ -250,9 +245,6 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
               seriNumarasi: seriNumarasi || undefined,
               formatPriority: c.f.priority,
             };
-            console.log(`[parseAnyBarcode] Parsed result:`, parsed);
-          } else {
-            console.log(`[parseAnyBarcode] Format "${c.f.name}" regex did not match`);
           }
         }
         if (parsed) results.push(parsed);
@@ -263,13 +255,10 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   }
   
   if (results.length === 0) {
-    console.log('[parseAnyBarcode] No matches found');
     return null;
   }
 
-  console.log('[parseAnyBarcode] All results:', results);
   const bestMatch = results.sort((a,b) => score(b) - score(a))[0];
-  console.log('[parseAnyBarcode] Best match:', bestMatch);
 
   // Remove formatPriority from the result as it's only used for scoring
   const { formatPriority, ...result } = bestMatch;
@@ -277,22 +266,15 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
 }
 
 export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: ProductCode[]) {
-  console.log('[resolveProductFromParsed] Parsed:', parsed);
-  console.log('[resolveProductFromParsed] Product codes count:', productCodes.length);
-
   let product =
     (parsed.stokKodu ? productCodes.find(p => p.stokKodu === parsed.stokKodu) : undefined) ||
     (parsed.barcodeNumber ? productCodes.find(p => (p as any).barcodeNumber === parsed.barcodeNumber) : undefined);
 
-  console.log('[resolveProductFromParsed] Product found by stokKodu/barcodeNumber:', product?.stokKodu);
-
   if (!product && parsed.matchedFormatId) {
-    console.log('[resolveProductFromParsed] Trying to find by formatId:', parsed.matchedFormatId);
     // Önce çoklu format desteğini kontrol et (yeni sistem)
     product = productCodes.find(p => {
       const formatIds = (p as any).barcodeFormatIds;
       const singleFormatId = (p as any).barcodeFormatId;
-      console.log(`[resolveProductFromParsed] Checking product ${p.stokKodu}: barcodeFormatIds=${formatIds}, barcodeFormatId=${singleFormatId}`);
 
       if (Array.isArray(formatIds) && formatIds.includes(parsed.matchedFormatId)) {
         return true;
@@ -300,11 +282,9 @@ export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: Pr
       // Geriye uyumluluk için tek format kontrolü (eski sistem)
       return singleFormatId === parsed.matchedFormatId;
     });
-    console.log('[resolveProductFromParsed] Product found by formatId:', product?.stokKodu);
   }
 
   const result = { ...parsed, stokKodu: product?.stokKodu ?? parsed.stokKodu, product };
-  console.log('[resolveProductFromParsed] Final result:', result);
   return result;
 }
 
