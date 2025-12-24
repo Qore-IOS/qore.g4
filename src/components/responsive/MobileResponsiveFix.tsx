@@ -62,9 +62,39 @@ export default function MobileResponsiveFix() {
      2.1 PAGE SHELL - GLOBAL SAFE ZONE PADDING
      ============================================================ */
   .page-shell {
+    padding-top: max(var(--safe-top), 1rem) !important;
     padding-left: max(var(--safe-left), var(--mobile-padding-page)) !important;
     padding-right: max(var(--safe-right), var(--mobile-padding-page)) !important;
     padding-bottom: calc(var(--dock-height) + var(--safe-bottom) + 1rem) !important;
+  }
+
+  /* ============================================================
+     2.1.1 KPI KARTLARI - EŞİT GENİŞLİK
+     ============================================================ */
+  /* KPI kartları içeren grid'ler 2 kolon olsun ve eşit genişlik */
+  .page-shell [class*="grid"][class*="gap"] {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: var(--mobile-gap) !important;
+  }
+
+  /* Tek KPI kartı varsa tam genişlik */
+  .page-shell [class*="grid"][class*="gap"] > *:only-child {
+    grid-column: 1 / -1 !important;
+  }
+
+  /* Tek sayıda KPI varsa sonuncusu tam genişlik */
+  .page-shell [class*="grid"][class*="gap"] > *:last-child:nth-child(odd) {
+    grid-column: 1 / -1 !important;
+  }
+
+  /* KPI kartları eşit yükseklik ve genişlik */
+  .page-shell [class*="grid"][class*="gap"] > [class*="Card"],
+  .page-shell [class*="grid"][class*="gap"] > [class*="rounded"],
+  .page-shell [class*="grid"][class*="gap"] > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
   }
 
   /* ============================================================
@@ -274,51 +304,83 @@ export default function MobileResponsiveFix() {
   }
 
   /* ============================================================
-     2.6 BUTON GRUPLARI - OTOMATİK WRAP & GRID
+     2.6 BUTON GRUPLARI - DÜZGÜN HİZALAMA & GRID
      ============================================================ */
-  /* Yan yana buton grupları wrap olsun - DOCK HARİÇ */
-  .page-shell .flex[class*="gap"] {
-    flex-wrap: wrap !important;
+  /* Tüm buton grupları grid layout ile düzgün hizala - DOCK HARİÇ */
+  .page-shell .flex[class*="gap"]:has(button),
+  .page-shell .flex[class*="gap"]:has(a[class*="Button"]),
+  .page-shell .flex[class*="space-x"]:has(button) {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: var(--mobile-gap-sm) !important;
+    width: 100% !important;
+    align-items: stretch !important;
   }
 
-  /* Belirli buton grubu patternleri 2x2 grid yap */
-  .page-shell [class*="CardContent"] > .flex[class*="gap"] > button,
-  .page-shell [class*="CardContent"] > div > .flex[class*="gap"] > button,
-  .page-shell [class*="CardHeader"] .flex[class*="gap"] > button,
-  .page-shell [class*="CardHeader"] .flex[class*="gap"] > a {
-    flex: 1 1 calc(50% - 0.5rem) !important;
-    min-width: calc(50% - 0.5rem) !important;
+  /* Tek buton varsa tam genişlik */
+  .page-shell .flex[class*="gap"]:has(button) > button:only-child,
+  .page-shell .flex[class*="gap"]:has(a) > a:only-child {
+    grid-column: 1 / -1 !important;
+  }
+
+  /* Tek sayıda buton varsa sonuncusu tam genişlik */
+  .page-shell .flex[class*="gap"] > button:last-child:nth-child(odd),
+  .page-shell .flex[class*="gap"] > a:last-child:nth-child(odd) {
+    grid-column: 1 / -1 !important;
+  }
+
+  /* Butonlar eşit boyut ve ortalanmış içerik */
+  .page-shell .flex[class*="gap"] > button,
+  .page-shell .flex[class*="gap"] > a[class*="Button"],
+  .page-shell .flex[class*="space-x"] > button {
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+    text-align: center !important;
   }
 
   /* space-x'leri gap'e çevir */
-  [class*="space-x-2"],
-  [class*="space-x-3"],
-  [class*="space-x-4"] {
+  .page-shell [class*="space-x-2"],
+  .page-shell [class*="space-x-3"],
+  .page-shell [class*="space-x-4"] {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
     gap: var(--mobile-gap-sm) !important;
   }
 
-  [class*="space-x-2"] > * + *,
-  [class*="space-x-3"] > * + *,
-  [class*="space-x-4"] > * + * {
+  .page-shell [class*="space-x-2"] > * + *,
+  .page-shell [class*="space-x-3"] > * + *,
+  .page-shell [class*="space-x-4"] > * + * {
     margin-left: 0 !important;
   }
 
   /* ============================================================
-     2.7 FLEX LAYOUT - MOBİL STACK
+     2.7 FLEX LAYOUT - MOBİL HİZALAMA
      ============================================================ */
-  /* justify-between flex'ler column yap - DOCK HARİÇ */
+  /* justify-between flex'ler düzgün hizala - DOCK HARİÇ */
   .page-shell .flex[class*="justify-between"][class*="items-center"] {
     flex-direction: column !important;
     align-items: stretch !important;
     gap: var(--mobile-gap-sm) !important;
   }
 
-  /* Header içindeki flex'ler - DOCK HARİÇ */
+  /* Header içindeki flex'ler - tam genişlik ve ortalanmış */
   .page-shell [class*="CardHeader"] > .flex,
   .page-shell [class*="CardHeader"] > div > .flex {
     flex-direction: column !important;
-    align-items: flex-start !important;
+    align-items: stretch !important;
     gap: var(--mobile-gap-sm) !important;
+    width: 100% !important;
+  }
+
+  /* Genel flex container hizalama */
+  .page-shell .flex {
+    align-items: center !important;
+  }
+
+  /* Flex içi elemanlar ortalanmış */
+  .page-shell .flex > * {
+    text-align: center !important;
   }
 
   /* ============================================================
