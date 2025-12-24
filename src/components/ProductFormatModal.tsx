@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Loader2 } from 'lucide-react';
 import type { ProductCode, Currency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
@@ -16,6 +17,7 @@ import { useAuth } from '@/contexts/auth-context';
 import TrackingModeSelect from './TrackingModeSelect';
 import { TrackingMode, resolveDefaultTrackingMode, TRACKING_MODE_LABEL } from '@/lib/tracking';
 import BarcodeFormatSelect, { type FormatValue } from './BarcodeFormatSelect';
+import BarcodeFormatMultiSelect from './BarcodeFormatMultiSelect';
 
 type Definitions = {
   brands: string[];
@@ -74,11 +76,19 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
   });
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => { 
+  // Çoklu format modu kontrolü - eğer barcodeFormatIds varsa çoklu mod aktif
+  const hasMultipleFormats = Array.isArray((initial as any)?.barcodeFormatIds) &&
+    (initial as any).barcodeFormatIds.length > 0;
+  const [multiFormatMode, setMultiFormatMode] = useState(hasMultipleFormats);
+
+  useEffect(() => {
     setProduct({
       ...initial,
       trackingMode: resolveDefaultTrackingMode(initial as any),
     });
+    const hasMulti = Array.isArray((initial as any)?.barcodeFormatIds) &&
+      (initial as any).barcodeFormatIds.length > 0;
+    setMultiFormatMode(hasMulti);
   }, [initial]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,7 +130,9 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       cihazGrubu: product.cihazGrubu?.trim() || null,
       testAdi: product.testAdi?.trim() || null,
       barcodeNumber: (product.barcodeNumber || '').trim() || null,
-      barcodeFormatId: product.barcodeFormatId || null,
+      // Çoklu format modunda barcodeFormatIds kullan, tek modda barcodeFormatId
+      barcodeFormatId: multiFormatMode ? null : (product.barcodeFormatId || null),
+      barcodeFormatIds: multiFormatMode ? ((product as any).barcodeFormatIds || []) : null,
       ambalajDegeri: product.ambalajDegeri || null,
       trackingMode: product.trackingMode || resolveDefaultTrackingMode(product as any),
     };
@@ -247,21 +259,65 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
             className="mt-2"
           />
 
-           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
             <div>
-                <Label>Barkod Numarası (UDI)</Label>
-                <Input
+              <Label>Barkod Numarası (UDI)</Label>
+              <Input
                 value={product.barcodeNumber ?? ''}
                 onChange={(e) => setProduct(s => ({ ...s, barcodeNumber: e.target.value.trim() }))}
                 placeholder="Örn: 00812345678901"
-                />
-                <p className="text-xs text-muted-foreground mt-1">Referans gömülü değilse ürünün benzersiz barkod numarası.</p>
+              />
+              <p className="text-xs text-muted-foreground mt-1">Referans gömülü değilse ürünün benzersiz barkod numarası.</p>
             </div>
-            <BarcodeFormatSelect
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Çoklu Format</Label>
+                <Switch
+                  checked={multiFormatMode}
+                  onCheckedChange={(checked) => {
+                    setMultiFormatMode(checked);
+                    if (checked) {
+                      // Tek format'tan çoklu format'a geçiş
+                      const currentFormatId = product.barcodeFormatId;
+                      setProduct(s => ({
+                        ...s,
+                        barcodeFormatIds: currentFormatId && currentFormatId !== '__auto__'
+                          ? [currentFormatId]
+                          : [],
+                        barcodeFormatId: null
+                      }));
+                    } else {
+                      // Çoklu format'tan tek format'a geçiş
+                      const formatIds = (product as any).barcodeFormatIds || [];
+                      setProduct(s => ({
+                        ...s,
+                        barcodeFormatId: formatIds.length > 0 ? formatIds[0] : '__auto__',
+                        barcodeFormatIds: null
+                      }));
+                    }
+                  }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Aynı ürün için hem seri no hem lot takipli barkod formatları kullanabilirsiniz.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-2">
+            {multiFormatMode ? (
+              <BarcodeFormatMultiSelect
+                value={(product as any).barcodeFormatIds || []}
+                onChange={(ids) => setProduct(s => ({ ...s, barcodeFormatIds: ids }))}
+              />
+            ) : (
+              <BarcodeFormatSelect
                 value={product.barcodeFormatId}
                 onChange={(id) => setProduct(s => ({ ...s, barcodeFormatId: id }))}
-            />
-            </div>
+              />
+            )}
+          </div>
           <div>
               <Label>Maliyet</Label>
               <CostInput

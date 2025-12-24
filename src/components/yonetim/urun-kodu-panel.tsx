@@ -429,6 +429,9 @@ export default function UrunKoduPanel() {
         trackingMode: trackingModeToExcel((p as any).trackingMode),
         barcodeNumber: (p as any).barcodeNumber ?? '',
         barcodeFormatId: (p as any).barcodeFormatId ?? '',
+        barcodeFormatIds: Array.isArray((p as any).barcodeFormatIds)
+          ? (p as any).barcodeFormatIds.join(',')
+          : '',
     }));
     
     const workbook = XLSX.utils.book_new();
@@ -493,6 +496,9 @@ export default function UrunKoduPanel() {
             trackingMode: trackingModeFromExcel(row['trackingmode']),
             barcodeNumber: row['barcodenumber'] ?? null,
             barcodeFormatId: row['barcodeformatid'] || null,
+            barcodeFormatIds: row['barcodeformatids']
+              ? String(row['barcodeformatids']).split(',').map(s => s.trim()).filter(Boolean)
+              : undefined,
           };
           
           const cleanedProductData = Object.fromEntries(

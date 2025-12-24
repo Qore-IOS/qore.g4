@@ -24,7 +24,8 @@ export interface ProductCode {
   testGrubu?: string;
   cihazGrubu?: string;
   testAdi?: string; // Ürünün çalıştığı testin adı (Total Verimlilik paneli için)
-  barcodeFormatId?: string | null; // Links to a BarcodeFormat
+  barcodeFormatId?: string | null; // Links to a BarcodeFormat (legacy - tek format)
+  barcodeFormatIds?: string[]; // Çoklu barkod formatları (yeni sistem)
   barcodeNumber?: string; // The unique identifier part of the barcode for this product (UDI)
   trackingMode?: TrackingMode;
   [k: string]: any;

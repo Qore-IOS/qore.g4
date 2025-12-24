@@ -269,7 +269,15 @@ export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: Pr
     (parsed.barcodeNumber ? productCodes.find(p => (p as any).barcodeNumber === parsed.barcodeNumber) : undefined);
 
   if (!product && parsed.matchedFormatId) {
-    product = productCodes.find(p => (p as any).barcodeFormatId === parsed.matchedFormatId);
+    // Önce çoklu format desteğini kontrol et (yeni sistem)
+    product = productCodes.find(p => {
+      const formatIds = (p as any).barcodeFormatIds;
+      if (Array.isArray(formatIds) && formatIds.includes(parsed.matchedFormatId)) {
+        return true;
+      }
+      // Geriye uyumluluk için tek format kontrolü (eski sistem)
+      return (p as any).barcodeFormatId === parsed.matchedFormatId;
+    });
   }
   return { ...parsed, stokKodu: product?.stokKodu ?? parsed.stokKodu, product };
 }
