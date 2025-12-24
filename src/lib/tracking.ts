@@ -68,25 +68,39 @@ export function resolveEffectiveTrackingMode(
     const hasSeri = !!(parsed.seriNumarasi && parsed.seriNumarasi.trim());
     const hasLot = !!(parsed.lotNumarasi && parsed.lotNumarasi.trim());
 
+    console.log('[resolveEffectiveTrackingMode] Parsed:', {
+      seriNumarasi: parsed.seriNumarasi,
+      lotNumarasi: parsed.lotNumarasi,
+      hasSeri,
+      hasLot,
+      matchedFormat: { trackSerial: matchedFormat.trackSerial, trackLot: matchedFormat.trackLot }
+    });
+
     // If barcode has serial number and format supports it
     if (hasSeri && matchedFormat.trackSerial === true) {
+      console.log('[resolveEffectiveTrackingMode] → serial mode (has seri)');
       return 'serial';
     }
 
     // If barcode has lot (but no serial) and format supports it
     if (hasLot && !hasSeri && matchedFormat.trackLot !== false) {
+      console.log('[resolveEffectiveTrackingMode] → lot_barcode mode (has lot, no seri)');
       return 'lot_barcode';
     }
 
     // Otherwise quantity tracking
+    console.log('[resolveEffectiveTrackingMode] → qty_barcode mode (fallback)');
     return 'qty_barcode';
   }
 
   // Fall back to product's static tracking mode
   if (product) {
-    return resolveDefaultTrackingMode(product);
+    const mode = resolveDefaultTrackingMode(product);
+    console.log('[resolveEffectiveTrackingMode] → fallback to product tracking mode:', mode);
+    return mode;
   }
 
   // Ultimate fallback
+  console.log('[resolveEffectiveTrackingMode] → ultimate fallback (qty_barcode)');
   return 'qty_barcode';
 }
