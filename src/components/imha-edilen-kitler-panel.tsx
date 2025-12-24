@@ -147,7 +147,10 @@ export default function ImhaEdilenKitlerPanel() {
             ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
         );
         const snap = await getDocs(q);
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const allItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        // Lot okutulduğunda sadece seri numarası OLMAYAN kayıtları döndür
+        // Bu sayede seri nolu kayıtlar sadece seri no okutulduğunda işlem görür
+        return allItems.filter(item => !item.seriNumarasi || item.seriNumarasi.trim() === '');
     }, []);
 
     // Handle barcode scan
