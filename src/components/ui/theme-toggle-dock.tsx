@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useTheme } from "next-themes"
+import { useAuth } from "@/contexts/auth-context"
 import { cn } from "@/lib/utils"
 
 interface ThemeToggleDockProps {
@@ -9,7 +10,8 @@ interface ThemeToggleDockProps {
 }
 
 export function ThemeToggleDock({ className }: ThemeToggleDockProps) {
-  const { theme, setTheme } = useTheme()
+  const { theme } = useTheme()
+  const { setUserTheme, currentUser } = useAuth()
   const [mounted, setMounted] = React.useState(false)
 
   // Avoid hydration mismatch
@@ -22,7 +24,8 @@ export function ThemeToggleDock({ className }: ThemeToggleDockProps) {
   const isDark = theme === "dark"
 
   const toggleTheme = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setTheme(e.target.checked ? "dark" : "light")
+    const newTheme = e.target.checked ? "dark" : "light"
+    setUserTheme(newTheme)
   }
 
   return (
