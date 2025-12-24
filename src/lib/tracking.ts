@@ -68,23 +68,32 @@ export function resolveEffectiveTrackingMode(
     const hasSeri = !!(parsed.seriNumarasi && parsed.seriNumarasi.trim());
     const hasLot = !!(parsed.lotNumarasi && parsed.lotNumarasi.trim());
 
+    // Default: formats support both serial and lot tracking unless explicitly disabled
+    const formatSupportsSerial = matchedFormat.trackSerial !== false; // undefined = true (default)
+    const formatSupportsLot = matchedFormat.trackLot !== false;       // undefined = true (default)
+
     console.log('[resolveEffectiveTrackingMode] Parsed:', {
       seriNumarasi: parsed.seriNumarasi,
       lotNumarasi: parsed.lotNumarasi,
       hasSeri,
       hasLot,
-      matchedFormat: { trackSerial: matchedFormat.trackSerial, trackLot: matchedFormat.trackLot }
+      matchedFormat: {
+        trackSerial: matchedFormat.trackSerial,
+        trackLot: matchedFormat.trackLot,
+        formatSupportsSerial,
+        formatSupportsLot
+      }
     });
 
-    // If barcode has serial number and format supports it
-    if (hasSeri && matchedFormat.trackSerial === true) {
-      console.log('[resolveEffectiveTrackingMode] → serial mode (has seri)');
+    // If barcode has serial number and format supports it (priority over lot)
+    if (hasSeri && formatSupportsSerial) {
+      console.log('[resolveEffectiveTrackingMode] → serial mode (has seri + format supports)');
       return 'serial';
     }
 
-    // If barcode has lot (but no serial) and format supports it
-    if (hasLot && !hasSeri && matchedFormat.trackLot !== false) {
-      console.log('[resolveEffectiveTrackingMode] → lot_barcode mode (has lot, no seri)');
+    // If barcode has lot and format supports it
+    if (hasLot && formatSupportsLot) {
+      console.log('[resolveEffectiveTrackingMode] → lot_barcode mode (has lot + format supports)');
       return 'lot_barcode';
     }
 
