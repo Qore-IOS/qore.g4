@@ -260,6 +260,14 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
 
   const bestMatch = results.sort((a,b) => score(b) - score(a))[0];
 
+  console.log('[parseAnyBarcode] Best match:', {
+    formatId: bestMatch.matchedFormatId,
+    stokKodu: bestMatch.stokKodu,
+    lotNumarasi: bestMatch.lotNumarasi,
+    seriNumarasi: bestMatch.seriNumarasi,
+    priority: bestMatch.formatPriority
+  });
+
   // Remove formatPriority from the result as it's only used for scoring
   const { formatPriority, ...result } = bestMatch;
   return result;
