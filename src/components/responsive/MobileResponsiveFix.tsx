@@ -212,9 +212,18 @@ export default function MobileResponsiveFix() {
      2.5.1 MOBİL DOCK - ÖZEL KORUMA
      ============================================================ */
   /* Mobil dock'un global CSS'den etkilenmemesi için */
-  .fixed[class*="bottom-0"] {
+  .fixed[class*="bottom-0"][class*="z-40"] {
     overflow: visible !important;
     z-index: 40 !important;
+  }
+
+  /* Dock inner container - logo için overflow visible */
+  .fixed[class*="bottom-0"] > div {
+    overflow: visible !important;
+  }
+
+  .fixed[class*="bottom-0"] > div > div {
+    overflow: visible !important;
   }
 
   /* Dock içindeki butonlar orijinal boyutlarını korusun */
@@ -225,26 +234,43 @@ export default function MobileResponsiveFix() {
     overflow: visible !important;
   }
 
-  /* Dock içindeki bildirim butonu */
+  /* Dock içindeki bildirim butonu - görünür olsun */
   .fixed[class*="bottom-0"] button[class*="w-10"],
-  .fixed[class*="bottom-0"] button[class*="h-10"] {
+  .fixed[class*="bottom-0"] button[class*="h-10"],
+  .fixed[class*="bottom-0"] [class*="w-10"],
+  .fixed[class*="bottom-0"] [class*="h-10"] {
     width: 2.5rem !important;
     height: 2.5rem !important;
     min-width: 2.5rem !important;
     min-height: 2.5rem !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
   }
 
-  /* Logo butonu - overflow ve z-index düzeltmesi */
+  /* Logo butonu container - overflow ve z-index düzeltmesi */
   .fixed[class*="bottom-0"] .absolute {
     overflow: visible !important;
     z-index: 50 !important;
   }
 
-  .fixed[class*="bottom-0"] button[class*="w-20"] {
+  /* Logo butonu - tam görünürlük */
+  .fixed[class*="bottom-0"] button[class*="w-20"],
+  .fixed[class*="bottom-0"] [class*="w-20"][class*="h-20"] {
     width: 5rem !important;
     height: 5rem !important;
     min-height: 5rem !important;
     overflow: visible !important;
+    display: flex !important;
+    visibility: visible !important;
+  }
+
+  /* Logo image */
+  .fixed[class*="bottom-0"] img {
+    width: 5rem !important;
+    height: 5rem !important;
+    object-fit: contain !important;
+    visibility: visible !important;
   }
 
   /* ============================================================
@@ -308,9 +334,28 @@ export default function MobileResponsiveFix() {
     font-size: 16px !important; /* iOS zoom engelle */
   }
 
-  /* Select genişliği */
+  /* Select genişliği ve metin görünürlüğü */
   .page-shell [class*="SelectTrigger"] {
     width: 100% !important;
+    height: auto !important;
+    min-height: var(--touch-min) !important;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+  }
+
+  /* SelectTrigger içindeki span - line-clamp kaldır, metin tam görünsün */
+  .page-shell [class*="SelectTrigger"] > span,
+  .page-shell [data-radix-select-trigger] > span,
+  .page-shell button[role="combobox"] > span {
+    display: block !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    -webkit-line-clamp: unset !important;
+    line-clamp: unset !important;
+    -webkit-box-orient: unset !important;
+    line-height: 1.3 !important;
+    max-height: none !important;
   }
 
   /* Label küçült */
