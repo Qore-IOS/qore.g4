@@ -322,11 +322,11 @@ export default function UrunKullanimPanel() {
     const lot = resolved.lotNumarasi || '';
     const seri = resolved.seriNumarasi || '';
 
-    // Determine tracking mode based on matched format (dynamic) or product settings (fallback)
+    // Determine tracking mode based on what the barcode contains
     const matchedFormat = parsed.matchedFormatId
       ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
       : undefined;
-    const mode = resolveEffectiveTrackingMode(matchedFormat, resolved.product as any);
+    const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, resolved.product as any);
 
     let item: DepoStokItem | undefined;
 

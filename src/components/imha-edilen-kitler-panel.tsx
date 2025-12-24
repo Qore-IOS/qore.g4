@@ -200,11 +200,11 @@ export default function ImhaEdilenKitlerPanel() {
             return;
         }
 
-        // Determine tracking mode based on matched format (dynamic) or product settings (fallback)
+        // Determine tracking mode based on what the barcode contains
         const matchedFormat = parsed.matchedFormatId
             ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
             : undefined;
-        const mode: TrackingMode = resolveEffectiveTrackingMode(matchedFormat, product as any);
+        const mode: TrackingMode = resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
 
         if (mode === 'serial') {
             if (!seri) {
