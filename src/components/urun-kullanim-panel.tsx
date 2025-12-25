@@ -940,45 +940,47 @@ export default function UrunKullanimPanel() {
                       <PopoverContent className="w-[400px] p-0">
                         <Command>
                           <CommandInput placeholder="Ürün ara..." />
-                          <CommandList className="max-h-[300px] overflow-y-auto">
+                          <CommandList>
                             <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                            <CommandGroup>
-                              {(() => {
-                                const filtered = products.filter(p => {
-                                  // Filter products with min/max stock levels defined in lab management
-                                  const rule = minMaxRules.find(r => r.stokKodu === p.stokKodu);
-                                  // Only show products with min/max values defined (use 'min' and 'max', not 'minStock' and 'maxStock')
-                                  return rule && (rule.min != null || rule.max != null);
-                                });
-                                console.log('🗑️ Çöp Kutusu Debug:', {
-                                  selectedLabId,
-                                  totalProducts: products.length,
-                                  totalMinMaxRules: minMaxRules.length,
-                                  minMaxRulesWithValues: minMaxRules.filter(r => r.min != null || r.max != null).length,
-                                  filteredProducts: filtered.length,
-                                  sampleRule: minMaxRules[0]
-                                });
-                                return filtered;
-                              })()
-                                .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''))
-                                .map((product) => (
-                                  <CommandItem
-                                    key={product.id}
-                                    value={product.stokAdi || ''}
-                                    onSelect={() => {
-                                      setSelectedTrashProduct(product.stokKodu || '');
-                                      // Set default remaining tests to package quantity
-                                      setTrashRemainingTests(product.ambalajDegeri || 0);
-                                    }}
-                                  >
-                                    <Check className={cn("mr-2 h-4 w-4", selectedTrashProduct === product.stokKodu ? "opacity-100" : "opacity-0")} />
-                                    <div className="flex flex-col">
-                                      <span>{product.stokAdi}</span>
-                                      <span className="text-xs text-muted-foreground">{product.stokKodu}</span>
-                                    </div>
-                                  </CommandItem>
-                                ))}
-                            </CommandGroup>
+                            <ScrollArea className="h-[300px]">
+                              <CommandGroup>
+                                {(() => {
+                                  const filtered = products.filter(p => {
+                                    // Filter products with min/max stock levels defined in lab management
+                                    const rule = minMaxRules.find(r => r.stokKodu === p.stokKodu);
+                                    // Only show products with min/max values defined (use 'min' and 'max', not 'minStock' and 'maxStock')
+                                    return rule && (rule.min != null || rule.max != null);
+                                  });
+                                  console.log('🗑️ Çöp Kutusu Debug:', {
+                                    selectedLabId,
+                                    totalProducts: products.length,
+                                    totalMinMaxRules: minMaxRules.length,
+                                    minMaxRulesWithValues: minMaxRules.filter(r => r.min != null || r.max != null).length,
+                                    filteredProducts: filtered.length,
+                                    sampleRule: minMaxRules[0]
+                                  });
+                                  return filtered;
+                                })()
+                                  .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''))
+                                  .map((product) => (
+                                    <CommandItem
+                                      key={product.id}
+                                      value={product.stokAdi || ''}
+                                      onSelect={() => {
+                                        setSelectedTrashProduct(product.stokKodu || '');
+                                        // Set default remaining tests to package quantity
+                                        setTrashRemainingTests(product.ambalajDegeri || 0);
+                                      }}
+                                    >
+                                      <Check className={cn("mr-2 h-4 w-4", selectedTrashProduct === product.stokKodu ? "opacity-100" : "opacity-0")} />
+                                      <div className="flex flex-col">
+                                        <span>{product.stokAdi}</span>
+                                        <span className="text-xs text-muted-foreground">{product.stokKodu}</span>
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                              </CommandGroup>
+                            </ScrollArea>
                           </CommandList>
                         </Command>
                       </PopoverContent>
