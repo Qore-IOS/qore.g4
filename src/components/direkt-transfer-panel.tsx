@@ -59,7 +59,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tutanak-autoprint';
 import { emitFefoOverride } from '@/lib/notifications';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { updateHospitalLastTransferDates } from '@/actions/stokActions';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -560,8 +559,38 @@ export default function DirektTransferPanel() {
 
       await autoPrintTutanakFromTransferId(db, transferRef.id, targetLab, currentUserProfile.name ?? currentUser.email ?? '');
       
-      if (targetId) {
-        await updateHospitalLastTransferDates(targetId, itemsToShip);
+      // Update labTransferDates collection
+      if (targetId && selectedDepotId) {
+        try {
+          const labTransferDocId = `${targetId}_${selectedDepotId}`;
+          const labTransferRef = doc(db, 'labTransferDates', labTransferDocId);
+          const now = new Date();
+          const userName = currentUserProfile?.name || currentUser?.email || '';
+
+          // Build transfers map
+          const transfersUpdate: Record<string, any> = {};
+          itemsToShip.forEach((item) => {
+            if (item.stokKodu) {
+              transfersUpdate[item.stokKodu] = {
+                lastTransferDate: Timestamp.fromDate(now),
+                lastTransferBy: userName,
+              };
+            }
+          });
+
+          await setDoc(labTransferRef, {
+            labId: targetId,
+            depotId: selectedDepotId,
+            labName: targetName,
+            depotName: depotName,
+            transfers: transfersUpdate,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+
+          console.log('labTransferDates updated:', labTransferDocId, transfersUpdate);
+        } catch (transferError) {
+          console.error('Error updating labTransferDates:', transferError);
+        }
       }
 
       setDirectTransferItems([]);
