@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import type { Order, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, updateDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, addDoc, limit, orderBy } from 'firebase/firestore';
+import { collection, doc, getDoc, updateDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, addDoc, limit, orderBy, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -27,7 +27,6 @@ import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 import type { ParsedGeneric } from '@/lib/barcode';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { updateLabTransferDates } from '@/actions/stokActions';
 
 
 function LastTransferLine({
@@ -507,17 +506,40 @@ export default function ToplamaPage() {
 
       await maybeAutoPrintTutanak(db, targetHospital, shipmentDocRef.id, currentUserProfile?.name || currentUser?.email || '');
 
-      // Update labTransferDates collection with last transfer dates
+      // Update labTransferDates collection with last transfer dates (direct client-side write)
       const effectiveLabId = order.labId || targetHospital?.id;
       if (effectiveLabId && order.depotId && shipmentItems.length > 0) {
-        await updateLabTransferDates(
-          effectiveLabId,
-          order.depotId,
-          order.kurumAdi,
-          currentDepot.name || '',
-          shipmentItems,
-          currentUserProfile?.name || currentUser?.email
-        );
+        try {
+          const labTransferDocId = `${effectiveLabId}_${order.depotId}`;
+          const labTransferRef = doc(db, 'labTransferDates', labTransferDocId);
+          const now = new Date();
+          const userName = currentUserProfile?.name || currentUser?.email || '';
+
+          // Build transfers map
+          const transfersUpdate: Record<string, any> = {};
+          shipmentItems.forEach((item) => {
+            if (item.stokKodu) {
+              transfersUpdate[item.stokKodu] = {
+                lastTransferDate: Timestamp.fromDate(now),
+                lastTransferBy: userName,
+              };
+            }
+          });
+
+          // Use setDoc with merge to create or update
+          await setDoc(labTransferRef, {
+            labId: effectiveLabId,
+            depotId: order.depotId,
+            labName: order.kurumAdi,
+            depotName: currentDepot?.name || '',
+            transfers: transfersUpdate,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+
+          console.log('labTransferDates updated:', labTransferDocId, transfersUpdate);
+        } catch (transferError) {
+          console.error('Error updating labTransferDates:', transferError);
+        }
       }
 
     } catch (e) {
