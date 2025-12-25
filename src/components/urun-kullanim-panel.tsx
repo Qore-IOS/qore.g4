@@ -141,6 +141,15 @@ export default function UrunKullanimPanel() {
     };
   }, []);
 
+  // Debug: Watch trash product selection changes
+  useEffect(() => {
+    console.log('🔄 selectedTrashProduct changed to:', selectedTrashProduct);
+  }, [selectedTrashProduct]);
+
+  useEffect(() => {
+    console.log('🔄 isTrashProductPopoverOpen changed to:', isTrashProductPopoverOpen);
+  }, [isTrashProductPopoverOpen]);
+
   // Fetch device groups (small collection, rarely changes)
   useEffect(() => {
     const fetchDeviceGroups = async () => {
@@ -989,10 +998,14 @@ export default function UrunKullanimPanel() {
                                       console.log('🖱️ MOUSE ENTER:', product.stokAdi);
                                     }}
                                     onClick={(e) => {
-                                      console.log('🖱️ CLICKED:', product.stokAdi, 'Event:', e);
+                                      console.log('🖱️ CLICKED:', product.stokAdi);
+                                      console.log('📦 Setting product:', product.stokKodu);
+                                      console.log('🔢 Setting tests:', product.ambalajDegeri);
                                       setSelectedTrashProduct(product.stokKodu || '');
                                       setTrashRemainingTests(product.ambalajDegeri || 0);
-                                      setIsTrashProductPopoverOpen(false); // Close popover after selection
+                                      console.log('🚪 Closing popover...');
+                                      setIsTrashProductPopoverOpen(false);
+                                      console.log('✅ State updates done!');
                                     }}
                                   >
                                     <Check
