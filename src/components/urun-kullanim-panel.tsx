@@ -59,6 +59,10 @@ export default function UrunKullanimPanel() {
   const labIdFromUrl = slug?.[0] || '';
   const pointIdFromUrl = slug?.[1] || '';
 
+  // State must be defined before using in hooks
+  const [selectedLabId, setSelectedLabId] = useState(labIdFromUrl);
+  const [selectedSubPointId, setSelectedSubPointId] = useState(pointIdFromUrl);
+
   // Use lightweight dashboard data (no heavy collections like depoStok, tuketimKayitlari)
   const {
       hospitals: laboratories,
@@ -76,9 +80,6 @@ export default function UrunKullanimPanel() {
   const { data: minMaxRules = [] } = useMinMaxRules(selectedLabId);
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
-
-  const [selectedLabId, setSelectedLabId] = useState(labIdFromUrl);
-  const [selectedSubPointId, setSelectedSubPointId] = useState(pointIdFromUrl);
 
   // Use TanStack Query for subPoints of selected lab only (not all labs!)
   const { data: selectedLabSubPoints = [] } = useSubPoints(selectedLabId);
