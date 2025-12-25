@@ -74,6 +74,7 @@ import type {
     ProductCode,
     MinMaxRule,
     EjectedKitRecord,
+    TrashBinRecord,
 } from '@/lib/types';
 import { cn, generateId } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
@@ -97,6 +98,7 @@ export default function EjectedKitPanel() {
     const [allDevices, setAllDevices] = useState<Device[]>([]);
     const [allProducts, setAllProducts] = useState<ProductCode[]>([]);
     const [ejectedKitRecords, setEjectedKitRecords] = useState<EjectedKitRecord[]>([]);
+    const [trashBinRecords, setTrashBinRecords] = useState<TrashBinRecord[]>([]);
 
     // Selection State
     const [selectedLabId, setSelectedLabId] = useState<string>('');
@@ -221,6 +223,22 @@ export default function EjectedKitPanel() {
                 ...d.data(),
             } as EjectedKitRecord));
             setEjectedKitRecords(records);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // Listen to trash bin records
+    useEffect(() => {
+        const q = query(
+            collection(db, 'trashBinRecords'),
+            orderBy('createdAt', 'desc')
+        );
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const records: TrashBinRecord[] = snapshot.docs.map((d) => ({
+                id: d.id,
+                ...d.data(),
+            } as TrashBinRecord));
+            setTrashBinRecords(records);
         });
         return () => unsubscribe();
     }, []);
@@ -585,15 +603,47 @@ export default function EjectedKitPanel() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        <TableRow>
-                                            <TableCell colSpan={6} className="text-center py-8">
-                                                <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                                                    <AlertCircle className="h-8 w-8" />
-                                                    <span>Çöp kutusu kayıtları yakında burada görüntülenecek.</span>
-                                                    <span className="text-xs">trashBinRecords collection'ından veri çekilecek</span>
-                                                </div>
-                                            </TableCell>
-                                        </TableRow>
+                                        {trashBinRecords.length === 0 ? (
+                                            <TableRow>
+                                                <TableCell colSpan={6} className="text-center py-8">
+                                                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                                                        <AlertCircle className="h-8 w-8" />
+                                                        <span>Henüz çöp kutusu kaydı bulunmuyor.</span>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ) : (
+                                            trashBinRecords.map((record) => (
+                                                <TableRow key={record.id}>
+                                                    <TableCell className="text-xs">
+                                                        {formatDate(record.createdAt)}
+                                                    </TableCell>
+                                                    <TableCell>{record.laboratoryName}</TableCell>
+                                                    <TableCell>
+                                                        <div className="flex flex-col">
+                                                            <span className="font-medium">{record.deviceModel}</span>
+                                                            <span className="text-xs text-muted-foreground">
+                                                                SN: {record.deviceSerialNumber}
+                                                            </span>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div>
+                                                            <div className="font-medium">{record.stokAdi}</div>
+                                                            <div className="text-xs text-muted-foreground">
+                                                                {record.stokKodu}
+                                                            </div>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge variant="outline">
+                                                            {record.remainingTests} test
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell>{record.createdByName}</TableCell>
+                                                </TableRow>
+                                            ))
+                                        )}
                                     </TableBody>
                                 </Table>
                             </ScrollArea>

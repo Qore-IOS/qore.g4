@@ -946,12 +946,13 @@ export default function UrunKullanimPanel() {
                             <CommandGroup>
                               {products
                                 .filter(p => {
-                                  // Filter products that have min/max defined for the selected lab
+                                  // Filter products that are assigned to the selected lab
                                   const pool = labPools.find(pool =>
                                     pool.laboratoryId === selectedLabId &&
                                     pool.stokKodu === p.stokKodu
                                   );
-                                  return pool && (pool.minStock !== undefined || pool.maxStock !== undefined);
+                                  // Just check if the product is assigned to the lab (no min/max requirement)
+                                  return !!pool;
                                 })
                                 .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''))
                                 .map((product) => (
