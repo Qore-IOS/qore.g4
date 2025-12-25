@@ -926,7 +926,7 @@ export default function UrunKullanimPanel() {
                 <div className="space-y-4">
                   <div>
                     <Label className="text-sm font-medium mb-2 block">Ürün Seçin</Label>
-                    <Popover open={isTrashProductPopoverOpen} onOpenChange={setIsTrashProductPopoverOpen}>
+                    <Popover open={isTrashProductPopoverOpen} onOpenChange={setIsTrashProductPopoverOpen} modal={false}>
                       <PopoverTrigger asChild>
                         <Button
                           variant="outline"
@@ -939,8 +939,8 @@ export default function UrunKullanimPanel() {
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[400px] p-0 z-[9999]">
-                        <div className="flex flex-col">
+                      <PopoverContent className="w-[400px] p-0 z-[9999]" style={{ pointerEvents: 'auto' }}>
+                        <div className="flex flex-col" style={{ pointerEvents: 'auto' }}>
                           <div className="p-2 border-b">
                             <Input
                               placeholder="Ürün ara..."
@@ -949,7 +949,7 @@ export default function UrunKullanimPanel() {
                               className="h-9"
                             />
                           </div>
-                          <div className="max-h-[300px] overflow-y-auto">
+                          <div className="max-h-[300px] overflow-y-auto" style={{ pointerEvents: 'auto' }}>
                             <div className="p-1">
                               {(() => {
                                 const filtered = products
@@ -984,7 +984,12 @@ export default function UrunKullanimPanel() {
                                       "flex items-center gap-2 p-2 rounded-sm cursor-pointer hover:bg-accent",
                                       selectedTrashProduct === product.stokKodu && "bg-accent"
                                     )}
-                                    onClick={() => {
+                                    style={{ pointerEvents: 'auto' }}
+                                    onMouseEnter={() => {
+                                      console.log('🖱️ MOUSE ENTER:', product.stokAdi);
+                                    }}
+                                    onClick={(e) => {
+                                      console.log('🖱️ CLICKED:', product.stokAdi, 'Event:', e);
                                       setSelectedTrashProduct(product.stokKodu || '');
                                       setTrashRemainingTests(product.ambalajDegeri || 0);
                                       setIsTrashProductPopoverOpen(false); // Close popover after selection
