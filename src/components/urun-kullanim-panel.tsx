@@ -126,6 +126,7 @@ export default function UrunKullanimPanel() {
   const [selectedTrashProduct, setSelectedTrashProduct] = useState('');
   const [trashRemainingTests, setTrashRemainingTests] = useState<number>(0);
   const [trashProductSearch, setTrashProductSearch] = useState('');
+  const [isTrashProductPopoverOpen, setIsTrashProductPopoverOpen] = useState(false);
 
   useEffect(() => {
     const handleOpenFaultModal = (event: CustomEvent<Device>) => {
@@ -930,7 +931,7 @@ export default function UrunKullanimPanel() {
                 <div className="space-y-4">
                   <div>
                     <Label className="text-sm font-medium mb-2 block">Ürün Seçin</Label>
-                    <Popover>
+                    <Popover open={isTrashProductPopoverOpen} onOpenChange={setIsTrashProductPopoverOpen}>
                       <PopoverTrigger asChild>
                         <Button
                           variant="outline"
@@ -991,6 +992,7 @@ export default function UrunKullanimPanel() {
                                     onClick={() => {
                                       setSelectedTrashProduct(product.stokKodu || '');
                                       setTrashRemainingTests(product.ambalajDegeri || 0);
+                                      setIsTrashProductPopoverOpen(false); // Close popover after selection
                                     }}
                                   >
                                     <Check
