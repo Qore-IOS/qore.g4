@@ -73,10 +73,11 @@ export default function LaboratuvarSayimPage() {
 
             if (isSerialTracked) {
                 // For serial-tracked items: remove items with unscanned serials
+                // CRITICAL FIX: Normalize null/undefined to empty string for comparison
                 const groupItems = rawStock.filter(item =>
                     item.stokKodu === group.stokKodu &&
-                    item.lotNumarasi === group.lotNumarasi &&
-                    item.miad === group.miad
+                    (item.lotNumarasi || '') === group.lotNumarasi &&
+                    (item.miad || '') === group.miad
                 );
 
                 groupItems.forEach(item => {
@@ -86,10 +87,11 @@ export default function LaboratuvarSayimPage() {
                 });
             } else {
                 // For lot/qty tracked items: calculate how many to remove based on count
+                // CRITICAL FIX: Normalize null/undefined to empty string for comparison
                 const groupItems = rawStock.filter(item =>
                     item.stokKodu === group.stokKodu &&
-                    item.lotNumarasi === group.lotNumarasi &&
-                    item.miad === group.miad
+                    (item.lotNumarasi || '') === group.lotNumarasi &&
+                    (item.miad || '') === group.miad
                 );
 
                 const countedQty = group.countedQty || 0;
