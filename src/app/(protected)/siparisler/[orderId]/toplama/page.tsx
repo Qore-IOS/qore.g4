@@ -41,15 +41,35 @@ function LastTransferLine({
 
   if (!jsDate) {
     return (
-      <div className={cn("text-xs text-muted-foreground italic", className)}>
+      <div className={cn("text-xs text-orange-500 font-medium", className)}>
         Son transfer bilgisi yok
       </div>
     );
   }
 
+  // Calculate days ago
+  const now = new Date();
+  const diffMs = now.getTime() - jsDate.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  let displayText: string;
+  if (diffDays === 0) {
+    displayText = "Son transfer: bugün";
+  } else if (diffDays === 1) {
+    displayText = "Son transfer: dün";
+  } else if (diffDays < 30) {
+    displayText = `Son transfer: ${diffDays} gün önce`;
+  } else if (diffDays < 365) {
+    const months = Math.floor(diffDays / 30);
+    displayText = `Son transfer: ${months} ay önce`;
+  } else {
+    const years = Math.floor(diffDays / 365);
+    displayText = `Son transfer: ${years} yıl önce`;
+  }
+
   return (
     <div className={cn("text-xs text-blue-600 font-medium", className)}>
-      Son transfer: {format(jsDate, 'dd.MM.yyyy HH:mm', { locale: tr })}
+      {displayText}
     </div>
   );
 }
@@ -91,7 +111,9 @@ export default function ToplamaPage() {
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [currentDepot, setCurrentDepot] = useState<Depot | null>(null);
-  
+  // Last transfer dates per stokKodu from this depot to the target hospital
+  const [lastTransferDates, setLastTransferDates] = useState<Record<string, Date>>({});
+
   const [scannedSerials, setScannedSerials] = useState<Record<string, string[]>>({});
   const [fefoWarning, setFefoWarning] = useState<{ scannedItem: DepoStokItem, suggestedLot: string, onConfirm: () => void } | null>(null);
   
@@ -126,19 +148,42 @@ export default function ToplamaPage() {
         }
 
         // 2. Fetch Dependent Data (Depot specific stock, etc.)
-        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap] = await Promise.all([
+        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap, shippedStokSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
           getDocs(query(collection(db, 'depoStok'), where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
           getDocs(collection(db, 'def_deviceGroups')),
           getDocs(collection(db, 'hospitals')),
           getDoc(doc(db, 'depots', orderData.depotId)),
+          // Fetch shipped items from this depot to target hospital for last transfer dates
+          orderData.labId
+            ? getDocs(query(
+                collection(db, 'depoStok'),
+                where('depotId', '==', orderData.depotId),
+                where('hedefKurumId', '==', orderData.labId),
+                where('isShipped', '==', true)
+              ))
+            : Promise.resolve({ docs: [] }),
         ]);
 
         const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
         const depoStokData = depoStokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
         const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
         const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
-        
+
+        // Calculate last transfer dates per stokKodu
+        const transferDates: Record<string, Date> = {};
+        shippedStokSnap.docs.forEach(d => {
+          const data = d.data() as DepoStokItem;
+          const stokKodu = data.stokKodu;
+          const sevkTarihi = toDateFromAny(data.sevkTarihi);
+          if (stokKodu && sevkTarihi) {
+            if (!transferDates[stokKodu] || sevkTarihi > transferDates[stokKodu]) {
+              transferDates[stokKodu] = sevkTarihi;
+            }
+          }
+        });
+        setLastTransferDates(transferDates);
+
         if (depotSnap && depotSnap.exists()) {
             setCurrentDepot({ id: depotSnap.id, ...depotSnap.data() } as Depot);
         } else {
@@ -536,7 +581,7 @@ export default function ToplamaPage() {
                                   <p className="text-xs text-muted-foreground font-mono">{(item as any).stokKodu}</p>
                                   <div className="mt-1">
                                     <LastTransferLine
-                                      date={targetHospital?.lastProductTransfers?.[(item as any).stokKodu]}
+                                      date={lastTransferDates[(item as any).stokKodu]}
                                     />
                                   </div>
                               </div>
