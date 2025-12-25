@@ -148,18 +148,28 @@ export default function ToplamaPage() {
         }
 
         // 2. Fetch Dependent Data (Depot specific stock, etc.)
-        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap, shippedStokSnap] = await Promise.all([
+        // For last transfer dates, we need to query by both hedefKurumId (new records) and hedefKurum (legacy records)
+        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap, shippedByIdSnap, shippedByNameSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
           getDocs(query(collection(db, 'depoStok'), where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
           getDocs(collection(db, 'def_deviceGroups')),
           getDocs(collection(db, 'hospitals')),
           getDoc(doc(db, 'depots', orderData.depotId)),
-          // Fetch shipped items from this depot to target hospital for last transfer dates
+          // Query by hedefKurumId (new records)
           orderData.labId
             ? getDocs(query(
                 collection(db, 'depoStok'),
                 where('depotId', '==', orderData.depotId),
                 where('hedefKurumId', '==', orderData.labId),
+                where('isShipped', '==', true)
+              ))
+            : Promise.resolve({ docs: [] }),
+          // Query by hedefKurum (name) for legacy records
+          orderData.kurumAdi
+            ? getDocs(query(
+                collection(db, 'depoStok'),
+                where('depotId', '==', orderData.depotId),
+                where('hedefKurum', '==', orderData.kurumAdi),
                 where('isShipped', '==', true)
               ))
             : Promise.resolve({ docs: [] }),
@@ -170,10 +180,20 @@ export default function ToplamaPage() {
         const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
         const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
 
+        // Combine both queries and deduplicate by document ID
+        const allShippedDocs = new Map<string, DepoStokItem>();
+        shippedByIdSnap.docs.forEach(d => {
+          allShippedDocs.set(d.id, { id: d.id, ...d.data() } as DepoStokItem);
+        });
+        shippedByNameSnap.docs.forEach(d => {
+          if (!allShippedDocs.has(d.id)) {
+            allShippedDocs.set(d.id, { id: d.id, ...d.data() } as DepoStokItem);
+          }
+        });
+
         // Calculate last transfer dates per stokKodu
         const transferDates: Record<string, Date> = {};
-        shippedStokSnap.docs.forEach(d => {
-          const data = d.data() as DepoStokItem;
+        allShippedDocs.forEach((data) => {
           const stokKodu = data.stokKodu;
           const sevkTarihi = toDateFromAny(data.sevkTarihi);
           if (stokKodu && sevkTarihi) {
