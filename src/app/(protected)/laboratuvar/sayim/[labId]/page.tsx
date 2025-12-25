@@ -327,14 +327,26 @@ export default function LaboratuvarSayimPage() {
         }
     }
     
-    if (!foundAndUpdated && serial && res?.stagedNew) {
+    // CRITICAL FIX: Handle newly transferred items (both serial and lot/qty tracked)
+    if (!foundAndUpdated && res?.stagedNew) {
         const groupKey = `${parsed.stokKodu}-${parsed.lotNumarasi || ''}-${parsed.miadFormatted || ''}`;
-        setScanned(prev => {
-            const setFor = new Set(prev[groupKey] || []);
-            setFor.add(serial);
-            return { ...prev, [groupKey]: setFor };
-        });
-        toast({ title: 'Yeni Ürün Doğrulandı', description: `${parsed.stokKodu} - ${serial}` });
+
+        if (serial) {
+            // Serial tracked - add to scanned serials
+            setScanned(prev => {
+                const setFor = new Set(prev[groupKey] || []);
+                setFor.add(serial);
+                return { ...prev, [groupKey]: setFor };
+            });
+            toast({ title: 'Yeni Ürün Doğrulandı', description: `${parsed.stokKodu} - ${serial}` });
+        } else {
+            // Lot/qty tracked - increment count
+            setCountedQuantities(prev => ({
+                ...prev,
+                [groupKey]: (prev[groupKey] || 0) + 1
+            }));
+            toast({ title: 'Yeni Ürün Sayıldı', description: `${parsed.stokKodu} ${parsed.lotNumarasi ? `(Lot: ${parsed.lotNumarasi})` : ''}` });
+        }
         playFeedback();
         foundAndUpdated = true;
     }
