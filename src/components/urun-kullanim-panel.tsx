@@ -29,7 +29,7 @@ import { openDeviceFaultReport } from '@/lib/faults';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useLightDashboardData } from './dashboard/useDashboardData';
-import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules } from '@/hooks/useFirebaseQueries';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
@@ -71,6 +71,9 @@ export default function UrunKullanimPanel() {
   // Use TanStack Query for barcode formats with caching
   const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
   const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
+
+  // Fetch min/max rules for selected lab (for trash bin product filtering)
+  const { data: minMaxRules = [] } = useMinMaxRules(selectedLabId);
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
 
@@ -947,21 +950,17 @@ export default function UrunKullanimPanel() {
                               {(() => {
                                 const filtered = products.filter(p => {
                                   // Filter products with min/max stock levels defined in lab management
-                                  const pool = labPools.find(pool =>
-                                    pool.laboratoryId === selectedLabId &&
-                                    pool.stokKodu === p.stokKodu
-                                  );
+                                  const rule = minMaxRules.find(r => r.stokKodu === p.stokKodu);
                                   // Only show products with min/max values defined (check for both null and undefined)
-                                  return pool && (pool.minStock != null || pool.maxStock != null);
+                                  return rule && (rule.minStock != null || rule.maxStock != null);
                                 });
                                 console.log('🗑️ Çöp Kutusu Debug:', {
                                   selectedLabId,
                                   totalProducts: products.length,
-                                  totalLabPools: labPools.length,
-                                  labPoolsForThisLab: labPools.filter(p => p.laboratoryId === selectedLabId).length,
-                                  labPoolsWithMinMax: labPools.filter(p => p.laboratoryId === selectedLabId && (p.minStock != null || p.maxStock != null)).length,
+                                  totalMinMaxRules: minMaxRules.length,
+                                  minMaxRulesWithValues: minMaxRules.filter(r => r.minStock != null || r.maxStock != null).length,
                                   filteredProducts: filtered.length,
-                                  samplePool: labPools.filter(p => p.laboratoryId === selectedLabId)[0]
+                                  sampleRule: minMaxRules[0]
                                 });
                                 return filtered;
                               })()
