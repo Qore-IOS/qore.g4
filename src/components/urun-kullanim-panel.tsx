@@ -948,7 +948,7 @@ export default function UrunKullanimPanel() {
                               className="h-9"
                             />
                           </div>
-                          <ScrollArea className="h-[300px]">
+                          <div className="max-h-[300px] overflow-y-auto">
                             <div className="p-1">
                               {(() => {
                                 const filtered = products
@@ -1002,7 +1002,7 @@ export default function UrunKullanimPanel() {
                                 ));
                               })()}
                             </div>
-                          </ScrollArea>
+                          </div>
                         </div>
                       </PopoverContent>
                     </Popover>
