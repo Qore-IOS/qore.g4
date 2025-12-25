@@ -947,14 +947,14 @@ export default function UrunKullanimPanel() {
                                 const filtered = products.filter(p => {
                                   // Filter products with min/max stock levels defined in lab management
                                   const rule = minMaxRules.find(r => r.stokKodu === p.stokKodu);
-                                  // Only show products with min/max values defined (check for both null and undefined)
-                                  return rule && (rule.minStock != null || rule.maxStock != null);
+                                  // Only show products with min/max values defined (use 'min' and 'max', not 'minStock' and 'maxStock')
+                                  return rule && (rule.min != null || rule.max != null);
                                 });
                                 console.log('🗑️ Çöp Kutusu Debug:', {
                                   selectedLabId,
                                   totalProducts: products.length,
                                   totalMinMaxRules: minMaxRules.length,
-                                  minMaxRulesWithValues: minMaxRules.filter(r => r.minStock != null || r.maxStock != null).length,
+                                  minMaxRulesWithValues: minMaxRules.filter(r => r.min != null || r.max != null).length,
                                   filteredProducts: filtered.length,
                                   sampleRule: minMaxRules[0]
                                 });
