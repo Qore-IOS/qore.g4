@@ -125,6 +125,7 @@ export default function UrunKullanimPanel() {
   }>>([]);
   const [selectedTrashProduct, setSelectedTrashProduct] = useState('');
   const [trashRemainingTests, setTrashRemainingTests] = useState<number>(0);
+  const [trashProductSearch, setTrashProductSearch] = useState('');
 
   useEffect(() => {
     const handleOpenFaultModal = (event: CustomEvent<Device>) => {
@@ -943,51 +944,71 @@ export default function UrunKullanimPanel() {
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-[400px] p-0">
-                        <Command>
-                          <CommandInput placeholder="Ürün ara..." />
-                          <CommandList>
-                            <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                            <ScrollArea className="h-[300px]">
-                              <CommandGroup>
-                                {(() => {
-                                  const filtered = products.filter(p => {
+                        <div className="flex flex-col">
+                          <div className="p-2 border-b">
+                            <Input
+                              placeholder="Ürün ara..."
+                              value={trashProductSearch}
+                              onChange={(e) => setTrashProductSearch(e.target.value)}
+                              className="h-9"
+                            />
+                          </div>
+                          <ScrollArea className="h-[300px]">
+                            <div className="p-1">
+                              {(() => {
+                                const filtered = products
+                                  .filter(p => {
                                     // Filter products with min/max stock levels defined in lab management
                                     const rule = minMaxRules.find(r => r.stokKodu === p.stokKodu);
-                                    // Only show products with min/max values defined (use 'min' and 'max', not 'minStock' and 'maxStock')
-                                    return rule && (rule.min != null || rule.max != null);
-                                  });
-                                  console.log('🗑️ Çöp Kutusu Debug:', {
-                                    selectedLabId,
-                                    totalProducts: products.length,
-                                    totalMinMaxRules: minMaxRules.length,
-                                    minMaxRulesWithValues: minMaxRules.filter(r => r.min != null || r.max != null).length,
-                                    filteredProducts: filtered.length,
-                                    sampleRule: minMaxRules[0]
-                                  });
-                                  return filtered;
-                                })()
-                                  .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''))
-                                  .map((product) => (
-                                    <CommandItem
-                                      key={product.id}
-                                      value={product.stokAdi || ''}
-                                      onSelect={() => {
-                                        setSelectedTrashProduct(product.stokKodu || '');
-                                        // Set default remaining tests to package quantity
-                                        setTrashRemainingTests(product.ambalajDegeri || 0);
-                                      }}
-                                    >
-                                      <Check className={cn("mr-2 h-4 w-4", selectedTrashProduct === product.stokKodu ? "opacity-100" : "opacity-0")} />
-                                      <div className="flex flex-col">
-                                        <span>{product.stokAdi}</span>
-                                        <span className="text-xs text-muted-foreground">{product.stokKodu}</span>
-                                      </div>
-                                    </CommandItem>
-                                  ))}
-                              </CommandGroup>
-                            </ScrollArea>
-                          </CommandList>
-                        </Command>
+                                    if (!rule || (rule.min == null && rule.max == null)) return false;
+
+                                    // Apply search filter
+                                    if (trashProductSearch) {
+                                      const search = trashProductSearch.toLowerCase();
+                                      const nameMatch = (p.stokAdi || '').toLowerCase().includes(search);
+                                      const codeMatch = (p.stokKodu || '').toLowerCase().includes(search);
+                                      return nameMatch || codeMatch;
+                                    }
+                                    return true;
+                                  })
+                                  .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''));
+
+                                if (filtered.length === 0) {
+                                  return (
+                                    <div className="p-4 text-center text-sm text-muted-foreground">
+                                      Ürün bulunamadı.
+                                    </div>
+                                  );
+                                }
+
+                                return filtered.map((product) => (
+                                  <div
+                                    key={product.id}
+                                    className={cn(
+                                      "flex items-center gap-2 p-2 rounded-sm cursor-pointer hover:bg-accent",
+                                      selectedTrashProduct === product.stokKodu && "bg-accent"
+                                    )}
+                                    onClick={() => {
+                                      setSelectedTrashProduct(product.stokKodu || '');
+                                      setTrashRemainingTests(product.ambalajDegeri || 0);
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "h-4 w-4 shrink-0",
+                                        selectedTrashProduct === product.stokKodu ? "opacity-100" : "opacity-0"
+                                      )}
+                                    />
+                                    <div className="flex flex-col flex-1 min-w-0">
+                                      <span className="text-sm">{product.stokAdi}</span>
+                                      <span className="text-xs text-muted-foreground">{product.stokKodu}</span>
+                                    </div>
+                                  </div>
+                                ));
+                              })()}
+                            </div>
+                          </ScrollArea>
+                        </div>
                       </PopoverContent>
                     </Popover>
                   </div>
