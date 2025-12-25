@@ -17,7 +17,7 @@ import { Check, X, Loader2, ListFilter } from 'lucide-react';
 import { cn, playFeedback } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { useLabCountMissingStock } from '@/hooks/useLabCountMissingStock';
-import type { ProductCode, DepoStokItem, ConsumptionRecord } from '@/lib/types';
+import type { ProductCode, DepoStokItem, ConsumptionRecord, LabPool, Laboratory } from '@/lib/types';
 import type { BarcodeFormat } from '@/lib/barcode';
 import { Progress } from '@/components/ui/progress';
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
@@ -51,6 +51,8 @@ export default function LaboratuvarSayimPage() {
   const [countedQuantities, setCountedQuantities] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [showOnlyUnverified, setShowOnlyUnverified] = useState(false);
+  const [labPools, setLabPools] = useState<LabPool[]>([]);
+  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
 
 
   const saveSession = async () => {
@@ -157,6 +159,12 @@ export default function LaboratuvarSayimPage() {
     getDocs(collection(db, 'barcodeFormats')).then(snap => {
       setBarcodeFormats(snap.docs.map(d => ({ id: d.id, ...d.data() } as BarcodeFormat)));
     });
+    getDocs(collection(db, 'labPools')).then(snap => {
+      setLabPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
+    });
+    getDocs(collection(db, 'hospitals')).then(snap => {
+      setLaboratories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
+    });
   }, []);
 
   useEffect(() => {
@@ -208,6 +216,16 @@ export default function LaboratuvarSayimPage() {
 
   const existingLabSerials = useMemo(() => new Set(rawStock.map(s => s.seriNumarasi || '').filter(Boolean)), [rawStock]);
 
+  // Compute pool member IDs and names for inter-lab transfers
+  const { poolMemberIds, poolMemberNames } = useMemo(() => {
+    const pool = labPools.find(p => p.memberIds?.includes(labId));
+    if (!pool) return { poolMemberIds: [], poolMemberNames: [] };
+
+    const ids = pool.memberIds.filter(id => id !== labId); // Exclude current lab
+    const names = ids.map(id => laboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
+    return { poolMemberIds: ids, poolMemberNames: names };
+  }, [labPools, labId, laboratories]);
+
   const {
     onScanAndStageIfMissing,
     commitNewItems,
@@ -215,7 +233,17 @@ export default function LaboratuvarSayimPage() {
     serialTextClass,
     newFromCount,
     isNewSerial,
-  } = useLabCountMissingStock({ labId, labName, existingLabSerials, productCodes, barcodeFormats, toast });
+    isPoolTransferSerial,
+  } = useLabCountMissingStock({
+    labId,
+    labName,
+    existingLabSerials,
+    productCodes,
+    barcodeFormats,
+    toast,
+    poolMemberIds,
+    poolMemberNames,
+  });
 
   const allItemsForCount = useMemo(() => {
     const raw = rawStock.map(s => ({
@@ -232,15 +260,16 @@ export default function LaboratuvarSayimPage() {
     const all = [...raw, ...stagedButNotPersisted];
 
     const grouped = all.reduce((acc: Record<string, StockGroup>, item: any) => {
-      const key = `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
+      // CRITICAL FIX: Ensure consistent key format by handling undefined/null values
+      const key = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
       if (!acc[key]) {
          const product = productCodes.find(p => p.stokKodu === item.stokKodu);
         acc[key] = {
           id: key,
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
-          lotNumarasi: item.lotNumarasi,
-          miad: item.miad,
+          lotNumarasi: item.lotNumarasi || '',
+          miad: item.miad || '',
           expectedQty: 0,
           serials: [],
           trackingMode: product ? resolveDefaultTrackingMode(product as any) : 'serial',
@@ -399,7 +428,9 @@ export default function LaboratuvarSayimPage() {
             <div className="flex justify-between items-start">
               <div>
                 <CardTitle>Sayım Oturumu: {labName}</CardTitle>
-                <CardDescription>Okutulan yeşil, okutulmayan kırmızı. Kaynaktan eklenenler mavi renkte gösterilir.</CardDescription>
+                <CardDescription>
+                  Okutulan yeşil, okutulmayan kırmızı. Depodan eklenenler mavi, havuzdan eklenenler mor renkte gösterilir.
+                </CardDescription>
               </div>
               <Button onClick={() => setShowOnlyUnverified(v => !v)} variant="outline">
                 <ListFilter className="mr-2 h-4 w-4"/>
@@ -458,7 +489,8 @@ export default function LaboratuvarSayimPage() {
                               className={cn(
                                 'p-1 rounded flex items-center gap-2',
                                 (scanned[group.id] || new Set()).has(s) ? 'bg-green-200' : 'bg-red-200',
-                                isNewSerial(s) && 'bg-blue-200'
+                                isPoolTransferSerial(s) && 'bg-purple-200 dark:bg-purple-700',
+                                isNewSerial(s) && !isPoolTransferSerial(s) && 'bg-blue-200'
                               )}
                             >
                               {(scanned[group.id] || new Set()).has(s) || isNewSerial(s) ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
