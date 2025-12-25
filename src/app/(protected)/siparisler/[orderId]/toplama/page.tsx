@@ -148,19 +148,12 @@ export default function ToplamaPage() {
         }
 
         // 2. Fetch Dependent Data (Depot specific stock, etc.)
-        // Also fetch labTransferDates for this lab-depot combination
-        const labTransferDocId = orderData.labId ? `${orderData.labId}_${orderData.depotId}` : null;
-
-        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap, labTransferSnap] = await Promise.all([
+        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
           getDocs(query(collection(db, 'depoStok'), where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
           getDocs(collection(db, 'def_deviceGroups')),
           getDocs(collection(db, 'hospitals')),
           getDoc(doc(db, 'depots', orderData.depotId)),
-          // Fetch labTransferDates document for this lab-depot combination
-          labTransferDocId
-            ? getDoc(doc(db, 'labTransferDates', labTransferDocId))
-            : Promise.resolve(null),
         ]);
 
         const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
@@ -168,18 +161,32 @@ export default function ToplamaPage() {
         const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
         const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
 
-        // Get transfer dates from labTransferDates collection (single source of truth)
+        // Determine effective labId - try order.labId first, then find by kurumAdi
+        let effectiveLabId = orderData.labId;
+        if (!effectiveLabId && orderData.kurumAdi) {
+          const matchedHospital = hospitalsData.find(
+            h => h.name === orderData.kurumAdi || h.ad === orderData.kurumAdi
+          );
+          effectiveLabId = matchedHospital?.id;
+        }
+
+        // Fetch labTransferDates for this lab-depot combination
         const transferDates: Record<string, Date> = {};
-        if (labTransferSnap && labTransferSnap.exists()) {
-          const labTransferData = labTransferSnap.data();
-          const transfers = labTransferData?.transfers as Record<string, { lastTransferDate: any }> | undefined;
-          if (transfers) {
-            Object.entries(transfers).forEach(([stokKodu, info]) => {
-              const parsedDate = toDateFromAny(info.lastTransferDate);
-              if (parsedDate) {
-                transferDates[stokKodu] = parsedDate;
-              }
-            });
+        if (effectiveLabId && orderData.depotId) {
+          const labTransferDocId = `${effectiveLabId}_${orderData.depotId}`;
+          const labTransferSnap = await getDoc(doc(db, 'labTransferDates', labTransferDocId));
+
+          if (labTransferSnap.exists()) {
+            const labTransferData = labTransferSnap.data();
+            const transfers = labTransferData?.transfers as Record<string, { lastTransferDate: any }> | undefined;
+            if (transfers) {
+              Object.entries(transfers).forEach(([stokKodu, info]) => {
+                const parsedDate = toDateFromAny(info.lastTransferDate);
+                if (parsedDate) {
+                  transferDates[stokKodu] = parsedDate;
+                }
+              });
+            }
           }
         }
         setLastTransferDates(transferDates);
@@ -492,14 +499,19 @@ export default function ToplamaPage() {
       await batch.commit();
       itemsShippedCount = itemsToShip.length;
       success = true;
-      
-      const targetHospital = hospitals.find(h => h.id === order.labId);
+
+      // Find target hospital - try by labId first, then by kurumAdi
+      const targetHospital = order.labId
+        ? hospitals.find(h => h.id === order.labId)
+        : hospitals.find(h => h.name === order.kurumAdi || h.ad === order.kurumAdi);
+
       await maybeAutoPrintTutanak(db, targetHospital, shipmentDocRef.id, currentUserProfile?.name || currentUser?.email || '');
-      
+
       // Update labTransferDates collection with last transfer dates
-      if (order.labId && order.depotId && shipmentItems.length > 0) {
+      const effectiveLabId = order.labId || targetHospital?.id;
+      if (effectiveLabId && order.depotId && shipmentItems.length > 0) {
         await updateLabTransferDates(
-          order.labId,
+          effectiveLabId,
           order.depotId,
           order.kurumAdi,
           currentDepot.name || '',
