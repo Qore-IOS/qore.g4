@@ -366,9 +366,10 @@ export default function EjectedKitPanel() {
                 </CardHeader>
                 <CardContent>
                     <Tabs value={activeTab} onValueChange={setActiveTab}>
-                        <TabsList className="grid w-full grid-cols-2">
+                        <TabsList className="grid w-full grid-cols-3">
                             <TabsTrigger value="kayit">Kayıt</TabsTrigger>
                             <TabsTrigger value="gecmis">Geçmiş</TabsTrigger>
+                            <TabsTrigger value="cop-kutusu">Çöp Kutusu</TabsTrigger>
                         </TabsList>
 
                         <TabsContent value="kayit" className="space-y-6 pt-4">
@@ -565,6 +566,34 @@ export default function EjectedKitPanel() {
                                                 </TableRow>
                                             ))
                                         )}
+                                    </TableBody>
+                                </Table>
+                            </ScrollArea>
+                        </TabsContent>
+
+                        <TabsContent value="cop-kutusu" className="pt-4">
+                            <ScrollArea className="h-[500px]">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Tarih</TableHead>
+                                            <TableHead>Laboratuvar</TableHead>
+                                            <TableHead>Cihaz</TableHead>
+                                            <TableHead>Ürün</TableHead>
+                                            <TableHead>Kalan Test</TableHead>
+                                            <TableHead>Kaydeden</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="text-center py-8">
+                                                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                                                    <AlertCircle className="h-8 w-8" />
+                                                    <span>Çöp kutusu kayıtları yakında burada görüntülenecek.</span>
+                                                    <span className="text-xs">trashBinRecords collection'ından veri çekilecek</span>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
                                     </TableBody>
                                 </Table>
                             </ScrollArea>

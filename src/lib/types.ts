@@ -658,6 +658,22 @@ export interface DestroyedKitRecord {
   sourceType?: 'barcode' | 'excel' | 'fault'; // NEW: Source of destruction
 }
 
+export interface TrashBinRecord {
+  id: string;
+  laboratoryId: string;
+  laboratoryName: string;
+  deviceId: string;
+  deviceModel: string;
+  deviceSerialNumber: string;
+  stokKodu: string;
+  stokAdi: string;
+  remainingTests: number;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  sourceType: 'manual'; // For now, only manual entry
+}
+
 export interface Rack {
   id: string;
   labId: string;

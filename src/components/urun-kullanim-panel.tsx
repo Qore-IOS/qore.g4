@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useParams } from 'next/navigation';
-import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup } from '@/lib/types';
+import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup, TrashBinRecord } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play } from 'lucide-react';
+import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2 } from 'lucide-react';
 import { playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -109,6 +109,18 @@ export default function UrunKullanimPanel() {
   const [manualLotKey, setManualLotKey] = useState('');
   const [manualQuantity, setManualQuantity] = useState(1);
   const [isSessionActive, setIsSessionActive] = useState(false);
+
+  // Trash bin modal states
+  const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
+  const [selectedTrashDevice, setSelectedTrashDevice] = useState<Device | null>(null);
+  const [trashItems, setTrashItems] = useState<Array<{
+    id: string;
+    productCode: string;
+    productName: string;
+    remainingTests: number;
+  }>>([]);
+  const [selectedTrashProduct, setSelectedTrashProduct] = useState('');
+  const [trashRemainingTests, setTrashRemainingTests] = useState<number>(0);
 
   useEffect(() => {
     const handleOpenFaultModal = (event: CustomEvent<Device>) => {
@@ -472,7 +484,60 @@ export default function UrunKullanimPanel() {
       });
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
   }, [labStock, manualProductCode]);
-  
+
+  const handleTrashBinSubmit = useCallback(async () => {
+    if (!selectedTrashDevice || trashItems.length === 0 || !selectedLab) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen cihaz seçin ve en az bir ürün ekleyin.', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+
+      trashItems.forEach((item) => {
+        const trashBinRef = doc(collection(db, 'trashBinRecords'));
+        const trashBinRecord: Omit<TrashBinRecord, 'id'> & { id: string } = {
+          id: trashBinRef.id,
+          laboratoryId: selectedLab.id,
+          laboratoryName: selectedLab.name || '',
+          deviceId: selectedTrashDevice.id,
+          deviceModel: selectedTrashDevice.cihazAdi || selectedTrashDevice.model || '',
+          deviceSerialNumber: selectedTrashDevice.seriNumarasi || '',
+          stokKodu: item.productCode,
+          stokAdi: item.productName,
+          remainingTests: item.remainingTests,
+          createdAt: Timestamp.now(),
+          createdByUid: currentUser?.uid || '',
+          createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+          sourceType: 'manual',
+        };
+
+        batch.set(trashBinRef, trashBinRecord);
+      });
+
+      await batch.commit();
+
+      toast({
+        title: 'Çöpe Gönderildi',
+        description: `${trashItems.length} ürün çöp kutusuna eklendi.`,
+      });
+
+      // Reset state
+      setIsTrashBinModalOpen(false);
+      setSelectedTrashDevice(null);
+      setTrashItems([]);
+      setSelectedTrashProduct('');
+      setTrashRemainingTests(0);
+    } catch (error) {
+      console.error('Trash bin submit error:', error);
+      toast({
+        title: 'Hata',
+        description: 'Ürünler çöp kutusuna eklenirken bir hata oluştu.',
+        variant: 'destructive',
+      });
+    }
+  }, [selectedTrashDevice, trashItems, selectedLab, currentUser, currentUserProfile, toast]);
+
   const handleManualDeduction = async () => {
     if (!manualProductCode || !manualLotKey || manualQuantity <= 0) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen ürün, lot ve geçerli bir adet girin.', variant: 'destructive' });
@@ -512,8 +577,22 @@ export default function UrunKullanimPanel() {
         </div>
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="text-xl font-headline flex items-center"><PackageMinus className="mr-2 h-6 w-6 text-primary" />Ürün Kullanım Kaydı</CardTitle>
-          <CardDescription>Laboratuvar seçerek kullanılan ürünlerin barkodlarını okutup stoktan düşün.</CardDescription>
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <CardTitle className="text-xl font-headline flex items-center"><PackageMinus className="mr-2 h-6 w-6 text-primary" />Ürün Kullanım Kaydı</CardTitle>
+              <CardDescription>Laboratuvar seçerek kullanılan ürünlerin barkodlarını okutup stoktan düşün.</CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsTrashBinModalOpen(true)}
+              disabled={!selectedLabId}
+              className="ml-4"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Çöp Kutusu
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid md:grid-cols-2 gap-6">
@@ -754,6 +833,237 @@ export default function UrunKullanimPanel() {
               <Button variant="outline" onClick={() => handleFaultReport('aplikasyon')} disabled={isSavingFault}>{isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}<span className="ml-2">Aplikasyon</span></Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isTrashBinModalOpen} onOpenChange={setIsTrashBinModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <Trash2 className="mr-2 h-5 w-5 text-destructive" />
+              Çöp Kutusu - Ürün Ekleme
+            </DialogTitle>
+            <DialogDescription>
+              Çöpe atılacak ürünleri cihaz seçerek veya manuel olarak ekleyin.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-6">
+            {/* Device selection */}
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Cihaz Seçin</Label>
+              <p className="text-xs text-muted-foreground mb-3">
+                Ürün eklemek için önce bir cihaz seçin
+              </p>
+              {devicesToDisplay.length > 0 ? (
+                <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+                  {devicesToDisplay.map((device) => (
+                    <button
+                      key={device.id}
+                      type="button"
+                      onClick={() => setSelectedTrashDevice(device)}
+                      className={cn(
+                        "group relative w-full outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-all",
+                        selectedTrashDevice?.id === device.id
+                          ? "scale-105 ring-2 ring-primary"
+                          : "hover:scale-105"
+                      )}
+                    >
+                      <div className="text-center mb-1">
+                        <div className="text-xs font-medium leading-tight truncate px-1">
+                          {device.cihazAdi || device.model}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono truncate">
+                          {device.seriNumarasi || '-'}
+                        </div>
+                      </div>
+                      <div className={cn(
+                        "relative w-full aspect-square bg-muted rounded-lg flex items-center justify-center overflow-hidden border-2 transition-colors",
+                        selectedTrashDevice?.id === device.id
+                          ? "border-primary bg-primary/10"
+                          : "border-border group-hover:border-primary/30"
+                      )}>
+                        <Image
+                          src={device.imageUrl ? (device.imageUrl.startsWith('/') ? device.imageUrl : `/${device.imageUrl}`) : '/lab_diorama.png'}
+                          alt={device.cihazAdi || device.model || 'Device'}
+                          fill
+                          className="object-contain p-1"
+                          sizes="(max-width: 768px) 33vw, 20vw"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.srcset = '/lab_diorama.png';
+                            target.src = '/lab_diorama.png';
+                          }}
+                        />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center text-muted-foreground py-6 bg-muted rounded-lg">
+                  <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Bu laboratuvara tanımlı cihaz bulunamadı.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Product selection form - shown after device selection */}
+            {selectedTrashDevice && (
+              <div className="border-t pt-6 space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  <div>
+                    <p className="text-sm font-medium">
+                      Seçilen Cihaz: {selectedTrashDevice.cihazAdi || selectedTrashDevice.model}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      SN: {selectedTrashDevice.seriNumarasi}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Manuel product selection */}
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-sm font-medium mb-2 block">Ürün Seçin</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className="w-full justify-between font-normal"
+                        >
+                          {selectedTrashProduct
+                            ? products.find((p) => p.stokKodu === selectedTrashProduct)?.stokAdi
+                            : "Ürün seçin..."}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[400px] p-0">
+                        <Command>
+                          <CommandInput placeholder="Ürün ara..." />
+                          <CommandList>
+                            <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                            <CommandGroup>
+                              {products
+                                .filter(p => {
+                                  // Filter products that have min/max defined for the selected lab
+                                  const pool = labPools.find(pool =>
+                                    pool.laboratoryId === selectedLabId &&
+                                    pool.stokKodu === p.stokKodu
+                                  );
+                                  return pool && (pool.minStock !== undefined || pool.maxStock !== undefined);
+                                })
+                                .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''))
+                                .map((product) => (
+                                  <CommandItem
+                                    key={product.id}
+                                    value={product.stokAdi || ''}
+                                    onSelect={() => {
+                                      setSelectedTrashProduct(product.stokKodu || '');
+                                      // Set default remaining tests to package quantity
+                                      setTrashRemainingTests(product.ambalajDegeri || 0);
+                                    }}
+                                  >
+                                    <Check className={cn("mr-2 h-4 w-4", selectedTrashProduct === product.stokKodu ? "opacity-100" : "opacity-0")} />
+                                    <div className="flex flex-col">
+                                      <span>{product.stokAdi}</span>
+                                      <span className="text-xs text-muted-foreground">{product.stokKodu}</span>
+                                    </div>
+                                  </CommandItem>
+                                ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {selectedTrashProduct && (
+                    <div>
+                      <Label htmlFor="remaining-tests" className="text-sm font-medium mb-2 block">
+                        Kalan Test Adeti
+                      </Label>
+                      <Input
+                        id="remaining-tests"
+                        type="number"
+                        min="0"
+                        value={trashRemainingTests}
+                        onChange={(e) => setTrashRemainingTests(Number(e.target.value))}
+                        placeholder="Kalan test adedini girin"
+                      />
+                    </div>
+                  )}
+
+                  {selectedTrashProduct && (
+                    <Button
+                      onClick={() => {
+                        const product = products.find(p => p.stokKodu === selectedTrashProduct);
+                        if (product) {
+                          setTrashItems(prev => [...prev, {
+                            id: Math.random().toString(36).substr(2, 9),
+                            productCode: product.stokKodu || '',
+                            productName: product.stokAdi || '',
+                            remainingTests: trashRemainingTests,
+                          }]);
+                          setSelectedTrashProduct('');
+                          setTrashRemainingTests(0);
+                        }
+                      }}
+                      className="w-full"
+                    >
+                      <ClipboardPlus className="h-4 w-4 mr-2" />
+                      Listeye Ekle
+                    </Button>
+                  )}
+
+                  {/* Display added items */}
+                  {trashItems.length > 0 && (
+                    <div className="border rounded-lg p-4 space-y-2">
+                      <Label className="text-sm font-medium">Eklenecek Ürünler ({trashItems.length})</Label>
+                      <ScrollArea className="h-32">
+                        <div className="space-y-2">
+                          {trashItems.map((item) => (
+                            <div key={item.id} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
+                              <div className="flex-1">
+                                <p className="font-medium">{item.productName}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {item.productCode} • Kalan Test: {item.remainingTests}
+                                </p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setTrashItems(prev => prev.filter(i => i.id !== item.id))}
+                              >
+                                <XCircle className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setIsTrashBinModalOpen(false);
+              setSelectedTrashDevice(null);
+              setTrashItems([]);
+              setSelectedTrashProduct('');
+              setTrashRemainingTests(0);
+            }}>
+              İptal
+            </Button>
+            {trashItems.length > 0 && (
+              <Button onClick={handleTrashBinSubmit}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Çöpe Gönder ({trashItems.length})
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
