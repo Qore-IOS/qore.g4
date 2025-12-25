@@ -111,7 +111,8 @@ export default function ToplamaPage() {
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [currentDepot, setCurrentDepot] = useState<Depot | null>(null);
-  // Last transfer dates per stokKodu to the target hospital (from hospital's lastProductTransfers field)
+  // Last transfer dates per stokKodu to the target hospital
+  // Sources: hospitals.lastProductTransfers (primary) + depoStok.sevkTarihi (fallback for legacy data)
   const [lastTransferDates, setLastTransferDates] = useState<Record<string, Date>>({});
 
   const [scannedSerials, setScannedSerials] = useState<Record<string, string[]>>({});
@@ -148,12 +149,31 @@ export default function ToplamaPage() {
         }
 
         // 2. Fetch Dependent Data (Depot specific stock, etc.)
-        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap] = await Promise.all([
+        // Also fetch shipped items to this hospital for fallback transfer dates
+        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap, shippedByIdSnap, shippedByNameSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
           getDocs(query(collection(db, 'depoStok'), where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
           getDocs(collection(db, 'def_deviceGroups')),
           getDocs(collection(db, 'hospitals')),
           getDoc(doc(db, 'depots', orderData.depotId)),
+          // Query by hedefKurumId (new records)
+          orderData.labId
+            ? getDocs(query(
+                collection(db, 'depoStok'),
+                where('depotId', '==', orderData.depotId),
+                where('hedefKurumId', '==', orderData.labId),
+                where('isShipped', '==', true)
+              ))
+            : Promise.resolve({ docs: [] as any[] }),
+          // Query by hedefKurum (name) for legacy records
+          orderData.kurumAdi
+            ? getDocs(query(
+                collection(db, 'depoStok'),
+                where('depotId', '==', orderData.depotId),
+                where('hedefKurum', '==', orderData.kurumAdi),
+                where('isShipped', '==', true)
+              ))
+            : Promise.resolve({ docs: [] as any[] }),
         ]);
 
         const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
@@ -161,15 +181,37 @@ export default function ToplamaPage() {
         const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
         const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
 
-        // Get last transfer dates from hospital's lastProductTransfers field
-        // This is the most reliable source as it's updated on each transfer
-        const targetHospitalData = hospitalsData.find(h => h.id === orderData.labId);
+        // Build transfer dates: First from depoStok (fallback), then override with hospital's lastProductTransfers (primary)
         const transferDates: Record<string, Date> = {};
+
+        // Fallback: Calculate from depoStok shipped records
+        const allShippedDocs = new Map<string, DepoStokItem>();
+        shippedByIdSnap.docs.forEach(d => {
+          allShippedDocs.set(d.id, { id: d.id, ...d.data() } as DepoStokItem);
+        });
+        shippedByNameSnap.docs.forEach(d => {
+          if (!allShippedDocs.has(d.id)) {
+            allShippedDocs.set(d.id, { id: d.id, ...d.data() } as DepoStokItem);
+          }
+        });
+        allShippedDocs.forEach((data) => {
+          const stokKodu = data.stokKodu;
+          const sevkTarihi = toDateFromAny(data.sevkTarihi);
+          if (stokKodu && sevkTarihi) {
+            if (!transferDates[stokKodu] || sevkTarihi > transferDates[stokKodu]) {
+              transferDates[stokKodu] = sevkTarihi;
+            }
+          }
+        });
+
+        // Primary: Override with hospital's lastProductTransfers (most reliable, updated on each transfer)
+        const targetHospitalData = hospitalsData.find(h => h.id === orderData.labId);
         if (targetHospitalData && (targetHospitalData as any).lastProductTransfers) {
           const lastProductTransfers = (targetHospitalData as any).lastProductTransfers as Record<string, any>;
           Object.entries(lastProductTransfers).forEach(([stokKodu, date]) => {
             const parsedDate = toDateFromAny(date);
             if (parsedDate) {
+              // Override with hospital data (this is the most up-to-date source)
               transferDates[stokKodu] = parsedDate;
             }
           });
