@@ -91,9 +91,11 @@ export default function LaboratuvarYonetimiPanel() {
 
     // Filter by hedefKurumId OR by hedefKurum (name) for legacy records
     // that may have hedefKurum set but hedefKurumId is null/undefined
+    // CRITICAL: Also check isShipped to ensure only transferred items are shown
     return depoStok.filter(item =>
-      item.hedefKurumId === selectedLabId ||
-      (!item.hedefKurumId && item.hedefKurum === selectedLabName)
+      item.isShipped === true &&
+      (item.hedefKurumId === selectedLabId ||
+      (!item.hedefKurumId && item.hedefKurum === selectedLabName))
     );
   }, [depoStok, selectedLabId, laboratories]);
 

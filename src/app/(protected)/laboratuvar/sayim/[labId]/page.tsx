@@ -48,6 +48,7 @@ export default function LaboratuvarSayimPage() {
   const [rawStock, setRawStock] = useState<DepoStokItem[]>([]);
   const [rows, setRows] = useState<StockGroup[]>([]);
   const [scanned, setScanned] = useState<Record<string, Set<string>>>({});
+  const [countedQuantities, setCountedQuantities] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [showOnlyUnverified, setShowOnlyUnverified] = useState(false);
 
@@ -59,14 +60,50 @@ export default function LaboratuvarSayimPage() {
     try {
         const batch = writeBatch(db);
 
-        // 1. Identify unverified items and prepare for removal
+        // 1. Build a set of all scanned serial numbers
         const scannedSerialsSet = new Set(Object.values(scanned).flatMap(s => Array.from(s)));
-        const unverifiedItems = rawStock.filter(item => 
-            item.seriNumarasi && !scannedSerialsSet.has(item.seriNumarasi)
-        );
 
-        // 2. Delete unverified items from stock and create consumption records
-        unverifiedItems.forEach(item => {
+        // 2. Process each group to identify items to remove
+        const itemsToRemove: DepoStokItem[] = [];
+
+        allItemsForCount.forEach(group => {
+            const isSerialTracked = group.trackingMode === 'serial';
+
+            if (isSerialTracked) {
+                // For serial-tracked items: remove items with unscanned serials
+                const groupItems = rawStock.filter(item =>
+                    item.stokKodu === group.stokKodu &&
+                    item.lotNumarasi === group.lotNumarasi &&
+                    item.miad === group.miad
+                );
+
+                groupItems.forEach(item => {
+                    if (item.seriNumarasi && !scannedSerialsSet.has(item.seriNumarasi)) {
+                        itemsToRemove.push(item);
+                    }
+                });
+            } else {
+                // For lot/qty tracked items: calculate how many to remove based on count
+                const groupItems = rawStock.filter(item =>
+                    item.stokKodu === group.stokKodu &&
+                    item.lotNumarasi === group.lotNumarasi &&
+                    item.miad === group.miad
+                );
+
+                const countedQty = group.countedQty || 0;
+                const expectedQty = group.expectedQty;
+                const qtyToRemove = expectedQty - countedQty;
+
+                if (qtyToRemove > 0) {
+                    // Remove the excess items (items that weren't counted)
+                    const itemsToDelete = groupItems.slice(0, qtyToRemove);
+                    itemsToRemove.push(...itemsToDelete);
+                }
+            }
+        });
+
+        // 3. Delete unverified items from stock and create consumption records
+        itemsToRemove.forEach(item => {
             // Delete from depoStok
             const stockDocRef = doc(db, 'depoStok', item.id);
             batch.delete(stockDocRef);
@@ -89,7 +126,7 @@ export default function LaboratuvarSayimPage() {
             batch.set(consumptionDocRef, consumptionRecord);
         });
 
-        // 3. Save the history record of the count session
+        // 4. Save the history record of the count session
         await saveLabCountSession({
             laboratoryId: labId,
             laboratoryName: labName,
@@ -98,10 +135,10 @@ export default function LaboratuvarSayimPage() {
             scannedSerials: scannedSerialsSet,
         });
 
-        // 4. Commit all database operations
+        // 5. Commit all database operations
         await batch.commit();
-        
-        toast({ title: 'Başarılı', description: `Sayım kaydedildi ve ${unverifiedItems.length} eksik ürün stoktan düşüldü.` });
+
+        toast({ title: 'Başarılı', description: `Sayım kaydedildi ve ${itemsToRemove.length} eksik ürün stoktan düşüldü.` });
         router.push(`/laboratuvar/sayim/${labId}/history`);
 
     } catch(err) {
@@ -137,9 +174,28 @@ export default function LaboratuvarSayimPage() {
         setLabName(name);
 
         const stockRef = collection(db, 'depoStok');
-        const stockQuery = query(stockRef, where('hedefKurum', '==', name));
+        // CRITICAL FIX: Only load items that are shipped AND belong to this lab
+        // Use hedefKurumId for accurate filtering, fallback to hedefKurum for legacy records
+        const stockQuery = query(
+          stockRef,
+          where('isShipped', '==', true),
+          where('hedefKurumId', '==', labId)
+        );
         const snap = await getDocs(stockQuery);
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        let docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+
+        // Also fetch legacy records that might only have hedefKurum (name) set
+        const legacyQuery = query(
+          stockRef,
+          where('isShipped', '==', true),
+          where('hedefKurum', '==', name)
+        );
+        const legacySnap = await getDocs(legacyQuery);
+        const legacyDocs = legacySnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+          .filter(item => !item.hedefKurumId); // Only include items without hedefKurumId to avoid duplicates
+
+        docs = [...docs, ...legacyDocs];
         setRawStock(docs);
       } catch (error) {
         console.error('Error loading lab stock:', error);
@@ -188,7 +244,7 @@ export default function LaboratuvarSayimPage() {
           expectedQty: 0,
           serials: [],
           trackingMode: product ? resolveDefaultTrackingMode(product as any) : 'serial',
-          countedQty: 0,
+          countedQty: countedQuantities[key] || 0,
         };
       }
       acc[key].expectedQty++;
@@ -198,7 +254,7 @@ export default function LaboratuvarSayimPage() {
       return acc;
     }, {});
     return Object.values(grouped);
-  }, [rawStock, newFromCount, productCodes]);
+  }, [rawStock, newFromCount, productCodes, countedQuantities]);
   
   const displayedItems = useMemo(() => {
     if (!showOnlyUnverified) return allItemsForCount;
@@ -254,7 +310,10 @@ export default function LaboratuvarSayimPage() {
                 }
             } else { // Not serial tracked
                 if (group.countedQty < group.expectedQty) {
-                    setRows(prev => prev.map(g => g.id === group.id ? {...g, countedQty: g.countedQty + 1} : g));
+                    setCountedQuantities(prev => ({
+                        ...prev,
+                        [group.id]: (prev[group.id] || 0) + 1
+                    }));
                     toast({ title: 'Adet Artırıldı', description: `${group.stokAdi} (${group.lotNumarasi}) adedi güncellendi.` });
                     playFeedback();
                     foundAndUpdated = true;
