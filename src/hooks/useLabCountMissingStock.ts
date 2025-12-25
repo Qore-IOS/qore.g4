@@ -97,34 +97,31 @@ export function useLabCountMissingStock(params: {
       if (!depotSource) return null;
 
       const batch = writeBatch(db);
-      
-      // Mark old one as shipped
+
+      // CRITICAL FIX: Only update the existing record, don't create a duplicate
+      // Transfer the item by marking it as shipped and assigning to the lab
       const oldRef = doc(db, 'depoStok', depotSource.id);
       batch.update(oldRef, {
         isShipped: true,
         hedefKurum: labName,
         hedefKurumId: labId,
-        sevkTarihi: serverTimestamp()
+        sevkTarihi: serverTimestamp(),
+        depotId: null,   // Clear depot-specific info since it's now in lab
+        rafAdresi: null, // Clear shelf location
       });
 
-      // Create a new one for the lab
-      const newRef = doc(collection(db, 'depoStok'));
-      const newDoc: Omit<DepoStokItem, 'id'> = {
-        ...depotSource, // Copy all fields from source
-        depotId: null,   // Clear depot-specific info
-        rafAdresi: null,
-        isShipped: true, // It's "shipped" to the lab
-        hedefKurumId: labId,
-        hedefKurum: labName,
-        eklenmeTarihi: depotSource.eklenmeTarihi, // Preserve original entry date
-        sevkTarihi: serverTimestamp(), // Mark with transfer time
-      };
-
-      batch.set(newRef, newDoc as any);
-      
       await batch.commit();
 
-      return { id: newRef.id, ...newDoc };
+      // Return the updated document
+      return {
+        id: depotSource.id,
+        ...depotSource,
+        isShipped: true,
+        hedefKurumId: labId,
+        hedefKurum: labName,
+        depotId: null,
+        rafAdresi: null,
+      };
     },
     [labId, labName]
   );
