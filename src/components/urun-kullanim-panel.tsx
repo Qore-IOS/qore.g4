@@ -939,16 +939,27 @@ export default function UrunKullanimPanel() {
                           <CommandList>
                             <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
                             <CommandGroup>
-                              {products
-                                .filter(p => {
+                              {(() => {
+                                const filtered = products.filter(p => {
                                   // Filter products with min/max stock levels defined in lab management
                                   const pool = labPools.find(pool =>
                                     pool.laboratoryId === selectedLabId &&
                                     pool.stokKodu === p.stokKodu
                                   );
-                                  // Only show products with min/max values defined
-                                  return pool && (pool.minStock !== undefined || pool.maxStock !== undefined);
-                                })
+                                  // Only show products with min/max values defined (check for both null and undefined)
+                                  return pool && (pool.minStock != null || pool.maxStock != null);
+                                });
+                                console.log('🗑️ Çöp Kutusu Debug:', {
+                                  selectedLabId,
+                                  totalProducts: products.length,
+                                  totalLabPools: labPools.length,
+                                  labPoolsForThisLab: labPools.filter(p => p.laboratoryId === selectedLabId).length,
+                                  labPoolsWithMinMax: labPools.filter(p => p.laboratoryId === selectedLabId && (p.minStock != null || p.maxStock != null)).length,
+                                  filteredProducts: filtered.length,
+                                  samplePool: labPools.filter(p => p.laboratoryId === selectedLabId)[0]
+                                });
+                                return filtered;
+                              })()
                                 .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''))
                                 .map((product) => (
                                   <CommandItem
