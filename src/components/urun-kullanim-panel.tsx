@@ -945,7 +945,7 @@ export default function UrunKullanimPanel() {
                       <PopoverContent className="w-[400px] p-0">
                         <Command>
                           <CommandInput placeholder="Ürün ara..." />
-                          <CommandList>
+                          <CommandList className="max-h-[300px] overflow-y-auto">
                             <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
                             <CommandGroup>
                               {(() => {
