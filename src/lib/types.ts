@@ -672,3 +672,18 @@ export interface Rack {
   createdAt?: any;
   [k: string]: any;
 }
+
+// Lab Transfer Dates - Tracks last transfer dates per product from depot to lab
+export interface LabTransferDates {
+  id: string; // Format: {labId}_{depotId}
+  labId: string;
+  depotId: string;
+  labName: string;
+  depotName: string;
+  // Map of stokKodu -> transfer info
+  transfers: Record<string, {
+    lastTransferDate: TimestampLike;
+    lastTransferBy?: string;
+  }>;
+  updatedAt: TimestampLike;
+}

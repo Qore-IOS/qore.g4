@@ -13,6 +13,9 @@ import {
   DocumentData,
   doc,
   updateDoc,
+  setDoc,
+  getDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import fs from 'fs/promises';
@@ -98,6 +101,7 @@ export async function getDeviceImages(): Promise<string[]> {
 /**
  * Updates the 'lastProductTransfers' map in the Hospital document.
  * Uses dot notation (e.g., 'lastProductTransfers.STK001') to partial update.
+ * @deprecated Use updateLabTransferDates instead
  */
 export async function updateHospitalLastTransferDates(
   hospitalId: string,
@@ -123,5 +127,71 @@ export async function updateHospitalLastTransferDates(
   } catch (error) {
     // This is an auxiliary update, so it shouldn't crash the main flow.
     console.error('Error updating hospital last transfer dates:', error);
+  }
+}
+
+/**
+ * Updates the labTransferDates collection with last transfer dates.
+ * Document ID format: {labId}_{depotId}
+ * Uses dot notation to partial update individual product transfer dates.
+ */
+export async function updateLabTransferDates(
+  labId: string,
+  depotId: string,
+  labName: string,
+  depotName: string,
+  items: Array<{ stokKodu: string }>,
+  transferredBy?: string
+) {
+  if (!labId || !depotId || !items || items.length === 0) return;
+
+  try {
+    const docId = `${labId}_${depotId}`;
+    const docRef = doc(db, 'labTransferDates', docId);
+    const now = new Date();
+
+    // Check if document exists
+    const existingDoc = await getDoc(docRef);
+
+    if (existingDoc.exists()) {
+      // Update existing document with dot notation
+      const updatePayload: Record<string, any> = {
+        updatedAt: serverTimestamp(),
+      };
+
+      items.forEach((item) => {
+        if (item.stokKodu) {
+          updatePayload[`transfers.${item.stokKodu}`] = {
+            lastTransferDate: Timestamp.fromDate(now),
+            lastTransferBy: transferredBy || undefined,
+          };
+        }
+      });
+
+      await updateDoc(docRef, updatePayload);
+    } else {
+      // Create new document
+      const transfers: Record<string, { lastTransferDate: any; lastTransferBy?: string }> = {};
+
+      items.forEach((item) => {
+        if (item.stokKodu) {
+          transfers[item.stokKodu] = {
+            lastTransferDate: Timestamp.fromDate(now),
+            lastTransferBy: transferredBy || undefined,
+          };
+        }
+      });
+
+      await setDoc(docRef, {
+        labId,
+        depotId,
+        labName,
+        depotName,
+        transfers,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    console.error('Error updating lab transfer dates:', error);
   }
 }
