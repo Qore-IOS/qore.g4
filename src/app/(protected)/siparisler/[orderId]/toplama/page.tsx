@@ -162,21 +162,30 @@ export default function ToplamaPage() {
 
         // Determine effective labId - try order.labId first, then find by kurumAdi
         let effectiveLabId = orderData.labId;
+        console.log('[DEBUG] orderData.labId:', orderData.labId);
+        console.log('[DEBUG] orderData.kurumAdi:', orderData.kurumAdi);
+        console.log('[DEBUG] orderData.depotId:', orderData.depotId);
+
         if (!effectiveLabId && orderData.kurumAdi) {
           const matchedHospital = hospitalsData.find(
             h => h.name === orderData.kurumAdi || h.ad === orderData.kurumAdi
           );
+          console.log('[DEBUG] matchedHospital:', matchedHospital?.id, matchedHospital?.name);
           effectiveLabId = matchedHospital?.id;
         }
+        console.log('[DEBUG] effectiveLabId:', effectiveLabId);
 
         // Fetch labTransferDates for this lab-depot combination
         const transferDates: Record<string, Date> = {};
         if (effectiveLabId && orderData.depotId) {
           const labTransferDocId = `${effectiveLabId}_${orderData.depotId}`;
+          console.log('[DEBUG] labTransferDocId:', labTransferDocId);
           const labTransferSnap = await getDoc(doc(db, 'labTransferDates', labTransferDocId));
+          console.log('[DEBUG] labTransferSnap.exists():', labTransferSnap.exists());
 
           if (labTransferSnap.exists()) {
             const labTransferData = labTransferSnap.data();
+            console.log('[DEBUG] labTransferData:', labTransferData);
             const transfers = labTransferData?.transfers as Record<string, { lastTransferDate: any }> | undefined;
             if (transfers) {
               Object.entries(transfers).forEach(([stokKodu, info]) => {
@@ -187,7 +196,10 @@ export default function ToplamaPage() {
               });
             }
           }
+        } else {
+          console.log('[DEBUG] Skipping labTransferDates fetch - missing effectiveLabId or depotId');
         }
+        console.log('[DEBUG] transferDates:', transferDates);
         setLastTransferDates(transferDates);
 
         if (depotSnap && depotSnap.exists()) {
