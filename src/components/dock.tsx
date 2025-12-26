@@ -207,7 +207,7 @@ const DockItem = ({
               <item.icon className={cn("dock-item-icon", item.key === 'logout' && 'text-destructive')} />
             </motion.div>
           </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" sideOffset={8} className="glass-card">
+          <TooltipContent side="bottom" align="center" sideOffset={35} className="glass-card z-[100]">
             <p>{item.label}</p>
           </TooltipContent>
         </Tooltip>
