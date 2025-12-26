@@ -311,7 +311,6 @@ export default function CopKutusuPanel() {
                                       )}
                                       onClick={() => {
                                         setSelectedProduct(product.stokKodu || '');
-                                        setRemainingTests(product.ambalajDegeri || 0);
                                         setIsProductPopoverOpen(false);
                                       }}
                                     >
@@ -344,7 +343,7 @@ export default function CopKutusuPanel() {
                           id="remaining-tests"
                           type="number"
                           min="0"
-                          value={remainingTests}
+                          value={remainingTests || ''}
                           onChange={(e) => setRemainingTests(parseInt(e.target.value) || 0)}
                         />
                       </div>
