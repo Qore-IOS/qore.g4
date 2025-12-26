@@ -136,16 +136,21 @@ const DockItem = ({
                 onMouseEnter={() => handleSubMenuEnter(sub.key)}
                 onMouseLeave={handleSubMenuLeave}
               >
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm"
-                  onClick={(e) => handleNavigate(e, sub.href)}
+                <motion.div
+                  whileHover={{ scale: 1.02, x: 2 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 20 }}
                 >
-                  <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
-                  <span className="truncate">{sub.label}</span>
-                  {sub.subItems && <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0" />}
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
+                    onClick={(e) => handleNavigate(e, sub.href)}
+                  >
+                    <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
+                    <span className="truncate">{sub.label}</span>
+                    {sub.subItems && <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0" />}
+                  </Button>
+                </motion.div>
                 {/* Nested Sub-Menu */}
                 <AnimatePresence>
                 {activeSubMenu === sub.key && sub.subItems && (
@@ -159,16 +164,22 @@ const DockItem = ({
                     {/* Invisible bridge for nested menu */}
                     <div className="absolute -left-2 top-0 bottom-0 w-3" />
                     {sub.subItems.map(nestedSub => (
-                      <Button
+                      <motion.div
                         key={nestedSub.key}
-                        size="sm"
-                        variant="ghost"
-                        className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm"
-                        onClick={(e) => handleNavigate(e, nestedSub.href)}
+                        whileHover={{ scale: 1.02, x: 2 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+                        className="w-full"
                       >
-                        <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
-                        <span className="truncate">{nestedSub.label}</span>
-                      </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
+                          onClick={(e) => handleNavigate(e, nestedSub.href)}
+                        >
+                          <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
+                          <span className="truncate">{nestedSub.label}</span>
+                        </Button>
+                      </motion.div>
                     ))}
                   </motion.div>
                 )}
