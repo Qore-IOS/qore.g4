@@ -9,13 +9,9 @@ import { Loader2 } from 'lucide-react';
 export default function DashboardPage() {
     const {
         hospitals,
-        devices,
         productCodes,
-        depoStok,
         tuketimKayitlari,
-        shipments,
         efficiencyHistoryRecords,
-        minMaxRulesByLab,
         isLoading
     } = useDashboardData();
 
@@ -29,17 +25,13 @@ export default function DashboardPage() {
             </div>
         );
     }
-    
+
     return (
         <DashboardPanel
             hospitals={hospitals}
-            devices={devices}
             productCodes={productCodes}
-            depoStok={depoStok}
             tuketimKayitlari={tuketimKayitlari}
-            shipments={shipments}
             efficiencyHistoryRecords={efficiencyHistoryRecords}
-            minMaxRulesByLab={minMaxRulesByLab}
         />
     );
 }
