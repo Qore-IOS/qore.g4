@@ -205,14 +205,14 @@ const DockItem = ({
     </div>
   );
 
-  // Only show tooltip when submenu is not visible
+  // For items with submenus, show tooltip at bottom (since submenu appears on top)
   if (hasSubItems) {
-    return isHovered ? itemContent : (
+    return (
       <Tooltip>
         <TooltipTrigger asChild>
           {itemContent}
         </TooltipTrigger>
-        <TooltipContent side="top" align="center" className="mb-2 glass-card">
+        <TooltipContent side="bottom" align="center" className="mt-2 glass-card">
           <p>{item.label}</p>
         </TooltipContent>
       </Tooltip>
