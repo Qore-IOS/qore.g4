@@ -110,87 +110,118 @@ const DockItem = ({
 
   const hasSubItems = item.subItems && item.subItems.length > 0;
 
+  // For items with submenus, use a different structure
+  // Tooltip wraps only the icon, not the submenu
+  if (hasSubItems) {
+    return (
+      <div
+        className="relative flex flex-col items-center"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* Submenu positioned above the icon - OUTSIDE tooltip */}
+        <AnimatePresence>
+          {isHovered && (
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.9 }}
+              transition={{ duration: 0.15 }}
+              className="absolute bottom-full mb-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
+            >
+              {/* Invisible bridge to prevent gap between submenu and icon */}
+              <div className="absolute -bottom-2 left-0 right-0 h-3" />
+              {item.subItems!.map(sub => (
+                <div
+                  key={sub.key}
+                  className="relative w-full"
+                  onMouseEnter={() => handleSubMenuEnter(sub.key)}
+                  onMouseLeave={handleSubMenuLeave}
+                >
+                  <motion.div
+                    whileHover={{ scale: 1.02, x: 2 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+                  >
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
+                      onClick={(e) => handleNavigate(e, sub.href)}
+                    >
+                      <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
+                      <span className="truncate">{sub.label}</span>
+                      {sub.subItems && <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0" />}
+                    </Button>
+                  </motion.div>
+                  {/* Nested Sub-Menu */}
+                  <AnimatePresence>
+                  {activeSubMenu === sub.key && sub.subItems && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute left-full top-0 ml-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
+                    >
+                      {/* Invisible bridge for nested menu */}
+                      <div className="absolute -left-2 top-0 bottom-0 w-3" />
+                      {sub.subItems.map(nestedSub => (
+                        <motion.div
+                          key={nestedSub.key}
+                          whileHover={{ scale: 1.02, x: 2 }}
+                          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+                          className="w-full"
+                        >
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
+                            onClick={(e) => handleNavigate(e, nestedSub.href)}
+                          >
+                            <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
+                            <span className="truncate">{nestedSub.label}</span>
+                          </Button>
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Tooltip wraps ONLY the icon */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <motion.div
+              animate={isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
+              className={cn(
+                'dock-item-wrapper flex items-center justify-center cursor-pointer',
+                isActive && item.type === 'nav' && 'active'
+              )}
+              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+              onClick={(e) => handleNavigate(e, item.href)}
+            >
+              <item.icon className={cn("dock-item-icon", item.key === 'logout' && 'text-destructive')} />
+            </motion.div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="center" sideOffset={8} className="glass-card">
+            <p>{item.label}</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    );
+  }
+
+  // For items without submenus, tooltip on top
   const itemContent = (
-    // Outer container handles all hover events for stable behavior
     <div
       className="relative flex flex-col items-center"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Submenu positioned above the icon */}
-      <AnimatePresence>
-        {isHovered && hasSubItems && (
-          <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.9 }}
-            transition={{ duration: 0.15 }}
-            className="absolute bottom-full mb-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
-          >
-            {/* Invisible bridge to prevent gap between submenu and icon */}
-            <div className="absolute -bottom-2 left-0 right-0 h-3" />
-            {item.subItems!.map(sub => (
-              <div
-                key={sub.key}
-                className="relative w-full"
-                onMouseEnter={() => handleSubMenuEnter(sub.key)}
-                onMouseLeave={handleSubMenuLeave}
-              >
-                <motion.div
-                  whileHover={{ scale: 1.02, x: 2 }}
-                  transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                >
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
-                    onClick={(e) => handleNavigate(e, sub.href)}
-                  >
-                    <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
-                    <span className="truncate">{sub.label}</span>
-                    {sub.subItems && <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0" />}
-                  </Button>
-                </motion.div>
-                {/* Nested Sub-Menu */}
-                <AnimatePresence>
-                {activeSubMenu === sub.key && sub.subItems && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute left-full top-0 ml-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
-                  >
-                    {/* Invisible bridge for nested menu */}
-                    <div className="absolute -left-2 top-0 bottom-0 w-3" />
-                    {sub.subItems.map(nestedSub => (
-                      <motion.div
-                        key={nestedSub.key}
-                        whileHover={{ scale: 1.02, x: 2 }}
-                        transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                        className="w-full"
-                      >
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
-                          onClick={(e) => handleNavigate(e, nestedSub.href)}
-                        >
-                          <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
-                          <span className="truncate">{nestedSub.label}</span>
-                        </Button>
-                      </motion.div>
-                    ))}
-                  </motion.div>
-                )}
-                </AnimatePresence>
-              </div>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* The dock icon */}
       <motion.div
         animate={isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
         className={cn(
@@ -204,21 +235,6 @@ const DockItem = ({
       </motion.div>
     </div>
   );
-
-  // For items with submenus, show tooltip at bottom (since submenu appears on top)
-  // Use larger offset to appear below the dock bar, not overlapping with submenu
-  if (hasSubItems) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          {itemContent}
-        </TooltipTrigger>
-        <TooltipContent side="bottom" align="center" sideOffset={45} className="glass-card">
-          <p>{item.label}</p>
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
 
   return (
     <Tooltip>
