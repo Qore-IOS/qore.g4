@@ -34,11 +34,13 @@ const DockItem = ({
   isActive: boolean;
   setTheme: (theme: string) => void;
 }) => {
-    
+
   const { isOrbAnimationEnabled, toggleOrbAnimation, toggleNavMode, navMode } = useAuth();
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
   const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const subMenuTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const handleNavigate = (e: React.MouseEvent, path?: string) => {
     if (path) {
@@ -48,7 +50,45 @@ const DockItem = ({
       item.onClick();
     }
   };
-    
+
+  // Stabilized hover handlers with delay to prevent flickering
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsHovered(true);
+  };
+
+  const handleMouseLeave = () => {
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsHovered(false);
+      setActiveSubMenu(null);
+    }, 150); // Small delay to allow moving to submenu
+  };
+
+  const handleSubMenuEnter = (subKey: string) => {
+    if (subMenuTimeoutRef.current) {
+      clearTimeout(subMenuTimeoutRef.current);
+      subMenuTimeoutRef.current = null;
+    }
+    setActiveSubMenu(subKey);
+  };
+
+  const handleSubMenuLeave = () => {
+    subMenuTimeoutRef.current = setTimeout(() => {
+      setActiveSubMenu(null);
+    }, 100);
+  };
+
+  // Cleanup timeouts on unmount
+  React.useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      if (subMenuTimeoutRef.current) clearTimeout(subMenuTimeoutRef.current);
+    };
+  }, []);
+
   if (item.key === 'notifications') {
     return (
       <div className="relative flex items-center justify-center">
@@ -67,61 +107,67 @@ const DockItem = ({
   if (item.key === 'theme') {
     return <ThemeToggleDock />;
   }
-  
+
+  const hasSubItems = item.subItems && item.subItems.length > 0;
+
   const itemContent = (
-    <motion.div
-      whileHover={{ scale: 1.2, y: -8 }}
-      className={cn(
-        'dock-item-wrapper flex items-center justify-center', 
-        isActive && item.type === 'nav' && 'active'
-      )}
-      transition={{ type: 'spring', stiffness: 400, damping: 10 }}
-      onClick={(e) => handleNavigate(e, item.href)}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => { setIsHovered(false); setActiveSubMenu(null); }}
+    // Outer container handles all hover events for stable behavior
+    <div
+      className="relative flex flex-col items-center"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
+      {/* Submenu positioned above the icon */}
       <AnimatePresence>
-        {isHovered && item.subItems && item.subItems.length > 0 && (
+        {isHovered && hasSubItems && (
           <motion.div
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
-            transition={{ duration: 0.2 }}
-            className="absolute bottom-full mb-2 flex flex-col items-start gap-1 p-1 rounded-lg bg-popover border border-border shadow-lg"
-            onMouseEnter={() => setIsHovered(true)} 
-            onMouseLeave={() => { setIsHovered(false); setActiveSubMenu(null); }}
+            transition={{ duration: 0.15 }}
+            className="absolute bottom-full mb-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
           >
-            {item.subItems.map(sub => (
-              <div key={sub.key} className="relative" onMouseEnter={() => setActiveSubMenu(sub.key)} onMouseLeave={() => setActiveSubMenu(null)}>
+            {/* Invisible bridge to prevent gap between submenu and icon */}
+            <div className="absolute -bottom-2 left-0 right-0 h-3" />
+            {item.subItems!.map(sub => (
+              <div
+                key={sub.key}
+                className="relative w-full"
+                onMouseEnter={() => handleSubMenuEnter(sub.key)}
+                onMouseLeave={handleSubMenuLeave}
+              >
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-auto py-1 rounded-md w-full justify-start px-2"
+                  className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm"
                   onClick={(e) => handleNavigate(e, sub.href)}
                 >
-                  <sub.icon className="w-4 h-4 mr-2" />
-                  {sub.label}
-                  {sub.subItems && <ChevronRight className="w-4 h-4 ml-auto" />}
+                  <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
+                  <span className="truncate">{sub.label}</span>
+                  {sub.subItems && <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0" />}
                 </Button>
                 {/* Nested Sub-Menu */}
                 <AnimatePresence>
                 {activeSubMenu === sub.key && sub.subItems && (
                   <motion.div
-                    initial={{ opacity: 0, x: 10 }}
+                    initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 10 }}
-                    className="absolute left-full bottom-0 mb-1 flex flex-col items-start gap-1 p-1 rounded-lg bg-popover border border-border"
+                    exit={{ opacity: 0, x: -10 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute left-full top-0 ml-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
                   >
+                    {/* Invisible bridge for nested menu */}
+                    <div className="absolute -left-2 top-0 bottom-0 w-3" />
                     {sub.subItems.map(nestedSub => (
                       <Button
                         key={nestedSub.key}
                         size="sm"
                         variant="ghost"
-                        className="h-auto py-1 rounded-md w-full justify-start px-2"
+                        className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm"
                         onClick={(e) => handleNavigate(e, nestedSub.href)}
                       >
-                        <nestedSub.icon className="w-4 h-4 mr-2" />
-                        {nestedSub.label}
+                        <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
+                        <span className="truncate">{nestedSub.label}</span>
                       </Button>
                     ))}
                   </motion.div>
@@ -132,9 +178,35 @@ const DockItem = ({
           </motion.div>
         )}
       </AnimatePresence>
-      <item.icon className={cn("dock-item-icon", item.key === 'logout' && 'text-destructive')} />
-    </motion.div>
+
+      {/* The dock icon */}
+      <motion.div
+        animate={isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
+        className={cn(
+          'dock-item-wrapper flex items-center justify-center cursor-pointer',
+          isActive && item.type === 'nav' && 'active'
+        )}
+        transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+        onClick={(e) => handleNavigate(e, item.href)}
+      >
+        <item.icon className={cn("dock-item-icon", item.key === 'logout' && 'text-destructive')} />
+      </motion.div>
+    </div>
   );
+
+  // Only show tooltip when submenu is not visible
+  if (hasSubItems) {
+    return isHovered ? itemContent : (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {itemContent}
+        </TooltipTrigger>
+        <TooltipContent side="top" align="center" className="mb-2 glass-card">
+          <p>{item.label}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
 
   return (
     <Tooltip>
