@@ -213,7 +213,7 @@ const DockItem = ({
         <TooltipTrigger asChild>
           {itemContent}
         </TooltipTrigger>
-        <TooltipContent side="bottom" align="center" sideOffset={20} className="glass-card">
+        <TooltipContent side="bottom" align="center" sideOffset={45} className="glass-card">
           <p>{item.label}</p>
         </TooltipContent>
       </Tooltip>
