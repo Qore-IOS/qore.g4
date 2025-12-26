@@ -61,6 +61,7 @@ export interface Hospital {
   isConsumablesHospital?: boolean; // NEW: For "Hastane Sarf"
   manualDeductionEnabled?: boolean; // NEW: For "Manuel Düşüm"
   fefoEnabled?: boolean;
+  customProductOrder?: string[]; // Özel ürün sıralama - sipariş toplama ekranında kullanılır
   [k: string]: any;
 }
 
