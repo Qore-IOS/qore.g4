@@ -1,15 +1,13 @@
 
 'use client';
 import React, { useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import type { Hospital, DepoStokItem, Device, ConsumptionRecord, ProductCode, MinMaxRule, Shipment } from '@/lib/types';
+import type { Hospital, ConsumptionRecord, ProductCode } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { AlertTriangle, PackageCheck, PackageX, TrendingUp, Zap, ChevronLeft, ChevronRight, Eye, ChevronDown } from 'lucide-react';
+import { TrendingUp, Zap, ChevronLeft, ChevronRight, Eye, ChevronDown } from 'lucide-react';
 import {
-  differenceInDays, format, startOfWeek, endOfWeek, eachDayOfInterval,
+  format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
   startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, eachMonthOfInterval
 } from 'date-fns';
@@ -21,7 +19,6 @@ import EfficiencyDetailsModal from '@/components/EfficiencyDetailsModal';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal'; 
 import { useAuth } from '@/contexts/auth-context';
-import TimestampText from './TimestampText';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -35,8 +32,6 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 }));
 
 
-const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
-
 const motionProps = {
   initial: { scale: 1, y: 0 },
   whileHover: { scale: 1.03, y: -5, transition: { type: 'spring', stiffness: 300, damping: 20 } },
@@ -44,33 +39,23 @@ const motionProps = {
 
 interface DashboardPanelProps {
     hospitals: Hospital[];
-    devices: Device[];
     productCodes: ProductCode[];
-    depoStok: DepoStokItem[];
     tuketimKayitlari: ConsumptionRecord[];
-    shipments: Shipment[];
-    efficiencyHistoryRecords: any[]; // Changed from efficiencyDataRecords
-    minMaxRulesByLab: Record<string, Record<string, MinMaxRule>>;
+    efficiencyHistoryRecords: any[];
 }
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export default function DashboardPanel({
     hospitals,
-    devices,
     productCodes,
-    depoStok,
     tuketimKayitlari,
-    shipments,
-    efficiencyHistoryRecords, // Changed from efficiencyDataRecords
-    minMaxRulesByLab
+    efficiencyHistoryRecords,
 }: DashboardPanelProps) {
   const [isEfficiencyModalOpen, setIsEfficiencyModalOpen] = useState(false);
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
   const { currentUserProfile } = useAuth();
   const { theme } = useTheme();
-  
-  const router = useRouter();
 
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
@@ -79,58 +64,6 @@ export default function DashboardPanel({
   const [efficiencyYear, setEfficiencyYear] = useState(new Date().getFullYear());
   const [isEfficiencyCardExpanded, setIsEfficiencyCardExpanded] = useState(false);
 
-
-  const hospitalStockData = useMemo(() => {
-    return hospitals.map(hospital => {
-      const rules = minMaxRulesByLab[hospital.id] || {};
-      if (Object.keys(rules).length === 0) {
-        return { name: hospital.name, value: 0, percentage: 0 };
-      }
-
-      let totalPercentage = 0;
-      let ruleCount = 0;
-
-      for (const stokKodu in rules) {
-        const rule = rules[stokKodu];
-        if (rule && rule.max > 0) {
-          const currentStock = depoStok.filter(
-            item => item.hedefKurum === hospital.name && item.stokKodu === stokKodu
-          ).length;
-          const percentage = Math.min(100, (currentStock / rule.max) * 100);
-          totalPercentage += percentage;
-          ruleCount++;
-        }
-      }
-      
-      const averagePercentage = ruleCount > 0 ? totalPercentage / ruleCount : 0;
-      const totalStockForLab = depoStok.filter(item => item.hedefKurum === hospital.name).length;
-
-      return {
-        name: hospital.name,
-        value: totalStockForLab,
-        percentage: Math.round(averagePercentage)
-      };
-    })
-    .filter(item => item.percentage > 0)
-    .sort((a,b) => (a.name || '').localeCompare(b.name || ''));
-  }, [hospitals, depoStok, minMaxRulesByLab]);
-
-  const defectReports = useMemo(() => {
-    return devices.filter(d => d.arizaDurumu && d.arizaDurumu !== 'yok');
-  }, [devices]);
-
-  const expiringItems = useMemo(() => {
-    const today = new Date();
-    return depoStok
-      .filter(item => !item.isShipped && item.miad)
-      .map(item => {
-        const miadDate = toDateFromAny(item.miad);
-        const farkGun = miadDate ? differenceInDays(miadDate, today) : 9999;
-        return { ...item, farkGun };
-      })
-      .filter(item => item.farkGun <= 60)
-      .sort((a, b) => a.farkGun - b.farkGun);
-  }, [depoStok]);
 
   const { data: stockConsumptionTrend, title: trendTitle } = useMemo(() => {
     const getConsumptionCounts = (start: Date, end: Date): { total: number; byLab: Record<string, number> } => {
@@ -365,78 +298,6 @@ export default function DashboardPanel({
             </Card>
           </motion.div>
           
-          <motion.div {...motionProps} className="cursor-pointer" onClick={() => router.push('/cihaz-yonetimi-ana')}>
-              <Card className="glass-card h-full">
-                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><AlertTriangle className="text-destructive"/> Açık Arıza Kayıtları</CardTitle>
-                  <CardDescription>{defectReports.length} cihazda arıza bildirildi.</CardDescription>
-                </CardHeader>
-                <CardContent className={cn("overflow-y-auto max-h-[190px]", defectReports.length > 5 && "glass-scroll")}>
-                  <div className="space-y-3 pr-2">
-                    {defectReports.length === 0 && <p className="text-muted-foreground text-center py-8">Aktif arıza kaydı yok.</p>}
-                    {defectReports.slice(0, 5).map(d => (
-                      <div key={d.id} className="flex justify-between items-center text-sm p-2 rounded-md bg-destructive/10">
-                        <span className="font-semibold">{d.cihazAdi}</span>
-                        <span className="text-destructive font-medium capitalize">{(d.arizaDurumu || '').replace('_', ' ')}</span>
-                      </div>
-                    ))}
-                     {defectReports.length > 5 && <p className="text-xs text-center text-muted-foreground mt-2">... ve {defectReports.length - 5} daha fazlası</p>}
-                  </div>
-                </CardContent>
-              </Card>
-          </motion.div>
-        </div>
-
-        {/* Bottom KPI Grid - Mobile Responsive */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
-          <motion.div {...motionProps} className="xl:col-span-2 cursor-pointer" onClick={() => router.push('/laboratuvar-yonetimi')}>
-              <Card className="glass-card h-full">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><PackageCheck/> Laboratuvar Stok Doluluk Oranları</CardTitle>
-                  <CardDescription>Her laboratuvarın min-max kurallarına göre ortalama stok doluluk yüzdesi.</CardDescription>
-                </CardHeader>
-                <CardContent className={cn("space-y-4 pr-2", hospitalStockData.length > 6 && "glass-scroll")}>
-                  {hospitalStockData.map((hospital) => (
-                    <div key={hospital.name}>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span className="font-medium">{hospital.name}</span>
-                        <span className="text-muted-foreground font-bold text-lg">{hospital.percentage}%</span>
-                      </div>
-                      <Progress value={hospital.percentage} className="h-3" />
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-          </motion.div>
-
-          <motion.div {...motionProps} className="cursor-pointer" onClick={() => router.push('/stok-yonetimi')}>
-              <Card className="glass-card h-full">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><PackageX/> Miadı Yaklaşanlar (Depo)</CardTitle>
-                  <CardDescription>60 gün içinde miadı dolacak ürünler.</CardDescription>
-                </CardHeader>
-                <CardContent className={cn("pr-2", expiringItems.length > 6 && "glass-scroll")}>
-                  <Table>
-                      <TableHeader>
-                          <TableRow>
-                              <TableHead>Ürün</TableHead>
-                              <TableHead className="text-right">Kalan Gün</TableHead>
-                          </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {expiringItems.length === 0 && <TableRow><TableCell colSpan={2} className="text-center h-24">Miadı yaklaşan ürün yok.</TableCell></TableRow>}
-                        {expiringItems.slice(0, 10).map(item => (
-                          <TableRow key={item.id} className={item.farkGun <= 30 ? "text-destructive" : "text-amber-400"}>
-                              <TableCell className="font-medium truncate" title={item.stokAdi}>{item.stokAdi}</TableCell>
-                              <TableCell className="text-right font-bold">{item.farkGun}</TableCell>
-                          </TableRow>
-                        ))}
-                         {expiringItems.length > 10 && <TableRow><TableCell colSpan={2} className="text-center text-xs text-muted-foreground">... ve {expiringItems.length - 10} daha</TableCell></TableRow>}
-                      </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-          </motion.div>
         </div>
       </div>
       

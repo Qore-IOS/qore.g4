@@ -2,16 +2,15 @@
 'use client';
 import React from 'react';
 import CostDashboardPanel from '@/components/cost-dashboard-panel';
-import { useDashboardData } from '@/components/dashboard/useDashboardData';
+import { useProductCodes, useAllDepoStok, useRecentConsumption } from '@/hooks/useFirebaseQueries';
 import { Loader2 } from 'lucide-react';
 
 export default function CostDashboardPage() {
-    const { 
-        productCodes,
-        depoStok,
-        tuketimKayitlari,
-        isLoading
-    } = useDashboardData();
+    const productsQuery = useProductCodes();
+    const depoStokQuery = useAllDepoStok();
+    const consumptionQuery = useRecentConsumption(500);
+
+    const isLoading = productsQuery.isLoading || depoStokQuery.isLoading;
 
     if (isLoading) {
         return (
@@ -23,9 +22,9 @@ export default function CostDashboardPage() {
 
     return (
         <CostDashboardPanel
-            productCodes={productCodes}
-            depoStok={depoStok}
-            tuketimKayitlari={tuketimKayitlari}
+            productCodes={productsQuery.data ?? []}
+            depoStok={depoStokQuery.data ?? []}
+            tuketimKayitlari={consumptionQuery.data ?? []}
         />
     );
 }
