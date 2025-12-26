@@ -322,6 +322,19 @@ export interface ConsumptionRecord {
   userName: string;
 }
 
+/**
+ * Daily consumption statistics for dashboard KPI
+ * Stores aggregated daily consumption counts to avoid querying all consumption records
+ */
+export interface DailyConsumptionStats {
+  id: string;              // Format: "YYYY-MM-DD"
+  date: string;            // "YYYY-MM-DD" for easy querying
+  totalCount: number;      // Total consumption count for the day
+  byLab: Record<string, number>;  // Consumption count by laboratory ID
+  createdAt?: TimestampLike;
+  updatedAt?: TimestampLike;
+}
+
 export interface CihazUstuStokInput {
   stokKodu: string;
   adet: number;

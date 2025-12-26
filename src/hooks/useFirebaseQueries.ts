@@ -27,6 +27,7 @@ import type {
   ProductCode,
   DepoStokItem,
   ConsumptionRecord,
+  DailyConsumptionStats,
   Device,
   Shipment,
   LabPool,
@@ -288,6 +289,34 @@ export function useRecentConsumption(limitCount = 500) {
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Daily Consumption Stats - Aggregated daily totals for dashboard KPI
+ * Fetches pre-computed daily consumption counts instead of all consumption records
+ */
+export function useDailyConsumptionStats(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: ['dailyConsumptionStats', startDate, endDate],
+    queryFn: async () => {
+      const q = query(
+        collection(db, 'dailyConsumptionStats'),
+        where('date', '>=', startDate),
+        where('date', '<=', endDate),
+        orderBy('date', 'asc')
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })) as Array<{
+        id: string;
+        date: string;
+        totalCount: number;
+        byLab: Record<string, number>;
+      }>;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
 }
 

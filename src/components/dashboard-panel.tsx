@@ -1,8 +1,8 @@
 
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useTheme } from 'next-themes';
-import type { Hospital, ConsumptionRecord, ProductCode } from '@/lib/types';
+import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { TrendingUp, Zap, ChevronLeft, ChevronRight, Eye, ChevronDown } from 'lucide-react';
@@ -17,12 +17,14 @@ import { ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
 import { cn } from '@/lib/utils';
 import EfficiencyDetailsModal from '@/components/EfficiencyDetailsModal';
 import { motion } from 'framer-motion';
-import ConsumptionTrendModal from '@/components/ConsumptionTrendModal'; 
+import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
+import { formatDateKey } from '@/lib/dailyConsumptionStats';
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
@@ -64,77 +66,150 @@ export default function DashboardPanel({
   const [efficiencyYear, setEfficiencyYear] = useState(new Date().getFullYear());
   const [isEfficiencyCardExpanded, setIsEfficiencyCardExpanded] = useState(false);
 
-
-  const { data: stockConsumptionTrend, title: trendTitle } = useMemo(() => {
-    const getConsumptionCounts = (start: Date, end: Date): { total: number; byLab: Record<string, number> } => {
-        const byLab: Record<string, number> = {};
-        hospitals.forEach(h => {
-          if (h.id) byLab[h.id] = 0;
-        });
-
-        const recordsInPeriod = tuketimKayitlari.filter(item => {
-            const d = toDateFromAny(item.consumptionTimestamp);
-            return d && d >= start && d <= end;
-        });
-
-        recordsInPeriod.forEach(item => {
-            const hospital = hospitals.find(h => h.name === item.laboratoryName);
-            if (hospital && hospital.id) {
-                byLab[hospital.id] = (byLab[hospital.id] || 0) + 1;
-            }
-        });
-        
-        return { total: recordsInPeriod.length, byLab };
-    };
-
-    let interval: Date[];
-    let getPeriod: (date: Date) => { start: Date; end: Date };
-    let formatLabel: (date: Date) => string;
-    let title = '';
+  // Calculate date range for daily stats query
+  const { startDateKey, endDateKey } = useMemo(() => {
+    let start: Date;
+    let end: Date;
 
     switch (trendPeriod) {
-        case 'daily':
-            interval = Array.from({ length: 24 }, (_, i) => new Date(trendDate.getFullYear(), trendDate.getMonth(), trendDate.getDate(), i));
-            getPeriod = (d) => ({ start: d, end: new Date(d.getTime() + 3600000 - 1) });
-            formatLabel = (d) => format(d, 'HH:00');
-            title = `${format(trendDate, 'dd MMMM yyyy', { locale: tr })} - Günlük Tüketim`;
-            break;
-        case 'monthly':
-            interval = eachDayOfInterval({ start: startOfMonth(trendDate), end: endOfMonth(trendDate) });
-            getPeriod = (d) => ({ start: startOfDay(d), end: endOfDay(d) });
-            formatLabel = (d) => format(d, 'd');
-            title = `${format(trendDate, 'MMMM yyyy', { locale: tr })} - Aylık Tüketim`;
-            break;
-        case 'yearly':
-            interval = eachMonthOfInterval({ start: startOfYear(trendDate), end: endOfYear(trendDate) });
-            getPeriod = (d) => ({ start: startOfMonth(d), end: endOfMonth(d) });
-            formatLabel = (d) => format(d, 'MMM', { locale: tr });
-            title = `${format(trendDate, 'yyyy', { locale: tr })} - Yıllık Tüketim`;
-            break;
-        case 'weekly':
-        default:
-            const weekStart = startOfWeek(trendDate, { weekStartsOn: 1 });
-            interval = eachDayOfInterval({ start: weekStart, end: endOfWeek(trendDate, { weekStartsOn: 1 }) });
-            getPeriod = (d) => ({ start: startOfDay(d), end: endOfDay(d) });
-            formatLabel = (d) => format(d, 'eee', { locale: tr });
-            title = `Haftalık Tüketim (${format(weekStart, 'dd MMM', { locale: tr })} - ${format(endOfWeek(trendDate, { weekStartsOn: 1 }), 'dd MMM yyyy', { locale: tr })})`;
+      case 'daily':
+        start = startOfDay(trendDate);
+        end = endOfDay(trendDate);
+        break;
+      case 'monthly':
+        start = startOfMonth(trendDate);
+        end = endOfMonth(trendDate);
+        break;
+      case 'yearly':
+        start = startOfYear(trendDate);
+        end = endOfYear(trendDate);
+        break;
+      case 'weekly':
+      default:
+        start = startOfWeek(trendDate, { weekStartsOn: 1 });
+        end = endOfWeek(trendDate, { weekStartsOn: 1 });
+    }
+
+    return {
+      startDateKey: formatDateKey(start),
+      endDateKey: formatDateKey(end)
+    };
+  }, [trendPeriod, trendDate]);
+
+  // Fetch daily consumption stats from pre-computed collection
+  const { data: dailyStats = [] } = useDailyConsumptionStats(startDateKey, endDateKey);
+
+  // Convert daily stats to chart data format
+  const { data: stockConsumptionTrend, title: trendTitle } = useMemo(() => {
+    // Create a map of date -> stats for quick lookup
+    const statsMap = new Map<string, DailyConsumptionStats>();
+    dailyStats.forEach(stat => statsMap.set(stat.date, stat));
+
+    // For 'daily' period (hourly breakdown), we still need tuketimKayitlari
+    // For other periods, use daily aggregated stats
+    let interval: Date[];
+    let formatLabel: (date: Date) => string;
+    let title = '';
+    let useHourlyData = false;
+
+    switch (trendPeriod) {
+      case 'daily':
+        // Hourly breakdown still needs real-time data
+        interval = Array.from({ length: 24 }, (_, i) =>
+          new Date(trendDate.getFullYear(), trendDate.getMonth(), trendDate.getDate(), i)
+        );
+        formatLabel = (d) => format(d, 'HH:00');
+        title = `${format(trendDate, 'dd MMMM yyyy', { locale: tr })} - Günlük Tüketim`;
+        useHourlyData = true;
+        break;
+      case 'monthly':
+        interval = eachDayOfInterval({ start: startOfMonth(trendDate), end: endOfMonth(trendDate) });
+        formatLabel = (d) => format(d, 'd');
+        title = `${format(trendDate, 'MMMM yyyy', { locale: tr })} - Aylık Tüketim`;
+        break;
+      case 'yearly':
+        interval = eachMonthOfInterval({ start: startOfYear(trendDate), end: endOfYear(trendDate) });
+        formatLabel = (d) => format(d, 'MMM', { locale: tr });
+        title = `${format(trendDate, 'yyyy', { locale: tr })} - Yıllık Tüketim`;
+        break;
+      case 'weekly':
+      default:
+        const weekStart = startOfWeek(trendDate, { weekStartsOn: 1 });
+        interval = eachDayOfInterval({ start: weekStart, end: endOfWeek(trendDate, { weekStartsOn: 1 }) });
+        formatLabel = (d) => format(d, 'eee', { locale: tr });
+        title = `Haftalık Tüketim (${format(weekStart, 'dd MMM', { locale: tr })} - ${format(endOfWeek(trendDate, { weekStartsOn: 1 }), 'dd MMM yyyy', { locale: tr })})`;
     }
 
     const data = interval.map(date => {
-        const period = getPeriod(date);
-        const counts = getConsumptionCounts(period.start, period.end);
-        const dataPoint: Record<string, any> = {
-            date: formatLabel(date),
-            Tüketim: counts.total
-        };
-        for (const labId in counts.byLab) {
-            dataPoint[labId] = counts.byLab[labId];
+      const dataPoint: Record<string, any> = {
+        date: formatLabel(date)
+      };
+
+      if (useHourlyData) {
+        // For hourly data, use tuketimKayitlari (real-time for today)
+        const hourStart = date;
+        const hourEnd = new Date(date.getTime() + 3600000 - 1);
+
+        const recordsInHour = tuketimKayitlari.filter(item => {
+          const d = toDateFromAny(item.consumptionTimestamp);
+          return d && d >= hourStart && d <= hourEnd;
+        });
+
+        dataPoint['Tüketim'] = recordsInHour.length;
+
+        // Add per-lab breakdown
+        hospitals.forEach(h => {
+          if (h.id) {
+            dataPoint[h.id] = recordsInHour.filter(r => {
+              const hospital = hospitals.find(h => h.name === r.laboratoryName);
+              return hospital?.id === h.id;
+            }).length;
+          }
+        });
+      } else if (trendPeriod === 'yearly') {
+        // For yearly view, aggregate all days in the month
+        const monthStart = startOfMonth(date);
+        const monthEnd = endOfMonth(date);
+        const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+
+        let monthTotal = 0;
+        const monthByLab: Record<string, number> = {};
+
+        daysInMonth.forEach(day => {
+          const dayKey = formatDateKey(day);
+          const dayStat = statsMap.get(dayKey);
+          if (dayStat) {
+            monthTotal += dayStat.totalCount;
+            Object.entries(dayStat.byLab || {}).forEach(([labId, count]) => {
+              monthByLab[labId] = (monthByLab[labId] || 0) + count;
+            });
+          }
+        });
+
+        dataPoint['Tüketim'] = monthTotal;
+        Object.entries(monthByLab).forEach(([labId, count]) => {
+          dataPoint[labId] = count;
+        });
+      } else {
+        // For weekly/monthly view, use daily stats directly
+        const dateKey = formatDateKey(date);
+        const stat = statsMap.get(dateKey);
+
+        dataPoint['Tüketim'] = stat?.totalCount || 0;
+
+        // Add per-lab breakdown
+        if (stat?.byLab) {
+          Object.entries(stat.byLab).forEach(([labId, count]) => {
+            dataPoint[labId] = count;
+          });
         }
-        return dataPoint;
+      }
+
+      return dataPoint;
     });
 
     return { data, title };
-}, [tuketimKayitlari, trendPeriod, trendDate, hospitals]);
+  }, [dailyStats, trendPeriod, trendDate, hospitals, tuketimKayitlari]);
   
   const handleTrendNav = (direction: 'prev' | 'next') => {
     const fns = {

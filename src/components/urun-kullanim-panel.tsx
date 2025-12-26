@@ -30,6 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices } from '@/hooks/useFirebaseQueries';
+import { incrementTodayStats } from '@/lib/dailyConsumptionStats';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
@@ -273,6 +274,9 @@ export default function UrunKullanimPanel() {
       // Invalidate caches so data refreshes
       invalidateDepoStok();
       invalidateConsumption();
+
+      // Update daily consumption stats for dashboard KPI
+      incrementTodayStats(selectedLab.id).catch(console.error);
 
       await logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
         stokKodu: itemToConsume.stokKodu,
