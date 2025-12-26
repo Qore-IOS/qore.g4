@@ -1,19 +1,29 @@
 'use client';
 import VerimlilikHesaplamaPanel from '@/components/verimlilik-hesaplama-panel';
-import { useDashboardData } from '@/components/dashboard/useDashboardData';
+import {
+    useHospitals,
+    useProductCodes,
+    useRecentConsumption,
+    useLabPools,
+    useAllMinMaxRules
+} from '@/hooks/useFirebaseQueries';
 import { Loader2 } from 'lucide-react';
+import { useMemo } from 'react';
 
 export default function VerimlilikHesaplamaPage() {
-    const {
-        hospitals,
-        productCodes,
-        tuketimKayitlari,
-        cihazUstuGecmisi,
-        kumulatifRaporlar,
-        labPools,
-        allMinMaxRules,
-        isLoading
-    } = useDashboardData();
+    const hospitalsQuery = useHospitals();
+    const productsQuery = useProductCodes();
+    const consumptionQuery = useRecentConsumption(500);
+    const labPoolsQuery = useLabPools();
+
+    // Get hospital IDs for min/max rules
+    const hospitalIds = useMemo(
+        () => (hospitalsQuery.data ?? []).map(h => h.id),
+        [hospitalsQuery.data]
+    );
+    const minMaxRulesQuery = useAllMinMaxRules(hospitalIds);
+
+    const isLoading = hospitalsQuery.isLoading || productsQuery.isLoading;
 
     if (isLoading) {
         return (
@@ -25,13 +35,13 @@ export default function VerimlilikHesaplamaPage() {
 
     return (
         <VerimlilikHesaplamaPanel
-            hospitals={hospitals}
-            productCodes={productCodes}
-            tuketimKayitlari={tuketimKayitlari}
-            cihazUstuGecmisi={cihazUstuGecmisi}
-            kumulatifRaporlar={kumulatifRaporlar}
-            labPools={labPools} 
-            allMinMaxRules={allMinMaxRules}
+            hospitals={hospitalsQuery.data ?? []}
+            productCodes={productsQuery.data ?? []}
+            tuketimKayitlari={consumptionQuery.data ?? []}
+            cihazUstuGecmisi={[]}
+            kumulatifRaporlar={[]}
+            labPools={labPoolsQuery.data ?? []}
+            allMinMaxRules={minMaxRulesQuery.data ?? {}}
         />
     );
 }

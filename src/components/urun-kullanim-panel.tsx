@@ -29,7 +29,7 @@ import { openDeviceFaultReport } from '@/lib/faults';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useLightDashboardData } from './dashboard/useDashboardData';
-import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules } from '@/hooks/useFirebaseQueries';
+import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices } from '@/hooks/useFirebaseQueries';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
@@ -66,11 +66,13 @@ export default function UrunKullanimPanel() {
   // Use lightweight dashboard data (no heavy collections like depoStok, tuketimKayitlari)
   const {
       hospitals: laboratories,
-      devices,
       productCodes: products,
-      labPools,
       isLoading,
   } = useLightDashboardData();
+
+  // Fetch lab pools and devices separately
+  const { data: labPools = [] } = useLabPools();
+  const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
   const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();

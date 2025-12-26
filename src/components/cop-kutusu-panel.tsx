@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from './ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useLightDashboardData } from './dashboard/useDashboardData';
-import { useMinMaxRules } from '@/hooks/useFirebaseQueries';
+import { useMinMaxRules, useDevices } from '@/hooks/useFirebaseQueries';
 
 export default function CopKutusuPanel() {
   const { currentUser, currentUserProfile } = useAuth();
@@ -31,10 +31,12 @@ export default function CopKutusuPanel() {
   // Use lightweight dashboard data
   const {
       hospitals: laboratories,
-      devices,
       productCodes: products,
       isLoading,
   } = useLightDashboardData();
+
+  // Fetch devices separately
+  const { data: devices = [] } = useDevices();
 
   // Fetch min/max rules for selected lab
   const { data: minMaxRules = [] } = useMinMaxRules(selectedLabId);
