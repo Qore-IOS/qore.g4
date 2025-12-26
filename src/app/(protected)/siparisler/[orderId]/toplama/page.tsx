@@ -265,14 +265,42 @@ export default function ToplamaPage() {
           }
         }
         
-        pickingListItems.sort((a, b) => {
+        // Get target hospital for custom sorting
+        const targetHospitalForSort = orderData.labId
+          ? hospitalsData.find(h => h.id === orderData.labId)
+          : hospitalsData.find(h => h.name === orderData.kurumAdi || h.ad === orderData.kurumAdi);
+
+        // Check if hospital has custom product order
+        const customOrder = targetHospitalForSort?.customProductOrder;
+
+        if (customOrder && customOrder.length > 0) {
+          // Use custom product order
+          const orderMap = new Map<string, number>();
+          customOrder.forEach((code, idx) => {
+            orderMap.set(code, idx);
+          });
+
+          pickingListItems.sort((a, b) => {
+            const orderA = orderMap.has(a.stokKodu) ? orderMap.get(a.stokKodu)! : 99999;
+            const orderB = orderMap.has(b.stokKodu) ? orderMap.get(b.stokKodu)! : 99999;
+            if (orderA !== orderB) return orderA - orderB;
+            // Fallback to device group + name sort for items not in custom order
+            const groupA = (a as any).cihazGrubu || 'zzz';
+            const groupB = (b as any).cihazGrubu || 'zzz';
+            if (groupA !== groupB) return groupA.localeCompare(groupB);
+            return a.stokAdi.localeCompare(b.stokAdi);
+          });
+        } else {
+          // Default sorting: cihazGrubu then stokAdi alphabetically
+          pickingListItems.sort((a, b) => {
             const groupA = (a as any).cihazGrubu || 'zzz';
             const groupB = (b as any).cihazGrubu || 'zzz';
             if (groupA !== groupB) {
-                return groupA.localeCompare(groupB);
+              return groupA.localeCompare(groupB);
             }
             return a.stokAdi.localeCompare(b.stokAdi);
-        });
+          });
+        }
 
         setPickingList(pickingListItems);
 

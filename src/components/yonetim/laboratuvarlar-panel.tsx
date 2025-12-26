@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3 } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -18,6 +18,7 @@ import BackButton from '@/components/BackButton';
 import dynamic from 'next/dynamic';
 import SharedLabPoolModal from '@/components/SharedLabPoolModal';
 import EfficiencyPoolModal from '@/components/EfficiencyPoolModal';
+import ProductOrderModal from '@/components/ProductOrderModal';
 import { exportDataToExcel } from '@/lib/utils';
 
 
@@ -56,6 +57,10 @@ export default function LaboratuvarPanel() {
   const [isEfficiencyPoolListOpen, setIsEfficiencyPoolListOpen] = useState(false);
   const [efficiencyPools, setEfficiencyPools] = useState<EfficiencyPool[]>([]);
   const [efficiencyPoolDetailsModal, setEfficiencyPoolDetailsModal] = useState<{ open: boolean; pool: EfficiencyPool | null }>({ open: false, pool: null });
+
+  // Özel Sıralama Modal State
+  const [isProductOrderModalOpen, setIsProductOrderModalOpen] = useState(false);
+  const [productOrderTarget, setProductOrderTarget] = useState<Hospital | null>(null);
 
 
   const fetchHospitalsAndProducts = useCallback(async () => {
@@ -359,9 +364,10 @@ export default function LaboratuvarPanel() {
                         <TableCell className="font-mono text-xs">{h.kod}</TableCell>
                         <TableCell>{h.address}</TableCell>
                         <TableCell className="text-right space-x-1">
-                          <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)}><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => openModal(h)}><Edit3 className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(h.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)} title="Min-Max Ayarları"><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => { setProductOrderTarget(h); setIsProductOrderModalOpen(true); }} title="Özel Sıralama"><ListOrdered className="h-4 w-4 text-amber-500" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => openModal(h)} title="Düzenle"><Edit3 className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDelete(h.id)} title="Sil"><Trash2 className="h-4 w-4 text-destructive" /></Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -658,6 +664,20 @@ export default function LaboratuvarPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Özel Sıralama Modal */}
+      {productOrderTarget && (
+        <ProductOrderModal
+          open={isProductOrderModalOpen}
+          onOpenChange={(open) => {
+            setIsProductOrderModalOpen(open);
+            if (!open) setProductOrderTarget(null);
+          }}
+          hospital={productOrderTarget}
+          productCodes={productCodes}
+          onSaved={fetchHospitalsAndProducts}
+        />
+      )}
     </>
   );
 }
