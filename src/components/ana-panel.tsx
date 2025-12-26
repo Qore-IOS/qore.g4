@@ -40,7 +40,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Label } from '@/components/ui/label';
 import { motion } from 'framer-motion';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
+import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatPicker from '@/components/BarcodeFormatPicker';
 import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
@@ -398,7 +398,12 @@ export default function AnaPanel(props: AnaPanelProps) {
         if (!stokKodu) throw new Error('Stok kodu bulunamadı.');
 
         const matchedProduct = resolved.product;
-        const mode = resolveDefaultTrackingMode(matchedProduct as any);
+
+        // Determine tracking mode based on what the barcode contains
+        const matchedFormat = parsed.matchedFormatId
+          ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+          : undefined;
+        const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, matchedProduct as any);
 
         const isLotOnlyBarcode = (mode === 'serial') && !!lotNumarasi && !seriNumarasi;
 
