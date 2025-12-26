@@ -595,7 +595,7 @@ export default function UrunKullanimPanel() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsTrashBinModalOpen(true)}
+              onClick={() => router.push(`/cop-kutusu/${selectedLabId}`)}
               disabled={!selectedLabId}
               className="ml-4"
             >
