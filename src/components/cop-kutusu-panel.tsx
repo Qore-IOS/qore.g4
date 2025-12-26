@@ -78,10 +78,15 @@ export default function CopKutusuPanel() {
     return [];
   }, [currentUserProfile, laboratories]);
 
-  // Filter devices for selected lab
+  // Filter devices for selected lab (same as urun-kullanim-panel)
   const labDevices = useMemo(() => {
-    if (!selectedLabId) return [];
-    return devices.filter(d => d.laboratuvarId === selectedLabId && !d.deleted);
+    if (!selectedLabId || !devices) return [];
+    return devices
+      .filter(d => {
+        const deviceLabId = d.hospitalId || (d as any).hastaneId;
+        return deviceLabId?.toString() === selectedLabId.toString();
+      })
+      .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
   }, [devices, selectedLabId]);
 
   // Add item to trash list
