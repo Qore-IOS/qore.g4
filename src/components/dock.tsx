@@ -206,13 +206,14 @@ const DockItem = ({
   );
 
   // For items with submenus, show tooltip at bottom (since submenu appears on top)
+  // Use larger offset to appear below the dock bar, not overlapping with submenu
   if (hasSubItems) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           {itemContent}
         </TooltipTrigger>
-        <TooltipContent side="bottom" align="center" className="mt-2 glass-card">
+        <TooltipContent side="bottom" align="center" sideOffset={20} className="glass-card">
           <p>{item.label}</p>
         </TooltipContent>
       </Tooltip>
