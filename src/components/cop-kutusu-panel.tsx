@@ -180,31 +180,34 @@ export default function CopKutusuPanel() {
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Laboratory Selection */}
-          <div>
-            <Label className="text-sm font-medium mb-2 block">Laboratuvar Seçin</Label>
-            <select
-              value={selectedLabId}
-              onChange={(e) => {
-                setSelectedLabId(e.target.value);
-                setSelectedDevice(null);
-                router.push(`/cop-kutusu/${e.target.value}`);
-              }}
-              className="w-full p-2 border rounded-md"
-            >
-              <option value="">Laboratuvar seçin...</option>
-              {assignedLaboratories.map(lab => (
-                <option key={lab.id} value={lab.id}>{lab.name}</option>
-              ))}
-            </select>
-          </div>
+          {/* Laboratory Info */}
+          {selectedLab && (
+            <div className="bg-primary/5 p-4 rounded-lg">
+              <p className="text-sm text-muted-foreground">Seçili Laboratuvar</p>
+              <p className="font-medium text-lg">{selectedLab.name}</p>
+            </div>
+          )}
+
+          {!selectedLabId && (
+            <div className="text-center p-8 text-muted-foreground">
+              Lütfen ürün kullanım panelinden bir laboratuvar seçerek gelin.
+            </div>
+          )}
 
           {selectedLabId && (
             <>
               {/* Device Selection */}
               <div>
-                <Label className="text-sm font-medium mb-2 block">Cihaz Seçin</Label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Label className="text-sm font-medium mb-2 block">
+                  Cihaz Seçin {labDevices.length > 0 && `(${labDevices.length} cihaz)`}
+                </Label>
+
+                {labDevices.length === 0 ? (
+                  <div className="text-center p-8 text-muted-foreground border-2 border-dashed rounded-lg">
+                    Bu laboratuvara ait cihaz bulunamadı.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {labDevices.map((device) => {
                     const group = deviceGroups.find(g => g.id === device.cihazGrubuId);
                     const isSelected = selectedDevice?.id === device.id;
@@ -235,7 +238,8 @@ export default function CopKutusuPanel() {
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                )}
               </div>
 
               {selectedDevice && (
