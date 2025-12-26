@@ -1825,6 +1825,78 @@ export default function TotalVerimlilikPanel({
                   </Tooltip>
                 </TooltipProvider>
               )}
+
+              {/* KPI Card 1: Toplam Sarfiyat Maliyeti (Sütun 23 renkleriyle uyumlu - emerald/teal) */}
+              {rows.length > 0 && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
+                    <span className="text-emerald-600 dark:text-emerald-400 text-lg font-bold">₺</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Toplam Sarfiyat</span>
+                    <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
+                      {costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
+                      {totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* KPI Card 2: Toplam Hak Ediş Karşılığı (Sütun 24 renkleriyle uyumlu - amber/orange) */}
+              {rows.length > 0 && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-amber-50 dark:bg-amber-950/50 rounded-lg border border-amber-200 dark:border-amber-800">
+                  <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
+                    <span className="text-amber-600 dark:text-amber-400 text-lg font-bold">₺</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">Toplam Hak Ediş</span>
+                    <span className="text-base font-bold text-amber-600 dark:text-amber-400">
+                      {costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
+                      {totalHakEdisKarsiligi.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* KPI Card 3: Toplam Kâr (Sütun 25 renkleriyle uyumlu - yeşil kâr / kırmızı zarar) */}
+              {rows.length > 0 && (
+                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border ${
+                  totalKar >= 0
+                    ? 'bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-800'
+                    : 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800'
+                }`}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    totalKar >= 0
+                      ? 'bg-green-100 dark:bg-green-900'
+                      : 'bg-red-100 dark:bg-red-900'
+                  }`}>
+                    <span className={`text-lg font-bold ${
+                      totalKar >= 0
+                        ? 'text-green-600 dark:text-green-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }`}>
+                      {totalKar >= 0 ? '↑' : '↓'}
+                    </span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className={`text-sm font-semibold ${
+                      totalKar >= 0
+                        ? 'text-green-800 dark:text-green-200'
+                        : 'text-red-800 dark:text-red-200'
+                    }`}>
+                      Toplam Kâr
+                    </span>
+                    <span className={`text-base font-bold ${
+                      totalKar >= 0
+                        ? 'text-green-600 dark:text-green-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }`}>
+                      {totalKar >= 0 ? '+' : ''}{costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
+                      {totalKar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
