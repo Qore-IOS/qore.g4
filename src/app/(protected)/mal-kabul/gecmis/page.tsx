@@ -79,13 +79,13 @@ export default function MalKabulGecmisPage() {
       limit(1000) // Limit to a reasonable number for performance
     );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...(d.data() as MalKabulHeader) }));
+    const unsubscribe = onSnapshot(q, (snap: { docs: QueryDocumentSnapshot<DocumentData>[] }) => {
+      const data = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...(d.data() as MalKabulHeader) }));
       // Client-side sort to guarantee order, as onSnapshot can deliver out-of-order updates initially
-      data.sort((a,b) => toDateFromAny(b.timestamp)!.getTime() - toDateFromAny(a.timestamp)!.getTime());
+      data.sort((a: MalKabulHeader & { id: string }, b: MalKabulHeader & { id: string }) => toDateFromAny(b.timestamp)!.getTime() - toDateFromAny(a.timestamp)!.getTime());
       setAllRows(data);
       setIsLoading(false);
-    }, (error) => {
+    }, (error: Error) => {
       console.error('Error listening to mal kabul history:', error);
       toast({ title: 'Hata', description: 'Geçmiş verileri dinlenirken bir hata oluştu.', variant: 'destructive' });
       setIsLoading(false);
@@ -97,7 +97,7 @@ export default function MalKabulGecmisPage() {
   const openTransaction = useCallback(async (txId: string) => {
     setLines([]);
     setLinesLoading(true);
-    const txHeader = allRows.find(r => r.id === txId);
+    const txHeader = allRows.find((r: MalKabulHeader & { id: string }) => r.id === txId);
     if (!txHeader) {
       toast({ title: 'Bulunamadı', description: 'İşlem mevcut değil veya silinmiş.' });
       return;
@@ -107,7 +107,7 @@ export default function MalKabulGecmisPage() {
     try {
       const txRef = doc(db, COLLECTION_NAME, txId);
       const linesSnap = await getDocsFromServer(query(collection(txRef, 'lines'), orderBy('stokKodu')));
-      setLines(linesSnap.docs.map(d => d.data() as MalKabulLine));
+      setLines(linesSnap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => d.data() as MalKabulLine));
     } catch (e: any) {
       console.error('Satır detayları alınamadı:', e);
       toast({ title: 'Hata', description: e?.message ?? 'Detaylar yüklenemedi', variant: 'destructive' });
@@ -134,7 +134,7 @@ export default function MalKabulGecmisPage() {
   }, [currentPage, totalPages]);
 
   const exportCurrentPage = () => {
-    const rowsForExcel = paginatedRows.map(r => {
+    const rowsForExcel = paginatedRows.map((r: MalKabulHeader & { id: string }) => {
       return {
         'İşlem No': r.transactionId || r.id,
         'Depo': r.depotName,
@@ -152,15 +152,15 @@ export default function MalKabulGecmisPage() {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak detay bulunamadı.' });
       return;
     }
-    const summaryData = lines.map(l => ({
+    const summaryData = lines.map((l: MalKabulLine) => ({
       'Stok Kodu': l.stokKodu,
       'Stok Adı': l.stokAdi,
       'Lot': l.lotNumarasi,
       'Miad': l.miad,
       'Adet': l.adet,
     }));
-    const serialsData = lines.flatMap(l =>
-      (l.serials || []).map(s => ({
+    const serialsData = lines.flatMap((l: MalKabulLine) =>
+      (l.serials || []).map((s: string) => ({
         'Stok Kodu': l.stokKodu,
         'Stok Adı': l.stokAdi,
         'Lot': l.lotNumarasi,
@@ -193,7 +193,7 @@ export default function MalKabulGecmisPage() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-3">
-              <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(1); }}>
+              <Select value={String(pageSize)} onValueChange={(v: string) => { setPageSize(Number(v)); setCurrentPage(1); }}>
                 <SelectTrigger className="w-32"><SelectValue placeholder="Sayfa boyutu" /></SelectTrigger>
                 <SelectContent>
                   {PAGE_SIZE_OPTIONS.map(s => <SelectItem key={s} value={String(s)}>{s} / sayfa</SelectItem>)}
@@ -238,7 +238,7 @@ export default function MalKabulGecmisPage() {
                     <TableCell colSpan={7} className="text-center py-10">Kayıt bulunamadı.</TableCell>
                   </TableRow>
                 ) : (
-                  paginatedRows.map((r) => (
+                  paginatedRows.map((r: MalKabulHeader & { id: string }) => (
                       <TableRow key={r.id} data-row-id={r.id} ref={r.id === openId ? focusRef : null} className="hover:bg-muted/40" >
                         <TableCell className="font-medium">{r.transactionId || r.id}</TableCell>
                         <TableCell>{r.depotName || '-'}</TableCell>
@@ -258,17 +258,17 @@ export default function MalKabulGecmisPage() {
         </CardContent>
 
         <CardFooter className="flex items-center justify-between">
-          <Button variant="outline" disabled={currentPage <= 1 || isLoading} onClick={() => setCurrentPage(p => p - 1)}>
+          <Button variant="outline" disabled={currentPage <= 1 || isLoading} onClick={() => setCurrentPage((p: number) => p - 1)}>
             <ChevronLeft className="h-4 w-4 mr-2" /> Önceki
           </Button>
           <span>Sayfa {currentPage} / {totalPages}</span>
-          <Button variant="outline" disabled={currentPage >= totalPages || isLoading} onClick={() => setCurrentPage(p => p + 1)}>
+          <Button variant="outline" disabled={currentPage >= totalPages || isLoading} onClick={() => setCurrentPage((p: number) => p + 1)}>
             Sonraki <ChevronRight className="h-4 w-4 ml-2" />
           </Button>
         </CardFooter>
       </Card>
 
-      <Dialog open={!!selectedTx} onOpenChange={(o) => !o && setSelectedTx(null)}>
+      <Dialog open={!!selectedTx} onOpenChange={(o: boolean) => !o && setSelectedTx(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
              <div className="flex justify-between items-start">
@@ -306,7 +306,7 @@ export default function MalKabulGecmisPage() {
                   ) : lines.length === 0 ? (
                     <TableRow><TableCell colSpan={5} className="text-center py-10">Detay yok.</TableCell></TableRow>
                   ) : (
-                    lines.map((l, idx) => (
+                    lines.map((l: MalKabulLine, idx: number) => (
                       <TableRow key={idx}>
                         <TableCell className="font-medium">{l.stokKodu}</TableCell>
                         <TableCell>{l.stokAdi}</TableCell>

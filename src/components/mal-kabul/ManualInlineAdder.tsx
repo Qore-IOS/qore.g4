@@ -1,12 +1,12 @@
 
 'use client';
-import { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '../ui/label';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import ExpiryDateInput from '@/components/common/ExpiryDateInput';
-import type { ManualProductOption } from '@/lib/types';
+import type { ManualProductOption } from '../../lib/types';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Check, ChevronsUpDown } from 'lucide-react';
@@ -44,7 +44,7 @@ export default function ManualInlineAdder({
     return activeTab === 'manual' ? manualProducts : barcodeProducts;
   }, [activeTab, manualProducts, barcodeProducts]);
   
-  const chosenProduct = useMemo(() => productsForCurrentTab.find(p => p.code === selectedProductCode), [productsForCurrentTab, selectedProductCode]);
+  const chosenProduct = useMemo(() => productsForCurrentTab.find((p: ManualProductOption) => p.code === selectedProductCode), [productsForCurrentTab, selectedProductCode]);
 
   const resetLocalState = () => {
     setSelectedProductCode('');
@@ -88,7 +88,7 @@ export default function ManualInlineAdder({
 
   return (
     <div className="mt-2 rounded-xl border bg-background/40 p-3">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
+      <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as 'manual' | 'barcode')} className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="manual">Manuel Takip</TabsTrigger>
           <TabsTrigger value="barcode">Barkodsuz Giriş (Lot/Adet)</TabsTrigger>
@@ -106,7 +106,7 @@ export default function ManualInlineAdder({
                         className="w-full justify-between font-normal"
                       >
                         <span className="truncate">
-                          {selectedProductCode ? productsForCurrentTab.find(p => p.code === selectedProductCode)?.name : 'Ürün seçin...'}
+                          {selectedProductCode ? productsForCurrentTab.find((p: ManualProductOption) => p.code === selectedProductCode)?.name : 'Ürün seçin...'}
                         </span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
@@ -117,7 +117,7 @@ export default function ManualInlineAdder({
                         <CommandList>
                           <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
                           <CommandGroup>
-                            {productsForCurrentTab.sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                            {productsForCurrentTab.sort((a: ManualProductOption, b: ManualProductOption) => a.name.localeCompare(b.name)).map((p: ManualProductOption) => (
                               <CommandItem
                                 key={p.code}
                                 value={`${p.name} ${p.code}`}
@@ -148,7 +148,7 @@ export default function ManualInlineAdder({
                       type="number"
                       min={1}
                       value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value)}
                       className="w-28"
                     />
                   </div>
@@ -159,7 +159,7 @@ export default function ManualInlineAdder({
                 <>
                   <div>
                     <Label className="text-xs text-muted-foreground mb-1 block">Lot</Label>
-                    <Input value={lot} onChange={(e) => setLot(e.target.value)} className="w-40" placeholder="Lot Numarası"/>
+                    <Input value={lot} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLot(e.target.value)} className="w-40" placeholder="Lot Numarası"/>
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground mb-1 block">Miad</Label>
@@ -167,7 +167,7 @@ export default function ManualInlineAdder({
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                    <Input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="w-28" />
+                    <Input type="number" min={1} value={quantity} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value)} className="w-28" />
                   </div>
                 </>
               )}
