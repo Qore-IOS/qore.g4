@@ -9,7 +9,7 @@ interface CameraCaptureProps {
   onClose: () => void;
 }
 
-export const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onClose }) => {
+export const CameraCapture = ({ onCapture, onClose }: CameraCaptureProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { toast } = useToast();
   const [error, setError] = useState<string | null>(null);

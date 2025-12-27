@@ -60,7 +60,7 @@ export default function IrsaliyeOcrModal({
         };
     });
 
-    setDetectedItems(prev => [...prev, ...processedItems]);
+    setDetectedItems((prev: any[]) => [...prev, ...processedItems]);
     
     if (processedItems.length === 0) {
         toast({ title: `${source} tarandı ancak ürün/miktar eşleşmesi bulunamadı.`, variant: "default" });
@@ -108,7 +108,7 @@ export default function IrsaliyeOcrModal({
   };
 
   const removeItem = (index: number) => {
-    setDetectedItems(prev => prev.filter((_, i) => i !== index));
+    setDetectedItems((prev: any[]) => prev.filter((_: any, i: number) => i !== index));
   };
   
   const handleModalClose = () => {
@@ -139,7 +139,7 @@ export default function IrsaliyeOcrModal({
           <CameraCapture onCapture={handleCapture} onClose={() => setShowCamera(false)} />
         ) : (
           <div className="flex-1 flex flex-col overflow-hidden px-6">
-            <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="w-full mb-4">
+            <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as 'camera' | 'pdf')} className="w-full mb-4">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="camera">Kamera ile Tara</TabsTrigger>
                 <TabsTrigger value="pdf">PDF İrsaliye Yükle</TabsTrigger>
@@ -185,7 +185,7 @@ export default function IrsaliyeOcrModal({
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {detectedItems.map((item, idx) => (
+                    {detectedItems.map((item: any, idx: number) => (
                       <div key={idx} className="bg-white p-3 rounded border shadow-sm flex flex-col gap-2 relative group">
                         <div className="flex justify-between items-start">
                           <div>

@@ -1,5 +1,5 @@
 'use client';
-import { ProductCode } from './types';
+import type { ProductCode } from '@/lib/types';
 import { normalizeMiad } from './date';
 
 export interface IrsaliyeParseResult {
