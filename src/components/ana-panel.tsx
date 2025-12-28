@@ -1,88 +1,129 @@
+/**
+ * @fileoverview Mal Kabul (Goods Receiving) Main Panel Component
+ * @description Enterprise-grade goods receiving panel with barcode scanning,
+ * OCR support, batch processing, and comprehensive inventory management.
+ * @module components/ana-panel
+ * @version 2.0.0
+ */
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense, ChangeEvent, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+
+// Type imports
 import type {
   ScannedItem,
   ProductCode,
-  AddressDefinition,
-  DepoStokItem,
-  VerificationReportItem,
-  Shipment,
-  Depot,
-  MinMaxRule,
-  User as AppUser,
   DepotStockCountSession
 } from '@/lib/types';
+import type { IrsaliyeParseResult } from '@/lib/mal-kabul/types';
+import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
+
+// Hooks
 import { useToast } from "@/hooks/use-toast";
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Barcode, Trash2, CheckSquare, PlusCircle, AlertTriangle, Loader2, Search, CheckCircle, XCircle, History, Upload, Download, FileText, Warehouse, Building, Camera, Users, Play, LogOut, ChevronDown, ScanLine } from 'lucide-react';
-import { Switch } from "@/components/ui/switch";
-import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, orderBy, limit, getDoc, addDoc, onSnapshot, updateDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
-import { cn, generateId, readExcelData, exportDataToExcel, playFeedback, sanitizeGS1 } from '@/lib/utils';
-import { format as formatDate, differenceInDays, parse as parseDate, getMonth, getYear, isValid, subMonths } from 'date-fns';
-import { tr } from 'date-fns/locale';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { motion } from 'framer-motion';
-import { useBarcodeParser } from '@/hooks/useBarcodeParser';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useDepoStokByDepot, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
-import BarcodeFormatPicker from '@/components/BarcodeFormatPicker';
-import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
-import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
-import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
-import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import { useAuth } from '@/contexts/auth-context';
+
+// UI Components
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+
+// Icons
+import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine } from 'lucide-react';
+
+// Firebase
+import { db } from '@/lib/firebase';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
+
+// Utilities
+import { cn, generateId, playFeedback } from '@/lib/utils';
+import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
+import { normalizeMiad } from '@/components/common/ExpiryDateInput';
+
+// Logging & Validation
+import { malKabulLogger, createCorrelationId } from '@/lib/logger';
+import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
+
+// Child Components
+import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
 import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
 
-// IrsaliyeOcrModal'dan dönen sonuç tipi
-interface IrsaliyeParseResult {
-  stokKodu: string;
-  lot?: string;
-  miad?: string;
-  quantity: number;
-}
+// =============================================================================
+// DYNAMIC IMPORTS
+// =============================================================================
 
-const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
-  ssr: false,
-  loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>,
-});
+/**
+ * Dynamic camera barcode scanner component
+ * @description Loaded dynamically to reduce initial bundle size
+ */
+const DynamicCameraBarcodeScanner = dynamic(
+  () => import('@/components/camera-barcode-scanner'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center p-8" role="status" aria-label="Kamera yükleniyor">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+        <p className="ml-2">Kamera Yükleniyor...</p>
+      </div>
+    ),
+  }
+);
 
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
 
+/**
+ * Extended scanned item with grouping support
+ * @description Represents a single scanned item or a group of items with the same lot
+ */
 type ScanRow = ScannedItem & {
+  /** Quantity of items (for grouped/lot items) */
   adet?: number;
+  /** Whether this row represents a grouped item */
   isGroup?: boolean;
+  /** Expected quantity (for verification) */
   expectedAdet?: number;
+  /** List of scanned serial numbers in this group */
   scannedSerials?: string[];
-  key?: string; // Add a key for grouped items
-  items?: ScannedItem[]; // For grouped rows
+  /** Unique key for grouping (stokKodu-lot-miad) */
+  key?: string;
+  /** Child items for grouped rows */
+  items?: ScannedItem[];
 };
 
-// URL-safe base64 decode
-function fromB64Url(b64url: string): string {
-    const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
-    const bin = typeof window !== 'undefined' ? atob(b64) : Buffer.from(b64, 'base64').toString('binary');
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
-}
+/**
+ * QR transfer item structure
+ */
+type QrItem = {
+  /** Product stock code */
+  k: string;
+  /** Product name */
+  a: string;
+  /** Lot number */
+  l?: string;
+  /** Expiry date */
+  m?: string;
+  /** Serial number */
+  s?: string;
+  /** Quantity */
+  q: number;
+};
 
-type QrItem = { k: string; a: string; l?: string; m?: string; s?: string; q: number };
+/**
+ * QR transfer payload structure
+ */
 type QrPayload = {
   t: 'transfer';
   v: number;
@@ -94,29 +135,9 @@ type QrPayload = {
   items: QrItem[];
 };
 
-
-const toFsTimestamp = (d?: any): Timestamp => {
-  try {
-    if (d instanceof Date && !isNaN(d.getTime())) return Timestamp.fromDate(d);
-  } catch {}
-  return Timestamp.now();
-};
-const safeStr = (v: any): string => (v === undefined || v === null ? '' : String(v));
-const safeNullable = <T,>(v: T | undefined): T | null => (v === undefined ? null : v);
-
-const stripUndefined = (val: any): any => {
-  if (Array.isArray(val)) return val.map(stripUndefined).filter(v => v !== undefined);
-  if (val && typeof val === 'object') {
-    const out: any = {};
-    Object.keys(val).forEach(k => {
-      const v = stripUndefined((val as any)[k]);
-      if (v !== undefined) out[k] = v;
-    });
-    return out;
-  }
-  return val === undefined ? undefined : val;
-};
-
+/**
+ * Mal Kabul transaction line item
+ */
 type MalKabulLine = {
   stokKodu: string;
   stokAdi: string;
@@ -126,6 +147,9 @@ type MalKabulLine = {
   serials: string[];
 };
 
+/**
+ * Mal Kabul transaction header
+ */
 type MalKabulHeader = {
   transactionId: string;
   depotId: string;
@@ -138,6 +162,82 @@ type MalKabulHeader = {
   mode: 'verified' | 'unverified';
 };
 
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Decode URL-safe base64 string
+ * @param b64url - URL-safe base64 encoded string
+ * @returns Decoded string
+ */
+function fromB64Url(b64url: string): string {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = typeof window !== 'undefined' ? atob(b64) : Buffer.from(b64, 'base64').toString('binary');
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Convert a Date or unknown value to Firestore Timestamp
+ * @param d - Date value or undefined
+ * @returns Firestore Timestamp
+ */
+const toFsTimestamp = (d?: Date | unknown): Timestamp => {
+  try {
+    if (d instanceof Date && !isNaN(d.getTime())) return Timestamp.fromDate(d);
+  } catch {
+    malKabulLogger.warn('Failed to convert date to Timestamp', { date: String(d) });
+  }
+  return Timestamp.now();
+};
+
+/**
+ * Convert value to string safely
+ * @param v - Any value
+ * @returns String representation or empty string
+ */
+const safeStr = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
+
+/**
+ * Convert undefined to null for Firestore compatibility
+ * @param v - Value that might be undefined
+ * @returns Value or null
+ */
+const safeNullable = <T,>(v: T | undefined): T | null => (v === undefined ? null : v);
+
+/**
+ * Remove undefined values from object recursively
+ * @description Firestore doesn't accept undefined values, this strips them
+ * @param val - Object or array to clean
+ * @returns Cleaned object without undefined values
+ */
+const stripUndefined = (val: unknown): unknown => {
+  if (Array.isArray(val)) return val.map(stripUndefined).filter(v => v !== undefined);
+  if (val && typeof val === 'object') {
+    const out: Record<string, unknown> = {};
+    Object.keys(val).forEach(k => {
+      const v = stripUndefined((val as Record<string, unknown>)[k]);
+      if (v !== undefined) out[k] = v;
+    });
+    return out;
+  }
+  return val === undefined ? undefined : val;
+};
+
+// =============================================================================
+// GROUPED ROW MANAGEMENT
+// =============================================================================
+
+/**
+ * Upsert a grouped row in the scanned items list
+ * @description If a matching row exists, increments its quantity. Otherwise creates a new row.
+ * @param setScannedItems - State setter for scanned items
+ * @param base - Base product information
+ * @param match - Function to match existing rows
+ * @param delta - Quantity to add (default: 1)
+ */
 function upsertGroupedRow(
   setScannedItems: React.Dispatch<React.SetStateAction<ScanRow[]>>,
   base: { stokKodu: string; stokAdi: string; lot?: string; miad?: string; barkod?: string },
