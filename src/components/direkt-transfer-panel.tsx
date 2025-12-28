@@ -1,3 +1,10 @@
+/**
+ * @fileoverview Direct Transfer Panel Component
+ * @description Enterprise-grade direct transfer panel for inventory transfers between
+ * depots and laboratories with barcode scanning, FEFO validation, and batch processing.
+ * @module components/direkt-transfer-panel
+ * @version 2.0.0
+ */
 
 'use client';
 
@@ -6,6 +13,12 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption } from '@/lib/types';
 import type { BarcodeFormat, ParsedGeneric } from '@/lib/barcode';
+
+// Type imports from direkt-transfer module
+import type { TransferRow, FefoViolation, ScanSource } from '@/lib/direkt-transfer/types';
+
+// Logging integration
+import { direktTransferLogger } from '@/lib/logger';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -66,16 +79,7 @@ const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /><span className="ml-2">Kamera Yükleniyor...</span></div>,
 });
 
-type TransferRow = DepoStokItem & {
-  key: string;
-  adet: number;
-  isGroup?: boolean;
-};
-
-type FefoViolation = {
-  scannedItem: DepoStokItem;
-  recommendedItem: DepoStokItem;
-};
+// TransferRow and FefoViolation types imported from @/lib/direkt-transfer/types
 
 
 // YENİ EKLENEN YARDIMCI FONKSİYON:
@@ -128,7 +132,10 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
           violations.push({ scannedItem: item, recommendedItem: earlierItems[0] });
         }
       } catch (e) {
-        console.warn("Tarih parslama hatası, FEFO atlanıyor:", item.stokKodu);
+        direktTransferLogger.warn('Tarih parslama hatası, FEFO kontrolü atlanıyor', {
+          stokKodu: item.stokKodu,
+          miad: item.miad,
+        });
       }
     }
   }));
@@ -195,7 +202,9 @@ export default function DirektTransferPanel() {
       }
 
     } catch (e: any) {
-      console.error('[DirektTransfer] Prereqs failed:', e);
+      direktTransferLogger.error('Ön veriler yüklenemedi', e, {
+        operation: 'fetchPrerequisites',
+      });
       toast({ title: "Veri Hatası", description: `Ön veriler yüklenemedi: ${e.message}`, variant: "destructive" });
     } finally {
       setPrereqsLoading(false);
@@ -587,15 +596,32 @@ export default function DirektTransferPanel() {
             updatedAt: serverTimestamp(),
           }, { merge: true });
 
-          console.log('labTransferDates updated:', labTransferDocId, transfersUpdate);
+          direktTransferLogger.debug('labTransferDates güncellendi', {
+            docId: labTransferDocId,
+            updates: Object.keys(transfersUpdate),
+          });
         } catch (transferError) {
-          console.error('Error updating labTransferDates:', transferError);
+          direktTransferLogger.error('labTransferDates güncellenemedi', transferError, {
+            labId: targetId,
+            depotId: selectedDepotId,
+          });
         }
       }
 
       setDirectTransferItems([]);
+
+      direktTransferLogger.info('Transfer başarıyla tamamlandı', {
+        transferId: transferRef.id,
+        itemCount: itemsToShip.length,
+        targetName,
+        mode: isBorcMode ? 'borc' : 'lab',
+      });
     } catch (err) {
-      console.error('Transfer commit error:', err);
+      direktTransferLogger.error('Transfer commit hatası', err, {
+        depotId: selectedDepotId,
+        targetId,
+        itemCount: itemsToShip.length,
+      });
       toast({ title: 'Veritabanı Hatası', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
     } finally {
       setShipmentLoading(false);
@@ -726,10 +752,14 @@ export default function DirektTransferPanel() {
 
   return (
     <>
-      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+      <div
+        className="p-3 sm:p-4 space-y-3 sm:space-y-4"
+        role="main"
+        aria-label="Direkt transfer paneli"
+      >
         {/* Header Section - Mobile Responsive */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <BackButton fallback="/siparisler" />
+          <BackButton fallback="/siparisler" aria-label="Geri dön" />
           <div className="flex items-center gap-2 flex-wrap">
             <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -780,21 +810,44 @@ export default function DirektTransferPanel() {
           {/* Form Grid - Mobile Responsive */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-end">
             <div className="space-y-1">
-                <Label className="text-xs sm:text-sm">Kaynak depo seçin</Label>
+                <Label htmlFor="source-depot-select" className="text-xs sm:text-sm">Kaynak depo seçin</Label>
                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={prereqsLoading}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Kaynak depo seçin" /></SelectTrigger>
-                <SelectContent> {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)} </SelectContent>
+                <SelectTrigger
+                  id="source-depot-select"
+                  className="w-full"
+                  aria-label="Kaynak depo seçimi"
+                  aria-describedby="source-depot-description"
+                >
+                  <SelectValue placeholder="Kaynak depo seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {depots.map(d => (
+                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                  ))}
+                </SelectContent>
                 </Select>
+                <span id="source-depot-description" className="sr-only">Transfer edilecek ürünlerin bulunduğu depo</span>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs sm:text-sm">Hedef Laboratuvar</Label>
+              <Label htmlFor="target-lab-select" className="text-xs sm:text-sm">Hedef Laboratuvar</Label>
               <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" role="combobox" aria-expanded={isLabPopoverOpen} className="w-full justify-between font-normal text-xs sm:text-sm" disabled={isBorcMode || hospitals.length === 0}>
+                  <Button
+                    id="target-lab-select"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isLabPopoverOpen}
+                    aria-haspopup="listbox"
+                    aria-label={selectedLabName || "Laboratuvar seçin"}
+                    aria-describedby="target-lab-description"
+                    className="w-full justify-between font-normal text-xs sm:text-sm"
+                    disabled={isBorcMode || hospitals.length === 0}
+                  >
                     {selectedLabName || "Laboratuvar seçin."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
                   </Button>
                 </PopoverTrigger>
+                <span id="target-lab-description" className="sr-only">Ürünlerin transfer edileceği hedef laboratuvar</span>
                 <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
                   <Command>
                     <CommandInput placeholder="Laboratuvar ara..." />
