@@ -1,7 +1,17 @@
+/**
+ * @fileoverview Mal Kabul Transaction History Page
+ * @description Displays historical goods receiving transactions with pagination,
+ * filtering, and detailed view capabilities.
+ * @module app/(protected)/mal-kabul/gecmis/page
+ * @version 2.0.0
+ */
+
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+
+// Firebase
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -14,6 +24,8 @@ import {
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+
+// UI Components
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
 } from '@/components/ui/card';
@@ -22,25 +34,42 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, History, ChevronLeft, ChevronRight, RotateCw, FileSpreadsheet } from 'lucide-react';
+
+// Icons
+import { Loader2, History, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
+
+// Hooks & Utils
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { toDateFromAny, formatTimestamp } from '@/lib/time';
 import { useRowFocus } from '@/hooks/useRowFocus';
 
+// Logging
+import { malKabulLogger } from '@/lib/logger';
+
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
+
+/**
+ * Mal Kabul transaction header (from Firestore)
+ */
 type MalKabulHeader = {
   transactionId: string;
   depotId: string;
   depotName: string;
   userId: string;
   userName: string;
-  timestamp?: any;
+  timestamp?: unknown;
   itemCount: number;
   brands?: string[];
   mode: 'verified' | 'unverified';
 };
 
+/**
+ * Mal Kabul transaction line item
+ */
 type MalKabulLine = {
   stokKodu: string;
   stokAdi: string;
@@ -50,9 +79,21 @@ type MalKabulLine = {
   serials?: string[];
 };
 
-const PAGE_SIZE_OPTIONS = [50, 100, 200];
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/** Available page size options */
+const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
+
+/** Firestore collection name */
 const COLLECTION_NAME = 'malKabulTransactions';
+
+/** Field to order by */
 const ORDER_FIELD = 'timestamp';
+
+/** Maximum records to fetch */
+const MAX_RECORDS = 1000;
 
 export default function MalKabulGecmisPage() {
   const { toast } = useToast();
@@ -70,35 +111,65 @@ export default function MalKabulGecmisPage() {
   const [linesLoading, setLinesLoading] = useState(false);
   const [lines, setLines] = useState<MalKabulLine[]>([]);
 
-  // Real-time listener
+  // Real-time listener for transaction history
   useEffect(() => {
     setIsLoading(true);
+    malKabulLogger.debug('Initializing transaction history listener');
+
     const q = query(
       collection(db, COLLECTION_NAME),
       orderBy(ORDER_FIELD, 'desc'),
-      limit(1000) // Limit to a reasonable number for performance
+      limit(MAX_RECORDS)
     );
 
-    const unsubscribe = onSnapshot(q, (snap: { docs: QueryDocumentSnapshot<DocumentData>[] }) => {
-      const data = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...(d.data() as MalKabulHeader) }));
-      // Client-side sort to guarantee order, as onSnapshot can deliver out-of-order updates initially
-      data.sort((a: MalKabulHeader & { id: string }, b: MalKabulHeader & { id: string }) => toDateFromAny(b.timestamp)!.getTime() - toDateFromAny(a.timestamp)!.getTime());
-      setAllRows(data);
-      setIsLoading(false);
-    }, (error: Error) => {
-      console.error('Error listening to mal kabul history:', error);
-      toast({ title: 'Hata', description: 'Geçmiş verileri dinlenirken bir hata oluştu.', variant: 'destructive' });
-      setIsLoading(false);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snap: { docs: QueryDocumentSnapshot<DocumentData>[] }) => {
+        const data = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
+          id: d.id,
+          ...(d.data() as MalKabulHeader)
+        }));
 
-    return () => unsubscribe();
+        // Client-side sort to guarantee order
+        data.sort((a, b) => {
+          const aTime = toDateFromAny(a.timestamp)?.getTime() ?? 0;
+          const bTime = toDateFromAny(b.timestamp)?.getTime() ?? 0;
+          return bTime - aTime;
+        });
+
+        setAllRows(data);
+        setIsLoading(false);
+        malKabulLogger.info('Transaction history loaded', { count: data.length });
+      },
+      (error: Error) => {
+        malKabulLogger.error('Failed to listen to transaction history', error);
+        toast({
+          title: 'Hata',
+          description: 'Geçmiş verileri dinlenirken bir hata oluştu.',
+          variant: 'destructive'
+        });
+        setIsLoading(false);
+      }
+    );
+
+    return () => {
+      malKabulLogger.debug('Cleaning up transaction history listener');
+      unsubscribe();
+    };
   }, [toast]);
-  
+
+  /**
+   * Open transaction details modal
+   * @param txId - Transaction ID to open
+   */
   const openTransaction = useCallback(async (txId: string) => {
     setLines([]);
     setLinesLoading(true);
-    const txHeader = allRows.find((r: MalKabulHeader & { id: string }) => r.id === txId);
+    malKabulLogger.debug('Opening transaction details', { transactionId: txId });
+
+    const txHeader = allRows.find((r) => r.id === txId);
     if (!txHeader) {
+      malKabulLogger.warn('Transaction not found', { transactionId: txId });
       toast({ title: 'Bulunamadı', description: 'İşlem mevcut değil veya silinmiş.' });
       return;
     }
@@ -106,11 +177,19 @@ export default function MalKabulGecmisPage() {
 
     try {
       const txRef = doc(db, COLLECTION_NAME, txId);
-      const linesSnap = await getDocsFromServer(query(collection(txRef, 'lines'), orderBy('stokKodu')));
-      setLines(linesSnap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => d.data() as MalKabulLine));
-    } catch (e: any) {
-      console.error('Satır detayları alınamadı:', e);
-      toast({ title: 'Hata', description: e?.message ?? 'Detaylar yüklenemedi', variant: 'destructive' });
+      const linesSnap = await getDocsFromServer(
+        query(collection(txRef, 'lines'), orderBy('stokKodu'))
+      );
+      const lineData = linesSnap.docs.map((d) => d.data() as MalKabulLine);
+      setLines(lineData);
+      malKabulLogger.info('Transaction details loaded', {
+        transactionId: txId,
+        lineCount: lineData.length
+      });
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      malKabulLogger.error('Failed to load transaction details', error, { transactionId: txId });
+      toast({ title: 'Hata', description: error.message || 'Detaylar yüklenemedi', variant: 'destructive' });
     } finally {
       setLinesLoading(false);
     }
