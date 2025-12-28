@@ -1,3 +1,9 @@
+/**
+ * @fileoverview Transfer Detail Page
+ * @description Displays detailed information about a specific transfer record.
+ * @module app/(protected)/transfer-gecmis/[transferId]/page
+ * @version 2.0.0
+ */
 
 'use client';
 
@@ -17,6 +23,7 @@ import BackButton from '@/components/BackButton';
 import * as XLSX from 'xlsx';
 import TransferTutanakPDFButton from '@/components/exports/TransferTutanakPDFButton';
 import TimestampText from '@/components/TimestampText';
+import { transferGecmisLogger } from '@/lib/logger';
 
 
 type TransferRoot = {
@@ -66,7 +73,9 @@ export default function Page() {
         setRoot(rootData);
         setItems(rows);
       } catch (e) {
-        console.error(e);
+        transferGecmisLogger.error('Transfer detayları yüklenemedi', e, {
+          transferId,
+        });
         toast({ title: 'Hata', description: 'Transfer detayları yüklenemedi.', variant: 'destructive' });
       } finally { if (mounted) setLoading(false); }
     })();
@@ -86,16 +95,25 @@ export default function Page() {
   
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div
+        className="flex items-center justify-center h-[60vh]"
+        role="status"
+        aria-label="Transfer detayları yükleniyor"
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+        <span className="sr-only">Yükleniyor...</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-4">
+    <div
+      className="space-y-6 p-4"
+      role="main"
+      aria-label="Transfer detay sayfası"
+    >
       <div className="flex items-center justify-between">
-        <BackButton fallback="/transfer-gecmis" />
+        <BackButton fallback="/transfer-gecmis" aria-label="Geri dön" />
          {root && transferId && (
           <TransferTutanakPDFButton
             header={{

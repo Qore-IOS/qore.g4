@@ -31,6 +31,8 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
  */
 export type LogModule =
   | 'mal-kabul'
+  | 'direkt-transfer'
+  | 'transfer-gecmis'
   | 'sevkiyat'
   | 'stok-yonetimi'
   | 'siparisler'
@@ -507,6 +509,31 @@ export const ocrLogger = createLogger('ocr');
  * Barcode module logger
  */
 export const barcodeLogger = createLogger('barcode');
+
+/**
+ * Direkt Transfer module logger
+ */
+export const direktTransferLogger = createLogger('direkt-transfer');
+
+/**
+ * Transfer History module logger
+ */
+export const transferGecmisLogger = createLogger('transfer-gecmis');
+
+/**
+ * Sevkiyat (Shipment) module logger
+ */
+export const sevkiyatLogger = createLogger('sevkiyat');
+
+/**
+ * Stok Yonetimi (Stock Management) module logger
+ */
+export const stokYonetimiLogger = createLogger('stok-yonetimi');
+
+/**
+ * Siparisler (Orders) module logger
+ */
+export const siparislerLogger = createLogger('siparisler');
 
 // =============================================================================
 // UTILITY FUNCTIONS
