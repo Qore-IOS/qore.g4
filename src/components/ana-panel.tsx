@@ -23,7 +23,7 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 // Hooks
 import { useToast } from "@/hooks/use-toast";
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useDepoStokByDepot, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
