@@ -16,6 +16,7 @@ import {
   orderBy,
   doc,
   getDocs,
+  limit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital, Device, DeviceFaultReport } from '@/lib/types';
