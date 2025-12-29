@@ -39,6 +39,8 @@ export type LogModule =
   | 'sevkiyat'
   | 'stok-yonetimi'
   | 'siparisler'
+  | 'siparis-gecmis'
+  | 'siparis-toplama'
   | 'auth'
   | 'firebase'
   | 'ocr'
@@ -552,6 +554,16 @@ export const kullanimDogrulamaLogger = createLogger('kullanim-dogrulama');
  * Tuketim Istatistik (Consumption Statistics) module logger
  */
 export const tuketimIstatistikLogger = createLogger('tuketim-istatistik');
+
+/**
+ * Siparis Gecmis (Order History) module logger
+ */
+export const siparisGecmisLogger = createLogger('siparis-gecmis');
+
+/**
+ * Siparis Toplama (Order Picking) module logger
+ */
+export const siparisToplamaLogger = createLogger('siparis-toplama');
 
 // =============================================================================
 // UTILITY FUNCTIONS

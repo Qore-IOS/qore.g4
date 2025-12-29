@@ -1,3 +1,25 @@
+/**
+ * @fileoverview Order Picking Page
+ * @description Handles the barcode scanning and product picking process for orders.
+ * Supports serial and lot-based tracking, FEFO validation, and shipment creation.
+ * @module app/siparisler/[orderId]/toplama
+ * @version 2.0.0
+ *
+ * @features
+ * - HID barcode scanner integration
+ * - FEFO (First Expired First Out) validation with override option
+ * - Serial number and lot-based tracking
+ * - Real-time picking progress display
+ * - Automatic shipment creation on completion
+ * - Lab transfer date tracking
+ * - Custom product order support per hospital
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Screen reader announcements for scan results
+ * - Keyboard accessible controls
+ * - Visual feedback for picking progress
+ */
 
 'use client';
 
@@ -27,6 +49,7 @@ import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 import type { ParsedGeneric } from '@/lib/barcode';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { siparisToplamaLogger } from '@/lib/logger';
 
 
 function LastTransferLine({
@@ -162,30 +185,39 @@ export default function ToplamaPage() {
 
         // Determine effective labId - try order.labId first, then find by kurumAdi
         let effectiveLabId = orderData.labId;
-        console.log('[DEBUG] orderData.labId:', orderData.labId);
-        console.log('[DEBUG] orderData.kurumAdi:', orderData.kurumAdi);
-        console.log('[DEBUG] orderData.depotId:', orderData.depotId);
+        siparisToplamaLogger.debug('Sipariş verileri yüklendi', {
+          labId: orderData.labId,
+          kurumAdi: orderData.kurumAdi,
+          depotId: orderData.depotId,
+        });
 
         if (!effectiveLabId && orderData.kurumAdi) {
           const matchedHospital = hospitalsData.find(
             h => h.name === orderData.kurumAdi || h.ad === orderData.kurumAdi
           );
-          console.log('[DEBUG] matchedHospital:', matchedHospital?.id, matchedHospital?.name);
+          siparisToplamaLogger.debug('Hastane eşleştirmesi yapıldı', {
+            matchedHospitalId: matchedHospital?.id,
+            matchedHospitalName: matchedHospital?.name,
+          });
           effectiveLabId = matchedHospital?.id;
         }
-        console.log('[DEBUG] effectiveLabId:', effectiveLabId);
+        siparisToplamaLogger.debug('Efektif laboratuvar ID belirlendi', { effectiveLabId });
 
         // Fetch labTransferDates for this lab-depot combination
         const transferDates: Record<string, Date> = {};
         if (effectiveLabId && orderData.depotId) {
           const labTransferDocId = `${effectiveLabId}_${orderData.depotId}`;
-          console.log('[DEBUG] labTransferDocId:', labTransferDocId);
+          siparisToplamaLogger.debug('Transfer tarihleri yükleniyor', { labTransferDocId });
           const labTransferSnap = await getDoc(doc(db, 'labTransferDates', labTransferDocId));
-          console.log('[DEBUG] labTransferSnap.exists():', labTransferSnap.exists());
+          siparisToplamaLogger.debug('Transfer tarihleri sorgusu tamamlandı', {
+            exists: labTransferSnap.exists(),
+          });
 
           if (labTransferSnap.exists()) {
             const labTransferData = labTransferSnap.data();
-            console.log('[DEBUG] labTransferData:', labTransferData);
+            siparisToplamaLogger.debug('Transfer verileri alındı', {
+              transferCount: Object.keys(labTransferData?.transfers || {}).length,
+            });
             const transfers = labTransferData?.transfers as Record<string, { lastTransferDate: any }> | undefined;
             if (transfers) {
               Object.entries(transfers).forEach(([stokKodu, info]) => {
@@ -197,15 +229,20 @@ export default function ToplamaPage() {
             }
           }
         } else {
-          console.log('[DEBUG] Skipping labTransferDates fetch - missing effectiveLabId or depotId');
+          siparisToplamaLogger.debug('Transfer tarihleri yüklenemiyor - eksik veri', {
+            effectiveLabId,
+            depotId: orderData.depotId,
+          });
         }
-        console.log('[DEBUG] transferDates:', transferDates);
+        siparisToplamaLogger.debug('Transfer tarihleri hazırlandı', {
+          transferDatesCount: Object.keys(transferDates).length,
+        });
         setLastTransferDates(transferDates);
 
         if (depotSnap && depotSnap.exists()) {
             setCurrentDepot({ id: depotSnap.id, ...depotSnap.data() } as Depot);
         } else {
-            console.warn(`Depot with ID ${orderData.depotId} not found.`);
+            siparisToplamaLogger.warn('Depo bulunamadı', { depotId: orderData.depotId });
         }
 
         setProductCodes(productsData);
@@ -305,7 +342,7 @@ export default function ToplamaPage() {
         setPickingList(pickingListItems);
 
       } catch (error) {
-        console.error("Error fetching data for picking page:", error);
+        siparisToplamaLogger.error('Toplama sayfası verileri yüklenirken hata oluştu', error, { orderId });
         toast({ title: 'Hata', description: 'Veriler yüklenirken bir hata oluştu.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
@@ -576,14 +613,20 @@ export default function ToplamaPage() {
             updatedAt: serverTimestamp(),
           }, { merge: true });
 
-          console.log('labTransferDates updated:', labTransferDocId, transfersUpdate);
+          siparisToplamaLogger.info('Transfer tarihleri güncellendi', {
+            labTransferDocId,
+            updatedProductsCount: Object.keys(transfersUpdate).length,
+          });
         } catch (transferError) {
-          console.error('Error updating labTransferDates:', transferError);
+          siparisToplamaLogger.error('Transfer tarihleri güncellenirken hata oluştu', transferError);
         }
       }
 
     } catch (e) {
-      console.error("Transfer error:", e);
+      siparisToplamaLogger.error('Transfer işlemi sırasında hata oluştu', e, {
+        orderId: order?.id,
+        itemsCount: Object.values(scannedSerials).flat().length,
+      });
       toast({ title: 'Hata', description: 'Transfer sırasında bir veritabanı hatası oluştu.', variant: 'destructive' });
     } finally {
       setIsProcessing(false);
