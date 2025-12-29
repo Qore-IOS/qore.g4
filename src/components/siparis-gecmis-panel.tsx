@@ -1,3 +1,22 @@
+/**
+ * @fileoverview Order History Panel Component
+ * @description Displays historical shipments and completed orders by depot.
+ * Provides filtering, pagination, and detailed shipment information.
+ * @module components/siparis-gecmis-panel
+ * @version 2.0.0
+ *
+ * @features
+ * - Depot-based shipment history filtering
+ * - Pagination with configurable rows per page
+ * - Real-time updates via Firestore listeners
+ * - Order creator and shipper information display
+ * - Navigation to individual shipment details
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Screen reader support for navigation and status
+ * - Keyboard accessible pagination controls
+ */
 
 'use client';
 
@@ -16,8 +35,15 @@ import BackButton from '@/components/BackButton';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { useRowFocus } from '@/hooks/useRowFocus';
+import { Label } from '@/components/ui/label';
+import { siparisGecmisLogger } from '@/lib/logger';
 
-export default function SiparisGecmisPanel() {
+/**
+ * Order History Panel Component
+ * @description Displays completed orders and shipment history filtered by depot
+ * @returns {JSX.Element} The rendered order history panel
+ */
+export default function SiparisGecmisPanel(): JSX.Element {
   const searchParams = useSearchParams();
   const router = useRouter();
   const depotIdFromUrl = searchParams.get('depotId') || '';
@@ -79,7 +105,9 @@ export default function SiparisGecmisPanel() {
         }
         setLoading(false);
     }, (error) => {
-        console.error("Error fetching shipment/order history:", error);
+        siparisGecmisLogger.error('Sevkiyat/sipariş geçmişi yüklenirken hata oluştu', error, {
+          shipmentsCount: allShipments.length,
+        });
         toast({ title: 'Hata', description: 'Geçmiş yüklenirken bir hata oluştu.', variant: 'destructive' });
         setLoading(false);
     });
@@ -106,18 +134,18 @@ export default function SiparisGecmisPanel() {
   }, [selectedDepotId, rowsPerPage]);
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4" role="main" aria-label="Sipariş geçmişi sayfası">
       <BackButton fallback="/siparisler" />
-      <Card>
+      <Card role="region" aria-labelledby="order-history-title">
         <CardHeader>
-          <CardTitle>Sipariş Geçmişi</CardTitle>
+          <CardTitle id="order-history-title">Sipariş Geçmişi</CardTitle>
           <CardDescription>Depo bazlı tamamlanmış sipariş ve sevkiyatları görüntüleyin.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="max-w-md mb-4">
-            <label className="text-sm font-medium">Depo</label>
+            <Label htmlFor="depot-filter" className="text-sm font-medium">Depo</Label>
             <Select value={selectedDepotId} onValueChange={v => { router.push(`/siparis-gecmis?depotId=${v}`); setSelectedDepotId(v); }}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="depot-filter" className="w-full" aria-label="Depo filtresi">
                 <SelectValue placeholder="Depo Seçin..." />
               </SelectTrigger>
               <SelectContent>
@@ -125,29 +153,34 @@ export default function SiparisGecmisPanel() {
               </SelectContent>
             </Select>
           </div>
-          
+
           {loading ? (
-             <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin" /></div>
+             <div className="flex items-center justify-center h-64" role="status" aria-label="Yükleniyor">
+               <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+               <span className="sr-only">Sevkiyat geçmişi yükleniyor...</span>
+             </div>
           ) : (
-             <Accordion type="single" collapsible className="w-full">
+             <Accordion type="single" collapsible className="w-full" aria-label="Sevkiyat listesi">
                 {paginatedShipments.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">Bu depo için geçmiş sevkiyat bulunamadı.</p>
+                  <p className="text-center text-muted-foreground py-8" role="status">Bu depo için geçmiş sevkiyat bulunamadı.</p>
                 ) : (
                   paginatedShipments.map(s => (
                     <AccordionItem key={s.id} value={s.id} data-row-id={s.id}>
-                        <AccordionTrigger 
+                        <AccordionTrigger
                           className="flex justify-between items-center hover:no-underline p-4"
                           onClick={() => router.push(`/siparis-gecmis/${s.id}?depotId=${selectedDepotId}`)}
+                          aria-label={`${s.recipientHospital} sevkiyat detaylarını görüntüle`}
                         >
                             <div className="text-left space-y-1">
                                 <p className="font-semibold">{s.recipientHospital}</p>
                                 <p className="text-xs text-muted-foreground">{s.timestamp ? formatDate(s.timestamp, 'dd MMM yyyy, HH:mm', { locale: tr }) : '-'}</p>
                             </div>
                             <div className="text-xs text-muted-foreground">
-                                Sip. Oluşturan: {allOrders[s.orderId]?.createdBy || 'Direkt Transfer'} <br/>
-                                Sevk Eden: {s.userName}
+                                <span>Sip. Oluşturan: {allOrders[s.orderId]?.createdBy || 'Direkt Transfer'}</span>
+                                <br aria-hidden="true" />
+                                <span>Sevk Eden: {s.userName}</span>
                             </div>
-                            <div className="font-medium">
+                            <div className="font-medium" aria-label={`Toplam ${s.items.reduce((sum, i) => sum + i.quantity, 0)} adet`}>
                                 {s.items.reduce((sum, i) => sum + i.quantity, 0)} Adet
                             </div>
                         </AccordionTrigger>
@@ -160,19 +193,37 @@ export default function SiparisGecmisPanel() {
         {totalPages > 1 && (
             <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t">
                  <div className="flex items-center space-x-2 text-sm">
-                    <span>Satır/sayfa:</span>
+                    <Label htmlFor="rows-per-page">Satır/sayfa:</Label>
                     <Select value={String(rowsPerPage)} onValueChange={val => { setRowsPerPage(Number(val)); setPage(1); }}>
-                    <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                    <SelectTrigger id="rows-per-page" className="w-20" aria-label="Sayfa başına satır sayısı">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                         {[20, 50, 100].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
                     </SelectContent>
                     </Select>
                 </div>
-                <div className="flex items-center space-x-1">
-                  <Button size="sm" variant="outline" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>Önceki</Button>
-                  <span className="text-sm px-2">Sayfa {page} / {totalPages}</span>
-                  <Button size="sm" variant="outline" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Sonraki</Button>
-                </div>
+                <nav className="flex items-center space-x-1" role="navigation" aria-label="Sayfalama">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    aria-label="Önceki sayfa"
+                  >
+                    Önceki
+                  </Button>
+                  <span className="text-sm px-2" aria-current="page">Sayfa {page} / {totalPages}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    aria-label="Sonraki sayfa"
+                  >
+                    Sonraki
+                  </Button>
+                </nav>
             </CardFooter>
         )}
       </Card>
