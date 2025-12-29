@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Check, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { toDateSafe } from '@/lib/date';
 import BackButton from '@/components/BackButton';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -71,7 +72,7 @@ export default function DepoSayimDetayPage() {
         <CardHeader>
           <CardTitle>Depo Sayım Detayı: {session.brand}</CardTitle>
           <CardDescription>
-            {session.createdByName} tarafından {session.closedAt ? format(session.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : ''} tarihinde tamamlandı.
+            {session.createdByName} tarafından {session.closedAt && toDateSafe(session.closedAt) ? format(toDateSafe(session.closedAt)!, 'dd.MM.yyyy HH:mm', { locale: tr }) : ''} tarihinde tamamlandı.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -83,8 +84,8 @@ export default function DepoSayimDetayPage() {
 
           <h3 className="text-lg font-semibold mt-6 mb-2">Seri Numarası Detayları</h3>
           <ScrollArea className="h-[50vh]">
-            <Accordion type="multiple" defaultValue={(session.scannedItems || []).map((item: any) => item.id)}>
-              {(session.scannedItems || []).map((group: any) => {
+            <Accordion type="multiple" defaultValue={(Array.isArray(session.scannedItems) ? session.scannedItems : []).map((item: any) => item.id)}>
+              {(Array.isArray(session.scannedItems) ? session.scannedItems : []).map((group: any) => {
                 const allSerialsInGroup = new Set(group.items.map((i: any) => i.seriNumarasi));
                 const scannedForGroup = new Set(group.scannedSerials || []);
                 return (
