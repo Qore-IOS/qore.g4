@@ -263,7 +263,7 @@ export default function AramaPanel() {
         stokAdi: sample.stokAdi,
         lotNumarasi: sample.lotNumarasi,
         miad: formatMiad(sample.miad),
-        islemTipi: 'Direkt Transfer',
+        islemTipi: 'Direkt Transfer' as const,
         actor: g.t.userName || '-',
         tarih: normDate(g.t.timestamp),
         adet: g.items.length,

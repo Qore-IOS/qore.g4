@@ -326,3 +326,6 @@ export async function autoPrintTutanakFromTransferId(
     printHtmlViaHiddenIframe(wrapForPrint(`Teslim Tutanağı - ${ctx.transferOrShipmentId}`, fallbackBody));
   }
 }
+
+// Re-export maybeAutoPrintTutanak from tutanak.ts for backward compatibility
+export { maybeAutoPrintTutanak } from './tutanak';
