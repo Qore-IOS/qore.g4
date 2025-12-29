@@ -184,8 +184,9 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     return (
       <div className="p-4">
         <BackButton fallback="/total-verimlilik/gecmis" />
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin" />
+        <div className="flex items-center justify-center h-64" role="status" aria-label="Yükleniyor">
+          <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+          <span className="sr-only">Kayıt detayları yükleniyor...</span>
         </div>
       </div>
     );
@@ -195,7 +196,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     return (
       <div className="p-4">
         <BackButton fallback="/total-verimlilik/gecmis" />
-        <div className="text-center py-8 text-muted-foreground">
+        <div className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">
           Kayıt bulunamadı.
         </div>
       </div>
@@ -203,7 +204,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
   }
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Geçmiş Detayı">
       <BackButton fallback="/total-verimlilik/gecmis" />
 
       <Card>
@@ -211,7 +212,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <CardTitle className="text-xl flex items-center gap-2">
-                <History className="h-6 w-6 text-primary" />
+                <History className="h-6 w-6 text-primary" aria-hidden="true" />
                 Total Verimlilik Geçmişi
               </CardTitle>
               <CardDescription className="mt-2 space-y-1">
@@ -334,22 +335,24 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
             )}
 
             <div className="flex gap-2">
-              <Button variant="outline" onClick={handleExportExcel}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
+              <Button variant="outline" onClick={handleExportExcel} aria-label="Excel dosyasına aktar">
+                <FileSpreadsheet className="h-4 w-4 mr-2" aria-hidden="true" />
                 Excel'e Aktar
               </Button>
               <Button
                 variant={showResultsOnly ? 'default' : 'outline'}
                 onClick={() => setShowResultsOnly(!showResultsOnly)}
+                aria-pressed={showResultsOnly}
+                aria-label={showResultsOnly ? "Tüm sütunları göster" : "Sadece sonuçları göster"}
               >
                 {showResultsOnly ? (
                   <>
-                    <EyeOff className="h-4 w-4 mr-2" />
+                    <EyeOff className="h-4 w-4 mr-2" aria-hidden="true" />
                     Tüm Sütunları Göster
                   </>
                 ) : (
                   <>
-                    <Eye className="h-4 w-4 mr-2" />
+                    <Eye className="h-4 w-4 mr-2" aria-hidden="true" />
                     Sadece Sonuçları Göster
                   </>
                 )}
@@ -359,13 +362,13 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
         </CardHeader>
         <CardContent>
           {record.rows.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">
               Bu kayıtta veri bulunmuyor.
             </div>
           ) : (
             <ScrollArea className="w-full">
               <div className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'}>
-                <Table>
+                <Table aria-label="Total verimlilik detay tablosu">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[180px] bg-muted/50 sticky left-0 z-10">

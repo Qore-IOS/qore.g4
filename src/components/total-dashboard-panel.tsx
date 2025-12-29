@@ -1,9 +1,35 @@
+/**
+ * @fileoverview Total Dashboard Panel Component
+ * @description Comprehensive dashboard for visualizing total efficiency metrics
+ * across all laboratories and efficiency pools. Provides KPI cards, trend analysis,
+ * comparative charts, and device fault tracking.
+ * @module components/total-dashboard-panel
+ * @version 1.0.0
+ *
+ * @features
+ * - Multi-pool efficiency overview with KPI cards
+ * - Period-based filtering (last 6 months default)
+ * - Pool and laboratory filtering
+ * - Stock accuracy and kit efficiency visualization
+ * - Cost and profit analysis with multi-currency support
+ * - Device fault tracking integration
+ * - Lab performance ranking
+ * - Trend indicators for efficiency changes
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Screen reader compatible data visualization
+ * - Keyboard accessible filters and controls
+ * - Semantic HTML structure
+ */
+
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { totalVerimlilikLogger } from '@/lib/logger';
 import type { Hospital, EfficiencyPool, DeviceFaultReport } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import {
@@ -612,7 +638,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         setSelectedPeriods(defaultPeriods);
 
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        totalVerimlilikLogger.error('Dashboard verileri yüklenirken hata oluştu', error);
         toast({ title: 'Hata', description: 'Veriler yüklenirken hata oluştu.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
@@ -956,17 +982,18 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex items-center justify-center h-96" role="status" aria-label="Yükleniyor">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+          <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden="true" />
           <p className="text-muted-foreground">Dashboard yükleniyor...</p>
+          <span className="sr-only">Dashboard verileri yükleniyor, lütfen bekleyin</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6 min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="p-6 space-y-6 min-h-screen bg-gray-50 dark:bg-gray-950" role="main" aria-label="Total Dashboard">
       <BackButton fallback="/total-verimlilik" />
 
       {/* Header */}
@@ -984,11 +1011,11 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap" role="group" aria-label="Dashboard filtreleri">
           {/* Pool Filter */}
           <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
-            <SelectTrigger className="w-[200px] bg-background">
-              <Layers className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectTrigger className="w-[200px] bg-background" aria-label="Verimlilik havuzu seçin">
+              <Layers className="h-4 w-4 mr-2 text-muted-foreground" aria-hidden="true" />
               <SelectValue placeholder="Havuz seçin..." />
             </SelectTrigger>
             <SelectContent>
@@ -1001,8 +1028,8 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
 
           {/* Lab Filter */}
           <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-            <SelectTrigger className="w-[200px] bg-background">
-              <FlaskConical className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectTrigger className="w-[200px] bg-background" aria-label="Laboratuvar seçin">
+              <FlaskConical className="h-4 w-4 mr-2 text-muted-foreground" aria-hidden="true" />
               <SelectValue placeholder="Laboratuvar seçin..." />
             </SelectTrigger>
             <SelectContent>
@@ -1016,19 +1043,19 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
           {/* Period Filter */}
           <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Calendar className="h-4 w-4" />
+              <Button variant="outline" className="gap-2" aria-label={`Dönem filtresi, ${selectedPeriods.size} dönem seçili`} aria-expanded={isFilterOpen}>
+                <Calendar className="h-4 w-4" aria-hidden="true" />
                 Dönem ({selectedPeriods.size})
-                {isFilterOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {isFilterOpen ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-72 p-4" align="end">
-              <div className="space-y-4">
+              <div className="space-y-4" role="group" aria-label="Dönem seçim paneli">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-medium">Dönem Seçimi</h4>
+                  <h4 className="font-medium" id="period-selection-title">Dönem Seçimi</h4>
                   <div className="flex gap-2">
-                    <Button variant="ghost" size="sm" onClick={selectAllPeriods}>Tümü</Button>
-                    <Button variant="ghost" size="sm" onClick={clearPeriods}>Temizle</Button>
+                    <Button variant="ghost" size="sm" onClick={selectAllPeriods} aria-label="Tüm dönemleri seç">Tümü</Button>
+                    <Button variant="ghost" size="sm" onClick={clearPeriods} aria-label="Seçimleri temizle">Temizle</Button>
                   </div>
                 </div>
                 <div className="space-y-2">

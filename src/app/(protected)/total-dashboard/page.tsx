@@ -1,3 +1,9 @@
+/**
+ * @fileoverview Total Dashboard Page
+ * @description Page wrapper for the Total Dashboard Panel component.
+ * @module app/total-dashboard/page
+ */
+
 'use client';
 
 import React from 'react';
@@ -10,8 +16,9 @@ export default function TotalDashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin" />
+      <div className="flex items-center justify-center h-64" role="status" aria-label="Yükleniyor">
+        <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+        <span className="sr-only">Total Dashboard yükleniyor...</span>
       </div>
     );
   }

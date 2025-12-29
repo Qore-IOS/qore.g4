@@ -123,13 +123,13 @@ export default function TotalVerimlilikGecmisPanel() {
   });
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Geçmişi">
       <BackButton fallback="/total-verimlilik" />
 
       <Card>
         <CardHeader>
           <CardTitle className="text-xl flex items-center gap-2">
-            <History className="h-6 w-6 text-primary" />
+            <History className="h-6 w-6 text-primary" aria-hidden="true" />
             Total Verimlilik Geçmişi
           </CardTitle>
           <CardDescription>
@@ -138,26 +138,28 @@ export default function TotalVerimlilikGecmisPanel() {
         </CardHeader>
         <CardContent>
           <div className="relative max-w-md mb-4">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <Input
               placeholder="Havuz adı, dönem veya kullanıcı ara..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-8"
+              aria-label="Geçmiş kayıtlarda ara"
             />
           </div>
 
           {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 className="h-8 w-8 animate-spin" />
+            <div className="flex items-center justify-center h-64" role="status" aria-label="Yükleniyor">
+              <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+              <span className="sr-only">Kayıtlar yükleniyor...</span>
             </div>
           ) : filteredRecords.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">
               {searchTerm ? 'Arama kriterine uygun kayıt bulunamadı.' : 'Henüz kaydedilmiş verimlilik hesabı yok.'}
             </div>
           ) : (
             <ScrollArea className="h-[60vh]">
-              <Table>
+              <Table aria-label="Total verimlilik geçmiş kayıtları tablosu">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-[200px]">Havuz</TableHead>
@@ -243,8 +245,8 @@ export default function TotalVerimlilikGecmisPanel() {
                       </TableCell>
                       <TableCell className="text-center">
                         <Link href={`/total-verimlilik/gecmis/${record.id}`}>
-                          <Button variant="outline" size="sm">
-                            <ChevronRight className="h-4 w-4 mr-1" />
+                          <Button variant="outline" size="sm" aria-label={`${record.poolName} - ${MONTHS[record.month]} ${record.year} kaydını görüntüle`}>
+                            <ChevronRight className="h-4 w-4 mr-1" aria-hidden="true" />
                             Görüntüle
                           </Button>
                         </Link>
