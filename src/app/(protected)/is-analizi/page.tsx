@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, ChangeEvent } from 'react';
+import type { DateRange } from 'react-day-picker';
 import {
     Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X, ChevronDown, ChevronUp, Trash2
 } from 'lucide-react';
@@ -178,9 +179,11 @@ export default function IsAnaliziPage() {
         }
     }, [filters.dateRange, filters.showAll, loadDataFromFirestore]);
 
-    const handleDateChange = (dateRange: { from: Date | undefined; to: Date | undefined }) => {
+    const handleDateChange = (dateRange: DateRange | undefined) => {
         // Tarih seçildiğinde showAll'ı kapat
-        setFilters({ dateRange, showAll: false });
+        if (dateRange) {
+            setFilters({ dateRange, showAll: false });
+        }
         // The useEffect above will handle the refetch
     };
 
