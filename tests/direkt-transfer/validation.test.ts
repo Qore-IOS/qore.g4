@@ -43,7 +43,7 @@ import {
   calculateRemainingStock,
   formatZodErrors,
   getValidationErrorMessage,
-} from '../../src/lib/direkt-transfer/validation.ts';
+} from '../../src/lib/direkt-transfer/validation.js';
 
 // =============================================================================
 // PATTERN TESTS
