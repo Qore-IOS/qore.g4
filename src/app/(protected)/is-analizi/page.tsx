@@ -501,7 +501,8 @@ export default function IsAnaliziPage() {
                                 />
                                 <Bar dataKey="normal" stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} onClick={(d) => handleHospitalClick(d.name)} cursor="pointer" name="Normal" />
                                 <Bar dataKey="emergency" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} onClick={(d) => handleHospitalClick(d.name)} cursor="pointer" name="Acil"
-                                    label={({ x, y, width, height, value, payload }: any) => {
+                                    label={(props: any) => {
+                                        const { x, y, width, height, payload } = props;
                                         if (payload?.emergencyRate > 0) {
                                             return (
                                                 <text x={x + width + 5} y={y + height / 2} fill="#ef4444" fontSize={10} dominantBaseline="middle">
@@ -509,7 +510,7 @@ export default function IsAnaliziPage() {
                                                 </text>
                                             );
                                         }
-                                        return null;
+                                        return <text />;
                                     }}
                                 />
                             </BarChart>
