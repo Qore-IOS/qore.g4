@@ -78,7 +78,7 @@ export default function DepoSayimPage() {
             setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
             setFullDepotStok(stockSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)));
 
-            if(depotList.length > 0 && !selectedDepotId) {
+            if(depotList.length > 0 && depotList[0].id && !selectedDepotId) {
                 setSelectedDepotId(depotList[0].id);
             }
         } catch (e) {
