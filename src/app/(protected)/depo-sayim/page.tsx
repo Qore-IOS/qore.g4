@@ -18,7 +18,8 @@ import { db } from '@/lib/firebase';
 import type { Depot, ProductCode, DepoStokItem, ConsumptionRecord, DepotStockCountSession } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import useHidScanner from '@/hooks/useHidScanner';
-import { playFeedback, generateId } from '@/lib/utils';
+import { playFeedback } from '@/lib/utils';
+import { nanoid } from 'nanoid';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -253,7 +254,7 @@ export default function DepoSayimPage() {
                     const newEntry: Omit<DepoStokItem, 'id'> = {
                         depotId: selectedDepotId, depotName, stokKodu: group.stokKodu, stokAdi: group.stokAdi,
                         lotNumarasi: group.lotNumarasi, miad: group.miad, eklenmeTarihi: new Date(), isShipped: false,
-                        irsaliyeNumarasi: 'SAYIMDAN_FAZLA', createdByName: currentUserProfile.name, seriNumarasi: `FAZLA-${generateId(6)}`,
+                        irsaliyeNumarasi: 'SAYIMDAN_FAZLA', createdByName: currentUserProfile.name, seriNumarasi: `FAZLA-${nanoid(6)}`,
                     };
                     batch.set(newDocRef, newEntry);
                 }
