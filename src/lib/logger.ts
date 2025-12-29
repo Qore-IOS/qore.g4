@@ -41,6 +41,10 @@ export type LogModule =
   | 'siparisler'
   | 'siparis-gecmis'
   | 'siparis-toplama'
+  | 'verimlilik-hesaplama'
+  | 'verimlilik-istatistik'
+  | 'verimlilik-gecmis'
+  | 'total-verimlilik'
   | 'auth'
   | 'firebase'
   | 'ocr'
@@ -434,7 +438,7 @@ class Logger {
 /**
  * Module-specific logger for convenience
  */
-class ModuleLogger {
+export class ModuleLogger {
   constructor(
     private logger: Logger,
     private module: LogModule
@@ -564,6 +568,26 @@ export const siparisGecmisLogger = createLogger('siparis-gecmis');
  * Siparis Toplama (Order Picking) module logger
  */
 export const siparisToplamaLogger = createLogger('siparis-toplama');
+
+/**
+ * Verimlilik Hesaplama (Efficiency Calculation) module logger
+ */
+export const verimlilikHesaplamaLogger = createLogger('verimlilik-hesaplama');
+
+/**
+ * Verimlilik Istatistik (Efficiency Statistics) module logger
+ */
+export const verimlilikIstatistikLogger = createLogger('verimlilik-istatistik');
+
+/**
+ * Verimlilik Gecmis (Efficiency History) module logger
+ */
+export const verimlilikGecmisLogger = createLogger('verimlilik-gecmis');
+
+/**
+ * Total Verimlilik (Total Efficiency) module logger
+ */
+export const totalVerimlilikLogger = createLogger('total-verimlilik');
 
 // =============================================================================
 // UTILITY FUNCTIONS

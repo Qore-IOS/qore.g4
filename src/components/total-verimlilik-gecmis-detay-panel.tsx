@@ -1,9 +1,30 @@
+/**
+ * @fileoverview Total Verimlilik Geçmiş Detay (Total Efficiency History Detail) Panel
+ * @description Displays detailed view of a saved total efficiency calculation record
+ * with full table data, efficiency metrics visualization, and export capabilities.
+ * @module components/total-verimlilik-gecmis-detay-panel
+ * @version 1.0.0
+ *
+ * @features
+ * - Full table view with all efficiency columns
+ * - Results-only view toggle
+ * - Efficiency metrics visualization with circular charts
+ * - Excel export functionality
+ * - Column 22 box loss calculation with mode toggle
+ *
+ * @accessibility
+ * - ARIA labels for charts and tables
+ * - Screen reader compatible data display
+ * - Keyboard accessible toggle buttons
+ */
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -109,7 +130,9 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
           });
         }
       } catch (error) {
-        console.error('Error fetching record:', error);
+        totalVerimlilikLogger.error('Total verimlilik detay kaydı yüklenemedi', error, {
+          recordId,
+        });
         toast({
           title: 'Hata',
           description: 'Kayıt yüklenirken bir hata oluştu.',

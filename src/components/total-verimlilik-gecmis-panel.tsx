@@ -1,9 +1,30 @@
+/**
+ * @fileoverview Total Verimlilik Geçmişi (Total Efficiency History) Panel
+ * @description Displays saved total efficiency calculation history with pool-based
+ * filtering, efficiency metrics visualization, and navigation to detail views.
+ * @module components/total-verimlilik-gecmis-panel
+ * @version 1.0.0
+ *
+ * @features
+ * - List of saved total efficiency calculations
+ * - Search by pool name, period, or user
+ * - Efficiency score visualization with color coding
+ * - Row count display
+ * - Navigation to detail view
+ *
+ * @accessibility
+ * - ARIA labels for search and navigation
+ * - Screen reader compatible table
+ * - Keyboard accessible buttons
+ */
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -75,7 +96,7 @@ export default function TotalVerimlilikGecmisPanel() {
 
         setRecords(fetchedRecords);
       } catch (error) {
-        console.error('Error fetching records:', error);
+        totalVerimlilikLogger.error('Total verimlilik geçmiş kayıtları yüklenemedi', error);
         toast({
           title: 'Hata',
           description: 'Geçmiş kayıtlar yüklenemedi.',
