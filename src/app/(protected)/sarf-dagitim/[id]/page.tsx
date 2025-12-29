@@ -64,7 +64,7 @@ export default function SarfDagilimDetayPage() {
   const { toast } = useToast();
   const router = useRouter();
   const params = useParams();
-  const hospitalId = params.id as string;
+  const hospitalId = (params?.id as string) ?? '';
   const { currentUser, currentUserProfile } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
