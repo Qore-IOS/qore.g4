@@ -108,8 +108,8 @@ export default function DepoSayimPage() {
             const product = productCodes.find(p => p.stokKodu === item.stokKodu);
             acc[key] = {
               id: key,
-              stokKodu: item.stokKodu,
-              stokAdi: item.stokAdi,
+              stokKodu: item.stokKodu || '',
+              stokAdi: item.stokAdi || '',
               lotNumarasi: item.lotNumarasi || '',
               miad: item.miad as string || '',
               trackingMode: product ? resolveDefaultTrackingMode(product as any) : 'serial',
