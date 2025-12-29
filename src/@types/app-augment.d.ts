@@ -415,6 +415,37 @@ declare module "@/lib/types" {
     slots: DeviceGroupSlot[];
   }
 
+  export interface DeviceFaultReport {
+    id: string;
+    labId: string;
+    labName: string;
+    groupId: string;
+    groupName: string;
+    deviceId: string;
+    model: string;
+    serial: string;
+    orderInGroup: number;
+    description: string;
+    status: 'open' | 'closed';
+    faultType: 'teknik_servis' | 'aplikasyon';
+    openedAt: Date | null;
+    openedBy: string;
+    openedByName: string;
+    closedAt: Date | null;
+    closedBy?: string;
+    closedByName?: string;
+    source: string;
+    isEjectedKitFault?: boolean;
+    productStokKodu?: string;
+    productStokAdi?: string;
+    productCihazGrubu?: string;
+    kitResolution?: 'imha' | 'tekrar_kullanim' | null;
+    ejectedKitRecordId?: string;
+    testCount?: number;
+    title?: string;
+    closeDescription?: string;
+  }
+
   export interface CihazUstuStokInput {
     deviceId?: ID;
     productCodeId?: ID;
@@ -592,6 +623,17 @@ declare module "@/lib/types" {
     linkedProductCode: string; // stokKodu
   }
 
+  export interface LabPool {
+    id: string;
+    name: string;
+    memberIds: string[];
+    active: boolean;
+    createdAt: any;
+    createdByUid: string;
+    createdByName: string;
+    mainLabId?: string;
+  }
+
   export interface EventRow {
     id: string;
     stokKodu: string;
@@ -604,5 +646,128 @@ declare module "@/lib/types" {
     adet: number;
     seriNolar: string[];
     konum: string;
+  }
+
+  // ManualProductOption
+  export type ManualProductOption = {
+    code: string;
+    name: string;
+    tracking: 'serial' | 'lot_barcode' | 'lot_manual' | 'qty_barcode' | 'qty_manual';
+  };
+
+  // GridDefinition
+  export interface CellDef {
+    row: number;
+    col: number;
+    merged?: boolean;
+    stokKodu?: string;
+    products?: string[];
+  }
+
+  export interface GridDefinition {
+    rows: number;
+    cols: number;
+    cells: CellDef[];
+  }
+
+  // DailyConsumptionStats
+  export interface DailyConsumptionStats {
+    id: string;
+    date: string;
+    totalCount: number;
+    byLab: Record<string, number>;
+    createdAt?: TimestampLike;
+    updatedAt?: TimestampLike;
+  }
+
+  // EfficiencyPool
+  export interface EfficiencyPool {
+    id: string;
+    name: string;
+    memberIds: string[];
+    centerLabId?: string;
+    active: boolean;
+    createdAt: any;
+    createdByUid: string;
+    createdByName: string;
+  }
+
+  // EjectedKitRecord
+  export interface EjectedKitRecord {
+    id: string;
+    laboratoryId: string;
+    laboratoryName: string;
+    deviceId: string;
+    deviceModel: string;
+    deviceSerial: string;
+    deviceImageUrl: string;
+    stokKodu: string;
+    stokAdi: string;
+    cihazGrubu?: string;
+    quantityType: 'kutu' | 'test';
+    testCount: number;
+    aciklama: string;
+    createdAt: TimestampLike;
+    createdByUid: string;
+    createdByName: string;
+    faultReportId: string;
+  }
+
+  // DestroyedKitRecord
+  export interface DestroyedKitRecord {
+    id: string;
+    ejectedKitRecordId: string | null;
+    faultReportId: string | null;
+    laboratoryId: string | null;
+    laboratoryName: string;
+    depotId?: string | null;
+    depotName?: string;
+    deviceId: string | null;
+    deviceModel: string;
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi?: string;
+    miad?: string;
+    seriNumarasi?: string;
+    testCount: number;
+    remainingTests?: number;
+    aciklama: string;
+    resolvedAt: TimestampLike;
+    resolvedByUid: string;
+    resolvedByName: string;
+    sourceType?: 'barcode' | 'excel' | 'fault';
+  }
+
+  // TrashBinRecord
+  export interface TrashBinRecord {
+    id: string;
+    laboratoryId: string;
+    laboratoryName: string;
+    deviceId: string;
+    deviceModel: string;
+    deviceSerialNumber: string;
+    stokKodu: string;
+    stokAdi: string;
+    remainingTests: number;
+    createdAt: TimestampLike;
+    createdByUid: string;
+    createdByName: string;
+    sourceType: 'manual';
+  }
+
+  // Rack
+  export interface Rack {
+    id: string;
+    labId: string;
+    labCode: string;
+    fridgeCode: string;
+    date: string;
+    sequence: number;
+    status: 'open' | 'sealed';
+    specimens?: string[];
+    specimenCount?: number;
+    sealedAt?: any;
+    createdAt?: any;
+    [k: string]: any;
   }
 }

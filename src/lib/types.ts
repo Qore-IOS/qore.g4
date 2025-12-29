@@ -414,6 +414,9 @@ export interface DeviceFaultReport {
   kitResolution?: 'imha' | 'tekrar_kullanim' | null;
   ejectedKitRecordId?: string;
   testCount?: number;
+  // Additional fields
+  title?: string;
+  closeDescription?: string;
 }
 
 
