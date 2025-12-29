@@ -160,12 +160,13 @@ export default function DepoSayimPage() {
                     toast({ title: 'Seri No Eksik', description: 'Bu ürün seri numarası ile takip ediliyor, barkod seri no içermiyor.', variant: 'destructive' });
                     return prevItems;
                 }
-                if (group.scannedSerials.has(parsed.seriNumarasi)) {
+                const seriNo = parsed.seriNumarasi as string;
+                if (group.scannedSerials.has(seriNo)) {
                     playFeedback(true);
                     toast({ title: 'Tekrar', description: 'Bu seri numarası zaten okutuldu.', variant: 'default' });
                     return prevItems;
                 }
-                group.scannedSerials = new Set(group.scannedSerials).add(parsed.seriNumarasi);
+                group.scannedSerials = new Set(group.scannedSerials).add(seriNo);
                 // For serial tracked, scannedAdet is the size of the set
                 group.scannedAdet = group.scannedSerials.size;
             } else {
