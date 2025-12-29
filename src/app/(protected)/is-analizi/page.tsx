@@ -182,7 +182,10 @@ export default function IsAnaliziPage() {
     const handleDateChange = (dateRange: DateRange | undefined) => {
         // Tarih seçildiğinde showAll'ı kapat
         if (dateRange) {
-            setFilters({ dateRange, showAll: false });
+            setFilters({
+                dateRange: { from: dateRange.from, to: dateRange.to ?? undefined },
+                showAll: false
+            });
         }
         // The useEffect above will handle the refetch
     };
