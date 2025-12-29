@@ -41,13 +41,22 @@ export default function GecmisRafDetayPage() {
       const rackSnap = await getDoc(rackRef);
       if (rackSnap.exists()) {
         const data = rackSnap.data();
-        setRack({
+        const rackData: Rack = {
+          ...(data as Omit<Rack, 'id' | 'specimens' | 'separatedSpecimens' | 'sealedAt'>),
           id: rackSnap.id,
-          ...data,
+          labId: data.labId || '',
+          labCode: data.labCode || '',
+          fridgeCode: data.fridgeCode || '',
+          date: data.date || new Date().toISOString().split('T')[0],
+          labName: data.labName || '',
+          sealedBy: data.sealedBy || '',
           specimens: data.specimens || [],
           separatedSpecimens: data.separatedSpecimens || {},
           sealedAt: data.sealedAt?.toDate ? data.sealedAt.toDate() : new Date(),
-        } as Rack);
+          sequence: data.sequence || 0,
+          status: data.status || 'sealed',
+        };
+        setRack(rackData);
       } else {
         toast({ title: 'Hata', description: 'Raf detayı bulunamadı.', variant: 'destructive' });
         router.push('/numune-arsivi/gecmis');
@@ -77,7 +86,8 @@ export default function GecmisRafDetayPage() {
     if (!rack || !separationMode) return;
     
     const specimenId = barcode.trim();
-    const specimenIndex = rack.specimens.indexOf(specimenId);
+    const specimens = rack.specimens || [];
+    const specimenIndex = specimens.indexOf(specimenId);
 
     if (specimenIndex === -1) {
       toast({ title: 'Bulunamadı', description: `Numune (${specimenId}) bu rafta değil.`, variant: 'default' });
@@ -101,7 +111,7 @@ export default function GecmisRafDetayPage() {
       // Update local state to reflect change immediately
       setRack(prev => {
         if (!prev) return null;
-        const newSpecimens = prev.specimens.filter(s => s !== specimenId);
+        const newSpecimens = (prev.specimens || []).filter(s => s !== specimenId);
         const newSeparated = {
           ...prev.separatedSpecimens,
           [specimenId]: { position: originalPosition, separatedAt: new Date() }

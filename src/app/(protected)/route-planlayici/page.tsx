@@ -473,7 +473,7 @@ export default function RoutePlanlayiciPage() {
             <Select value={viewDriverId} onValueChange={setViewDriverId}>
               <SelectTrigger className="w-full sm:w-[200px] md:w-[240px]"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
               <SelectContent>
-                {drivers.map(d => (<SelectItem key={d.id} value={d.id}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
+                {drivers.filter(d => d.id).map(d => (<SelectItem key={d.id} value={d.id!}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
               </SelectContent>
             </Select>
           </div>
@@ -547,7 +547,7 @@ export default function RoutePlanlayiciPage() {
                   <Select value={planDriverId} onValueChange={setPlanDriverId}>
                     <SelectTrigger className="mt-1 text-xs sm:text-sm"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
                     <SelectContent>
-                      {drivers.map(d => (<SelectItem key={d.id} value={d.id}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
+                      {drivers.filter(d => d.id).map(d => (<SelectItem key={d.id} value={d.id!}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
                     </SelectContent>
                   </Select>
                 </div>

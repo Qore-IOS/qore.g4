@@ -254,9 +254,9 @@ export default function ToplamaPage() {
         const pickingListItems: PickingListItemType[] = [];
         const availableWarehouseStock = depoStokData;
 
-        for (const orderItem of orderData.items) {
+        for (const orderItem of (orderData.items || [])) {
           const productInfo = productsData.find(p => p.stokKodu === orderItem.stokKodu);
-          let neededForThisOrderItem = orderItem.adet;
+          let neededForThisOrderItem = orderItem.adet ?? 0;
           const availableItemsForProduct = availableWarehouseStock
             .filter(ds => ds.stokKodu === orderItem.stokKodu)
             .sort((a,b) => {
@@ -266,8 +266,9 @@ export default function ToplamaPage() {
             });
           
           if (availableItemsForProduct.length === 0) {
+            const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
             pickingListItems.push({
-              id: generateId(), orderId: orderData.id, stokKodu: orderItem.stokKodu, stokAdi: orderItem.stokAdi, lotNumarasi: 'STOK YOK', miad: '-', rafAdresiOnerilen: '-', adetIstenen: orderItem.adet, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu)?.imageUrl,
+              id: generateId(), orderId: orderData.id, stokKodu: orderItem.stokKodu || '', stokAdi: orderItem.stokAdi || '', lotNumarasi: 'STOK YOK', miad: '-', rafAdresiOnerilen: '-', adetIstenen: orderItem.adet ?? 0, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
             } as any);
             continue;
           }
@@ -288,16 +289,17 @@ export default function ToplamaPage() {
           });
             
           for (const groupKey of sortedGroupKeys) {
-            if (neededForThisOrderItem <= 0) break;
+            if ((neededForThisOrderItem ?? 0) <= 0) break;
             const itemsInGroup = stockGroups[groupKey];
-            const itemsToTakeCount = Math.min(neededForThisOrderItem, itemsInGroup.length);
-                
+            const itemsToTakeCount = Math.min(neededForThisOrderItem ?? 0, itemsInGroup.length);
+
             if (itemsToTakeCount > 0) {
               const firstItem = itemsInGroup[0];
+              const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
               pickingListItems.push({
-                id: generateId(), orderId: orderData.id, stokKodu: firstItem.stokKodu, stokAdi: productInfo?.stokAdi || firstItem.stokAdi, lotNumarasi: firstItem.lotNumarasi, miad: firstItem.miad as string, rafAdresiOnerilen: firstItem.rafAdresi, adetIstenen: itemsToTakeCount, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu)?.imageUrl,
+                id: generateId(), orderId: orderData.id, stokKodu: firstItem.stokKodu || '', stokAdi: productInfo?.stokAdi || firstItem.stokAdi || '', lotNumarasi: firstItem.lotNumarasi || '', miad: (firstItem.miad as string) || '', rafAdresiOnerilen: firstItem.rafAdresi || '', adetIstenen: itemsToTakeCount, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
               } as any);
-              neededForThisOrderItem -= itemsToTakeCount;
+              neededForThisOrderItem = (neededForThisOrderItem ?? 0) - itemsToTakeCount;
             }
           }
         }
@@ -308,24 +310,24 @@ export default function ToplamaPage() {
           : hospitalsData.find(h => h.name === orderData.kurumAdi || h.ad === orderData.kurumAdi);
 
         // Check if hospital has custom product order
-        const customOrder = targetHospitalForSort?.customProductOrder;
+        const customOrder = (targetHospitalForSort as any)?.customProductOrder as string[] | undefined;
 
         if (customOrder && customOrder.length > 0) {
           // Use custom product order
           const orderMap = new Map<string, number>();
-          customOrder.forEach((code, idx) => {
+          customOrder.forEach((code: string, idx: number) => {
             orderMap.set(code, idx);
           });
 
           pickingListItems.sort((a, b) => {
-            const orderA = orderMap.has(a.stokKodu) ? orderMap.get(a.stokKodu)! : 99999;
-            const orderB = orderMap.has(b.stokKodu) ? orderMap.get(b.stokKodu)! : 99999;
+            const orderA = orderMap.has(a.stokKodu || '') ? orderMap.get(a.stokKodu || '')! : 99999;
+            const orderB = orderMap.has(b.stokKodu || '') ? orderMap.get(b.stokKodu || '')! : 99999;
             if (orderA !== orderB) return orderA - orderB;
             // Fallback to device group + name sort for items not in custom order
             const groupA = (a as any).cihazGrubu || 'zzz';
             const groupB = (b as any).cihazGrubu || 'zzz';
             if (groupA !== groupB) return groupA.localeCompare(groupB);
-            return a.stokAdi.localeCompare(b.stokAdi);
+            return (a.stokAdi || '').localeCompare(b.stokAdi || '');
           });
         } else {
           // Default sorting: cihazGrubu then stokAdi alphabetically
@@ -335,7 +337,7 @@ export default function ToplamaPage() {
             if (groupA !== groupB) {
               return groupA.localeCompare(groupB);
             }
-            return a.stokAdi.localeCompare(b.stokAdi);
+            return (a.stokAdi || '').localeCompare(b.stokAdi || '');
           });
         }
 
@@ -376,7 +378,7 @@ export default function ToplamaPage() {
                  toast({ title: 'Hata', description: `Bu ürün (${stockItem.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
                  return;
             }
-            addScannedSerial(stockItem.stokKodu, code);
+            addScannedSerial(stockItem.stokKodu || '', code);
         } else {
             toast({ title: 'Hata', description: 'Barkod formatı geçersiz veya tanınmıyor.', variant: 'destructive' });
         }
@@ -399,7 +401,7 @@ export default function ToplamaPage() {
   
     const mode = resolveDefaultTrackingMode(product as any);
   
-    if (mode === 'serial' || mode === 'serial_and_lot') {
+    if (mode === 'serial' || (mode as string) === 'serial_and_lot') {
       if (!seriNumarasi) {
         toast({ title: 'Hata', description: 'Seri no takipli ürün için barkod seri no içermiyor.', variant: 'destructive' });
         return;
@@ -415,7 +417,7 @@ export default function ToplamaPage() {
         toast({ title: 'Uyarı', description: 'Bu seri numarası zaten okutulmuş.', variant: 'default' });
         return;
       }
-      const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + item.adetIstenen, 0);
+      const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + (item.adetIstenen ?? 0), 0);
       const currentScannedForProduct = scannedSerials[stokKodu] || [];
       if (currentScannedForProduct.length >= totalNeededForProduct) {
         toast({ title: 'Uyarı', description: `Bu ürün için istenen adete ulaşıldı.`, variant: 'default' });
@@ -435,7 +437,7 @@ export default function ToplamaPage() {
     } else { // Lot/Quantity logic
         const groupToIncrement = pickingList.find(pl => 
             pl.stokKodu === stokKodu &&
-            (scannedSerials[stokKodu] || []).filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < pl.adetIstenen
+            (scannedSerials[stokKodu] || []).filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < (pl.adetIstenen ?? 0)
         );
 
         if (!groupToIncrement) {
@@ -508,8 +510,8 @@ export default function ToplamaPage() {
       const shipmentItems: ShipmentItem[] = [];
       const shippedQuantities: Record<string, number> = {};
   
-      itemsToShip.forEach(item => {
-          const key = item.stokKodu;
+      itemsToShip.filter(item => item.stokKodu).forEach(item => {
+          const key = item.stokKodu!;
           shippedQuantities[key] = (shippedQuantities[key] || 0) + 1;
       });
   
@@ -540,8 +542,8 @@ export default function ToplamaPage() {
       };
       batch.set(shipmentDocRef, { ...newShipment, timestamp: Timestamp.fromDate(newShipment.timestamp as Date) });
     
-      itemsToShip.forEach(item => {
-          const stokRef = doc(db, 'depoStok', item.id);
+      itemsToShip.filter(item => item.id).forEach(item => {
+          const stokRef = doc(db, 'depoStok', item.id!);
           batch.update(stokRef, {
               isShipped: true,
               hedefKurum: order.kurumAdi,
@@ -550,22 +552,22 @@ export default function ToplamaPage() {
           });
       });
     
-      const remainingItems = order.items.map(item => {
-          const shippedCount = shippedQuantities[item.stokKodu] || 0;
+      const remainingItems = (order.items || []).map(item => {
+          const shippedCount = item.stokKodu ? (shippedQuantities[item.stokKodu] || 0) : 0;
           return {
               ...item,
-              adet: item.adet - shippedCount,
+              adet: (item.adet ?? 0) - shippedCount,
           };
       }).filter(item => item.adet > 0);
   
-      if (remainingItems.length === 0) {
+      if (remainingItems.length === 0 && order.id) {
           batch.update(doc(db, 'orders', order.id), {
               status: 'completed',
               transferredAt: serverTimestamp(),
               transferredById: currentUser?.uid,
               transferredBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı'
           });
-      } else {
+      } else if (order.id) {
           batch.update(doc(db, 'orders', order.id), {
               items: remainingItems,
               status: 'toplaniyor'

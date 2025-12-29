@@ -59,8 +59,8 @@ export default function SarfTalepGecmisPage() {
             <p className="text-center text-muted-foreground py-8">Geçmiş talep bulunamadı.</p>
           ) : (
             <Accordion type="single" collapsible className="w-full">
-              {requests.map(req => (
-                <AccordionItem key={req.id} value={req.id}>
+              {requests.filter(req => req.id).map(req => (
+                <AccordionItem key={req.id} value={req.id!}>
                   <AccordionTrigger
                     className="flex justify-between items-center hover:no-underline p-4"
                     onClick={() => router.push(`/sarf-dagitim/gecmis/${req.id}`)}
@@ -74,7 +74,7 @@ export default function SarfTalepGecmisPage() {
                         Talebi Açan: {req.createdBy || '-'}
                         </div>
                         <div className="font-medium">
-                        {(req.items || []).reduce((sum, i) => sum + i.adet, 0)} Adet
+                        {(req.items || []).reduce((sum, i) => sum + (i.adet ?? 0), 0)} Adet
                         </div>
                         {req.status === 'completed' && (
                             <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-600">
