@@ -5,7 +5,8 @@
  * @version 1.0.0
  */
 
-import type { DepoStokItem, Hospital, Depot, ProductCode, TimestampLike, TrackingMode } from '@/lib/types';
+import type { DepoStokItem, Hospital, Depot, ProductCode, TimestampLike } from '@/lib/types';
+import type { TrackingMode } from '@/lib/tracking';
 
 // ============================================================================
 // CORE TRANSFER TYPES

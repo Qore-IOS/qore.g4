@@ -1,3 +1,11 @@
+/**
+ * @fileoverview Consumption Statistics Panel Component
+ * @description Enterprise-grade panel for viewing and analyzing product consumption
+ * statistics with filtering, sorting, pagination, and monthly average calculations.
+ * @module components/urun-kullanim-istatistik-panel
+ * @version 2.0.0
+ */
+
 'use client';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import type { Hospital, ProductCode, ConsumptionRecord, DepoStokItem } from '@/lib/types';
@@ -16,18 +24,32 @@ import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DateRange } from 'react-day-picker';
 import TimestampText from './TimestampText';
+import { tuketimIstatistikLogger } from '@/lib/logger';
 
 
+/**
+ * Monthly average consumption data structure
+ */
 interface MonthlyAverage {
+  /** Stock code */
   stokKodu: string;
+  /** Stock name */
   stokAdi: string;
+  /** Average monthly consumption */
   ortalamaAylikTuketim: number;
+  /** Total consumption in period */
   toplamTuketim: number;
+  /** Number of months with consumption */
   aySayisi: number;
 }
 
+/** Sort keys for consumption table */
 type SortKey = 'consumptionTimestamp' | 'stokKodu' | 'stokAdi' | 'lotNumarasi' | 'seriNumarasi' | 'userName';
 
+/**
+ * Sortable table header component
+ * Displays column header with sort indicator and click handler
+ */
 const SortableHeader: React.FC<{
   label: string;
   sortKey: SortKey;
@@ -37,22 +59,55 @@ const SortableHeader: React.FC<{
 }> = ({ label, sortKey, currentSortKey, sortOrder, setSort }) => {
   const isActive = currentSortKey === sortKey;
   return (
-    <TableHead onClick={() => setSort(sortKey)} className="cursor-pointer hover:bg-muted/50">
+    <TableHead
+      onClick={() => setSort(sortKey)}
+      className="cursor-pointer hover:bg-muted/50"
+      role="columnheader"
+      aria-sort={isActive ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSort(sortKey); }}
+    >
       <div className="flex items-center gap-1">
         {label}
-        {isActive && (sortOrder === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+        {isActive && (sortOrder === 'asc' ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />)}
       </div>
     </TableHead>
   );
 };
 
+/**
+ * Props for TuketimIstatistikleriPanel component
+ */
 interface TuketimIstatistikleriPanelProps {
+  /** List of hospitals/laboratories */
   hospitals: Hospital[];
+  /** List of product codes */
   productCodes: ProductCode[];
+  /** Consumption records */
   urunKullanimKayitlari: ConsumptionRecord[];
+  /** Toast notification function */
   toast: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void;
 }
 
+/**
+ * Consumption Statistics Panel Component
+ *
+ * Displays consumption records with filtering, sorting, and pagination.
+ * Provides monthly average calculations for consumption analysis.
+ *
+ * @param props - Component props
+ * @returns Statistics panel component
+ *
+ * @example
+ * ```tsx
+ * <TuketimIstatistikleriPanel
+ *   hospitals={hospitals}
+ *   productCodes={productCodes}
+ *   urunKullanimKayitlari={consumptionRecords}
+ *   toast={toast}
+ * />
+ * ```
+ */
 export default function TuketimIstatistikleriPanel({
   hospitals,
   productCodes,
@@ -127,13 +182,20 @@ export default function TuketimIstatistikleriPanel({
   }, [selectedHospitalId, filterStokKoduAdi, dateRange, rowsPerPage]);
   
 
+  /**
+   * Calculates monthly average consumption for all products
+   * Groups consumption by month and calculates averages per product
+   */
   const calculateMonthlyAverages = useCallback(() => {
+    const startTime = performance.now();
+
     if (filteredData.length === 0) {
+      tuketimIstatistikLogger.debug('Aylık ortalama hesaplaması - veri yok');
       setMonthlyAverages([]);
       setIsAverageModalOpen(true);
       return;
     }
-    
+
     const consumptionsByProduct: Record<string, { total: number; months: Set<string> }> = {};
     filteredData.forEach(record => {
       const consumptionDate = new Date(record.consumptionTimestamp);
@@ -160,6 +222,12 @@ export default function TuketimIstatistikleriPanel({
       };
     }).sort((a,b) => a.stokAdi.localeCompare(b.stokAdi));
 
+    const duration = performance.now() - startTime;
+    tuketimIstatistikLogger.performance('Aylık ortalamalar hesaplandı', duration, {
+      productCount: averages.length,
+      recordsProcessed: filteredData.length,
+    });
+
     setMonthlyAverages(averages);
     setIsAverageModalOpen(true);
   }, [filteredData, productCodes]);
@@ -182,22 +250,31 @@ export default function TuketimIstatistikleriPanel({
 
 
   return (
-    <div className="space-y-6">
-      <Card className="shadow-md rounded-lg">
+    <div className="space-y-6" role="main" aria-label="Tüketim istatistikleri paneli">
+      <Card className="shadow-md rounded-lg" role="region" aria-labelledby="stats-title">
         <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div>
-            <CardTitle className="text-xl flex items-center"><LineChart className="mr-2 h-6 w-6 text-primary" />Tüketim İstatistikleri</CardTitle>
+            <CardTitle id="stats-title" className="text-xl flex items-center">
+              <LineChart className="mr-2 h-6 w-6 text-primary" aria-hidden="true" />
+              Tüketim İstatistikleri
+            </CardTitle>
             <CardDescription>Laboratuvar bazlı ürün tüketim geçmişi ve analizleri.</CardDescription>
           </div>
-          <Button onClick={calculateMonthlyAverages} variant="outline" className="rounded-md" disabled={!selectedHospitalId}>
-            <BarChartHorizontalBig className="mr-2 h-4 w-4" /> Aylık Ortalama Tüketim
+          <Button
+            onClick={calculateMonthlyAverages}
+            variant="outline"
+            className="rounded-md"
+            disabled={!selectedHospitalId}
+            aria-label="Aylık ortalama tüketim hesapla"
+          >
+            <BarChartHorizontalBig className="mr-2 h-4 w-4" aria-hidden="true" /> Aylık Ortalama Tüketim
           </Button>
         </CardHeader>
         <CardContent>
           <div className="mb-4">
             <label htmlFor="laboratory-select-stats" className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
             <Select value={selectedHospitalId} onValueChange={setSelectedHospitalId}>
-              <SelectTrigger id="laboratory-select-stats" className="w-full md:w-1/2 lg:w-1/3 rounded-md">
+              <SelectTrigger id="laboratory-select-stats" className="w-full md:w-1/2 lg:w-1/3 rounded-md" aria-label="Analiz için laboratuvar seçin">
                 <SelectValue placeholder="Analiz için laboratuvar seçin..." />
               </SelectTrigger>
               <SelectContent>
@@ -209,8 +286,11 @@ export default function TuketimIstatistikleriPanel({
           </div>
 
           {selectedHospitalId && (
-            <Card className="border-border dark:border-input rounded-lg p-4 mt-4">
-              <CardTitle className="text-lg mb-3 flex items-center"><Filter className="mr-2 h-5 w-5 text-foreground/80" />Filtreler</CardTitle>
+            <Card className="border-border dark:border-input rounded-lg p-4 mt-4" role="region" aria-label="Filtreler ve sonuçlar">
+              <CardTitle className="text-lg mb-3 flex items-center">
+                <Filter className="mr-2 h-5 w-5 text-foreground/80" aria-hidden="true" />
+                Filtreler
+              </CardTitle>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                 <div>
                   <label htmlFor="filter-stok" className="block text-sm font-medium mb-1">Stok Kodu/Adı</label>
@@ -230,8 +310,8 @@ export default function TuketimIstatistikleriPanel({
                         <label htmlFor="filter-start-date" className="block text-sm font-medium mb-1">Tarih Aralığı</label>
                         <DatePickerWithRange date={dateRange} setDate={setDateRange} className="w-full"/>
                     </div>
-                     <Button onClick={clearFilters} variant="ghost" className="rounded-md self-end mt-2 sm:mt-0">
-                        <X className="mr-2 h-4 w-4" /> Temizle
+                     <Button onClick={clearFilters} variant="ghost" className="rounded-md self-end mt-2 sm:mt-0" aria-label="Filtreleri temizle">
+                        <X className="mr-2 h-4 w-4" aria-hidden="true" /> Temizle
                     </Button>
                 </div>
               </div>
@@ -240,9 +320,9 @@ export default function TuketimIstatistikleriPanel({
               
                 <>
                 <ScrollArea className="h-[500px] border rounded-md">
-                  <Table>
+                  <Table aria-label="Tüketim kayıtları tablosu">
                     <TableHeader>
-                      <TableRow>
+                      <TableRow role="row">
                         <SortableHeader label="Stok Kodu" sortKey="stokKodu" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort}/>
                         <SortableHeader label="Stok Adı" sortKey="stokAdi" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort}/>
                         <SortableHeader label="Lot No" sortKey="lotNumarasi" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort}/>

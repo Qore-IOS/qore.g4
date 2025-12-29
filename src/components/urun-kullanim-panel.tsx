@@ -1,3 +1,10 @@
+/**
+ * @fileoverview Product Usage Panel Component
+ * @description Enterprise-grade product usage panel for barcode scanning,
+ * stock deduction, manual consumption, and trash bin operations in laboratory environments.
+ * @module components/urun-kullanim-panel
+ * @version 2.0.0
+ */
 
 'use client';
 import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
@@ -31,15 +38,22 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices } from '@/hooks/useFirebaseQueries';
 import { incrementTodayStats } from '@/lib/dailyConsumptionStats';
+import { urunKullanimLogger } from '@/lib/logger';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>,
 });
 
-const logSerialHistory = async (seriNo: string, type: string, details: any) => {
+/**
+ * Logs serial number history to Firestore
+ * @param seriNo - Serial number to log
+ * @param type - Event type (consumption, transfer, etc.)
+ * @param details - Event details
+ */
+const logSerialHistory = async (seriNo: string, type: string, details: Record<string, unknown>) => {
     if (!seriNo) {
-        console.warn("Attempted to log history for an empty serial number.");
+        urunKullanimLogger.warn('Boş seri numarası için geçmiş kaydı atlandı', { type });
         return;
     }
     const historyRef = collection(db, `serialHistory/${seriNo}/events`);
@@ -144,14 +158,6 @@ export default function UrunKullanimPanel() {
     };
   }, []);
 
-  // Debug: Watch trash product selection changes
-  useEffect(() => {
-    console.log('🔄 selectedTrashProduct changed to:', selectedTrashProduct);
-  }, [selectedTrashProduct]);
-
-  useEffect(() => {
-    console.log('🔄 isTrashProductPopoverOpen changed to:', isTrashProductPopoverOpen);
-  }, [isTrashProductPopoverOpen]);
 
   // Fetch device groups (small collection, rarely changes)
   useEffect(() => {
@@ -159,7 +165,9 @@ export default function UrunKullanimPanel() {
       try {
         const dgsnap = await getDocs(collection(db, 'def_deviceGroups'));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
+        urunKullanimLogger.debug('Cihaz grupları yüklendi', { count: dgsnap.docs.length });
       } catch (e) {
+        urunKullanimLogger.error('Cihaz grupları yüklenemedi', e);
         toast({title: 'Hata', description: 'Cihaz grupları yüklenemedi.', variant: 'destructive'});
       }
     };
@@ -276,7 +284,9 @@ export default function UrunKullanimPanel() {
       invalidateConsumption();
 
       // Update daily consumption stats for dashboard KPI
-      incrementTodayStats(selectedLab.id).catch(console.error);
+      incrementTodayStats(selectedLab.id).catch(err =>
+        urunKullanimLogger.warn('Günlük tüketim istatistikleri güncellenemedi', { error: err?.message })
+      );
 
       await logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
         stokKodu: itemToConsume.stokKodu,
@@ -304,7 +314,10 @@ export default function UrunKullanimPanel() {
 
       return newTuketimDocRef.id;
     } catch (err) {
-      console.error("Consumption write error: ", err);
+      urunKullanimLogger.error('Tüketim kaydı yazılamadı', err, {
+        stokKodu: itemToConsume.stokKodu,
+        seriNumarasi: itemToConsume.seriNumarasi
+      });
       setScanStatus('error');
       toast({ title: "Veritabanı Hatası", description: "Tüketim kaydedilirken hata oluştu.", variant: 'destructive'});
       setTimeout(() => setScanStatus('idle'), 3000);
@@ -473,12 +486,20 @@ export default function UrunKullanimPanel() {
         hospitalName: selectedLabName ?? '',
       });
   
+      urunKullanimLogger.info('Arıza kaydı oluşturuldu', {
+        deviceId: selectedDevice.id,
+        deviceName: selectedDevice.cihazAdi,
+        faultType,
+      });
       toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için arıza bildirildi.` });
       setFaultModalOpen(false);
       setFaultDescription('');
       setSelectedDevice(null);
     } catch (err) {
-      console.error('Failed to report fault:', err);
+      urunKullanimLogger.error('Arıza kaydı oluşturulamadı', err, {
+        deviceId: selectedDevice?.id,
+        faultType,
+      });
       toast({ title: 'Hata', description: 'Arıza kaydı oluşturulamadı.', variant: 'destructive' });
     } finally {
       setIsSavingFault(false);
@@ -538,6 +559,12 @@ export default function UrunKullanimPanel() {
 
       await batch.commit();
 
+      urunKullanimLogger.info('Çöp kutusu kaydı oluşturuldu', {
+        laboratoryId: selectedLab.id,
+        deviceId: selectedTrashDevice.id,
+        itemCount: trashItems.length,
+      });
+
       toast({
         title: 'Çöpe Gönderildi',
         description: `${trashItems.length} ürün çöp kutusuna eklendi.`,
@@ -550,7 +577,10 @@ export default function UrunKullanimPanel() {
       setSelectedTrashProduct('');
       setTrashRemainingTests(0);
     } catch (error) {
-      console.error('Trash bin submit error:', error);
+      urunKullanimLogger.error('Çöp kutusu kaydı oluşturulamadı', error, {
+        laboratoryId: selectedLab?.id,
+        deviceId: selectedTrashDevice?.id,
+      });
       toast({
         title: 'Hata',
         description: 'Ürünler çöp kutusuna eklenirken bir hata oluştu.',
@@ -596,11 +626,11 @@ export default function UrunKullanimPanel() {
           <h2 className="text-2xl font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
           <p className="text-sm text-muted-foreground">{selectedLabName || 'Laboratuvar seçilmedi'}</p>
         </div>
-      <Card className="shadow-lg">
+      <Card className="shadow-lg" role="region" aria-labelledby="urun-kullanim-title">
         <CardHeader>
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <CardTitle className="text-xl font-headline flex items-center"><PackageMinus className="mr-2 h-6 w-6 text-primary" />Ürün Kullanım Kaydı</CardTitle>
+              <CardTitle id="urun-kullanim-title" className="text-xl font-headline flex items-center"><PackageMinus className="mr-2 h-6 w-6 text-primary" aria-hidden="true" />Ürün Kullanım Kaydı</CardTitle>
               <CardDescription>Laboratuvar seçerek kullanılan ürünlerin barkodlarını okutup stoktan düşün.</CardDescription>
             </div>
             <Button
@@ -675,12 +705,28 @@ export default function UrunKullanimPanel() {
                         </PopoverContent>
                       </Popover>
                     </div>
-                    <Button onClick={() => setIsCameraScannerOpen(true)} variant="outline" size="icon" className="h-10 w-10" title="Kamera ile Tara" disabled={!selectedLabId}>
-                      <Camera className="h-5 w-5" />
+                    <Button
+                      onClick={() => setIsCameraScannerOpen(true)}
+                      variant="outline"
+                      size="icon"
+                      className="h-10 w-10"
+                      title="Kamera ile Tara"
+                      aria-label="Kamera ile barkod tara"
+                      disabled={!selectedLabId}
+                    >
+                      <Camera className="h-5 w-5" aria-hidden="true" />
                     </Button>
                      {selectedLab?.manualDeductionEnabled && (
-                      <Button variant="outline" size="icon" className="h-10 w-10" title="Manuel Düşüm" disabled={!selectedLabId} onClick={() => setIsManualDeductionOpen(true)}>
-                          <Pencil className="h-5 w-5" />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-10 w-10"
+                        title="Manuel Düşüm"
+                        aria-label="Manuel stok düşümü yap"
+                        disabled={!selectedLabId}
+                        onClick={() => setIsManualDeductionOpen(true)}
+                      >
+                          <Pencil className="h-5 w-5" aria-hidden="true" />
                       </Button>
                     )}
                   </div>
@@ -690,12 +736,17 @@ export default function UrunKullanimPanel() {
                       Barkod okuyucu bu alanda aktiftir. Okutulan ürünler stoktan düşecektir.
                   </p>
 
-                  <Card className={cn("w-full transition-colors relative overflow-hidden", scanStatus === 'success' && 'border-green-500', scanStatus === 'error' && 'border-destructive')}>
+                  <Card
+                    className={cn("w-full transition-colors relative overflow-hidden", scanStatus === 'success' && 'border-green-500', scanStatus === 'error' && 'border-destructive')}
+                    role="status"
+                    aria-live="polite"
+                    aria-label="Son okutulan ürün bilgisi"
+                  >
                       <div className="flex">
                           <div className="flex-1 p-4">
                               <CardHeader className="p-0 mb-2">
                                 <div className={cn("flex items-center gap-2", scanStatus === 'success' && 'text-green-500', scanStatus === 'error' && 'text-destructive')}>
-                                  {scanStatus === 'success' ? <CheckCircle className="w-6 w-6" /> : scanStatus === 'error' ? <XCircle className="w-6 w-6" /> : <Barcode className="w-6 w-6" />}
+                                  {scanStatus === 'success' ? <CheckCircle className="w-6 w-6" aria-hidden="true" /> : scanStatus === 'error' ? <XCircle className="w-6 w-6" aria-hidden="true" /> : <Barcode className="w-6 w-6" aria-hidden="true" />}
                                   <span className="font-semibold">Son Okutulan Ürün</span>
                                 </div>
                               </CardHeader>
@@ -769,11 +820,11 @@ export default function UrunKullanimPanel() {
         </CardFooter>
       </Card>
       
-      <Card className="bg-gradient-to-br from-slate-900/40 to-black/20 border-white/10">
+      <Card className="bg-gradient-to-br from-slate-900/40 to-black/20 border-white/10" role="region" aria-label="Laboratuvar cihazları">
         <CardContent className="pt-6">
           {selectedLabId && (
             devicesToDisplay.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 w-full">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 w-full" role="list" aria-label="Cihaz listesi">
                 {devicesToDisplay.map((c) => (
                   <button
                     key={c.id}
@@ -783,6 +834,8 @@ export default function UrunKullanimPanel() {
                       window.dispatchEvent(event);
                     }}
                     title={`${c.cihazAdi || c.model || ''} • ${c.seriNumarasi || ''}`}
+                    aria-label={`${c.cihazAdi || c.model || 'Cihaz'} - Seri: ${c.seriNumarasi || 'N/A'} - ${(c.arizaDurumu !== 'yok') ? 'Arızalı' : 'Çalışıyor'}`}
+                    role="listitem"
                   >
                     <div className="text-center mb-2">
                       <div className="text-sm font-medium leading-tight truncate px-1">{c.cihazAdi || c.model}</div>
@@ -838,20 +891,27 @@ export default function UrunKullanimPanel() {
       </Dialog>
       
       <Dialog open={faultModalOpen} onOpenChange={setFaultModalOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby="fault-dialog-description">
           <DialogHeader>
             <DialogTitle>Arıza Kaydı: {selectedDevice?.cihazAdi}</DialogTitle>
-            <DialogDescription>SN: {selectedDevice?.seriNumarasi}</DialogDescription>
+            <DialogDescription id="fault-dialog-description">SN: {selectedDevice?.seriNumarasi}</DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
             <Input
               placeholder="Arıza açıklaması (opsiyonel)"
               value={faultDescription}
               onChange={(e) => setFaultDescription(e.target.value)}
+              aria-label="Arıza açıklaması"
             />
             <div className="grid grid-cols-2 gap-4">
-              <Button variant="outline" onClick={() => handleFaultReport('teknik_servis')} disabled={isSavingFault}>{isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}<span className="ml-2">Teknik Servis</span></Button>
-              <Button variant="outline" onClick={() => handleFaultReport('aplikasyon')} disabled={isSavingFault}>{isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}<span className="ml-2">Aplikasyon</span></Button>
+              <Button variant="outline" onClick={() => handleFaultReport('teknik_servis')} disabled={isSavingFault} aria-label="Teknik servis arızası bildir">
+                {isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Wrench className="h-4 w-4" aria-hidden="true" />}
+                <span className="ml-2">Teknik Servis</span>
+              </Button>
+              <Button variant="outline" onClick={() => handleFaultReport('aplikasyon')} disabled={isSavingFault} aria-label="Aplikasyon arızası bildir">
+                {isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Wrench className="h-4 w-4" aria-hidden="true" />}
+                <span className="ml-2">Aplikasyon</span>
+              </Button>
             </div>
           </div>
         </DialogContent>
@@ -1004,18 +1064,12 @@ export default function UrunKullanimPanel() {
                                       "flex items-center gap-2 p-2 rounded-sm cursor-pointer hover:bg-accent",
                                       selectedTrashProduct === product.stokKodu && "bg-accent"
                                     )}
-                                    onMouseEnter={() => {
-                                      console.log('🖱️ MOUSE ENTER:', product.stokAdi);
-                                    }}
-                                    onClick={(e) => {
-                                      console.log('🖱️ CLICKED:', product.stokAdi);
-                                      console.log('📦 Setting product:', product.stokKodu);
-                                      console.log('🔢 Setting tests:', product.ambalajDegeri);
+                                    role="option"
+                                    aria-selected={selectedTrashProduct === product.stokKodu}
+                                    onClick={() => {
                                       setSelectedTrashProduct(product.stokKodu || '');
                                       setTrashRemainingTests(product.ambalajDegeri || 0);
-                                      console.log('🚪 Closing popover...');
                                       setIsTrashProductPopoverOpen(false);
-                                      console.log('✅ State updates done!');
                                     }}
                                   >
                                     <Check
@@ -1128,33 +1182,40 @@ export default function UrunKullanimPanel() {
       </Dialog>
 
       <Dialog open={isManualDeductionOpen} onOpenChange={setIsManualDeductionOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby="manual-deduction-description">
           <DialogHeader>
             <DialogTitle>Manuel Stok Düşüm</DialogTitle>
-            <DialogDescription>Listeden ürün seçerek stoktan düşün.</DialogDescription>
+            <DialogDescription id="manual-deduction-description">Listeden ürün seçerek stoktan düşün.</DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
               <div>
-                <Label>Ürün</Label>
+                <Label htmlFor="manual-product-select">Ürün</Label>
                 <Select value={manualProductCode} onValueChange={setManualProductCode}>
-                    <SelectTrigger><SelectValue placeholder="Ürün seçin..." /></SelectTrigger>
+                    <SelectTrigger id="manual-product-select" aria-label="Ürün seçin"><SelectValue placeholder="Ürün seçin..." /></SelectTrigger>
                     <SelectContent>{manualDeductionAvailableProducts.map(p => (<SelectItem key={p.id} value={p.stokKodu ?? ''}>{p.stokAdi}</SelectItem>))}</SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>Lot / Miad</Label>
+                <Label htmlFor="manual-lot-select">Lot / Miad</Label>
                 <Select value={manualLotKey} onValueChange={setManualLotKey} disabled={!manualProductCode}>
-                    <SelectTrigger><SelectValue placeholder="Lot seçin..." /></SelectTrigger>
+                    <SelectTrigger id="manual-lot-select" aria-label="Lot ve miad seçin"><SelectValue placeholder="Lot seçin..." /></SelectTrigger>
                     <SelectContent>{manualDeductionLotOptions.map(opt => (<SelectItem key={opt.key} value={opt.key}>{opt.label} ({opt.count})</SelectItem>))}</SelectContent>
                 </Select>
               </div>
               <div>
-                  <Label>Adet</Label>
-                  <Input type="number" value={manualQuantity} onChange={e => setManualQuantity(Number(e.target.value))} min={1}/>
+                  <Label htmlFor="manual-quantity-input">Adet</Label>
+                  <Input
+                    id="manual-quantity-input"
+                    type="number"
+                    value={manualQuantity}
+                    onChange={e => setManualQuantity(Number(e.target.value))}
+                    min={1}
+                    aria-label="Düşülecek adet"
+                  />
               </div>
           </div>
           <DialogFooter>
-            <Button onClick={handleManualDeduction}>Düşüm Yap</Button>
+            <Button onClick={handleManualDeduction} aria-label="Manuel düşüm işlemini başlat">Düşüm Yap</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

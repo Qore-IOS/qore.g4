@@ -1,3 +1,10 @@
+/**
+ * @fileoverview Usage Verification Panel Component
+ * @description Enterprise-grade panel for verifying product consumption through
+ * disposal barcode scanning. Ensures proper kit disposal verification in laboratory environments.
+ * @module components/kullanim-dogrulama-panel
+ * @version 2.0.0
+ */
 
 'use client';
 import React, { useState, useMemo, useEffect, ChangeEvent, KeyboardEvent, Suspense, useCallback } from 'react';
@@ -14,24 +21,45 @@ import { DISPOSAL_BARCODE_LENGTH, DISPOSAL_LOT_LENGTH } from '@/lib/constants';
 import { collection, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from "@/hooks/use-toast";
+import { kullanimDogrulamaLogger } from '@/lib/logger';
 
 
+/**
+ * Usage Verification Panel Component
+ *
+ * Provides functionality for verifying that consumed products have been properly
+ * disposed of by scanning disposal kit barcodes. The panel displays consumption
+ * records grouped by product, lot, and expiry date, allowing verification of
+ * each consumed item.
+ *
+ * @example
+ * ```tsx
+ * <KullanimDogrulamaPanel />
+ * ```
+ */
 export default function KullanimDogrulamaPanel() {
   const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>('');
   const [disposalBarcode, setDisposalBarcode] = useState<string>('');
   const [verificationItems, setVerificationItems] = useState<VerificationItemGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
   const { toast } = useToast();
 
+  /** Input element ID for disposal barcode scanner field */
   const DISPOSAL_BARCODE_INPUT_ID = "disposal-barcode-input";
 
+  /**
+   * Fetches all required data for the verification panel
+   * Loads laboratories, product codes, and consumption records from Firestore
+   */
   const fetchPanelData = useCallback(async () => {
     setIsLoading(true);
+    const startTime = performance.now();
+
     try {
       const [laboratoriesSnap, productsSnap, consumptionSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
@@ -41,7 +69,7 @@ export default function KullanimDogrulamaPanel() {
 
       setLaboratories(laboratoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Laboratory)));
       setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
-      
+
       const consumptionItems = consumptionSnap.docs.map(doc => {
           const data = doc.data();
            Object.keys(data).forEach(key => {
@@ -53,8 +81,15 @@ export default function KullanimDogrulamaPanel() {
       });
       setTuketimKayitlari(consumptionItems);
 
+      const duration = performance.now() - startTime;
+      kullanimDogrulamaLogger.performance('Panel verileri yüklendi', duration, {
+        laboratoriesCount: laboratoriesSnap.docs.length,
+        productsCount: productsSnap.docs.length,
+        consumptionCount: consumptionSnap.docs.length,
+      });
+
     } catch (error) {
-      console.error("Error fetching panel data:", error);
+      kullanimDogrulamaLogger.error('Panel verileri yüklenemedi', error);
       toast({ title: "Veri Hatası", description: "Doğrulama paneli için veriler yüklenemedi.", variant: "destructive" });
     } finally {
       setIsLoading(false);
@@ -126,10 +161,16 @@ export default function KullanimDogrulamaPanel() {
   }, [verificationItems, searchTerm]);
 
 
+  /**
+   * Handles disposal barcode scanning and verification
+   * Validates barcode format, finds matching consumption record, and updates verification count
+   * @param barcodeToProcess - Optional barcode to process, defaults to current input value
+   */
   const handleDisposalScan = (barcodeToProcess?: string) => {
     const currentBarcode = (barcodeToProcess || disposalBarcode).trim();
 
     if (!selectedLaboratoryId) {
+      kullanimDogrulamaLogger.warn('Laboratuvar seçilmeden barkod okutulmaya çalışıldı');
       toast({ title: "Uyarı", description: "Lütfen önce bir laboratuvar seçin.", variant: "default" });
       return;
     }
@@ -138,6 +179,10 @@ export default function KullanimDogrulamaPanel() {
       return;
     }
     if (currentBarcode.length !== DISPOSAL_BARCODE_LENGTH) {
+      kullanimDogrulamaLogger.warn('Geçersiz barkod uzunluğu', {
+        expected: DISPOSAL_BARCODE_LENGTH,
+        received: currentBarcode.length,
+      });
       toast({ title: "Hata", description: `İmha barkodu ${DISPOSAL_BARCODE_LENGTH} hane olmalıdır. Girilen: ${currentBarcode.length}`, variant: "destructive" });
       setDisposalBarcode('');
       return;
@@ -160,16 +205,24 @@ export default function KullanimDogrulamaPanel() {
     );
 
     if (itemWasFoundAndUpdated && updatedItemDetailsForToast) {
+      kullanimDogrulamaLogger.info('İmha doğrulandı', {
+        stokKodu: updatedItemDetailsForToast.stokKodu,
+        lotNumarasi: updatedItemDetailsForToast.lotNumarasi,
+        dogrulananAdet: updatedItemDetailsForToast.dogrulananAdet,
+        tuketilenAdet: updatedItemDetailsForToast.tuketilenAdet,
+      });
       toast({ title: "Doğrulandı", description: `${updatedItemDetailsForToast.stokAdi} (Lot: ${updatedItemDetailsForToast.lotNumarasi}) için 1 adet imha doğrulandı.` });
     } else {
       const alreadyFullyVerifiedItem = verificationItems.find(item => item.lotNumarasi === kitLotNumber && item.dogrulananAdet === item.tuketilenAdet);
       if(alreadyFullyVerifiedItem){
+          kullanimDogrulamaLogger.debug('Zaten tamamen doğrulanmış lot', { kitLotNumber });
           toast({ title: "Zaten Doğrulanmış", description: `${alreadyFullyVerifiedItem.stokAdi} (Lot: ${kitLotNumber}) için tüm tüketimler zaten doğrulanmış.`, variant: "default", duration: 5000 });
       } else {
+        kullanimDogrulamaLogger.warn('Eşleşen lot bulunamadı', { kitLotNumber });
         toast({ title: "Uyarı", description: `Okutulan kit lot numarası (${kitLotNumber}) ile eşleşen veya doğrulanmamış tüketim bulunamadı.`, variant: "default", duration: 5000 });
       }
     }
-    
+
     setDisposalBarcode('');
     document.getElementById(DISPOSAL_BARCODE_INPUT_ID)?.focus();
   };
@@ -182,17 +235,20 @@ export default function KullanimDogrulamaPanel() {
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="shadow-md rounded-lg">
+    <div className="space-y-6" role="main" aria-label="Kullanım doğrulama paneli">
+      <Card className="shadow-md rounded-lg" role="region" aria-labelledby="verification-title">
         <CardHeader>
-          <CardTitle className="text-xl flex items-center"><Recycle className="mr-2 h-6 w-6 text-green-600" />Kullanım Sağlama (İmha Doğrulama)</CardTitle>
+          <CardTitle id="verification-title" className="text-xl flex items-center">
+            <Recycle className="mr-2 h-6 w-6 text-green-600" aria-hidden="true" />
+            Kullanım Sağlama (İmha Doğrulama)
+          </CardTitle>
           <CardDescription>Kullanılan ürünlerin kitlerinin imha edildiğini doğrulayın. İmha kiti barkodunu okutun.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
             <label htmlFor="laboratory-select-verification" className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
             <Select value={selectedLaboratoryId} onValueChange={(value) => { setSelectedLaboratoryId(value); setSearchTerm(''); }}>
-              <SelectTrigger id="laboratory-select-verification" className="w-full md:w-1/2 lg:w-1/3 rounded-md">
+              <SelectTrigger id="laboratory-select-verification" className="w-full md:w-1/2 lg:w-1/3 rounded-md" aria-label="Doğrulama yapılacak laboratuvarı seçin">
                 <SelectValue placeholder="Doğrulama yapılacak laboratuvarı seçin" />
               </SelectTrigger>
               <SelectContent>
@@ -218,7 +274,7 @@ export default function KullanimDogrulamaPanel() {
                 </div>
               </CardHeader>
               <CardContent className="px-0 pb-0">
-              <div className="flex items-center space-x-2 mb-4">
+              <div className="flex items-center space-x-2 mb-4" role="search">
                 <Input
                   id={DISPOSAL_BARCODE_INPUT_ID}
                   placeholder={`İmha Kiti Barkodu (${DISPOSAL_BARCODE_LENGTH} hane)`}
@@ -228,27 +284,41 @@ export default function KullanimDogrulamaPanel() {
                   maxLength={DISPOSAL_BARCODE_LENGTH}
                   className="flex-grow rounded-md h-10"
                   disabled={!selectedLaboratoryId || verificationItems.length === 0}
+                  aria-label="İmha kiti barkodu girin"
+                  aria-describedby="barcode-hint"
                 />
-                <Button onClick={() => handleDisposalScan()} className="rounded-md h-10" disabled={!disposalBarcode}>
-                  <Barcode className="mr-2 h-5 w-5"/>Doğrula
+                <span id="barcode-hint" className="sr-only">
+                  Barkod {DISPOSAL_BARCODE_LENGTH} haneli olmalıdır
+                </span>
+                <Button
+                  onClick={() => handleDisposalScan()}
+                  className="rounded-md h-10"
+                  disabled={!disposalBarcode}
+                  aria-label="Barkodu doğrula"
+                >
+                  <Barcode className="mr-2 h-5 w-5" aria-hidden="true" />
+                  Doğrula
                 </Button>
               </div>
 
               {isLoading ? (
-                  <div className="flex justify-center items-center py-6"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+                  <div className="flex justify-center items-center py-6" role="status" aria-label="Yükleniyor">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+                    <span className="sr-only">Veriler yükleniyor...</span>
+                  </div>
               ) : verificationItems.length === 0 && !searchTerm ? (
-                 <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
-                  <Info className="h-10 w-10 mb-2" />
+                 <div className="flex flex-col items-center justify-center py-6 text-muted-foreground" role="status">
+                  <Info className="h-10 w-10 mb-2" aria-hidden="true" />
                   <p>Bu laboratuvar için doğrulanacak kullanım kaydı bulunmuyor.</p>
                 </div>
               ) : filteredVerificationItems.length === 0 && searchTerm ? (
-                <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
-                  <Search className="h-10 w-10 mb-2" />
+                <div className="flex flex-col items-center justify-center py-6 text-muted-foreground" role="status">
+                  <Search className="h-10 w-10 mb-2" aria-hidden="true" />
                   <p>Arama kriterlerine uyan doğrulanacak kullanım yok.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto max-h-[500px]">
-                  <Table>
+                  <Table aria-label="Doğrulanacak kullanım kayıtları">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Stok Adı (Kodu)</TableHead>

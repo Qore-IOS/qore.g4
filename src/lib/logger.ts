@@ -33,6 +33,9 @@ export type LogModule =
   | 'mal-kabul'
   | 'direkt-transfer'
   | 'transfer-gecmis'
+  | 'urun-kullanim'
+  | 'kullanim-dogrulama'
+  | 'tuketim-istatistik'
   | 'sevkiyat'
   | 'stok-yonetimi'
   | 'siparisler'
@@ -534,6 +537,21 @@ export const stokYonetimiLogger = createLogger('stok-yonetimi');
  * Siparisler (Orders) module logger
  */
 export const siparislerLogger = createLogger('siparisler');
+
+/**
+ * Urun Kullanim (Product Usage) module logger
+ */
+export const urunKullanimLogger = createLogger('urun-kullanim');
+
+/**
+ * Kullanim Dogrulama (Usage Verification) module logger
+ */
+export const kullanimDogrulamaLogger = createLogger('kullanim-dogrulama');
+
+/**
+ * Tuketim Istatistik (Consumption Statistics) module logger
+ */
+export const tuketimIstatistikLogger = createLogger('tuketim-istatistik');
 
 // =============================================================================
 // UTILITY FUNCTIONS
