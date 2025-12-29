@@ -300,21 +300,21 @@ export default function StockDetailPage() {
     
     const itemsToDeduct = items.filter(item => unscannedSerials.includes(normalizeSerial(item.seriNumarasi)));
 
-    itemsToDeduct.forEach(item => {
+    itemsToDeduct.filter(item => item.id).forEach(item => {
         const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-            stokKodu: item.stokKodu,
-            stokAdi: item.stokAdi,
+            stokKodu: item.stokKodu || '',
+            stokAdi: item.stokAdi || '',
             lotNumarasi: item.lotNumarasi ?? '',
             miad: formatMiad(item.miad),
             seriNumarasi: item.seriNumarasi ?? '',
             consumptionTimestamp: new Date(),
             consumptionType: 'sayimdan_dusum',
-            userId: currentUserProfile.uid,
-            userName: currentUserProfile.name || 'Bilinmeyen Kullanıcı',
-            laboratoryName: depotName, 
+            userId: currentUserProfile?.uid || '',
+            userName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            laboratoryName: depotName,
             laboratoryId: depotId,
         };
-        batch.delete(doc(db, 'depoStok', item.id));
+        batch.delete(doc(db, 'depoStok', item.id!));
         batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
     });
 

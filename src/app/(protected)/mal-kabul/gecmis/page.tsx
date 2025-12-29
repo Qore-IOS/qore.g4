@@ -98,7 +98,7 @@ const MAX_RECORDS = 1000;
 export default function MalKabulGecmisPage() {
   const { toast } = useToast();
   const sp = useSearchParams();
-  const openId = sp.get('open');
+  const openId = sp?.get('open') ?? null;
 
   const [pageSize, setPageSize] = useState<number>(50);
   const [isLoading, setIsLoading] = useState(true);
