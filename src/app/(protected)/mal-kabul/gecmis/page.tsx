@@ -61,7 +61,7 @@ type MalKabulHeader = {
   depotName: string;
   userId: string;
   userName: string;
-  timestamp?: unknown;
+  timestamp?: Date | { seconds: number; nanoseconds: number } | null;
   itemCount: number;
   brands?: string[];
   mode: 'verified' | 'unverified';
@@ -132,8 +132,8 @@ export default function MalKabulGecmisPage() {
 
         // Client-side sort to guarantee order
         data.sort((a, b) => {
-          const aTime = toDateFromAny(a.timestamp)?.getTime() ?? 0;
-          const bTime = toDateFromAny(b.timestamp)?.getTime() ?? 0;
+          const aTime = toDateFromAny(a.timestamp as Parameters<typeof toDateFromAny>[0])?.getTime() ?? 0;
+          const bTime = toDateFromAny(b.timestamp as Parameters<typeof toDateFromAny>[0])?.getTime() ?? 0;
           return bTime - aTime;
         });
 

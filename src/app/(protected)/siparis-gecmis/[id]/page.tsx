@@ -72,19 +72,19 @@ export default function SiparisGecmisDetailPage() {
   const tableData: CombinedItem[] = React.useMemo(() => {
     if (shipment?.items?.length) {
       return shipment.items.map(it => ({
-        stokKodu: it.stokKodu,
-        stokAdi: it.stokAdi,
+        stokKodu: it.stokKodu || '',
+        stokAdi: it.stokAdi || '',
         lotNumarasi: it.lotNumarasi,
         miad: it.miad,
-        quantity: it.quantity,
+        quantity: it.quantity ?? 0,
         serialNumbers: it.serialNumbers
       }));
     }
     if (order?.items?.length) {
       return order.items.map(it => ({
-        stokKodu: it.stokKodu,
-        stokAdi: it.stokAdi,
-        quantity: it.adet
+        stokKodu: it.stokKodu || '',
+        stokAdi: it.stokAdi || '',
+        quantity: it.adet ?? 0
       }));
     }
     return [];

@@ -34,10 +34,10 @@ function generateTutanak(req: ConsumableRequest) {
     const tableRows: (string | number)[][] = [];
 
     (req.items || []).forEach(item => {
-        const row = [
-            item.stokKodu,
-            item.stokAdi,
-            item.adet
+        const row: (string | number)[] = [
+            item.stokKodu || '',
+            item.stokAdi || '',
+            item.adet ?? 0
         ];
         tableRows.push(row);
     });
@@ -51,7 +51,7 @@ function generateTutanak(req: ConsumableRequest) {
         headStyles: { fillColor: [22, 160, 133] },
     });
     
-    doc.save(`Sarf_Talep_${req.kurumAdi}_${req.id.substring(0,6)}.pdf`);
+    doc.save(`Sarf_Talep_${req.kurumAdi}_${(req.id || 'unknown').substring(0,6)}.pdf`);
 }
 
 
@@ -118,7 +118,7 @@ export default function SarfGecmisDetayPage() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {(request.items || []).map(item => (
+                                {(request.items || []).filter(item => item.id).map(item => (
                                     <TableRow key={item.id}>
                                         <TableCell className="font-mono">{item.stokKodu}</TableCell>
                                         <TableCell>{item.stokAdi}</TableCell>

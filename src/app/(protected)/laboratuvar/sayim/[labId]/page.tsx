@@ -109,6 +109,7 @@ export default function LaboratuvarSayimPage() {
         // 3. Delete unverified items from stock and create consumption records
         itemsToRemove.forEach(item => {
             // Delete from depoStok
+            if (!item.id) return; // Skip items without id
             const stockDocRef = doc(db, 'depoStok', item.id);
             batch.delete(stockDocRef);
 
@@ -134,8 +135,17 @@ export default function LaboratuvarSayimPage() {
         await saveLabCountSession({
             laboratoryId: labId,
             laboratoryName: labName,
-            user: { id: currentUserProfile.uid, name: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen' },
-            stockItemsForLab: rawStock, // Pass the original stock for comparison
+            user: { id: currentUserProfile.uid || '', name: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen' },
+            stockItemsForLab: rawStock.filter(item => item.id).map(item => ({
+                id: item.id!,
+                stokKodu: item.stokKodu || '',
+                stokAdi: item.stokAdi || '',
+                lotNumarasi: item.lotNumarasi || '',
+                miad: (item.miad as string) || '',
+                seriNumarasi: item.seriNumarasi || '',
+                hedefKurum: item.hedefKurum,
+                marka: (item.marka as string | undefined),
+            })),
             scannedSerials: scannedSerialsSet,
         });
 
