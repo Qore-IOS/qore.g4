@@ -131,7 +131,7 @@ export default function ArizaIstatistikleriPage() {
     }, {} as Record<string, number>);
 
     const topDevices = Object.entries(faultCounts)
-      .sort(([, a], [, b]) => b - a)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
       .slice(0, 5)
       .map(([deviceId, count]) => {
         const device = devices.find(d => d.id === deviceId);
@@ -230,7 +230,7 @@ export default function ArizaIstatistikleriPage() {
                         key={lab.id}
                         value={lab.name}
                         onSelect={() => {
-                          setSelectedLabId(lab.id);
+                          setSelectedLabId(lab.id ?? 'all');
                           setIsLabPopoverOpen(false);
                         }}
                       >
@@ -259,7 +259,7 @@ export default function ArizaIstatistikleriPage() {
                             <p className="font-medium">{d.name}</p>
                             <p className="text-xs text-muted-foreground">{d.lab}</p>
                         </div>
-                        <span className="font-bold text-lg text-destructive">{d.count}</span>
+                        <span className="font-bold text-lg text-destructive">{d.count as number}</span>
                     </li>
                 ))}
             </ul>
