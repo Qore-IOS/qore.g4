@@ -93,7 +93,11 @@ export default function UrunKullanimIstatistikPage() {
   // Panel prop #2: urunKullanimKayitlari -> map tuketimKayitlari to the legacy DepoStok-like shape
   const urunKullanimKayitlariLike: DepoStokItem[] = useMemo(() => {
     return tuketimKayitlari.map((k) => {
-      const fallbackDate = k.consumptionTimestamp ? new Date(k.consumptionTimestamp) : null;
+      const fallbackDate = k.consumptionTimestamp
+      ? (typeof k.consumptionTimestamp === 'object' && 'toDate' in k.consumptionTimestamp
+          ? (k.consumptionTimestamp as { toDate: () => Date }).toDate()
+          : new Date(k.consumptionTimestamp as string | number | Date))
+      : null;
       return {
         id: (k as any).id || `${k.stokKodu}-${k.seriNumarasi || ''}-${k.lotNumarasi || ''}`,
         stokKodu: k.stokKodu,
@@ -118,9 +122,8 @@ export default function UrunKullanimIstatistikPage() {
   return (
     <UrunKullanimIstatistikPanel
       hospitals={hospitals}
-      urunKullanimKayitlari={urunKullanimKayitlariLike}
+      urunKullanimKayitlari={tuketimKayitlari}
       productCodes={productCodes}
-      hospitalStockCounts={hospitalStockCounts}
       toast={(opts: any) => toast(opts)}
     />
   );

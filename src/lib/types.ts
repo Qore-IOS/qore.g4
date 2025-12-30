@@ -449,6 +449,12 @@ export type AppView =
   | 'is-analizi'
   | 'total-verimlilik'
   | 'cihazdan-cikan-kit'
+  | 'sevkiyat'
+  | 'depo-sayim'
+  | 'cihaz-yonetimi'
+  | 'miad-uyarilari'
+  | 'verimlilik'
+  | 'numune-arsivi'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
