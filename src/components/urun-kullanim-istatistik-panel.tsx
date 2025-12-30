@@ -18,8 +18,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFo
 import { LineChart, Filter, CalendarDays, BarChartHorizontalBig, X, Search, Loader2, ChevronUp, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { format, isValid, addDays, endOfDay } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { toDateSafe } from '@/lib/date';
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DateRange } from 'react-day-picker';
@@ -139,7 +141,7 @@ export default function TuketimIstatistikleriPanel({
     return urunKullanimKayitlari.filter(record => {
         if(record.laboratoryName !== selectedLabName) return false;
 
-        const consumptionDate = new Date(record.consumptionTimestamp);
+        const consumptionDate = toDateSafe(record.consumptionTimestamp);
         if (!consumptionDate || !isValid(consumptionDate)) return false;
 
         const isInDateRange = 
@@ -198,7 +200,7 @@ export default function TuketimIstatistikleriPanel({
 
     const consumptionsByProduct: Record<string, { total: number; months: Set<string> }> = {};
     filteredData.forEach(record => {
-      const consumptionDate = new Date(record.consumptionTimestamp);
+      const consumptionDate = toDateSafe(record.consumptionTimestamp);
       if (!consumptionDate || !isValid(consumptionDate)) return;
       const monthYear = format(consumptionDate, 'yyyy-MM');
 
@@ -397,7 +399,7 @@ export default function TuketimIstatistikleriPanel({
           <DialogHeader>
             <DialogTitle>Aylık Ortalama Tüketim Raporu</DialogTitle>
             <CardDescription>
-              {selectedHospitalName} laboratuvarı için ürün bazlı ortalama aylık tüketim miktarları.
+              {hospitals.find(h => h.id === selectedHospitalId)?.name || '-'} laboratuvarı için ürün bazlı ortalama aylık tüketim miktarları.
               {dateRange?.from || dateRange?.to ? ` (Filtre: ${dateRange.from ? format(dateRange.from, "dd.MM.yy") : 'Başlangıç'} - ${dateRange.to ? format(dateRange.to, "dd.MM.yy") : 'Bitiş'})` : '(Tüm zamanlar)'}
             </CardDescription>
           </DialogHeader>
