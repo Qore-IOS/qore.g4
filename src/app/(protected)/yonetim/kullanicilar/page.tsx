@@ -97,7 +97,14 @@ export default function KullaniciPanel() {
   }, [fetchData]);
 
   const openModal = (user?: AppUser) => {
-    setCurrentUser(user || { notificationsEnabled: false, notificationPreferences: [] });
+    if (user) {
+      setCurrentUser({
+        ...user,
+        notificationPreferences: (user.notificationPreferences || []) as NotificationTypeUI[],
+      });
+    } else {
+      setCurrentUser({ notificationsEnabled: false, notificationPreferences: [] });
+    }
     setPassword('');
     setIsModalOpen(true);
   };
