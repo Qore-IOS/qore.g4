@@ -120,7 +120,7 @@ const SimpleProductThumb: React.FC<{ src?: string | null; alt: string; size?: nu
 
 export default function ToplamaPage() {
   const params = useParams();
-  const orderId = params.orderId as string;
+  const orderId = (params?.orderId as string) ?? '';
   const router = useRouter();
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
