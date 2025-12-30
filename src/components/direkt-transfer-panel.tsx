@@ -51,6 +51,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
+import { formatMiad } from '@/lib/date';
 import BackButton from '@/components/BackButton';
 import ManualInlineAdder from '@/components/direkt-transfer/ManualInlineAdder';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -108,7 +109,8 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
     // FEFO Kontrol Mantığı (Date-fns ile tarih karşılaştırma)
     for (const item of shipItemsForThisCode) {
       try {
-        const itemDate = parseDate(item.miad ?? '', 'dd.MM.yyyy', new Date());
+        const itemMiadStr = formatMiad(item.miad, '');
+        const itemDate = parseDate(itemMiadStr, 'dd.MM.yyyy', new Date());
 
         // Depodaki, transfer listesinde OLMAYAN ve miadı daha eski olan ürünleri bul
         const earlierItems = productStockInDepot.filter(s => {
@@ -117,7 +119,8 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
           if (isBeingShipped) return false;
 
           // Tarih kontrolü
-          const stockDate = parseDate(s.miad ?? '', 'dd.MM.yyyy', new Date());
+          const sMiadStr = formatMiad(s.miad, '');
+          const stockDate = parseDate(sMiadStr, 'dd.MM.yyyy', new Date());
           // Stoktaki tarih < Transfer edilen tarih ise violation vardır
           return compareAsc(stockDate, itemDate) < 0;
         });
@@ -125,8 +128,8 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
         if (earlierItems.length > 0) {
           // En eski tarihli olanı öneri olarak ekle
           earlierItems.sort((a, b) => compareAsc(
-            parseDate(a.miad ?? '', 'dd.MM.yyyy', new Date()),
-            parseDate(b.miad ?? '', 'dd.MM.yyyy', new Date())
+            parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date()),
+            parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date())
           ));
 
           violations.push({ scannedItem: item, recommendedItem: earlierItems[0] });
@@ -448,8 +451,8 @@ export default function DirektTransferPanel() {
     
     pool.sort((a,b) => {
       try {
-        const ad = parseDate(a.miad ?? '', 'dd.MM.yyyy', new Date());
-        const bd = parseDate(b.miad ?? '', 'dd.MM.yyyy', new Date());
+        const ad = parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date());
+        const bd = parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date());
         return compareAsc(ad, bd);
       } catch { return 0; }
     });

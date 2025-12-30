@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { addDays, isValid, format, startOfDay, endOfDay } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
+import { toDateSafe, formatMiad } from '@/lib/date';
 import { Loader2, FileSpreadsheet } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { exportDataToExcel } from '@/lib/utils';
@@ -105,30 +106,31 @@ export default function StokYonetimiGecmisPanel() {
         const reportMap = new Map<string, ReportRow>();
   
         const initializeRowIfNeeded = (item: DepoStokItem) => {
-            const key = `${item.stokKodu}-${item.lotNumarasi}`;
+            const key = `${item.stokKodu}-${item.lotNumarasi || ''}`;
             if (!reportMap.has(key)) {
                 reportMap.set(key, {
-                    key, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad,
+                    key, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi || '', miad: formatMiad(item.miad, ''),
                     donemBasiStok: 0, donemIciGiris: 0, donemSonuStok: 0, fark: 0, detaySeriNumaralari: []
                 });
             }
             return reportMap.get(key)!;
         };
-  
+
         const stockForDepot = allStock.filter(item => item.depotId === selectedLocationId);
 
         stockForDepot.forEach(item => {
             const row = initializeRowIfNeeded(item);
             const isShipped = !!(item.isShipped && item.sevkTarihi);
-            const arrivalDate = item.eklenmeTarihi;
+            const arrivalDate = toDateSafe(item.eklenmeTarihi);
+            const sevkDate = toDateSafe(item.sevkTarihi);
 
-            if (isValid(arrivalDate) && arrivalDate < from && (!isShipped || (item.sevkTarihi! >= from))) {
+            if (arrivalDate && isValid(arrivalDate) && arrivalDate < from && (!isShipped || (sevkDate && sevkDate >= from))) {
                 row.donemBasiStok++;
             }
-            if (isValid(arrivalDate) && arrivalDate >= from && arrivalDate <= to) {
+            if (arrivalDate && isValid(arrivalDate) && arrivalDate >= from && arrivalDate <= to) {
                 row.donemIciGiris++;
             }
-            if (isValid(arrivalDate) && arrivalDate <= to && (!isShipped || (item.sevkTarihi! > to))) {
+            if (arrivalDate && isValid(arrivalDate) && arrivalDate <= to && (!isShipped || (sevkDate && sevkDate > to))) {
                 row.donemSonuStok++;
             }
         });
@@ -137,15 +139,16 @@ export default function StokYonetimiGecmisPanel() {
             row.fark = (row.donemBasiStok + row.donemIciGiris) - row.donemSonuStok;
             if (row.fark > 0) {
                 row.detaySeriNumaralari = allStock
-                    .filter(s => 
-                        s.depotId === selectedLocationId && 
-                        s.stokKodu === row.stokKodu && 
-                        s.lotNumarasi === row.lotNumarasi && 
-                        s.isShipped && 
-                        s.sevkTarihi! >= from && 
-                        s.sevkTarihi! <= to
-                    )
-                    .map(s => s.seriNumarasi);
+                    .filter(s => {
+                        if (s.depotId !== selectedLocationId) return false;
+                        if (s.stokKodu !== row.stokKodu) return false;
+                        if ((s.lotNumarasi || '') !== row.lotNumarasi) return false;
+                        if (!s.isShipped) return false;
+                        const sevkDate = toDateSafe(s.sevkTarihi);
+                        return sevkDate && sevkDate >= from && sevkDate <= to;
+                    })
+                    .map(s => s.seriNumarasi)
+                    .filter((sn): sn is string => !!sn);
             }
         });
   
@@ -168,7 +171,7 @@ export default function StokYonetimiGecmisPanel() {
         return {
             seriNumarasi: sn,
             hedef: stockItem?.hedefKurum || 'Bilinmiyor',
-            tarih: stockItem?.sevkTarihi,
+            tarih: toDateSafe(stockItem?.sevkTarihi),
         };
     });
     setSelectedRowDetails(details);
@@ -188,15 +191,16 @@ export default function StokYonetimiGecmisPanel() {
         'Fark (Sevk Edilen)': r.fark
     }));
 
-    const detailData = reportData.flatMap(row => 
+    const detailData = reportData.flatMap(row =>
         row.detaySeriNumaralari.map(sn => {
             const stockItem = allStock.find(s => s.seriNumarasi === sn);
+            const sevkDate = toDateSafe(stockItem?.sevkTarihi);
             return {
                 'Stok Kodu': row.stokKodu,
                 'Lot': row.lotNumarasi,
                 'Seri Numarası': sn,
                 'Hedef Kurum': stockItem?.hedefKurum || 'Bilinmiyor',
-                'Tarih': stockItem?.sevkTarihi && isValid(stockItem.sevkTarihi) ? format(stockItem.sevkTarihi, 'dd.MM.yyyy HH:mm') : ''
+                'Tarih': sevkDate && isValid(sevkDate) ? format(sevkDate, 'dd.MM.yyyy HH:mm') : ''
             };
         })
     );
