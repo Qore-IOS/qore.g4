@@ -7,24 +7,45 @@ declare module "@/lib/types" {
 
   export type AppView =
     | "dashboard"
-    | "arama"
+    | "mal-kabul"
     | "stok-yonetimi"
-    | "depo-sayim"
-    | "urun-kullanim"
-    | "sevkiyat"
+    | "siparisler"
+    | "laboratuvar-yonetimi"
     | "raporlama"
     | "yonetim"
+    | "urun-kullanim"
+    | "sarf-dagitim"
+    | "tuketim-istatistikleri"
+    | "cihaz-yonetimi-ana"
+    | "cihaz-ustu-ekle"
+    | "cihaz-ustu-gecmisi"
+    | "direkt-transfer"
+    | "urun-talep"
+    | "verimlilik-hesaplama"
+    | "cost-dashboard"
+    | "teknik-servis"
+    | "transfer-gecmis"
+    | "siparis-gecmis"
+    | "kumulatif-gecmis"
+    | "kumulatif-hesaplama"
+    | "arama"
+    | "cihaz-ariza-gecmis"
+    | "personel-islemleri"
+    | "is-analizi"
+    | "total-verimlilik"
+    | "cihazdan-cikan-kit"
+    | "sevkiyat"
+    | "depo-sayim"
     | "cihaz-yonetimi"
     | "miad-uyarilari"
     | "verimlilik"
-    | "cihaz-ustu-ekle"
     | "numune-arsivi";
 
   export interface User {
     id: ID;
     uid?: string;
     displayName?: string;
-    email?: string;
+    email?: string | null;
     role?: "admin" | "editor" | "viewer" | "user" | "teknik_servis" | "aplikasyon" | string;
     hospitalId?: ID;
     depotId?: ID;
@@ -39,6 +60,7 @@ declare module "@/lib/types" {
     createdAt?: TimestampLike;
     notificationsEnabled?: boolean;
     notificationPreferences?: string[];
+    themePreference?: 'light' | 'dark' | 'system';
   }
 
   // ---------- Master Data ----------
@@ -132,15 +154,15 @@ declare module "@/lib/types" {
   export interface DepoStokItem {
     id: ID;
     productCodeId?: ID;
-    stokKodu?: string;
-    stokAdi?: string;
+    stokKodu: string;
+    stokAdi: string;
     lot?: string;
     lotNumarasi?: string;
     seriNo?: string;
     seriNumarasi?: string;
     adet?: number;
     birim?: string;
-    miad?: TimestampLike;
+    miad: TimestampLike;
     depotId?: ID;
     hospitalId?: ID;
     shelf?: string;
@@ -153,6 +175,11 @@ declare module "@/lib/types" {
     depotName?: string;
     eklenmeTarihi?: TimestampLike;
     irsaliyeNumarasi?: string;
+    urunGrubu?: 'kit' | 'sarf';
+    ambalajDegeri?: number;
+    transferId?: string;
+    hedefKurumId?: string | null;
+    gtin?: string;
     [k: string]: unknown;
   }
 
@@ -186,8 +213,14 @@ declare module "@/lib/types" {
   export interface CellDef {
     row?: number;
     col?: number;
+    x?: number;
+    y?: number;
     code?: string;
     label?: string;
+    group?: string;
+    merged?: boolean;
+    stokKodu?: string;
+    products?: string[];
     [k: string]: unknown;
   }
 
@@ -237,13 +270,13 @@ declare module "@/lib/types" {
   }
 
   export interface OrderItem {
-    id?: ID;
+    id: ID;
     productCodeId?: ID;
     miktar?: number;
     birim?: string;
-    stokKodu?: string;
-    stokAdi?: string;
-    adet?: number;
+    stokKodu: string;
+    stokAdi: string;
+    adet: number;
     [k: string]: unknown;
   }
 
@@ -305,19 +338,26 @@ declare module "@/lib/types" {
     birim?: string;
     lot?: string;
     seriNo?: string;
-    seriNumarasi?: string;
-    stokKodu?: string;
-    stokAdi?: string;
-    lotNumarasi?: string;
-    miad?: TimestampLike;
+    seriNumarasi: string;
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi: string;
+    miad: string;
     tarih?: TimestampLike;
-    consumptionTimestamp?: TimestampLike;
+    consumptionTimestamp: TimestampLike;
     createdBy?: ID;
-    laboratoryId?: string;
-    laboratoryName?: string;
-    userName?: string;
-    userId?: string;
-    consumptionType?: string;
+    laboratoryId: string;
+    laboratoryName: string;
+    userName: string;
+    userId: string;
+    consumptionType: 'normal_kullanim' | 'sayimdan_dusum' | 'imha_dogrulama_sonrasi_dusum' | string;
+    rafAdresi?: string;
+    irsaliyeNumarasi?: string;
+    urunGrubu?: 'kit' | 'sarf';
+    ambalajDegeri?: number;
+    isImhaDogrulandi?: boolean;
+    subPointId?: string;
+    subPointName?: string;
     [k: string]: unknown;
   }
   
@@ -411,8 +451,9 @@ declare module "@/lib/types" {
     order: number;
     subPointId?: string | null;
     subPointName?: string | null;
-    // Changed from deviceIds: string[]
-    slots: DeviceGroupSlot[];
+    deviceIds?: string[];
+    slots?: DeviceGroupSlot[];
+    imageUrl?: string;
   }
 
   export interface DeviceFaultReport {
@@ -511,9 +552,10 @@ declare module "@/lib/types" {
     id: ID;
     hospitalId?: ID;
     productCodeId?: ID;
-    min?: number;
-    max?: number;
-    stokKodu?: string;
+    min: number;
+    max: number;
+    stokKodu: string;
+    aylikTuketimLimiti?: number;
     [k: string]: unknown;
   }
 
@@ -570,6 +612,8 @@ declare module "@/lib/types" {
   export interface LedgerData {
     header: LedgerHeader;
     items: Array<LedgerItemRow | GroupedLedgerRow>;
+    rows?: Array<LedgerItemRow | GroupedLedgerRow>;
+    product?: ProductCode;
   }
   
   export type Currency = 'EUR' | 'USD' | 'TRY';

@@ -122,9 +122,8 @@ export default function UrunKullanimIstatistikPage() {
   return (
     <UrunKullanimIstatistikPanel
       hospitals={hospitals}
-      urunKullanimKayitlari={urunKullanimKayitlariLike}
+      urunKullanimKayitlari={tuketimKayitlari}
       productCodes={productCodes}
-      hospitalStockCounts={hospitalStockCounts}
       toast={(opts: any) => toast(opts)}
     />
   );
