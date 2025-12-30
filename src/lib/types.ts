@@ -439,6 +439,7 @@ export type AppView =
   | 'verimlilik-hesaplama'
   | 'cost-dashboard'
   | 'teknik-servis'
+  | 'aplikasyon-paneli'
   | 'transfer-gecmis'
   | 'siparis-gecmis'
   | 'kumulatif-gecmis'

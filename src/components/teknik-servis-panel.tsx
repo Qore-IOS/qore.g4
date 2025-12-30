@@ -34,7 +34,8 @@ export default function TeknikServisPanel({
 
   const hospitalDeviceStatuses = hospitals.map(hospital => {
     const hospitalDevices = getDevicesForHospital(hospital.id);
-    const arizaSayisi = hospitalDevices.filter(d => d.device.arizaDurumu !== 'yok').length;
+    // Count only teknik_servis faults for this panel
+    const arizaSayisi = hospitalDevices.filter(d => d.device.arizaDurumu === 'teknik_servis').length;
     return {
       ...hospital,
       cihazSayisi: hospitalDevices.length,
@@ -71,14 +72,17 @@ export default function TeknikServisPanel({
               <CardContent className="pt-0 pb-4">
                 <div className="flex items-center mt-2">
                   {hospital.devices.slice(0, 10).map((assigned) => {
+                     // For teknik servis panel: red for teknik_servis faults, amber for aplikasyon faults, green for healthy
+                     const isTeknikServisFaulty = assigned.device.arizaDurumu === 'teknik_servis';
+                     const isAplikasyonFaulty = assigned.device.arizaDurumu === 'aplikasyon';
                      return (
-                        <span 
-                            key={assigned.id} 
+                        <span
+                            key={assigned.id}
                             className={cn(
                                 "h-3 w-3 rounded-full mr-1 border",
-                                assigned.device.arizaDurumu === 'yok' ? 'bg-green-500' : 'bg-red-500'
+                                isTeknikServisFaulty ? 'bg-red-500' : isAplikasyonFaulty ? 'bg-amber-500' : 'bg-green-500'
                             )}
-                            title={assigned.device.arizaDurumu === 'yok' ? 'Sağlıklı' : 'Arızalı'}
+                            title={isTeknikServisFaulty ? 'Teknik Servis Arızası' : isAplikasyonFaulty ? 'Aplikasyon Arızası' : 'Sağlıklı'}
                         ></span>
                      );
                   })}

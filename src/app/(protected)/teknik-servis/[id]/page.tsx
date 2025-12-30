@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -45,6 +45,7 @@ export default function TeknikServisDetayPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [faultIdForSelectedDevice, setFaultIdForSelectedDevice] = useState<string | null>(null);
+  const [selectedDeviceFaultType, setSelectedDeviceFaultType] = useState<string | null>(null);
 
 
   // --- Fetch hospital once ---
@@ -89,14 +90,19 @@ export default function TeknikServisDetayPage() {
   }, [hospitalId, toast]);
   
   const handleDeviceClick = async (device: Device) => {
+    // For teknik servis panel:
+    // - If device has teknik_servis fault, show modal with options
+    // - If device has aplikasyon fault, show info that it's an aplikasyon fault (can't manage)
+    // - If no fault, go directly to islem-formu
     if (device.arizaDurumu && device.arizaDurumu !== 'yok') {
       setSelectedDevice(device);
+      setSelectedDeviceFaultType(device.arizaDurumu);
       // Find the open fault report for this device
       try {
         const q = query(
-          collection(db, 'deviceFaultReports'), 
-          where('deviceId', '==', device.id), 
-          where('status', '==', 'open'), 
+          collection(db, 'deviceFaultReports'),
+          where('deviceId', '==', device.id),
+          where('status', '==', 'open'),
           limit(1)
         );
         const faultSnap = await getDocs(q);
@@ -151,7 +157,11 @@ export default function TeknikServisDetayPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {devicesByHospital.map((device) => {
-                const isFaulty = device.arizaDurumu !== 'yok';
+                // For teknik servis panel: show red for teknik_servis faults, amber for aplikasyon faults
+                const isTeknikServisFaulty = device.arizaDurumu === 'teknik_servis';
+                const isAplikasyonFaulty = device.arizaDurumu === 'aplikasyon';
+                const isFaulty = isTeknikServisFaulty || isAplikasyonFaulty;
+
                 return (
                   <button
                     key={device.id}
@@ -185,16 +195,28 @@ export default function TeknikServisDetayPage() {
                     <div
                         className={cn(
                             "w-full h-4 animate-pulse mt-1",
-                            isFaulty ? 'bg-red-500/50' : 'bg-green-500/50'
+                            isTeknikServisFaulty ? 'bg-red-500/50' : isAplikasyonFaulty ? 'bg-amber-500/50' : 'bg-green-500/50'
                         )}
                         style={{ filter: 'blur(12px)' }}
                     />
                     <div className="mt-2 h-10">
-                      {isFaulty ? (
+                      {isTeknikServisFaulty ? (
                         <>
                           <p className="text-xs text-red-500 font-semibold flex items-center justify-center">
                             <AlertTriangle className="h-3 w-3 mr-1" />
-                            Arızalı ({device.arizaDurumu?.replace('_', ' ') || 'Bilinmiyor'})
+                            Arızalı (Teknik Servis)
+                          </p>
+                          {device.arizaAciklamasi && (
+                            <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
+                              {device.arizaAciklamasi}
+                            </p>
+                          )}
+                        </>
+                      ) : isAplikasyonFaulty ? (
+                        <>
+                          <p className="text-xs text-amber-600 font-semibold flex items-center justify-center">
+                            <FlaskConical className="h-3 w-3 mr-1" />
+                            Arızalı (Aplikasyon)
                           </p>
                           {device.arizaAciklamasi && (
                             <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
@@ -220,18 +242,50 @@ export default function TeknikServisDetayPage() {
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Arızalı Cihaz İşlemi: {selectedDevice?.cihazAdi}</DialogTitle>
+            <DialogTitle>
+              {selectedDeviceFaultType === 'teknik_servis'
+                ? `Teknik Servis Arızası: ${selectedDevice?.cihazAdi}`
+                : `Aplikasyon Arızası: ${selectedDevice?.cihazAdi}`}
+            </DialogTitle>
             <DialogDescription>
-              Bu cihaz için bir arıza kaydı bulunmaktadır. Yapmak istediğiniz işlemi seçin.
+              {selectedDeviceFaultType === 'teknik_servis'
+                ? 'Bu cihaz için bir teknik servis arıza kaydı bulunmaktadır. Yapmak istediğiniz işlemi seçin.'
+                : 'Bu cihaz için bir aplikasyon arıza kaydı bulunmaktadır. Bu arızayı yalnızca aplikasyon personeli yönetebilir.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2 pt-4">
-              <Button onClick={() => faultIdForSelectedDevice && navigateToAction(`/ariza-yonetimi/${faultIdForSelectedDevice}`)} disabled={!faultIdForSelectedDevice}>
-                <Wrench className="mr-2 h-4 w-4" /> Arıza Kaydını Yönet
-              </Button>
-              <Button variant="outline" onClick={() => selectedDevice?.id && navigateToAction(`/teknik-servis/islem-formu/${selectedDevice.id}`)}>
-                <FilePenLine className="mr-2 h-4 w-4" /> Yeni Servis İşlemi Oluştur
-              </Button>
+              {selectedDeviceFaultType === 'teknik_servis' ? (
+                <>
+                  <Button
+                    onClick={() => faultIdForSelectedDevice && navigateToAction(`/ariza-yonetimi/${faultIdForSelectedDevice}`)}
+                    disabled={!faultIdForSelectedDevice}
+                  >
+                    <Wrench className="mr-2 h-4 w-4" /> Arıza Kaydını Yönet
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => selectedDevice?.id && navigateToAction(`/teknik-servis/islem-formu/${selectedDevice.id}`)}
+                  >
+                    <FilePenLine className="mr-2 h-4 w-4" /> Yeni Servis İşlemi Oluştur
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => faultIdForSelectedDevice && navigateToAction(`/ariza-yonetimi/${faultIdForSelectedDevice}`)}
+                    disabled={!faultIdForSelectedDevice}
+                  >
+                    <FlaskConical className="mr-2 h-4 w-4" /> Arıza Kaydını Görüntüle (Salt Okunur)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsModalOpen(false)}
+                  >
+                    Kapat
+                  </Button>
+                </>
+              )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
