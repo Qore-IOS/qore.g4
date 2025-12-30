@@ -44,8 +44,8 @@ declare module "@/lib/types" {
   // ---------- Master Data ----------
   export interface ProductCode {
     id: ID;
-    stokKodu?: string;
-    stokAdi?: string;
+    stokKodu: string;
+    stokAdi: string;
     barkod?: string;
     anaBirim?: "Kutu" | "Adet" | "Test" | "Flakon" | "Paket" | "Şişe" | string;
     uretici?: string;
@@ -97,7 +97,7 @@ declare module "@/lib/types" {
   export interface Hospital {
     id: ID;
     ad?: string;
-    name?: string;
+    name: string;
     kod?: string;
     sehir?: string;
     ilce?: string;
@@ -123,8 +123,8 @@ declare module "@/lib/types" {
     hospitalId?: ID;
     depotId?: ID;
     active?: boolean;
-    addressBarcode?: string;
-    addressName?: string;
+    addressBarcode: string;
+    addressName: string;
     [k: string]: unknown;
   }
 
