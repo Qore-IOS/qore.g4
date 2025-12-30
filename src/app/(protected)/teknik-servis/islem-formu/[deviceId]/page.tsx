@@ -47,7 +47,7 @@ const ACTION_LABELS: Record<ActionItem['action'], string> = {
 
 export default function IslemFormuPage() {
   const params = useParams();
-  const deviceId = Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string;
+  const deviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
   const router = useRouter();
   const { currentUserProfile } = useAuth();
   const { toast } = useToast();
