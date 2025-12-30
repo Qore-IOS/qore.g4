@@ -57,7 +57,7 @@ function generateTutanak(req: ConsumableRequest) {
 
 export default function SarfGecmisDetayPage() {
     const params = useParams();
-    const id = params.id as string;
+    const id = (params?.id as string) ?? '';
     const [request, setRequest] = useState<ConsumableRequest | null>(null);
     const [loading, setLoading] = useState(true);
 

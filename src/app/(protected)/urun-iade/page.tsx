@@ -344,7 +344,7 @@ export default function UrunIadePanel() {
                                         <TableCell className="text-muted-foreground">{item.hedefKurum}</TableCell>
                                         <TableCell className="text-right font-bold">{item.adet}</TableCell>
                                         <TableCell className="text-right">
-                                            <Button size="icon" variant="ghost" onClick={() => removeItem(item.id || '', item.isGroup, item.key)}>
+                                            <Button size="icon" variant="ghost" onClick={() => removeItem(item.id || '', item.isGroup ?? false, item.key)}>
                                                 <Trash2 className="h-4 w-4 text-destructive" />
                                             </Button>
                                         </TableCell>
