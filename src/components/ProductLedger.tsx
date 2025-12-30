@@ -11,6 +11,7 @@ import { motion } from "framer-motion";
 import { cn, exportDataToExcel } from "@/lib/utils";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
+import { toDateSafe } from "@/lib/date";
 
 interface Props {
   data: LedgerData;
@@ -31,32 +32,38 @@ function usePagination<T extends LedgerItemRow | GroupedLedgerRow>(rows: T[], pa
 
 export default function ProductLedger({ data, type, onClose = () => {}, productCodes = [] }: Props) {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  const rows = data.rows as (LedgerItemRow | GroupedLedgerRow)[];
+  const rows = (data.rows || data.items || []) as (LedgerItemRow | GroupedLedgerRow)[];
   const pager = usePagination(rows as any, 20);
 
   const handleExport = () => {
     if (type === "serial") {
-      const excelData = (rows as LedgerItemRow[]).map((item) => ({
-        "Tarih": item.date ? format(new Date(item.date), "dd.MM.yyyy HH:mm", { locale: tr }) : "-",
-        "İşlem Tipi": item.action,
-        "Kaynak": (item as any).source,
-        "Hedef": (item as any).target || "-",
-        "Detay": (item as any).details || "-"
-      }));
-      exportDataToExcel(excelData, `SeriNo_${(data.product as any).sorgu}`, "SeriNo Ekstre", () => {});
+      const excelData = (rows as LedgerItemRow[]).map((item) => {
+        const dt = toDateSafe(item.date);
+        return {
+          "Tarih": dt ? format(dt, "dd.MM.yyyy HH:mm", { locale: tr }) : "-",
+          "İşlem Tipi": item.action,
+          "Kaynak": (item as any).source,
+          "Hedef": (item as any).target || "-",
+          "Detay": (item as any).details || "-"
+        };
+      });
+      exportDataToExcel(excelData, `SeriNo_${data.product?.stokKodu || 'unknown'}`, "SeriNo Ekstre", () => {});
     } else {
-      const excelData = (rows as GroupedLedgerRow[]).map((g) => ({
-        "Tarih": g.date ? format(new Date(g.date), "dd.MM.yyyy HH:mm", { locale: tr }) : "-",
-        "Stok Kodu": g.stokKodu || "-",
-        "Stok Adı": g.stokAdi || "-",
-        "Lot": g.lot || "-",
-        "İşlem": (g as any).type,
-        "Miktar": g.seriNolar?.length || 0,
-        "Kaynak": g.source || "-",
-        "Hedef": g.target || "-",
-        "Seri No Adedi": g.seriNolar?.length || 0
-      }));
-      exportDataToExcel(excelData, `Urun_${(data.product as any).sorgu}`, "Ürün Ekstre", () => {});
+      const excelData = (rows as GroupedLedgerRow[]).map((g) => {
+        const dt = toDateSafe(g.date);
+        return {
+          "Tarih": dt ? format(dt, "dd.MM.yyyy HH:mm", { locale: tr }) : "-",
+          "Stok Kodu": g.stokKodu || "-",
+          "Stok Adı": g.stokAdi || "-",
+          "Lot": g.lot || "-",
+          "İşlem": (g as any).type,
+          "Miktar": g.seriNolar?.length || 0,
+          "Kaynak": g.source || "-",
+          "Hedef": g.target || "-",
+          "Seri No Adedi": g.seriNolar?.length || 0
+        };
+      });
+      exportDataToExcel(excelData, `Urun_${data.product?.stokKodu || 'unknown'}`, "Ürün Ekstre", () => {});
     }
   };
 
@@ -64,12 +71,12 @@ export default function ProductLedger({ data, type, onClose = () => {}, productC
     <div className="flex items-center gap-3 text-xs md:text-sm bg-background/50 p-3 rounded-xl border border-white/10">
       <div className="flex items-center gap-2">
         <span className="text-white/80">Stok Kodu:</span>
-        <span className="font-semibold">{data.product.stokKodu || "-"}</span>
+        <span className="font-semibold">{data.product?.stokKodu || "-"}</span>
       </div>
       <div className="h-4 w-px bg-white/20" />
       <div className="flex items-center gap-2">
         <span className="text-white/80">Stok Adı:</span>
-        <span className="font-semibold">{data.product.stokAdi || "-"}</span>
+        <span className="font-semibold">{data.product?.stokAdi || "-"}</span>
       </div>
     </div>
   );
@@ -120,15 +127,17 @@ export default function ProductLedger({ data, type, onClose = () => {}, productC
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(pager.rows as LedgerItemRow[]).map((r: LedgerItemRow, idx: number) => (
+                    {(pager.rows as LedgerItemRow[]).map((r: LedgerItemRow, idx: number) => {
+                      const rDate = toDateSafe(r.date);
+                      return (
                       <TableRow key={idx} className="hover:bg-white/5 border-b border-white/10">
-                        <TableCell>{r.date ? format(new Date(r.date), "dd.MM.yyyy - HH:mm", { locale: tr }) : "-"}</TableCell>
+                        <TableCell>{rDate ? format(rDate, "dd.MM.yyyy - HH:mm", { locale: tr }) : "-"}</TableCell>
                         <TableCell>{r.action}</TableCell>
                         <TableCell>{(r as any).source || "-"}</TableCell>
                         <TableCell>{(r as any).target || "-"}</TableCell>
                         <TableCell className="text-white/80">{(r as any).details || "-"}</TableCell>
                       </TableRow>
-                    ))}
+                    )})}
                   </TableBody>
                 </>
               ) : (
@@ -148,6 +157,7 @@ export default function ProductLedger({ data, type, onClose = () => {}, productC
                   <TableBody>
                     {(pager.rows as GroupedLedgerRow[]).map((g: GroupedLedgerRow, idx: number) => {
                       const open = !!expanded[idx];
+                      const gDate = toDateSafe(g.date);
                       return (
                         <React.Fragment key={idx}>
                           <TableRow className="hover:bg-white/5 border-b border-white/10">
@@ -160,7 +170,7 @@ export default function ProductLedger({ data, type, onClose = () => {}, productC
                                 {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                               </button>
                             </TableCell>
-                            <TableCell>{g.date ? format(new Date(g.date), "dd.MM.yyyy - HH:mm", { locale: tr }) : "-"}</TableCell>
+                            <TableCell>{gDate ? format(gDate, "dd.MM.yyyy - HH:mm", { locale: tr }) : "-"}</TableCell>
                             <TableCell className="font-medium">{g.stokAdi || "-"}</TableCell>
                             <TableCell>Lot: {g.lot || "-"}</TableCell>
                             <TableCell>{(g as any).type}</TableCell>
