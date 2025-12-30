@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where } from 'firebase/firestore';
@@ -11,8 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Loader2, PlusCircle, Trash2, Save, History } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { format } from 'date-fns';
@@ -22,9 +23,25 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 
+// Part change types (Parça Değişimi)
+type PartChangeType = 'lamba_degisimi' | 'kuvet_degisimi' | 'reaktif_degisimi' | '';
+
+// Operation types (Yapılan İşlem)
+type OperationType =
+  | 'aplikasyon_kontrol'
+  | 'kalibrasyon_kontrol'
+  | 'qc_materyal_kontrol'
+  | 'ornek_sonucu_karsilastirma'
+  | 'reaktif_yenileme'
+  | 'kalibrator_yenileme'
+  | 'qc_yenileme'
+  | 'cv_calismasi'
+  | 'diger';
+
 type ActionItem = {
   id: string;
-  action: 'kalibrasyon' | 'bakim' | 'reaktif_yukleme' | 'yazilim_guncelleme' | 'egitim' | 'diger' | '';
+  type: 'part_change' | 'operation';
+  action: PartChangeType | OperationType | '';
   quantity: number;
   description?: string;
 };
@@ -38,15 +55,36 @@ type ActionFormRecord = {
     technicianSignature?: string;
 };
 
-const ACTION_LABELS: Record<ActionItem['action'], string> = {
-  '': 'İşlem Seçin',
-  kalibrasyon: 'Kalibrasyon',
-  bakim: 'Bakım',
-  reaktif_yukleme: 'Reaktif Yükleme',
-  yazilim_guncelleme: 'Yazılım Güncelleme',
-  egitim: 'Eğitim',
+const PART_CHANGE_LABELS: Record<PartChangeType, string> = {
+  '': 'Parça Seçin',
+  lamba_degisimi: 'Lamba Değişimi',
+  kuvet_degisimi: 'Küvet Değişimi',
+  reaktif_degisimi: 'Reaktif Değişimi',
+};
+
+const OPERATION_LABELS: Record<OperationType, string> = {
+  aplikasyon_kontrol: 'Aplikasyon Kontrol',
+  kalibrasyon_kontrol: 'Kalibrasyon Kontrol',
+  qc_materyal_kontrol: 'QC Materyal Kontrol',
+  ornek_sonucu_karsilastirma: 'Örnek Sonucu Karşılaştırma',
+  reaktif_yenileme: 'Reaktif Yenileme',
+  kalibrator_yenileme: 'Kalibratör Yenileme',
+  qc_yenileme: 'QC Yenileme',
+  cv_calismasi: 'CV Çalışması',
   diger: 'Diğer',
 };
+
+const ALL_OPERATIONS: OperationType[] = [
+  'aplikasyon_kontrol',
+  'kalibrasyon_kontrol',
+  'qc_materyal_kontrol',
+  'ornek_sonucu_karsilastirma',
+  'reaktif_yenileme',
+  'kalibrator_yenileme',
+  'qc_yenileme',
+  'cv_calismasi',
+  'diger',
+];
 
 export default function AplikasyonIslemFormuPage() {
   const params = useParams();
@@ -71,6 +109,10 @@ export default function AplikasyonIslemFormuPage() {
   const technicianSignatureRef = useRef<SignaturePadRef>(null);
   const [signatures, setSignatures] = useState<{ personnel?: string; technician?: string }>({});
 
+  // Operation selection modal
+  const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
+  const [selectedOperations, setSelectedOperations] = useState<OperationType[]>([]);
+  const [digerAciklama, setDigerAciklama] = useState('');
 
   useEffect(() => {
     if (!deviceId) return;
@@ -101,8 +143,41 @@ export default function AplikasyonIslemFormuPage() {
     })();
   }, [deviceId, router, toast]);
 
-  const addActionRow = () => {
-    setActions(prev => [...prev, { id: crypto.randomUUID(), action: '', quantity: 1, description: '' }]);
+  const addPartChangeRow = () => {
+    setActions(prev => [...prev, { id: crypto.randomUUID(), type: 'part_change', action: '', quantity: 1, description: '' }]);
+  };
+
+  const openOperationModal = () => {
+    setSelectedOperations([]);
+    setDigerAciklama('');
+    setIsOperationModalOpen(true);
+  };
+
+  const toggleOperation = (op: OperationType) => {
+    setSelectedOperations(prev =>
+      prev.includes(op) ? prev.filter(o => o !== op) : [...prev, op]
+    );
+  };
+
+  const addSelectedOperations = () => {
+    // Validate "diger" requires description
+    if (selectedOperations.includes('diger') && !digerAciklama.trim()) {
+      toast({ title: 'Eksik Bilgi', description: '"Diğer" seçeneği için açıklama zorunludur.', variant: 'destructive' });
+      return;
+    }
+
+    const newItems: ActionItem[] = selectedOperations.map(op => ({
+      id: crypto.randomUUID(),
+      type: 'operation' as const,
+      action: op,
+      quantity: 1,
+      description: op === 'diger' ? digerAciklama : '',
+    }));
+
+    setActions(prev => [...prev, ...newItems]);
+    setIsOperationModalOpen(false);
+    setSelectedOperations([]);
+    setDigerAciklama('');
   };
 
   const updateAction = (id: string, field: keyof ActionItem, value: any) => {
@@ -114,10 +189,20 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const startSaveProcess = () => {
-    if (actions.some(a => !a.action || a.quantity <= 0)) {
-        toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm satırlarda bir işlem seçin ve geçerli bir adet girin.', variant: 'destructive' });
-        return;
+    // Validate part changes have selection
+    const invalidPartChange = actions.find(a => a.type === 'part_change' && (!a.action || a.quantity <= 0));
+    if (invalidPartChange) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm parça değişimi satırlarında bir parça seçin ve geçerli bir adet girin.', variant: 'destructive' });
+      return;
     }
+
+    // Validate "diger" operation has description
+    const invalidDiger = actions.find(a => a.action === 'diger' && !a.description?.trim());
+    if (invalidDiger) {
+      toast({ title: 'Eksik Bilgi', description: '"Diğer" işlemi için açıklama zorunludur.', variant: 'destructive' });
+      return;
+    }
+
     setSignatures({});
     setSignatureStep('personnel');
     setIsSignatureModalOpen(true);
@@ -173,6 +258,12 @@ export default function AplikasyonIslemFormuPage() {
     }
   };
 
+  const getActionLabel = (item: ActionItem): string => {
+    if (item.type === 'part_change') {
+      return PART_CHANGE_LABELS[item.action as PartChangeType] || item.action;
+    }
+    return OPERATION_LABELS[item.action as OperationType] || item.action;
+  };
 
   if (loading) {
     return <div className="p-6 flex justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
@@ -209,48 +300,69 @@ export default function AplikasyonIslemFormuPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="mb-4">
-              <Button onClick={addActionRow}><PlusCircle className="mr-2 h-4 w-4" /> Satır Ekle</Button>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <Button onClick={addPartChangeRow} variant="outline">
+                <Wrench className="mr-2 h-4 w-4" /> Değişen Parça Ekle
+              </Button>
+              <Button onClick={openOperationModal} variant="outline">
+                <ClipboardList className="mr-2 h-4 w-4" /> Yapılan İşlemi Seç
+              </Button>
             </div>
-            <ScrollArea className="h-64 border rounded-md">
+            <ScrollArea className="h-72 border rounded-md">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Yapılacak İşlem</TableHead>
-                    <TableHead className="w-32">Adet</TableHead>
+                    <TableHead className="w-24">Tür</TableHead>
+                    <TableHead>İşlem/Parça</TableHead>
+                    <TableHead className="w-24">Adet</TableHead>
                     <TableHead className="w-48">Açıklama</TableHead>
                     <TableHead className="w-16"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {actions.length === 0 ? (
-                    <TableRow><TableCell colSpan={4} className="text-center h-24 text-muted-foreground">İşlem ekleyin.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={5} className="text-center h-24 text-muted-foreground">Henüz işlem eklenmedi. Yukarıdaki butonları kullanarak parça değişimi veya işlem ekleyin.</TableCell></TableRow>
                   ) : (
                     actions.map(item => (
                       <TableRow key={item.id}>
                         <TableCell>
-                          <Select value={item.action} onValueChange={(v) => updateAction(item.id, 'action', v)}>
-                            <SelectTrigger><SelectValue placeholder="İşlem seçin..."/></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="kalibrasyon">Kalibrasyon</SelectItem>
-                              <SelectItem value="bakim">Bakım</SelectItem>
-                              <SelectItem value="reaktif_yukleme">Reaktif Yükleme</SelectItem>
-                              <SelectItem value="yazilim_guncelleme">Yazılım Güncelleme</SelectItem>
-                              <SelectItem value="egitim">Eğitim</SelectItem>
-                              <SelectItem value="diger">Diğer</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <span className={`text-xs font-medium px-2 py-1 rounded ${item.type === 'part_change' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                            {item.type === 'part_change' ? 'Parça' : 'İşlem'}
+                          </span>
                         </TableCell>
                         <TableCell>
-                          <Input type="number" value={item.quantity} onChange={(e) => updateAction(item.id, 'quantity', Number(e.target.value))} min="1"/>
+                          {item.type === 'part_change' ? (
+                            <Select value={item.action} onValueChange={(v) => updateAction(item.id, 'action', v)}>
+                              <SelectTrigger><SelectValue placeholder="Parça seçin..."/></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="lamba_degisimi">Lamba Değişimi</SelectItem>
+                                <SelectItem value="kuvet_degisimi">Küvet Değişimi</SelectItem>
+                                <SelectItem value="reaktif_degisimi">Reaktif Değişimi</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="font-medium">{OPERATION_LABELS[item.action as OperationType] || item.action}</span>
+                          )}
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="text"
-                            value={item.description || ''}
-                            onChange={(e) => updateAction(item.id, 'description', e.target.value)}
-                            placeholder="Açıklama..."
-                          />
+                          {item.type === 'part_change' ? (
+                            <Input type="number" value={item.quantity} onChange={(e) => updateAction(item.id, 'quantity', Number(e.target.value))} min="1"/>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {item.action === 'diger' || item.type === 'part_change' ? (
+                            <Input
+                              type="text"
+                              value={item.description || ''}
+                              onChange={(e) => updateAction(item.id, 'description', e.target.value)}
+                              placeholder={item.action === 'diger' ? 'Açıklama (zorunlu)' : 'Açıklama...'}
+                              className={item.action === 'diger' && !item.description ? 'border-destructive' : ''}
+                            />
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Button variant="ghost" size="icon" onClick={() => removeActionRow(item.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
@@ -270,6 +382,45 @@ export default function AplikasyonIslemFormuPage() {
           </CardFooter>
         </Card>
       </div>
+
+      {/* Operation Selection Modal */}
+      <Dialog open={isOperationModalOpen} onOpenChange={setIsOperationModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Yapılan İşlemi Seç</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-3">
+            {ALL_OPERATIONS.map(op => (
+              <div key={op} className="flex items-start space-x-3">
+                <Checkbox
+                  id={op}
+                  checked={selectedOperations.includes(op)}
+                  onCheckedChange={() => toggleOperation(op)}
+                />
+                <div className="flex flex-col">
+                  <Label htmlFor={op} className="cursor-pointer font-medium">
+                    {OPERATION_LABELS[op]}
+                  </Label>
+                  {op === 'diger' && selectedOperations.includes('diger') && (
+                    <Input
+                      className="mt-2 w-full"
+                      placeholder="Açıklama (zorunlu)"
+                      value={digerAciklama}
+                      onChange={(e) => setDigerAciklama(e.target.value)}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsOperationModalOpen(false)}>İptal</Button>
+            <Button onClick={addSelectedOperations} disabled={selectedOperations.length === 0}>
+              Ekle ({selectedOperations.length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* History Modal */}
       <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
@@ -292,7 +443,13 @@ export default function AplikasyonIslemFormuPage() {
                                         <ul className="list-disc pl-4 text-sm">
                                             {rec.actions.map(act => (
                                                 <li key={act.id}>
-                                                  {ACTION_LABELS[act.action] || act.action}: {act.quantity} adet
+                                                  <span className={`text-xs px-1 rounded mr-1 ${act.type === 'part_change' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                                                    {act.type === 'part_change' ? 'Parça' : 'İşlem'}
+                                                  </span>
+                                                  {act.type === 'part_change'
+                                                    ? `${PART_CHANGE_LABELS[act.action as PartChangeType] || act.action}: ${act.quantity} adet`
+                                                    : OPERATION_LABELS[act.action as OperationType] || act.action
+                                                  }
                                                   {act.description && <span className="text-muted-foreground ml-1">({act.description})</span>}
                                                 </li>
                                             ))}
