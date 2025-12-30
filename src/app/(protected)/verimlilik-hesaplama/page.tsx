@@ -18,7 +18,7 @@ export default function VerimlilikHesaplamaPage() {
 
     // Get hospital IDs for min/max rules
     const hospitalIds = useMemo(
-        () => (hospitalsQuery.data ?? []).map(h => h.id),
+        () => (hospitalsQuery.data ?? []).map(h => h.id).filter((id): id is string => !!id),
         [hospitalsQuery.data]
     );
     const minMaxRulesQuery = useAllMinMaxRules(hospitalIds);
