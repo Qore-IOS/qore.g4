@@ -21,7 +21,7 @@ declare module "@/lib/types" {
     | "numune-arsivi";
 
   export interface User {
-    id?: ID;
+    id: ID;
     uid?: string;
     displayName?: string;
     email?: string;
@@ -43,7 +43,7 @@ declare module "@/lib/types" {
 
   // ---------- Master Data ----------
   export interface ProductCode {
-    id?: ID;
+    id: ID;
     stokKodu?: string;
     stokAdi?: string;
     barkod?: string;
@@ -82,7 +82,7 @@ declare module "@/lib/types" {
   }
 
   export interface Depot {
-    id?: ID;
+    id: ID;
     ad?: string;
     name?: string;
     kod?: string;
@@ -95,7 +95,7 @@ declare module "@/lib/types" {
   }
 
   export interface Hospital {
-    id?: ID;
+    id: ID;
     ad?: string;
     name?: string;
     kod?: string;
@@ -114,7 +114,7 @@ declare module "@/lib/types" {
   export type Laboratory = Hospital;
 
   export interface AddressDefinition {
-    id?: ID;
+    id: ID;
     code?: string;
     description?: string;
     group?: string;
@@ -130,7 +130,7 @@ declare module "@/lib/types" {
 
   // ---------- Inventory & Counting ----------
   export interface DepoStokItem {
-    id?: ID;
+    id: ID;
     productCodeId?: ID;
     stokKodu?: string;
     stokAdi?: string;
@@ -157,7 +157,7 @@ declare module "@/lib/types" {
   }
 
   export interface DepotStockCountSession {
-    id?: ID;
+    id: ID;
     depotId?: ID;
     depotName?: string;
     brand?: string;
@@ -219,7 +219,7 @@ declare module "@/lib/types" {
   }
 
   export interface Shipment {
-    id?: ID;
+    id: ID;
     no?: string;
     tarih?: TimestampLike;
     sourceDepotId?: ID;
@@ -248,7 +248,7 @@ declare module "@/lib/types" {
   }
 
   export interface Order {
-    id?: ID;
+    id: ID;
     hospitalId?: ID;
     tarih?: TimestampLike;
     items?: OrderItem[];
@@ -268,7 +268,7 @@ declare module "@/lib/types" {
   }
 
   export interface PickingListItem {
-    id?: ID;
+    id: ID;
     shipmentId?: ID;
     productCodeId?: ID;
     lot?: string;
@@ -297,7 +297,7 @@ declare module "@/lib/types" {
   }
 
   export interface ConsumptionRecord {
-    id?: ID;
+    id: ID;
     productCodeId?: ID;
     hospitalId?: ID;
     deviceId?: ID;
@@ -342,7 +342,7 @@ declare module "@/lib/types" {
   }
 
   export interface ScannedItem {
-    id?: ID;
+    id: ID;
     barkod?: string;
     parsed?: ParsedBarcode;
     at?: TimestampLike;
@@ -361,7 +361,7 @@ declare module "@/lib/types" {
 
   // ---------- Devices ----------
   export interface Device {
-    id?: ID;
+    id: ID;
     ad?: string;
     name?: string;
     brand?: string;
@@ -384,7 +384,7 @@ declare module "@/lib/types" {
   }
 
   export interface AssignedDevice {
-    id?: ID;
+    id: ID;
     hastaneId?: string;
     cihazId?: string;
     assignedAt?: TimestampLike;
@@ -508,7 +508,7 @@ declare module "@/lib/types" {
 
   // ---------- Min/Max & Settings ----------
   export interface MinMaxRule {
-    id?: ID;
+    id: ID;
     hospitalId?: ID;
     productCodeId?: ID;
     min?: number;
