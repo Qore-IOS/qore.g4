@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode } from 'lucide-react';
+import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import { collection, getDocs } from 'firebase/firestore';
@@ -81,9 +81,12 @@ export default function CihazYonetimiHost() {
         <CardHeader className="text-center mb-8">
           <CardTitle className="text-3xl sm:text-4xl font-headline text-primary">Cihaz Yönetim Merkezi</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-10">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-10">
           <ModernButton onClick={() => router.push('/teknik-servis')} icon={Wrench}>
             Teknik Servis
+          </ModernButton>
+          <ModernButton onClick={() => router.push('/aplikasyon-paneli')} icon={FlaskConical}>
+            Aplikasyon
           </ModernButton>
           <ModernButton onClick={() => router.push('/ariza-yonetimi')} icon={ShieldAlert}>
             Tüm Arızalar
