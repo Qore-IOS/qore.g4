@@ -15,6 +15,7 @@ import { useLoading } from "@/contexts/loading-context";
 import PersistentNotificationToast from "./notifications/PersistentNotificationToast";
 import PageShell from "./responsive/PageShell";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
+import ThemeToggleDock from "./ui/theme-toggle-dock";
 import {
   SidebarProvider,
   Sidebar,
@@ -24,8 +25,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuSub,
-  SidebarMenuSubContent,
-  SidebarMenuSubTrigger,
   SidebarFooter,
   SidebarTrigger,
 } from "./ui/sidebar";
