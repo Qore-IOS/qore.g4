@@ -1,7 +1,7 @@
 
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,6 +19,7 @@ import { AlertTriangle } from 'lucide-react';
 
 export default function LabStockDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const firstId = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const { toast } = useToast();
   const { currentUserProfile } = useAuth();
@@ -114,7 +115,7 @@ export default function LabStockDetailPage() {
       // Try to delete even if it doesn't exist - Firebase won't error
       await deleteDoc(doc(db, 'depoStok', orphanedId));
       toast({ title: 'Başarılı', description: 'Kayıt temizlendi.' });
-      window.location.href = '/laboratuvar-yonetimi';
+      router.push('/laboratuvar-yonetimi');
     } catch (err) {
       console.error("Error force deleting orphan:", err);
       toast({ title: 'Hata', description: 'Kayıt temizlenemedi.', variant: 'destructive' });
