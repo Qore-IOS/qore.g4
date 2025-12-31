@@ -107,12 +107,13 @@ export default function LabStockDetailPage() {
     setIsDeleting(orphanedId);
     try {
       await deleteDoc(doc(db, 'depoStok', orphanedId));
-      toast({ title: 'Başarılı', description: 'Kayıt temizlendi.' });
-      router.push('/laboratuvar-yonetimi');
+      toast({ title: 'Başarılı', description: 'Kayıt temizlendi. Sayfa yenileniyor...' });
+      // Use replace + refresh to force the list page to re-fetch data
+      router.replace('/laboratuvar-yonetimi');
+      router.refresh();
     } catch (err) {
       console.error("Error force deleting orphan:", err);
       toast({ title: 'Hata', description: 'Kayıt temizlenemedi.', variant: 'destructive' });
-    } finally {
       setIsDeleting(null);
     }
   };
@@ -212,7 +213,7 @@ export default function LabStockDetailPage() {
                     <><Trash2 className="h-4 w-4 mr-2" /> Kaydı Zorla Sil</>
                   )}
                 </Button>
-                <Button onClick={() => window.location.href = '/laboratuvar-yonetimi'} variant="outline">
+                <Button onClick={() => { router.replace('/laboratuvar-yonetimi'); router.refresh(); }} variant="outline">
                   Geri Dön
                 </Button>
               </div>
@@ -236,7 +237,7 @@ export default function LabStockDetailPage() {
                   Bu ürün silinmiş veya stoktan düşürülmüş olabilir.
                   Sayfa yenilenmediği için eski veriler görüntüleniyor olabilir.
                 </p>
-                <Button onClick={() => window.location.href = '/laboratuvar-yonetimi'} variant="outline">
+                <Button onClick={() => { router.replace('/laboratuvar-yonetimi'); router.refresh(); }} variant="outline">
                   Laboratuvar Yönetimine Dön
                 </Button>
               </div>
