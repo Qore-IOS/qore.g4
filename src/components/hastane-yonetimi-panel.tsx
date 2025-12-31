@@ -90,10 +90,14 @@ export default function LaboratuvarYonetimiPanel() {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
   }, [laboratories, selectedLabId]);
 
-  const labStocks = useMemo(
-    () => depoStok.filter(item => item.hedefKurumId === selectedLabId),
-    [depoStok, selectedLabId]
-  );
+  // CRITICAL FIX: Filter by both hedefKurumId and hedefKurum (name) to include legacy records
+  const labStocks = useMemo(() => {
+    const labName = laboratories.find(l => l.id === selectedLabId)?.name || '';
+    return depoStok.filter(item =>
+      item.hedefKurumId === selectedLabId ||
+      (!item.hedefKurumId && item.hedefKurum === labName)
+    );
+  }, [depoStok, selectedLabId, laboratories]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
