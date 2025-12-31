@@ -129,8 +129,24 @@ export default function LabStockDetailPage() {
   
   if (!parentItem) {
     return (
-        <div className="flex h-full items-center justify-center text-destructive">
-            Ürün bilgisi yüklenemedi veya bulunamadı.
+        <div className="p-4 space-y-4">
+          <BackButton fallback="/laboratuvar-yonetimi" />
+          <Card>
+            <CardContent className="py-8">
+              <div className="flex flex-col items-center justify-center text-center space-y-4">
+                <div className="text-destructive text-lg font-medium">
+                  Ürün bilgisi yüklenemedi veya bulunamadı.
+                </div>
+                <p className="text-muted-foreground text-sm max-w-md">
+                  Bu ürün silinmiş veya stoktan düşürülmüş olabilir.
+                  Sayfa yenilenmediği için eski veriler görüntüleniyor olabilir.
+                </p>
+                <Button onClick={() => window.location.href = '/laboratuvar-yonetimi'} variant="outline">
+                  Laboratuvar Yönetimine Dön
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
     );
   }
