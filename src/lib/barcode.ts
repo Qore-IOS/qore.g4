@@ -174,11 +174,12 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
     let s = 0;
 
     // Priority bonus: Lower priority number = Higher score bonus
-    // Priority 1 gets +1000, Priority 2 gets +900, Priority 3 gets +800, etc.
+    // Priority 0 gets +1100, Priority 1 gets +1000, Priority 2 gets +900, etc.
     // This ensures user-defined priority always wins over field completeness
-    const priorityBonus = p.formatPriority
-      ? Math.max(0, 1100 - (p.formatPriority * 100))
-      : 500; // Default bonus for formats without priority
+    // Note: Using typeof check because 0 is a valid priority (falsy in JS)
+    // If priority is undefined, treat it as lowest priority (10)
+    const effectivePriority = typeof p.formatPriority === 'number' ? p.formatPriority : 10;
+    const priorityBonus = Math.max(0, 1100 - (effectivePriority * 100));
     s += priorityBonus;
 
     // Field completeness scoring (secondary to priority)
@@ -258,14 +259,28 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
     return null;
   }
 
-  const bestMatch = results.sort((a,b) => score(b) - score(a))[0];
+  // Sort by score and get the best match
+  const sortedResults = results.sort((a,b) => score(b) - score(a));
+  const bestMatch = sortedResults[0];
+
+  // Debug: log all candidates with their scores
+  if (sortedResults.length > 1) {
+    console.log('[parseAnyBarcode] All candidates:', sortedResults.map(r => ({
+      formatId: r.matchedFormatId,
+      stokKodu: r.stokKodu,
+      lotNumarasi: r.lotNumarasi,
+      priority: r.formatPriority,
+      score: score(r)
+    })));
+  }
 
   console.log('[parseAnyBarcode] Best match:', {
     formatId: bestMatch.matchedFormatId,
     stokKodu: bestMatch.stokKodu,
     lotNumarasi: bestMatch.lotNumarasi,
     seriNumarasi: bestMatch.seriNumarasi,
-    priority: bestMatch.formatPriority
+    priority: bestMatch.formatPriority,
+    score: score(bestMatch)
   });
 
   // Remove formatPriority from the result as it's only used for scoring
