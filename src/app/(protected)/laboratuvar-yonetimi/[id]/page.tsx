@@ -76,6 +76,13 @@ export default function LabStockDetailPage() {
             });
         }
 
+        // CRITICAL FIX: Always include the parent item in the list if it's not already there
+        // This ensures orphaned items (with inconsistent data) can still be deleted
+        const parentInList = fetchedItems.some(item => item.id === parent.id);
+        if (!parentInList) {
+            fetchedItems.unshift(parent); // Add parent at the beginning
+        }
+
         setItems(fetchedItems);
 
     } catch (err) {
@@ -96,7 +103,11 @@ export default function LabStockDetailPage() {
         return;
     }
     
-    if (!confirm(`${itemToDeduct.seriNumarasi} seri numaralı ürünü stoktan düşmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
+    const itemIdentifier = itemToDeduct.seriNumarasi
+      ? `${itemToDeduct.seriNumarasi} seri numaralı`
+      : `${itemToDeduct.lotNumarasi || 'Lot bilgisi yok'} lotlu`;
+
+    if (!confirm(`${itemIdentifier} ürünü stoktan düşmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
       return;
     }
 
@@ -201,15 +212,18 @@ export default function LabStockDetailPage() {
                 <TableBody>
                   {items.map(item => (
                     <TableRow key={item.id}>
-                      <TableCell className="font-mono text-xs">{item.seriNumarasi}</TableCell>
-                      <TableCell>{item.rafAdresi}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {item.seriNumarasi || <span className="text-muted-foreground italic">(Seri no yok)</span>}
+                      </TableCell>
+                      <TableCell>{item.rafAdresi || '-'}</TableCell>
                       <TableCell><TimestampText value={item.sevkTarihi} /></TableCell>
                       <TableCell className="text-right">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleDeductFromStock(item)}
                           disabled={isDeleting === item.id}
+                          title="Stoktan Düş"
                         >
                           {isDeleting === item.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
                         </Button>

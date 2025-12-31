@@ -43,16 +43,43 @@ export default function LabStockDetailPage() {
         const parent = { id: firstItemSnap.id, ...firstItemSnap.data() } as DepoStokItem;
         setParentItem(parent);
 
-        const q = query(
-            collection(db, 'depoStok'),
+        // Query using hedefKurumId if available, otherwise fall back to hedefKurum (name)
+        const baseConstraints = [
             where('stokKodu', '==', parent.stokKodu),
             where('lotNumarasi', '==', parent.lotNumarasi),
             where('miad', '==', parent.miad),
-            where('hedefKurum', '==', parent.hedefKurum),
             where('isShipped', '==', true)
-        );
-        const snap = await getDocs(q);
-        const fetchedItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        ];
+
+        let fetchedItems: DepoStokItem[] = [];
+
+        if (parent.hedefKurumId) {
+            const q = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurumId', '==', parent.hedefKurumId));
+            const snap = await getDocs(q);
+            fetchedItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        }
+
+        // Also query by hedefKurum (name) for legacy records
+        if (parent.hedefKurum) {
+            const legacyQ = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurum', '==', parent.hedefKurum));
+            const legacySnap = await getDocs(legacyQ);
+            const legacyItems = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+
+            const existingIds = new Set(fetchedItems.map(item => item.id));
+            legacyItems.forEach(item => {
+                if (!existingIds.has(item.id)) {
+                    fetchedItems.push(item);
+                }
+            });
+        }
+
+        // CRITICAL FIX: Always include the parent item in the list if it's not already there
+        // This ensures orphaned items (with inconsistent data) can still be deleted
+        const parentInList = fetchedItems.some(item => item.id === parent.id);
+        if (!parentInList) {
+            fetchedItems.unshift(parent);
+        }
+
         setItems(fetchedItems);
 
     } catch (err) {
@@ -73,7 +100,11 @@ export default function LabStockDetailPage() {
         return;
     }
     
-    if (!confirm(`${itemToDeduct.seriNumarasi} seri numaralı ürünü stoktan düşmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
+    const itemIdentifier = itemToDeduct.seriNumarasi
+      ? `${itemToDeduct.seriNumarasi} seri numaralı`
+      : `${itemToDeduct.lotNumarasi || 'Lot bilgisi yok'} lotlu`;
+
+    if (!confirm(`${itemIdentifier} ürünü stoktan düşmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
       return;
     }
 
@@ -178,15 +209,18 @@ export default function LabStockDetailPage() {
                 <TableBody>
                   {items.map(item => (
                     <TableRow key={item.id}>
-                      <TableCell className="font-mono text-xs">{item.seriNumarasi}</TableCell>
-                      <TableCell>{item.rafAdresi}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {item.seriNumarasi || <span className="text-muted-foreground italic">(Seri no yok)</span>}
+                      </TableCell>
+                      <TableCell>{item.rafAdresi || '-'}</TableCell>
                       <TableCell><TimestampText value={item.sevkTarihi} /></TableCell>
                       <TableCell className="text-right">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleDeductFromStock(item)}
                           disabled={isDeleting === item.id}
+                          title="Stoktan Düş"
                         >
                           {isDeleting === item.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
                         </Button>
