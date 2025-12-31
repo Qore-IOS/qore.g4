@@ -65,8 +65,10 @@ export default function LaboratuvarSayimPage() {
         // 1. Build a set of all scanned serial numbers
         const scannedSerialsSet = new Set(Object.values(scanned).flatMap(s => Array.from(s)));
 
-        // 2. Process each group to identify items to remove
+        // 2. Process each group to identify items to remove AND items to add
         const itemsToRemove: DepoStokItem[] = [];
+        let itemsToAdd = 0;
+        let itemsRemoved = 0;
 
         allItemsForCount.forEach(group => {
             const isSerialTracked = group.trackingMode === 'serial';
@@ -86,7 +88,7 @@ export default function LaboratuvarSayimPage() {
                     }
                 });
             } else {
-                // For lot/qty tracked items: calculate how many to remove based on count
+                // For lot/qty tracked items: calculate how many to remove or add based on count
                 // CRITICAL FIX: Normalize null/undefined to empty string for comparison
                 const groupItems = rawStock.filter(item =>
                     item.stokKodu === group.stokKodu &&
@@ -94,14 +96,42 @@ export default function LaboratuvarSayimPage() {
                     (item.miad || '') === group.miad
                 );
 
-                const countedQty = group.countedQty || 0;
+                // Use the latest counted quantity from state
+                const countedQty = countedQuantities[group.id] || 0;
                 const expectedQty = group.expectedQty;
-                const qtyToRemove = expectedQty - countedQty;
+                const qtyDifference = expectedQty - countedQty;
 
-                if (qtyToRemove > 0) {
-                    // Remove the excess items (items that weren't counted)
-                    const itemsToDelete = groupItems.slice(0, qtyToRemove);
+                if (qtyDifference > 0) {
+                    // Remove the excess items (items that weren't counted = consumed/missing)
+                    const itemsToDelete = groupItems.slice(0, qtyDifference);
                     itemsToRemove.push(...itemsToDelete);
+                } else if (qtyDifference < 0) {
+                    // STOCK INCREASE: Add new items for the surplus count
+                    const qtyToAdd = Math.abs(qtyDifference);
+                    const templateItem = groupItems[0] || {
+                        stokKodu: group.stokKodu,
+                        stokAdi: group.stokAdi,
+                        lotNumarasi: group.lotNumarasi,
+                        miad: group.miad,
+                    };
+
+                    for (let i = 0; i < qtyToAdd; i++) {
+                        const newStockRef = doc(collection(db, 'depoStok'));
+                        batch.set(newStockRef, {
+                            stokKodu: templateItem.stokKodu,
+                            stokAdi: templateItem.stokAdi || group.stokAdi,
+                            lotNumarasi: templateItem.lotNumarasi || group.lotNumarasi,
+                            miad: templateItem.miad || group.miad,
+                            seriNumarasi: '', // No serial for lot/qty tracked items
+                            isShipped: true,
+                            hedefKurumId: labId,
+                            hedefKurum: labName,
+                            eklenmeTarihi: new Date(),
+                            ekleyenKullanici: currentUserProfile.name || currentUserProfile.email || 'System',
+                            eklemeSebebi: 'sayim_fazlasi', // Added from inventory count surplus
+                        });
+                        itemsToAdd++;
+                    }
                 }
             }
         });
@@ -112,6 +142,7 @@ export default function LaboratuvarSayimPage() {
             if (!item.id) return; // Skip items without id
             const stockDocRef = doc(db, 'depoStok', item.id);
             batch.delete(stockDocRef);
+            itemsRemoved++;
 
             // Create a consumption record for the discrepancy
             const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
@@ -123,7 +154,7 @@ export default function LaboratuvarSayimPage() {
                 laboratoryId: labId,
                 laboratoryName: labName,
                 consumptionTimestamp: new Date(),
-                consumptionType: 'sayimdan_dusum', // New type for count discrepancy
+                consumptionType: 'sayimdan_dusum', // Type for count discrepancy
                 userId: currentUserProfile.uid,
                 userName: currentUserProfile.name || 'System',
             };
@@ -152,7 +183,13 @@ export default function LaboratuvarSayimPage() {
         // 5. Commit all database operations
         await batch.commit();
 
-        toast({ title: 'Başarılı', description: `Sayım kaydedildi ve ${itemsToRemove.length} eksik ürün stoktan düşüldü.` });
+        // Build result message
+        const messages: string[] = [];
+        if (itemsRemoved > 0) messages.push(`${itemsRemoved} eksik ürün stoktan düşüldü`);
+        if (itemsToAdd > 0) messages.push(`${itemsToAdd} fazla ürün stoğa eklendi`);
+        const resultMsg = messages.length > 0 ? messages.join(', ') : 'Stok değişikliği yok';
+
+        toast({ title: 'Başarılı', description: `Sayım kaydedildi. ${resultMsg}.` });
         router.push(`/laboratuvar/sayim/${labId}/history`);
 
     } catch(err) {
@@ -327,8 +364,9 @@ export default function LaboratuvarSayimPage() {
 
     for (const group of allItemsForCount) {
         const isSerialTracked = group.trackingMode === 'serial';
+        // CRITICAL FIX: Match lot number for ALL tracking types, not just serial
         const matchesGroup = group.stokKodu === parsed.stokKodu &&
-                           (!isSerialTracked || group.lotNumarasi === parsed.lotNumarasi);
+                           (group.lotNumarasi || '') === (parsed.lotNumarasi || '');
 
         if (matchesGroup) {
             if (isSerialTracked) {
@@ -349,21 +387,26 @@ export default function LaboratuvarSayimPage() {
                     foundAndUpdated = true;
                     break;
                 }
-            } else { // Not serial tracked
-                if (group.countedQty < group.expectedQty) {
-                    setCountedQuantities(prev => ({
-                        ...prev,
-                        [group.id]: (prev[group.id] || 0) + 1
-                    }));
-                    toast({ title: 'Adet Artırıldı', description: `${group.stokAdi} (${group.lotNumarasi}) adedi güncellendi.` });
-                    playFeedback();
-                    foundAndUpdated = true;
-                    break;
+            } else { // Not serial tracked (lot/qty tracking)
+                // CRITICAL FIX: Allow counting beyond expected quantity for stock increases
+                // Get current count from state (use functional update pattern for accuracy)
+                const currentCount = countedQuantities[group.id] || 0;
+
+                setCountedQuantities(prev => ({
+                    ...prev,
+                    [group.id]: (prev[group.id] || 0) + 1
+                }));
+
+                const newCount = currentCount + 1;
+                if (newCount <= group.expectedQty) {
+                    toast({ title: 'Adet Artırıldı', description: `${group.stokAdi} (${group.lotNumarasi}): ${newCount}/${group.expectedQty}` });
                 } else {
-                    toast({ title: 'Adet Tamamlandı', description: `${group.stokAdi} için beklenen adete ulaşıldı.` });
-                    playFeedback(true);
-                    return;
+                    // Stock increase scenario - scanned more than expected
+                    toast({ title: 'Stok Artışı', description: `${group.stokAdi} (${group.lotNumarasi}): ${newCount}/${group.expectedQty} - Fazla ürün tespit edildi` });
                 }
+                playFeedback();
+                foundAndUpdated = true;
+                break;
             }
         }
     }
