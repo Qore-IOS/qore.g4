@@ -25,7 +25,7 @@ interface DockProps {
   isVisible: boolean;
 }
 
-// Liquid Glass Selector Component
+// Liquid Glass Selector Component - Apple Style
 const LiquidGlassSelector = ({
   x,
   width,
@@ -39,7 +39,7 @@ const LiquidGlassSelector = ({
   isVisible: boolean;
   activeLabel?: string;
 }) => {
-  const springConfig = { damping: 25, stiffness: 300, mass: 0.5 };
+  const springConfig = { damping: 20, stiffness: 200, mass: 0.8 };
   const springX = useSpring(x, springConfig);
   const springWidth = useSpring(width, springConfig);
 
@@ -56,75 +56,155 @@ const LiquidGlassSelector = ({
       style={{
         x: springX,
         width: springWidth,
-        height: height + 16,
-        top: -8,
+        height: height + 20,
+        top: -10,
       }}
-      initial={{ opacity: 0, scale: 0.8 }}
+      initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.8 }}
-      transition={{ duration: 0.2 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
     >
-      {/* Glass container */}
+      {/* SVG Filter for Lensing Effect */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <filter id="liquid-glass-filter" x="-50%" y="-50%" width="200%" height="200%">
+            {/* Turbulence for subtle distortion */}
+            <feTurbulence type="fractalNoise" baseFrequency="0.01" numOctaves="1" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+
+          {/* Glow filter */}
+          <filter id="liquid-glow" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur stdDeviation="8" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+        </defs>
+      </svg>
+
+      {/* Main Glass Container */}
       <div
-        className="relative w-full h-full overflow-hidden"
+        className="relative w-full h-full"
         style={{
-          borderRadius: '160px',
+          borderRadius: '9999px',
+          transform: 'perspective(500px) rotateX(2deg)',
         }}
       >
-        {/* Lensing/Refraction effect layer */}
+        {/* Bottom shadow - creates floating effect */}
         <div
-          className="absolute inset-0"
+          className="absolute inset-x-2 -bottom-2 h-4"
           style={{
-            background: 'rgba(255, 255, 255, 0.15)',
-            backdropFilter: 'blur(12px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+            background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.15) 0%, transparent 70%)',
+            filter: 'blur(4px)',
+            borderRadius: '50%',
           }}
         />
 
-        {/* Light reflection - top left 45 degree */}
+        {/* Glass body - main structure */}
         <div
-          className="absolute inset-0"
+          className="absolute inset-0 overflow-hidden"
           style={{
-            background: `linear-gradient(
-              135deg,
-              rgba(255, 255, 255, 0.4) 0%,
-              rgba(255, 255, 255, 0.1) 30%,
-              transparent 60%
-            )`,
-            borderRadius: '160px',
-          }}
-        />
-
-        {/* Inner highlight for depth */}
-        <div
-          className="absolute inset-0"
-          style={{
-            boxShadow: `
-              inset 0 1px 2px rgba(255, 255, 255, 0.3),
-              inset 0 -1px 2px rgba(0, 0, 0, 0.05)
+            borderRadius: '9999px',
+            background: `
+              linear-gradient(
+                180deg,
+                rgba(255, 255, 255, 0.25) 0%,
+                rgba(255, 255, 255, 0.08) 50%,
+                rgba(255, 255, 255, 0.15) 100%
+              )
             `,
-            borderRadius: '160px',
+            backdropFilter: 'blur(20px) saturate(180%) brightness(1.1)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%) brightness(1.1)',
           }}
         />
 
-        {/* Outer glow/shadow for depth */}
+        {/* Top highlight - 3D rim light */}
         <div
-          className="absolute -inset-1"
+          className="absolute inset-x-0 top-0 h-[45%] overflow-hidden"
           style={{
-            background: 'transparent',
-            boxShadow: `
-              0 4px 16px rgba(0, 0, 0, 0.1),
-              0 2px 8px rgba(0, 0, 0, 0.05)
+            borderRadius: '9999px 9999px 50% 50%',
+            background: `
+              linear-gradient(
+                180deg,
+                rgba(255, 255, 255, 0.6) 0%,
+                rgba(255, 255, 255, 0.3) 40%,
+                transparent 100%
+              )
             `,
-            borderRadius: '164px',
-            zIndex: -1,
           }}
         />
 
-        {/* Edge highlight */}
+        {/* Left edge refraction */}
         <div
-          className="absolute inset-0 border border-white/30"
-          style={{ borderRadius: '160px' }}
+          className="absolute left-0 top-[10%] bottom-[10%] w-[3px]"
+          style={{
+            background: `
+              linear-gradient(
+                180deg,
+                transparent 0%,
+                rgba(255, 255, 255, 0.8) 20%,
+                rgba(255, 255, 255, 0.9) 50%,
+                rgba(255, 255, 255, 0.8) 80%,
+                transparent 100%
+              )
+            `,
+            filter: 'blur(1px)',
+            borderRadius: '9999px',
+          }}
+        />
+
+        {/* Right edge refraction */}
+        <div
+          className="absolute right-0 top-[10%] bottom-[10%] w-[3px]"
+          style={{
+            background: `
+              linear-gradient(
+                180deg,
+                transparent 0%,
+                rgba(255, 255, 255, 0.5) 20%,
+                rgba(255, 255, 255, 0.6) 50%,
+                rgba(255, 255, 255, 0.5) 80%,
+                transparent 100%
+              )
+            `,
+            filter: 'blur(1px)',
+            borderRadius: '9999px',
+          }}
+        />
+
+        {/* Inner depth shadow */}
+        <div
+          className="absolute inset-0"
+          style={{
+            borderRadius: '9999px',
+            boxShadow: `
+              inset 0 -8px 16px rgba(0, 0, 0, 0.06),
+              inset 0 2px 4px rgba(255, 255, 255, 0.4)
+            `,
+          }}
+        />
+
+        {/* Outer glass border - creates thickness illusion */}
+        <div
+          className="absolute inset-0"
+          style={{
+            borderRadius: '9999px',
+            border: '1.5px solid rgba(255, 255, 255, 0.5)',
+            boxShadow: `
+              0 8px 32px rgba(0, 0, 0, 0.12),
+              0 4px 16px rgba(0, 0, 0, 0.08),
+              0 2px 8px rgba(0, 0, 0, 0.04)
+            `,
+          }}
+        />
+
+        {/* Specular highlight - top left */}
+        <div
+          className="absolute top-[15%] left-[10%] w-[30%] h-[25%]"
+          style={{
+            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.7) 0%, transparent 70%)',
+            filter: 'blur(2px)',
+            borderRadius: '50%',
+          }}
         />
       </div>
 
@@ -132,12 +212,13 @@ const LiquidGlassSelector = ({
       <AnimatePresence>
         {activeLabel && (
           <motion.div
-            initial={{ opacity: 0, y: -5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -5 }}
-            className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap"
+            initial={{ opacity: 0, y: -8, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.9 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap"
           >
-            <span className="text-xs font-medium text-foreground/80 bg-background/80 backdrop-blur-sm px-2 py-0.5 rounded-full">
+            <span className="text-xs font-medium text-foreground bg-background/90 backdrop-blur-md px-3 py-1 rounded-full shadow-lg border border-white/20">
               {activeLabel}
             </span>
           </motion.div>
