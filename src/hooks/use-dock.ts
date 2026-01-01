@@ -61,6 +61,7 @@ import {
   MapPin,
   Barcode,
   PlusCircle,
+  Palette,
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
 import { playNotificationSound } from "@/lib/utils";
@@ -184,6 +185,12 @@ const subItemMap: Record<string, DockSubItem[]> = {
       label: "Envanter Yönetimi",
       icon: Warehouse,
       href: "/yonetim/envanter-yonetimi",
+    },
+    {
+      key: "kisisellistirme",
+      label: "Kişiselleştirme",
+      icon: Palette,
+      href: "/yonetim/kisisellistirme",
     },
   ],
   raporlama: [
