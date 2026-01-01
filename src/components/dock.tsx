@@ -39,7 +39,7 @@ const LiquidGlassSelector = ({
   isVisible: boolean;
   activeLabel?: string;
 }) => {
-  const springConfig = { damping: 20, stiffness: 200, mass: 0.8 };
+  const springConfig = { damping: 22, stiffness: 180, mass: 0.6 };
   const springX = useSpring(x, springConfig);
   const springWidth = useSpring(width, springConfig);
 
@@ -52,54 +52,38 @@ const LiquidGlassSelector = ({
 
   return (
     <motion.div
-      className="absolute pointer-events-none z-10"
+      className="absolute pointer-events-none"
       style={{
         x: springX,
         width: springWidth,
-        height: height + 20,
-        top: -10,
+        height: height,
+        top: '50%',
+        translateY: '-50%',
+        zIndex: 5,
       }}
-      initial={{ opacity: 0, scale: 0.9 }}
+      initial={{ opacity: 0, scale: 0.85 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ duration: 0.15, ease: "easeOut" }}
+      exit={{ opacity: 0, scale: 0.85 }}
+      transition={{ duration: 0.12, ease: "easeOut" }}
     >
-      {/* SVG Filter for Lensing Effect */}
-      <svg width="0" height="0" className="absolute">
-        <defs>
-          <filter id="liquid-glass-filter" x="-50%" y="-50%" width="200%" height="200%">
-            {/* Turbulence for subtle distortion */}
-            <feTurbulence type="fractalNoise" baseFrequency="0.01" numOctaves="1" result="noise" />
-            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" />
-          </filter>
-
-          {/* Glow filter */}
-          <filter id="liquid-glow" x="-100%" y="-100%" width="300%" height="300%">
-            <feGaussianBlur stdDeviation="8" result="blur" />
-            <feComposite in="SourceGraphic" in2="blur" operator="over" />
-          </filter>
-        </defs>
-      </svg>
-
       {/* Main Glass Container */}
       <div
         className="relative w-full h-full"
         style={{
           borderRadius: '9999px',
-          transform: 'perspective(500px) rotateX(2deg)',
         }}
       >
         {/* Bottom shadow - creates floating effect */}
         <div
-          className="absolute inset-x-2 -bottom-2 h-4"
+          className="absolute inset-x-3 -bottom-1.5 h-3"
           style={{
-            background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.15) 0%, transparent 70%)',
-            filter: 'blur(4px)',
+            background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.2) 0%, transparent 70%)',
+            filter: 'blur(3px)',
             borderRadius: '50%',
           }}
         />
 
-        {/* Glass body - main structure */}
+        {/* Glass body - main structure with lensing */}
         <div
           className="absolute inset-0 overflow-hidden"
           style={{
@@ -107,102 +91,96 @@ const LiquidGlassSelector = ({
             background: `
               linear-gradient(
                 180deg,
-                rgba(255, 255, 255, 0.25) 0%,
-                rgba(255, 255, 255, 0.08) 50%,
-                rgba(255, 255, 255, 0.15) 100%
+                rgba(255, 255, 255, 0.28) 0%,
+                rgba(255, 255, 255, 0.06) 40%,
+                rgba(255, 255, 255, 0.12) 100%
               )
             `,
-            backdropFilter: 'blur(20px) saturate(180%) brightness(1.1)',
-            WebkitBackdropFilter: 'blur(20px) saturate(180%) brightness(1.1)',
+            backdropFilter: 'blur(16px) saturate(180%) contrast(1.05)',
+            WebkitBackdropFilter: 'blur(16px) saturate(180%) contrast(1.05)',
+          }}
+        />
+
+        {/* Edge refraction - LEFT (stronger, creates lens edge distortion) */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[6px] overflow-hidden"
+          style={{
+            borderRadius: '9999px 0 0 9999px',
+            background: `
+              linear-gradient(
+                90deg,
+                rgba(255, 255, 255, 0.7) 0%,
+                rgba(255, 255, 255, 0.3) 50%,
+                transparent 100%
+              )
+            `,
+          }}
+        />
+
+        {/* Edge refraction - RIGHT */}
+        <div
+          className="absolute right-0 top-0 bottom-0 w-[6px] overflow-hidden"
+          style={{
+            borderRadius: '0 9999px 9999px 0',
+            background: `
+              linear-gradient(
+                -90deg,
+                rgba(255, 255, 255, 0.5) 0%,
+                rgba(255, 255, 255, 0.2) 50%,
+                transparent 100%
+              )
+            `,
           }}
         />
 
         {/* Top highlight - 3D rim light */}
         <div
-          className="absolute inset-x-0 top-0 h-[45%] overflow-hidden"
+          className="absolute inset-x-[10%] top-[2px] h-[40%]"
           style={{
-            borderRadius: '9999px 9999px 50% 50%',
-            background: `
-              linear-gradient(
-                180deg,
-                rgba(255, 255, 255, 0.6) 0%,
-                rgba(255, 255, 255, 0.3) 40%,
-                transparent 100%
-              )
-            `,
-          }}
-        />
-
-        {/* Left edge refraction */}
-        <div
-          className="absolute left-0 top-[10%] bottom-[10%] w-[3px]"
-          style={{
-            background: `
-              linear-gradient(
-                180deg,
-                transparent 0%,
-                rgba(255, 255, 255, 0.8) 20%,
-                rgba(255, 255, 255, 0.9) 50%,
-                rgba(255, 255, 255, 0.8) 80%,
-                transparent 100%
-              )
-            `,
-            filter: 'blur(1px)',
             borderRadius: '9999px',
-          }}
-        />
-
-        {/* Right edge refraction */}
-        <div
-          className="absolute right-0 top-[10%] bottom-[10%] w-[3px]"
-          style={{
             background: `
               linear-gradient(
                 180deg,
-                transparent 0%,
-                rgba(255, 255, 255, 0.5) 20%,
-                rgba(255, 255, 255, 0.6) 50%,
-                rgba(255, 255, 255, 0.5) 80%,
+                rgba(255, 255, 255, 0.65) 0%,
+                rgba(255, 255, 255, 0.2) 60%,
                 transparent 100%
               )
             `,
-            filter: 'blur(1px)',
-            borderRadius: '9999px',
+            filter: 'blur(0.5px)',
           }}
         />
 
-        {/* Inner depth shadow */}
+        {/* Inner depth - bottom dark edge */}
         <div
           className="absolute inset-0"
           style={{
             borderRadius: '9999px',
             boxShadow: `
-              inset 0 -8px 16px rgba(0, 0, 0, 0.06),
-              inset 0 2px 4px rgba(255, 255, 255, 0.4)
+              inset 0 -6px 12px rgba(0, 0, 0, 0.08),
+              inset 0 2px 3px rgba(255, 255, 255, 0.5)
             `,
           }}
         />
 
-        {/* Outer glass border - creates thickness illusion */}
+        {/* Outer border with glow */}
         <div
           className="absolute inset-0"
           style={{
             borderRadius: '9999px',
-            border: '1.5px solid rgba(255, 255, 255, 0.5)',
+            border: '1px solid rgba(255, 255, 255, 0.6)',
             boxShadow: `
-              0 8px 32px rgba(0, 0, 0, 0.12),
-              0 4px 16px rgba(0, 0, 0, 0.08),
-              0 2px 8px rgba(0, 0, 0, 0.04)
+              0 6px 24px rgba(0, 0, 0, 0.15),
+              0 2px 8px rgba(0, 0, 0, 0.1)
             `,
           }}
         />
 
-        {/* Specular highlight - top left */}
+        {/* Specular highlight - top left corner */}
         <div
-          className="absolute top-[15%] left-[10%] w-[30%] h-[25%]"
+          className="absolute top-[12%] left-[8%] w-[20%] h-[35%]"
           style={{
-            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.7) 0%, transparent 70%)',
-            filter: 'blur(2px)',
+            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.8) 0%, transparent 70%)',
+            filter: 'blur(1.5px)',
             borderRadius: '50%',
           }}
         />
@@ -212,13 +190,13 @@ const LiquidGlassSelector = ({
       <AnimatePresence>
         {activeLabel && (
           <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.9 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.1, ease: "easeOut" }}
+            className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap"
           >
-            <span className="text-xs font-medium text-foreground bg-background/90 backdrop-blur-md px-3 py-1 rounded-full shadow-lg border border-white/20">
+            <span className="text-xs font-medium text-foreground bg-background/95 backdrop-blur-md px-2.5 py-0.5 rounded-full shadow-md border border-border/50">
               {activeLabel}
             </span>
           </motion.div>
@@ -501,54 +479,61 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   // Refs for each item to track positions
   const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const dockRef = useRef<HTMLDivElement>(null);
+  const dockContentRef = useRef<HTMLDivElement>(null);
 
   // Liquid mode state
   const [isMouseInDock, setIsMouseInDock] = useState(false);
   const [activeItemKey, setActiveItemKey] = useState<string | null>(null);
   const [selectorPosition, setSelectorPosition] = useState({ x: 0, width: 48 });
+  const mouseInDockRef = useRef(false);
 
   // Track mouse position for liquid selector
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isLiquidMode || !dockRef.current) return;
+    if (!isLiquidMode || !dockContentRef.current) return;
 
-    const dockRect = dockRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - dockRect.left;
+    const contentRect = dockContentRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - contentRect.left;
 
     // Find the closest item to the mouse
-    let closestItem: { key: string; x: number; width: number } | null = null;
+    let closestItem: { key: string; centerX: number; width: number } | null = null;
     let closestDistance = Infinity;
 
     itemRefs.current.forEach((ref, key) => {
       if (ref) {
         const rect = ref.getBoundingClientRect();
-        const itemCenterX = rect.left + rect.width / 2 - dockRect.left;
+        const itemCenterX = rect.left + rect.width / 2 - contentRect.left;
         const distance = Math.abs(mouseX - itemCenterX);
 
         if (distance < closestDistance) {
           closestDistance = distance;
           closestItem = {
             key,
-            x: rect.left - dockRect.left - 8, // Offset for padding
-            width: rect.width + 16, // Add padding to selector
+            centerX: itemCenterX,
+            width: rect.width,
           };
         }
       }
     });
 
     if (closestItem) {
+      const selectorWidth = closestItem.width + 12; // Add padding
+      const selectorX = closestItem.centerX - selectorWidth / 2; // Center on icon
+
       setActiveItemKey(closestItem.key);
-      setSelectorPosition({ x: closestItem.x, width: closestItem.width });
+      setSelectorPosition({ x: selectorX, width: selectorWidth });
     }
   }, [isLiquidMode]);
 
   const handleMouseEnter = useCallback(() => {
     if (isLiquidMode) {
+      mouseInDockRef.current = true;
       setIsMouseInDock(true);
     }
   }, [isLiquidMode]);
 
   const handleMouseLeave = useCallback(() => {
     if (isLiquidMode) {
+      mouseInDockRef.current = false;
       setIsMouseInDock(false);
       setActiveItemKey(null);
     }
@@ -571,9 +556,11 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           className={cn(
             "relative flex h-14 items-center gap-3 p-3 rounded-full transition-shadow duration-300",
             "bg-[#e0e0e0] shadow-[9px_9px_18px_#bebebe,-9px_-9px_18px_#ffffff]",
-            "dark:bg-black/20 dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10 dark:backdrop-blur-md",
-            isLiquidMode && isMouseInDock && "cursor-none"
+            "dark:bg-black/20 dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10 dark:backdrop-blur-md"
           )}
+          style={{
+            cursor: isLiquidMode && isMouseInDock ? 'none' : 'auto',
+          }}
           animate={{
             opacity: isVisible ? 1 : 0,
             y: isVisible ? 0 : 20,
@@ -584,33 +571,36 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          {/* Liquid Glass Selector */}
-          {isLiquidMode && (
-            <AnimatePresence>
-              {isMouseInDock && (
-                <LiquidGlassSelector
-                  x={selectorPosition.x}
-                  width={selectorPosition.width}
-                  height={40}
-                  isVisible={isMouseInDock}
-                  activeLabel={activeItem?.label}
-                />
-              )}
-            </AnimatePresence>
-          )}
+          {/* Content wrapper for position reference */}
+          <div ref={dockContentRef} className="relative flex items-center gap-3">
+            {/* Liquid Glass Selector */}
+            {isLiquidMode && (
+              <AnimatePresence>
+                {isMouseInDock && activeItemKey && (
+                  <LiquidGlassSelector
+                    x={selectorPosition.x}
+                    width={selectorPosition.width}
+                    height={44}
+                    isVisible={isMouseInDock}
+                    activeLabel={activeItem?.label}
+                  />
+                )}
+              </AnimatePresence>
+            )}
 
-          <DockLogo />
-          {items.map((item) => (
-            <DockItem
-              key={item.key}
-              item={item}
-              isActive={item.key === currentView && item.type === 'nav'}
-              setTheme={setTheme}
-              isLiquidMode={isLiquidMode}
-              isLiquidHovered={isLiquidMode && activeItemKey === item.key}
-              onRefSet={(el) => setItemRef(item.key, el)}
-            />
-          ))}
+            <DockLogo />
+            {items.map((item) => (
+              <DockItem
+                key={item.key}
+                item={item}
+                isActive={item.key === currentView && item.type === 'nav'}
+                setTheme={setTheme}
+                isLiquidMode={isLiquidMode}
+                isLiquidHovered={isLiquidMode && activeItemKey === item.key}
+                onRefSet={(el) => setItemRef(item.key, el)}
+              />
+            ))}
+          </div>
           <div className="mx-2">
             <ThemeToggleDock />
           </div>
