@@ -2,12 +2,13 @@
 
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Palette, Image, Layout, Settings2 } from 'lucide-react';
+import { Palette, Image, Layout, Settings2, MousePointer2, Droplets, Check } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import BackButton from '@/components/BackButton';
+import { cn } from '@/lib/utils';
 
 export default function KisisellistirmePanel() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, dockStyle, setDockStyle } = useAuth();
 
   if (!isAdmin) {
     return (
@@ -50,6 +51,21 @@ export default function KisisellistirmePanel() {
     },
   ];
 
+  const dockStyles = [
+    {
+      key: 'hover' as const,
+      icon: MousePointer2,
+      title: 'Hover Görünümü',
+      description: 'Mouse ile üzerine gelindiğinde ikonlar büyür ve yukarı kalkar',
+    },
+    {
+      key: 'liquid' as const,
+      icon: Droplets,
+      title: 'Liquid Glass',
+      description: 'Cam efektli seçici mouse ile akışkan şekilde ikonlar arasında kayar',
+    },
+  ];
+
   return (
     <div className="p-6 space-y-6">
       <BackButton />
@@ -63,37 +79,107 @@ export default function KisisellistirmePanel() {
           </CardTitle>
           <CardDescription>
             Sistem görsellerini ve arayüz ayarlarını buradan yönetebilirsiniz.
-            Bu panel faz faz geliştirilmektedir.
           </CardDescription>
         </CardHeader>
       </Card>
 
-      {/* Upcoming Features Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {upcomingFeatures.map((feature) => (
-          <Card
-            key={feature.title}
-            className="bg-card/60 border-dashed border-2 opacity-70"
-          >
-            <CardContent className="flex flex-col items-center justify-center p-6 text-center">
-              <feature.icon className="h-10 w-10 mb-3 text-muted-foreground" />
-              <CardTitle className="text-base font-headline mb-1">{feature.title}</CardTitle>
-              <CardDescription className="text-sm mb-2">{feature.description}</CardDescription>
-              <span className="text-xs px-2 py-1 rounded-full bg-muted text-muted-foreground">
-                {feature.phase}
-              </span>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* Dock Style Selection - Active Feature */}
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-lg font-headline flex items-center gap-2">
+            <Droplets className="h-5 w-5 text-primary" />
+            Dock Görünümü
+          </CardTitle>
+          <CardDescription>
+            Alt navigasyon çubuğunun (dock) görünüm stilini seçin.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {dockStyles.map((style) => (
+              <button
+                key={style.key}
+                onClick={() => setDockStyle(style.key)}
+                className={cn(
+                  "relative flex flex-col items-start p-4 rounded-lg border-2 transition-all duration-200 text-left",
+                  dockStyle === style.key
+                    ? "border-primary bg-primary/5 shadow-md"
+                    : "border-border hover:border-primary/50 hover:bg-accent/50"
+                )}
+              >
+                {/* Selected indicator */}
+                {dockStyle === style.key && (
+                  <div className="absolute top-3 right-3">
+                    <div className="flex items-center justify-center w-5 h-5 rounded-full bg-primary text-primary-foreground">
+                      <Check className="w-3 h-3" />
+                    </div>
+                  </div>
+                )}
 
-      {/* Info Card */}
-      <Card className="bg-blue-500/10 border-blue-500/20">
-        <CardContent className="p-4">
-          <p className="text-sm text-blue-600 dark:text-blue-400">
-            <strong>Bilgi:</strong> Kişiselleştirme özellikleri yakında aktif edilecektir.
-            Bu panel üzerinden logo, tema renkleri ve arayüz düzenini özelleştirebileceksiniz.
-          </p>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={cn(
+                    "p-2 rounded-lg",
+                    dockStyle === style.key ? "bg-primary/10" : "bg-muted"
+                  )}>
+                    <style.icon className={cn(
+                      "h-5 w-5",
+                      dockStyle === style.key ? "text-primary" : "text-muted-foreground"
+                    )} />
+                  </div>
+                  <span className="font-medium">{style.title}</span>
+                </div>
+                <p className="text-sm text-muted-foreground pl-12">
+                  {style.description}
+                </p>
+
+                {/* Preview hint for Liquid */}
+                {style.key === 'liquid' && (
+                  <div className="mt-3 pl-12">
+                    <span className="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                      Apple Liquid Glass
+                    </span>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Liquid Glass Info */}
+          {dockStyle === 'liquid' && (
+            <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20">
+              <p className="text-sm text-blue-600 dark:text-blue-400">
+                <strong>Liquid Glass Aktif:</strong> Dock&apos;un üzerine geldiğinizde cam efektli seçici görünecek
+                ve ikonlar arasında akışkan bir şekilde hareket edecektir.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Upcoming Features Grid */}
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-lg font-headline">Yakında Gelecek Özellikler</CardTitle>
+          <CardDescription>
+            Bu özellikler gelecek güncellemelerle eklenecektir.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {upcomingFeatures.map((feature) => (
+              <div
+                key={feature.title}
+                className="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-dashed border-muted opacity-60 text-center"
+              >
+                <feature.icon className="h-8 w-8 mb-2 text-muted-foreground" />
+                <span className="font-medium text-sm mb-1">{feature.title}</span>
+                <span className="text-xs text-muted-foreground mb-2">{feature.description}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                  {feature.phase}
+                </span>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </div>

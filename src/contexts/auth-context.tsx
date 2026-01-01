@@ -18,6 +18,8 @@ type ThemePreference = 'light' | 'dark' | 'system';
 
 type NavMode = 'dock' | 'sidebar';
 
+type DockStyle = 'hover' | 'liquid';
+
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   currentUserProfile: User | null;
@@ -28,6 +30,8 @@ interface AuthContextType {
   toggleOrbAnimation: () => void;
   navMode: NavMode;
   toggleNavMode: () => void;
+  dockStyle: DockStyle;
+  setDockStyle: (style: DockStyle) => void;
   themePreference: ThemePreference;
   setUserTheme: (theme: ThemePreference) => Promise<void>;
   login: (email: string, pass: string) => Promise<FirebaseUser | null>;
@@ -50,6 +54,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
+  const [dockStyle, setDockStyleState] = useState<DockStyle>('hover');
   const [themePreference, setThemePreference] = useState<ThemePreference>('dark');
   const router = useRouter();
   const auth = getAuth(app);
@@ -58,10 +63,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const savedOrbState = localStorage.getItem('orb_animation_enabled');
     setIsOrbAnimationEnabled(savedOrbState === null ? true : savedOrbState === 'true');
-    
+
     const savedNavMode = localStorage.getItem('nav_mode') as NavMode | null;
     setNavMode(savedNavMode || 'dock');
 
+    const savedDockStyle = localStorage.getItem('dock_style') as DockStyle | null;
+    setDockStyleState(savedDockStyle || 'hover');
   }, []);
 
   const toggleOrbAnimation = () => {
@@ -78,6 +85,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         localStorage.setItem('nav_mode', newMode);
         return newMode;
     });
+  };
+
+  const setDockStyle = (style: DockStyle) => {
+    setDockStyleState(style);
+    localStorage.setItem('dock_style', style);
   };
 
   // Save theme preference to Firestore and apply it
@@ -256,6 +268,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     toggleOrbAnimation,
     navMode,
     toggleNavMode,
+    dockStyle,
+    setDockStyle,
     themePreference,
     setUserTheme,
     login,
