@@ -1,8 +1,8 @@
 
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -25,14 +25,142 @@ interface DockProps {
   isVisible: boolean;
 }
 
+// Liquid Glass Selector Component
+const LiquidGlassSelector = ({
+  x,
+  width,
+  height,
+  isVisible,
+  activeLabel,
+}: {
+  x: number;
+  width: number;
+  height: number;
+  isVisible: boolean;
+  activeLabel?: string;
+}) => {
+  const springConfig = { damping: 25, stiffness: 300, mass: 0.5 };
+  const springX = useSpring(x, springConfig);
+  const springWidth = useSpring(width, springConfig);
+
+  useEffect(() => {
+    springX.set(x);
+    springWidth.set(width);
+  }, [x, width, springX, springWidth]);
+
+  if (!isVisible) return null;
+
+  return (
+    <motion.div
+      className="absolute pointer-events-none z-10"
+      style={{
+        x: springX,
+        width: springWidth,
+        height: height + 16,
+        top: -8,
+      }}
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.8 }}
+      transition={{ duration: 0.2 }}
+    >
+      {/* Glass container */}
+      <div
+        className="relative w-full h-full overflow-hidden"
+        style={{
+          borderRadius: '160px',
+        }}
+      >
+        {/* Lensing/Refraction effect layer */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: 'rgba(255, 255, 255, 0.15)',
+            backdropFilter: 'blur(12px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+          }}
+        />
+
+        {/* Light reflection - top left 45 degree */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `linear-gradient(
+              135deg,
+              rgba(255, 255, 255, 0.4) 0%,
+              rgba(255, 255, 255, 0.1) 30%,
+              transparent 60%
+            )`,
+            borderRadius: '160px',
+          }}
+        />
+
+        {/* Inner highlight for depth */}
+        <div
+          className="absolute inset-0"
+          style={{
+            boxShadow: `
+              inset 0 1px 2px rgba(255, 255, 255, 0.3),
+              inset 0 -1px 2px rgba(0, 0, 0, 0.05)
+            `,
+            borderRadius: '160px',
+          }}
+        />
+
+        {/* Outer glow/shadow for depth */}
+        <div
+          className="absolute -inset-1"
+          style={{
+            background: 'transparent',
+            boxShadow: `
+              0 4px 16px rgba(0, 0, 0, 0.1),
+              0 2px 8px rgba(0, 0, 0, 0.05)
+            `,
+            borderRadius: '164px',
+            zIndex: -1,
+          }}
+        />
+
+        {/* Edge highlight */}
+        <div
+          className="absolute inset-0 border border-white/30"
+          style={{ borderRadius: '160px' }}
+        />
+      </div>
+
+      {/* Active label below selector */}
+      <AnimatePresence>
+        {activeLabel && (
+          <motion.div
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap"
+          >
+            <span className="text-xs font-medium text-foreground/80 bg-background/80 backdrop-blur-sm px-2 py-0.5 rounded-full">
+              {activeLabel}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+};
+
 const DockItem = ({
   item,
   isActive,
   setTheme,
+  isLiquidMode,
+  isLiquidHovered,
+  onRefSet,
 }: {
   item: DockItemData;
   isActive: boolean;
   setTheme: (theme: string) => void;
+  isLiquidMode?: boolean;
+  isLiquidHovered?: boolean;
+  onRefSet?: (el: HTMLDivElement | null) => void;
 }) => {
 
   const { isOrbAnimationEnabled, toggleOrbAnimation, toggleNavMode, navMode } = useAuth();
@@ -196,10 +324,12 @@ const DockItem = ({
         <Tooltip>
           <TooltipTrigger asChild>
             <motion.div
-              animate={isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
+              ref={onRefSet}
+              animate={!isLiquidMode && isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
               className={cn(
                 'dock-item-wrapper flex items-center justify-center cursor-pointer',
-                isActive && item.type === 'nav' && 'active'
+                isActive && item.type === 'nav' && 'active',
+                isLiquidMode && isLiquidHovered && 'z-20'
               )}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
               onClick={(e) => handleNavigate(e, item.href)}
@@ -207,9 +337,11 @@ const DockItem = ({
               <item.icon className={cn("dock-item-icon", item.key === 'logout' && 'text-destructive')} />
             </motion.div>
           </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" sideOffset={35} avoidCollisions={false} className="glass-card z-[100]">
-            <p>{item.label}</p>
-          </TooltipContent>
+          {!isLiquidMode && (
+            <TooltipContent side="bottom" align="center" sideOffset={35} avoidCollisions={false} className="glass-card z-[100]">
+              <p>{item.label}</p>
+            </TooltipContent>
+          )}
         </Tooltip>
       </div>
     );
@@ -218,15 +350,17 @@ const DockItem = ({
   // For items without submenus, tooltip on top
   const itemContent = (
     <div
+      ref={onRefSet}
       className="relative flex flex-col items-center"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
+        animate={!isLiquidMode && isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
-          isActive && item.type === 'nav' && 'active'
+          isActive && item.type === 'nav' && 'active',
+          isLiquidMode && isLiquidHovered && 'z-20'
         )}
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
         onClick={(e) => handleNavigate(e, item.href)}
@@ -241,9 +375,11 @@ const DockItem = ({
       <TooltipTrigger asChild>
         {itemContent}
       </TooltipTrigger>
-      <TooltipContent side="top" align="center" className="mb-2 glass-card">
-        <p>{item.label}</p>
-      </TooltipContent>
+      {!isLiquidMode && (
+        <TooltipContent side="top" align="center" className="mb-2 glass-card">
+          <p>{item.label}</p>
+        </TooltipContent>
+      )}
     </Tooltip>
   );
 };
@@ -278,20 +414,110 @@ const DockLogo = () => {
 };
 
 export function Dock({ items, currentView, className, setTheme, isVisible }: DockProps) {
+  const { dockStyle } = useAuth();
+  const isLiquidMode = dockStyle === 'liquid';
+
+  // Refs for each item to track positions
+  const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const dockRef = useRef<HTMLDivElement>(null);
+
+  // Liquid mode state
+  const [isMouseInDock, setIsMouseInDock] = useState(false);
+  const [activeItemKey, setActiveItemKey] = useState<string | null>(null);
+  const [selectorPosition, setSelectorPosition] = useState({ x: 0, width: 48 });
+
+  // Track mouse position for liquid selector
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isLiquidMode || !dockRef.current) return;
+
+    const dockRect = dockRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - dockRect.left;
+
+    // Find the closest item to the mouse
+    let closestItem: { key: string; x: number; width: number } | null = null;
+    let closestDistance = Infinity;
+
+    itemRefs.current.forEach((ref, key) => {
+      if (ref) {
+        const rect = ref.getBoundingClientRect();
+        const itemCenterX = rect.left + rect.width / 2 - dockRect.left;
+        const distance = Math.abs(mouseX - itemCenterX);
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestItem = {
+            key,
+            x: rect.left - dockRect.left - 8, // Offset for padding
+            width: rect.width + 16, // Add padding to selector
+          };
+        }
+      }
+    });
+
+    if (closestItem) {
+      setActiveItemKey(closestItem.key);
+      setSelectorPosition({ x: closestItem.x, width: closestItem.width });
+    }
+  }, [isLiquidMode]);
+
+  const handleMouseEnter = useCallback(() => {
+    if (isLiquidMode) {
+      setIsMouseInDock(true);
+    }
+  }, [isLiquidMode]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (isLiquidMode) {
+      setIsMouseInDock(false);
+      setActiveItemKey(null);
+    }
+  }, [isLiquidMode]);
+
+  // Get ref setter for each item
+  const setItemRef = useCallback((key: string, el: HTMLDivElement | null) => {
+    if (el) {
+      itemRefs.current.set(key, el);
+    }
+  }, []);
+
+  const activeItem = items.find(item => item.key === activeItemKey);
+
   return (
     <div className={cn(className)}>
       <TooltipProvider delayDuration={150}>
         <motion.div
-          className="flex h-14 items-center gap-3 p-3 rounded-full transition-shadow duration-300
-                     bg-[#e0e0e0] shadow-[9px_9px_18px_#bebebe,-9px_-9px_18px_#ffffff]
-                     dark:bg-black/20 dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10 dark:backdrop-blur-md"
+          ref={dockRef}
+          className={cn(
+            "relative flex h-14 items-center gap-3 p-3 rounded-full transition-shadow duration-300",
+            "bg-[#e0e0e0] shadow-[9px_9px_18px_#bebebe,-9px_-9px_18px_#ffffff]",
+            "dark:bg-black/20 dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10 dark:backdrop-blur-md",
+            isLiquidMode && isMouseInDock && "cursor-none"
+          )}
           animate={{
             opacity: isVisible ? 1 : 0,
             y: isVisible ? 0 : 20,
             pointerEvents: isVisible ? 'auto' : 'none',
           }}
           transition={{ duration: 0.3, ease: 'easeInOut' }}
+          onMouseMove={handleMouseMove}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
         >
+          {/* Liquid Glass Selector */}
+          {isLiquidMode && (
+            <AnimatePresence>
+              {isMouseInDock && (
+                <LiquidGlassSelector
+                  x={selectorPosition.x}
+                  width={selectorPosition.width}
+                  height={40}
+                  isVisible={isMouseInDock}
+                  activeLabel={activeItem?.label}
+                />
+              )}
+            </AnimatePresence>
+          )}
+
           <DockLogo />
           {items.map((item) => (
             <DockItem
@@ -299,6 +525,9 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
               item={item}
               isActive={item.key === currentView && item.type === 'nav'}
               setTheme={setTheme}
+              isLiquidMode={isLiquidMode}
+              isLiquidHovered={isLiquidMode && activeItemKey === item.key}
+              onRefSet={(el) => setItemRef(item.key, el)}
             />
           ))}
           <div className="mx-2">
