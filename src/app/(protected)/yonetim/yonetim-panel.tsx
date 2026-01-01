@@ -3,7 +3,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Warehouse, Building, Pill, MapPin, Users, Barcode, Moon, Sun, LogOut, Beaker, QrCode, History } from 'lucide-react';
+import { Warehouse, Building, Pill, MapPin, Users, Barcode, Moon, Sun, LogOut, Beaker, QrCode, History, Palette } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/contexts/auth-context';
 import AdminBackfillHedefKurumId from '@/components/AdminBackfillHedefKurumId';
@@ -36,6 +36,7 @@ export default function YonetimPanel() {
     { name: 'Kullanıcı Yönetimi', icon: Users, path: '/yonetim/kullanicilar' },
     { name: 'Test Yönetimi', icon: Beaker, path: '/yonetim/test-yonetimi' },
     { name: 'Barkod Formatları', icon: QrCode, path: '/yonetim/barkod-formatlari' },
+    { name: 'Kişiselleştirme', icon: Palette, path: '/yonetim/kisisellistirme' },
   ];
 
   return (
