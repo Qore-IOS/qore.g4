@@ -25,7 +25,7 @@ interface DockProps {
   isVisible: boolean;
 }
 
-// Liquid Glass Selector Component - Apple Style
+// Liquid Glass Selector Component - Apple Style with Liquid Motion
 const LiquidGlassSelector = ({
   x,
   width,
@@ -39,14 +39,66 @@ const LiquidGlassSelector = ({
   isVisible: boolean;
   activeLabel?: string;
 }) => {
-  const springConfig = { damping: 22, stiffness: 180, mass: 0.6 };
-  const springX = useSpring(x, springConfig);
-  const springWidth = useSpring(width, springConfig);
+  // Spring configs for different properties
+  const positionSpring = { damping: 18, stiffness: 150, mass: 0.8 };
+  const morphSpring = { damping: 12, stiffness: 200, mass: 0.5 };
+
+  const springX = useSpring(x, positionSpring);
+  const springWidth = useSpring(width, positionSpring);
+
+  // Track velocity for liquid deformation
+  const [velocity, setVelocity] = useState(0);
+  const [isMoving, setIsMoving] = useState(false);
+  const prevXRef = useRef(x);
+  const velocityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Deformation values based on velocity
+  const scaleX = useSpring(1, morphSpring);
+  const scaleY = useSpring(1, morphSpring);
+  const skewX = useSpring(0, morphSpring);
 
   useEffect(() => {
+    const deltaX = x - prevXRef.current;
+    const newVelocity = Math.abs(deltaX);
+
+    if (newVelocity > 2) {
+      setIsMoving(true);
+      setVelocity(deltaX);
+
+      // Calculate deformation based on movement direction and speed
+      const deformAmount = Math.min(Math.abs(deltaX) / 30, 0.25);
+      const direction = deltaX > 0 ? 1 : -1;
+
+      // Stretch horizontally, compress vertically (liquid squash & stretch)
+      scaleX.set(1 + deformAmount * 0.8);
+      scaleY.set(1 - deformAmount * 0.3);
+      skewX.set(direction * deformAmount * 8);
+
+      // Clear previous timeout
+      if (velocityTimeoutRef.current) {
+        clearTimeout(velocityTimeoutRef.current);
+      }
+
+      // Bounce back to original shape
+      velocityTimeoutRef.current = setTimeout(() => {
+        scaleX.set(1);
+        scaleY.set(1);
+        skewX.set(0);
+        setIsMoving(false);
+        setVelocity(0);
+      }, 80);
+    }
+
+    prevXRef.current = x;
     springX.set(x);
     springWidth.set(width);
-  }, [x, width, springX, springWidth]);
+
+    return () => {
+      if (velocityTimeoutRef.current) {
+        clearTimeout(velocityTimeoutRef.current);
+      }
+    };
+  }, [x, width, springX, springWidth, scaleX, scaleY, skewX]);
 
   if (!isVisible) return null;
 
@@ -60,25 +112,65 @@ const LiquidGlassSelector = ({
         top: '50%',
         translateY: '-50%',
         zIndex: 5,
-        borderRadius: '9999px',
-        overflow: 'visible',
+        scaleX,
+        scaleY,
+        skewX,
       }}
       initial={{ opacity: 0, scale: 0.85 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.85 }}
-      transition={{ duration: 0.12, ease: "easeOut" }}
+      transition={{ duration: 0.1, ease: "easeOut" }}
     >
-      {/* Main Glass Container - all effects contained within pill shape */}
+      {/* SVG Filters for advanced effects */}
+      <svg width="0" height="0" style={{ position: 'absolute' }}>
+        <defs>
+          {/* Displacement filter for liquid edge distortion */}
+          <filter id="liquid-distort" x="-20%" y="-20%" width="140%" height="140%">
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="0.015"
+              numOctaves="2"
+              result="noise"
+              seed="5"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="noise"
+              scale={isMoving ? 6 : 2}
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+
+          {/* Glow filter for rim light */}
+          <filter id="liquid-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur"/>
+            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+          </filter>
+        </defs>
+      </svg>
+
+      {/* Shadow layer - soft, colored shadow */}
+      <div
+        className="absolute inset-0"
+        style={{
+          borderRadius: '9999px',
+          transform: 'translateY(6px) scaleX(0.92) scaleY(0.6)',
+          background: 'radial-gradient(ellipse at center, rgba(0, 30, 60, 0.25) 0%, transparent 70%)',
+          filter: 'blur(8px)',
+        }}
+      />
+
+      {/* Main Glass Container */}
       <div
         className="relative w-full h-full"
         style={{
           borderRadius: '9999px',
           overflow: 'hidden',
-          // Outer shadow using filter to keep pill shape
-          filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.15)) drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+          filter: 'drop-shadow(0 4px 16px rgba(0,0,0,0.12)) drop-shadow(0 1px 3px rgba(0,0,0,0.08))',
         }}
       >
-        {/* Glass body - main structure */}
+        {/* Refraction layer - magnifies and tints background */}
         <div
           className="absolute inset-0"
           style={{
@@ -86,77 +178,134 @@ const LiquidGlassSelector = ({
             background: `
               linear-gradient(
                 180deg,
-                rgba(255, 255, 255, 0.3) 0%,
-                rgba(255, 255, 255, 0.08) 40%,
-                rgba(255, 255, 255, 0.15) 100%
+                rgba(255, 255, 255, 0.35) 0%,
+                rgba(255, 255, 255, 0.05) 35%,
+                rgba(255, 255, 255, 0.12) 100%
               )
             `,
-            backdropFilter: 'blur(16px) saturate(180%) contrast(1.05)',
-            WebkitBackdropFilter: 'blur(16px) saturate(180%) contrast(1.05)',
+            backdropFilter: 'blur(20px) saturate(200%) contrast(1.08) brightness(1.05)',
+            WebkitBackdropFilter: 'blur(20px) saturate(200%) contrast(1.08) brightness(1.05)',
           }}
         />
 
-        {/* Top highlight - 3D rim light */}
+        {/* Light A - Sharp rim light (top) */}
         <div
-          className="absolute inset-x-[8%] top-[1px] h-[45%]"
+          className="absolute inset-x-[5%] top-0 h-[50%]"
           style={{
-            borderRadius: '9999px',
+            borderRadius: '9999px 9999px 50% 50%',
             background: `
               linear-gradient(
                 180deg,
-                rgba(255, 255, 255, 0.7) 0%,
-                rgba(255, 255, 255, 0.25) 50%,
+                rgba(255, 255, 255, 0.85) 0%,
+                rgba(255, 255, 255, 0.4) 30%,
+                rgba(255, 255, 255, 0.1) 60%,
                 transparent 100%
               )
             `,
           }}
         />
 
-        {/* Edge refraction - LEFT */}
+        {/* Light B - Soft volume light */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-[5px]"
+          className="absolute inset-0"
+          style={{
+            borderRadius: '9999px',
+            background: `
+              radial-gradient(
+                ellipse 80% 50% at 50% 0%,
+                rgba(255, 255, 255, 0.3) 0%,
+                transparent 70%
+              )
+            `,
+            opacity: 0.6,
+          }}
+        />
+
+        {/* Left edge refraction - stronger */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[8px]"
           style={{
             background: `
               linear-gradient(
                 90deg,
-                rgba(255, 255, 255, 0.8) 0%,
-                rgba(255, 255, 255, 0.2) 70%,
+                rgba(255, 255, 255, 0.95) 0%,
+                rgba(255, 255, 255, 0.5) 40%,
+                rgba(255, 255, 255, 0.1) 80%,
                 transparent 100%
               )
             `,
           }}
         />
 
-        {/* Edge refraction - RIGHT */}
+        {/* Right edge refraction */}
         <div
-          className="absolute right-0 top-0 bottom-0 w-[5px]"
+          className="absolute right-0 top-0 bottom-0 w-[8px]"
           style={{
             background: `
               linear-gradient(
                 -90deg,
-                rgba(255, 255, 255, 0.6) 0%,
-                rgba(255, 255, 255, 0.15) 70%,
+                rgba(255, 255, 255, 0.75) 0%,
+                rgba(255, 255, 255, 0.3) 40%,
+                rgba(255, 255, 255, 0.05) 80%,
                 transparent 100%
               )
             `,
           }}
         />
 
-        {/* Inner border glow */}
+        {/* Bottom edge subtle highlight */}
+        <div
+          className="absolute inset-x-[10%] bottom-0 h-[25%]"
+          style={{
+            borderRadius: '50% 50% 9999px 9999px',
+            background: `
+              linear-gradient(
+                0deg,
+                rgba(255, 255, 255, 0.25) 0%,
+                transparent 100%
+              )
+            `,
+          }}
+        />
+
+        {/* Light C - Specular highlight sweep (top-left) */}
+        <div
+          className="absolute top-[8%] left-[5%] w-[25%] h-[45%]"
+          style={{
+            background: 'radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.4) 40%, transparent 70%)',
+            borderRadius: '50%',
+            filter: 'blur(1px)',
+          }}
+        />
+
+        {/* Light D - Secondary highlight (top-right, subtle) */}
+        <div
+          className="absolute top-[15%] right-[8%] w-[15%] h-[30%]"
+          style={{
+            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.5) 0%, transparent 70%)',
+            borderRadius: '50%',
+          }}
+        />
+
+        {/* Inner depth shadow */}
         <div
           className="absolute inset-0"
           style={{
             borderRadius: '9999px',
-            border: '1px solid rgba(255, 255, 255, 0.6)',
+            boxShadow: `
+              inset 0 -8px 20px rgba(0, 0, 0, 0.06),
+              inset 0 4px 8px rgba(255, 255, 255, 0.4),
+              inset 0 1px 2px rgba(255, 255, 255, 0.6)
+            `,
           }}
         />
 
-        {/* Specular highlight - top left corner */}
+        {/* Glass border */}
         <div
-          className="absolute top-[10%] left-[6%] w-[18%] h-[40%]"
+          className="absolute inset-0"
           style={{
-            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.9) 0%, transparent 70%)',
-            borderRadius: '50%',
+            borderRadius: '9999px',
+            border: '1.5px solid rgba(255, 255, 255, 0.7)',
           }}
         />
       </div>
@@ -165,10 +314,10 @@ const LiquidGlassSelector = ({
       <AnimatePresence>
         {activeLabel && (
           <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.1, ease: "easeOut" }}
+            initial={{ opacity: 0, y: -4, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.95 }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
             className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap"
           >
             <span className="text-xs font-medium text-foreground bg-background/95 backdrop-blur-md px-2.5 py-0.5 rounded-full shadow-md border border-border/50">
