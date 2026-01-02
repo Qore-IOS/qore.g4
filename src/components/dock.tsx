@@ -531,11 +531,9 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           className={cn(
             "relative flex h-14 items-center gap-3 p-3 rounded-full transition-shadow duration-300",
             "bg-[#e0e0e0] shadow-[9px_9px_18px_#bebebe,-9px_-9px_18px_#ffffff]",
-            "dark:bg-black/20 dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10 dark:backdrop-blur-md"
+            "dark:bg-black/20 dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10 dark:backdrop-blur-md",
+            isLiquidMode && isMouseInDock && "[&_*]:!cursor-none !cursor-none"
           )}
-          style={{
-            cursor: isLiquidMode && isMouseInDock ? 'none' : 'auto',
-          }}
           animate={{
             opacity: isVisible ? 1 : 0,
             y: isVisible ? 0 : 20,
