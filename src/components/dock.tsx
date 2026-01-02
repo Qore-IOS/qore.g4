@@ -60,40 +60,35 @@ const LiquidGlassSelector = ({
         top: '50%',
         translateY: '-50%',
         zIndex: 5,
+        borderRadius: '9999px',
+        overflow: 'visible',
       }}
       initial={{ opacity: 0, scale: 0.85 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.85 }}
       transition={{ duration: 0.12, ease: "easeOut" }}
     >
-      {/* Main Glass Container */}
+      {/* Main Glass Container - all effects contained within pill shape */}
       <div
         className="relative w-full h-full"
         style={{
           borderRadius: '9999px',
+          overflow: 'hidden',
+          // Outer shadow using filter to keep pill shape
+          filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.15)) drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
         }}
       >
-        {/* Bottom shadow - creates floating effect */}
+        {/* Glass body - main structure */}
         <div
-          className="absolute inset-x-3 -bottom-1.5 h-3"
-          style={{
-            background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.2) 0%, transparent 70%)',
-            filter: 'blur(3px)',
-            borderRadius: '50%',
-          }}
-        />
-
-        {/* Glass body - main structure with lensing */}
-        <div
-          className="absolute inset-0 overflow-hidden"
+          className="absolute inset-0"
           style={{
             borderRadius: '9999px',
             background: `
               linear-gradient(
                 180deg,
-                rgba(255, 255, 255, 0.28) 0%,
-                rgba(255, 255, 255, 0.06) 40%,
-                rgba(255, 255, 255, 0.12) 100%
+                rgba(255, 255, 255, 0.3) 0%,
+                rgba(255, 255, 255, 0.08) 40%,
+                rgba(255, 255, 255, 0.15) 100%
               )
             `,
             backdropFilter: 'blur(16px) saturate(180%) contrast(1.05)',
@@ -101,16 +96,31 @@ const LiquidGlassSelector = ({
           }}
         />
 
-        {/* Edge refraction - LEFT (stronger, creates lens edge distortion) */}
+        {/* Top highlight - 3D rim light */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-[6px] overflow-hidden"
+          className="absolute inset-x-[8%] top-[1px] h-[45%]"
           style={{
-            borderRadius: '9999px 0 0 9999px',
+            borderRadius: '9999px',
+            background: `
+              linear-gradient(
+                180deg,
+                rgba(255, 255, 255, 0.7) 0%,
+                rgba(255, 255, 255, 0.25) 50%,
+                transparent 100%
+              )
+            `,
+          }}
+        />
+
+        {/* Edge refraction - LEFT */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[5px]"
+          style={{
             background: `
               linear-gradient(
                 90deg,
-                rgba(255, 255, 255, 0.7) 0%,
-                rgba(255, 255, 255, 0.3) 50%,
+                rgba(255, 255, 255, 0.8) 0%,
+                rgba(255, 255, 255, 0.2) 70%,
                 transparent 100%
               )
             `,
@@ -119,68 +129,33 @@ const LiquidGlassSelector = ({
 
         {/* Edge refraction - RIGHT */}
         <div
-          className="absolute right-0 top-0 bottom-0 w-[6px] overflow-hidden"
+          className="absolute right-0 top-0 bottom-0 w-[5px]"
           style={{
-            borderRadius: '0 9999px 9999px 0',
             background: `
               linear-gradient(
                 -90deg,
-                rgba(255, 255, 255, 0.5) 0%,
-                rgba(255, 255, 255, 0.2) 50%,
+                rgba(255, 255, 255, 0.6) 0%,
+                rgba(255, 255, 255, 0.15) 70%,
                 transparent 100%
               )
             `,
           }}
         />
 
-        {/* Top highlight - 3D rim light */}
-        <div
-          className="absolute inset-x-[10%] top-[2px] h-[40%]"
-          style={{
-            borderRadius: '9999px',
-            background: `
-              linear-gradient(
-                180deg,
-                rgba(255, 255, 255, 0.65) 0%,
-                rgba(255, 255, 255, 0.2) 60%,
-                transparent 100%
-              )
-            `,
-            filter: 'blur(0.5px)',
-          }}
-        />
-
-        {/* Inner depth - bottom dark edge */}
-        <div
-          className="absolute inset-0"
-          style={{
-            borderRadius: '9999px',
-            boxShadow: `
-              inset 0 -6px 12px rgba(0, 0, 0, 0.08),
-              inset 0 2px 3px rgba(255, 255, 255, 0.5)
-            `,
-          }}
-        />
-
-        {/* Outer border with glow */}
+        {/* Inner border glow */}
         <div
           className="absolute inset-0"
           style={{
             borderRadius: '9999px',
             border: '1px solid rgba(255, 255, 255, 0.6)',
-            boxShadow: `
-              0 6px 24px rgba(0, 0, 0, 0.15),
-              0 2px 8px rgba(0, 0, 0, 0.1)
-            `,
           }}
         />
 
         {/* Specular highlight - top left corner */}
         <div
-          className="absolute top-[12%] left-[8%] w-[20%] h-[35%]"
+          className="absolute top-[10%] left-[6%] w-[18%] h-[40%]"
           style={{
-            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.8) 0%, transparent 70%)',
-            filter: 'blur(1.5px)',
+            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.9) 0%, transparent 70%)',
             borderRadius: '50%',
           }}
         />
