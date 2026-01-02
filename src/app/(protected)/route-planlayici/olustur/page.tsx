@@ -1,8 +1,7 @@
 // app/(protected)/route-planlayici/olustur/page.tsx
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -21,16 +20,6 @@ import {
 import type { Hospital, User as AppUser } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-
-const LeafletRouteMap = dynamic(() => import('../route-map-client'), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center h-full rounded-xl bg-muted/30">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      <span className="ml-2 text-sm text-muted-foreground">Harita yükleniyor…</span>
-    </div>
-  ),
-});
 
 type RouteStop = {
   order: number;
@@ -439,7 +428,7 @@ export default function RotaOlusturPage() {
             </CardHeader>
             <CardContent>
               {previewRoute ? (
-                // Önizleme Modu
+                // Önizleme Modu - Metro tarzı durak listesi
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -461,11 +450,40 @@ export default function RotaOlusturPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="h-[400px] rounded-xl overflow-hidden border">
-                    <LeafletRouteMap
-                      stops={(previewRoute.stops || []).slice().sort((a,b)=>a.order-b.order)}
-                      segmentStates={[]}
-                    />
+                  {/* Metro tarzı durak listesi */}
+                  <div className="h-[400px] rounded-xl overflow-y-auto border bg-card/50 p-4">
+                    {(previewRoute.stops || []).slice().sort((a,b)=>a.order-b.order).map((stop, idx, arr) => (
+                      <div key={stop.hospitalId} className="relative">
+                        <div className="flex items-start gap-4">
+                          {/* Metro node ve çizgi */}
+                          <div className="flex flex-col items-center flex-shrink-0">
+                            <div className="w-10 h-10 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center text-sm font-bold text-primary">
+                              {idx + 1}
+                            </div>
+                            {idx < arr.length - 1 && (
+                              <div className="w-1 h-12 bg-primary/30 my-1" />
+                            )}
+                          </div>
+                          {/* Durak bilgisi */}
+                          <div className="flex-1 pb-4">
+                            <div className="rounded-lg border bg-card p-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{stop.name}</span>
+                                {idx === 0 && (
+                                  <Badge variant="outline" className="text-xs">Başlangıç</Badge>
+                                )}
+                                {idx === arr.length - 1 && (
+                                  <Badge variant="outline" className="text-xs text-orange-500 border-orange-500">Bitiş</Badge>
+                                )}
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {stop.lat.toFixed(5)}, {stop.lng.toFixed(5)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ) : (

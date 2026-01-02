@@ -248,10 +248,11 @@ export default function KullaniciPanel() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="lojistik_sorumlusu">Lojistik Sorumlusu</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                       <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
-                      <SelectItem value="driver">Driver</SelectItem>
+                      <SelectItem value="driver">Driver (Şoför)</SelectItem>
                     </SelectContent>
                 </Select>
                 <Input
