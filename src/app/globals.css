@@ -74,10 +74,174 @@
 }
 
 @layer components {
-    .glass-card {
-        @apply bg-card/60 backdrop-blur-xl border border-white/10;
+    /* --- NEU-CARD: Neumorphic (Light) / Liquid Glass (Dark) --- */
+    .neu-card {
+        /* Light mode: Neumorphic */
+        background-color: #e0e0e0;
+        box-shadow: 9px 9px 18px #bebebe, -9px -9px 18px #ffffff;
     }
-    
+
+    /* Dark mode: Liquid Glass Card */
+    .dark .neu-card {
+        position: relative;
+        background: linear-gradient(
+          135deg,
+          rgba(255, 255, 255, 0.05) 0%,
+          rgba(255, 255, 255, 0.02) 50%,
+          rgba(255, 255, 255, 0.04) 100%
+        );
+        border: none;
+        backdrop-filter: blur(24px) saturate(180%);
+        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        overflow: visible;
+        isolation: isolate;
+        box-shadow:
+          0 12px 48px rgba(20, 40, 80, 0.35),
+          0 4px 16px rgba(20, 40, 80, 0.25);
+    }
+
+    /* Light A - Rim glow for cards */
+    .dark .neu-card::before {
+        content: '';
+        position: absolute;
+        inset: -3px;
+        border-radius: 23px;
+        background: radial-gradient(
+          ellipse 70% 30% at 50% 0%,
+          rgba(255, 255, 255, 0.12) 0%,
+          transparent 50%
+        );
+        filter: blur(10px);
+        opacity: 0.4;
+        pointer-events: none;
+        z-index: -1;
+    }
+
+    /* Light B/C/D - Inner glow and specular */
+    .dark .neu-card::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background:
+          radial-gradient(
+            ellipse 50% 35% at 15% 15%,
+            rgba(255, 255, 255, 0.08) 0%,
+            transparent 50%
+          ),
+          radial-gradient(
+            ellipse 40% 25% at 85% 85%,
+            rgba(255, 255, 255, 0.05) 0%,
+            transparent 50%
+          ),
+          radial-gradient(
+            ellipse 100% 60% at 50% 0%,
+            rgba(255, 255, 255, 0.06) 0%,
+            transparent 50%
+          );
+        pointer-events: none;
+        mix-blend-mode: overlay;
+    }
+
+    /* Hover state for neu-card */
+    .dark .neu-card:hover {
+        box-shadow:
+          0 0 30px rgba(255, 255, 255, 0.04),
+          0 16px 56px rgba(20, 40, 80, 0.4),
+          0 6px 20px rgba(20, 40, 80, 0.3);
+    }
+
+    .dark .neu-card:hover::before {
+        opacity: 0.55;
+    }
+
+    /* --- GLASS-CARD: For other glass elements --- */
+    .glass-card {
+        @apply bg-card/60 backdrop-blur-xl;
+        /* Light mode: normal card styling */
+    }
+
+    /* Dark mode: Full Liquid Glass effect */
+    .dark .glass-card {
+        position: relative;
+        background: linear-gradient(
+          135deg,
+          rgba(255, 255, 255, 0.05) 0%,
+          rgba(255, 255, 255, 0.02) 50%,
+          rgba(255, 255, 255, 0.04) 100%
+        );
+        /* Kenarlık yok - ışıkla tanımlanır */
+        border: none !important;
+        border-radius: 20px;
+        backdrop-filter: blur(24px) saturate(180%);
+        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        overflow: visible;
+        isolation: isolate;
+
+        /* Derinlik gölgesi - koyu mavi */
+        box-shadow:
+          0 12px 48px rgba(20, 40, 80, 0.35),
+          0 4px 16px rgba(20, 40, 80, 0.25);
+    }
+
+    /* Light A - Üst kenar parlaması (rim glow) */
+    .dark .glass-card::before {
+        content: '';
+        position: absolute;
+        inset: -3px;
+        border-radius: 23px;
+        background: radial-gradient(
+          ellipse 70% 30% at 50% 0%,
+          rgba(255, 255, 255, 0.12) 0%,
+          transparent 50%
+        );
+        filter: blur(10px);
+        opacity: 0.4;
+        pointer-events: none;
+        z-index: -1;
+    }
+
+    /* Light B/C/D - İç hacimsel parlama ve speküler noktalar */
+    .dark .glass-card::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background:
+          /* Light C - Sol üst speküler */
+          radial-gradient(
+            ellipse 50% 35% at 15% 15%,
+            rgba(255, 255, 255, 0.08) 0%,
+            transparent 50%
+          ),
+          /* Light D - Sağ alt speküler */
+          radial-gradient(
+            ellipse 40% 25% at 85% 85%,
+            rgba(255, 255, 255, 0.05) 0%,
+            transparent 50%
+          ),
+          /* Light B - Üst hacimsel parlama */
+          radial-gradient(
+            ellipse 100% 60% at 50% 0%,
+            rgba(255, 255, 255, 0.06) 0%,
+            transparent 50%
+          );
+        pointer-events: none;
+        mix-blend-mode: overlay;
+    }
+
+    /* Hover state */
+    .dark .glass-card:hover {
+        box-shadow:
+          0 0 30px rgba(255, 255, 255, 0.04),
+          0 16px 56px rgba(20, 40, 80, 0.4),
+          0 6px 20px rgba(20, 40, 80, 0.3);
+    }
+
+    .dark .glass-card:hover::before {
+        opacity: 0.55;
+    }
+
     .text-gradient-primary {
         @apply bg-gradient-to-r from-primary to-orange-400 text-transparent bg-clip-text;
     }

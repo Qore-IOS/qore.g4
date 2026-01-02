@@ -3,6 +3,9 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+// Card component with Liquid Glass effect for dark mode
+// Light mode: Neumorphic design
+// Dark mode: Liquid Glass via neu-card class in globals.css
 const Card = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
@@ -10,8 +13,7 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-[20px] text-card-foreground transition-all duration-300",
-      "bg-[#e0e0e0] shadow-[9px_9px_18px_#bebebe,-9px_-9px_18px_#ffffff] dark:bg-white/5 dark:backdrop-blur-xl dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10",
+      "neu-card rounded-[20px] text-card-foreground transition-all duration-300",
       className
     )}
     {...props}
