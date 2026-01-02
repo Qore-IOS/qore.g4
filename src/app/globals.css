@@ -757,3 +757,29 @@
      background-color: hsla(var(--hue), 50%, 50%, 1);
   }
 }
+
+/* Leaflet map z-index fix - ensure maps don't overlap dialogs */
+.route-map,
+.route-map .leaflet-container {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.route-map .leaflet-pane,
+.route-map .leaflet-tile-pane,
+.route-map .leaflet-overlay-pane,
+.route-map .leaflet-shadow-pane,
+.route-map .leaflet-marker-pane,
+.route-map .leaflet-tooltip-pane,
+.route-map .leaflet-popup-pane {
+  z-index: 1 !important;
+}
+
+.route-map .leaflet-control {
+  z-index: 10 !important;
+}
+
+.route-map .leaflet-top,
+.route-map .leaflet-bottom {
+  z-index: 10 !important;
+}
