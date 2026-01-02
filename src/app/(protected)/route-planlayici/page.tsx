@@ -7,8 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { MapIcon, History, Flag, LogOut, Plus, Truck } from 'lucide-react';
+import { MapIcon, History, Flag, LogOut, Plus, Truck, ListOrdered, MapPin } from 'lucide-react';
 import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -109,6 +110,11 @@ export default function RoutePlanlayiciPage() {
   const [viewDate, setViewDate] = useState<Date>(new Date());
   const [activeRoute, setActiveRoute] = useState<RouteDoc | null>(null);
   const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
+
+  // Şoför için atanmış rotalar modalı
+  const [showRoutesModal, setShowRoutesModal] = useState(false);
+  const [assignedRoutes, setAssignedRoutes] = useState<RouteDoc[]>([]);
+  const [loadingRoutes, setLoadingRoutes] = useState(false);
 
   // Yönetim yetkisi kontrolü
   const canManageRoutes = useMemo(() => {
@@ -270,6 +276,40 @@ export default function RoutePlanlayiciPage() {
     } catch { toast({ title: 'İşlem Hatası', description: 'Varış kaydedilemedi.', variant: 'destructive' }); }
   };
 
+  // Şoförün atanmış rotalarını getir
+  const fetchAssignedRoutes = useCallback(async () => {
+    if (!myUid) return;
+    setLoadingRoutes(true);
+    try {
+      const qy = query(
+        collection(db, 'routes'),
+        where('driverId', '==', myUid),
+        where('status', 'in', ['open', 'in_progress'])
+      );
+      const snap = await getDocs(qy);
+      const routes = snap.docs
+        .map(d => ({ id: d.id, ...(d.data() as any) }) as RouteDoc)
+        .sort((a, b) => b.date - a.date); // En yeni tarih önce
+      setAssignedRoutes(routes);
+    } catch {
+      toast({ title: 'Hata', description: 'Rotalar yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setLoadingRoutes(false);
+    }
+  }, [myUid, toast]);
+
+  // Modal açıldığında rotaları getir
+  const handleOpenRoutesModal = () => {
+    setShowRoutesModal(true);
+    fetchAssignedRoutes();
+  };
+
+  // Rota seç ve önizlemeye yükle
+  const handleSelectRoute = (route: RouteDoc) => {
+    setActiveRouteId(route.id);
+    setShowRoutesModal(false);
+  };
+
   return (
     <Card className="shadow-lg">
       <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
@@ -283,6 +323,18 @@ export default function RoutePlanlayiciPage() {
             {isDriver ? 'Rotam' : 'Route Planlayıcı'}
           </CardTitle>
         </div>
+        {/* Şoförler için rota seçim butonu */}
+        {isDriver && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenRoutesModal}
+            className="text-xs sm:text-sm"
+          >
+            <ListOrdered className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Rotalarım</span>
+          </Button>
+        )}
         {/* Action Buttons - Sadece yöneticiler görsün */}
         {canManageRoutes && (
           <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
@@ -381,6 +433,56 @@ export default function RoutePlanlayiciPage() {
           />
         </div>
       </CardContent>
+
+      {/* Şoför için atanmış rotalar modalı */}
+      <Dialog open={showRoutesModal} onOpenChange={setShowRoutesModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ListOrdered className="h-5 w-5" />
+              Atanmış Rotalarım
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {loadingRoutes ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+              </div>
+            ) : assignedRoutes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Atanmış rota bulunamadı.
+              </div>
+            ) : (
+              assignedRoutes.map((route) => (
+                <button
+                  key={route.id}
+                  onClick={() => handleSelectRoute(route)}
+                  className={`w-full p-3 rounded-lg border text-left transition-all hover:bg-accent/50 ${
+                    activeRouteId === route.id ? 'border-primary bg-accent/30' : 'border-border'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-sm">
+                          {format(new Date(route.dateISO), 'dd MMMM yyyy', { locale: tr })}
+                        </span>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {route.stops?.length || 0} durak
+                        </span>
+                      </div>
+                    </div>
+                    <Badge variant={route.status === 'in_progress' ? 'default' : 'secondary'} className="text-xs">
+                      {route.status === 'in_progress' ? 'Devam Ediyor' : 'Bekliyor'}
+                    </Badge>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
