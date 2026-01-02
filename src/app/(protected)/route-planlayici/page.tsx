@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { MapIcon, Loader2, History, Flag, LogOut, Plus, Route, Map as MapViewIcon } from 'lucide-react';
+import { MapIcon, Loader2, History, Flag, LogOut, Plus, Route, Map as MapViewIcon, Truck } from 'lucide-react';
 import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -21,6 +21,9 @@ import {
 import type { User as AppUser } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+
+// Yönetim yetkisi olan roller
+const MANAGEMENT_ROLES = ['admin', 'lojistik_sorumlusu'];
 
 // Google Maps Directions URL helpers
 type LatLng = { lat: number; lng: number };
@@ -108,20 +111,40 @@ const cloneStops = (stops: RouteStop[]) => stops.map(s => ({ ...s }));
 
 export default function RoutePlanlayiciPage() {
   const { toast } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
 
   const [myUid, setMyUid] = useState<string>('');
+  const [myRole, setMyRole] = useState<string>('');
   const [drivers, setDrivers] = useState<AppUser[]>([]);
   const [viewDriverId, setViewDriverId] = useState<string>('');
   const [viewDate, setViewDate] = useState<Date>(new Date());
   const [activeRoute, setActiveRoute] = useState<RouteDoc | null>(null);
   const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setMyUid(currentUser?.uid || '');
-  }, [currentUser]);
+  // Yönetim yetkisi kontrolü
+  const canManageRoutes = useMemo(() => {
+    return MANAGEMENT_ROLES.includes(myRole);
+  }, [myRole]);
+
+  // Kullanıcının şoför olup olmadığını kontrol et
+  const isDriver = myRole === 'driver';
 
   useEffect(() => {
+    setMyUid(currentUser?.uid || '');
+    setMyRole((currentUserProfile as any)?.role || '');
+  }, [currentUser, currentUserProfile]);
+
+  // Şoför girişinde otomatik olarak kendi rotasını yükle
+  useEffect(() => {
+    if (isDriver && myUid && !viewDriverId) {
+      setViewDriverId(myUid);
+    }
+  }, [isDriver, myUid, viewDriverId]);
+
+  useEffect(() => {
+    // Sadece yöneticiler şoför listesini çeksin
+    if (!canManageRoutes) return;
+
     (async () => {
       try {
         const uSnap = await getDocs(collection(db, 'users'));
@@ -131,7 +154,7 @@ export default function RoutePlanlayiciPage() {
         toast({ title: 'Veri Hatası', description: 'Sürücüler alınamadı.', variant: 'destructive' });
       }
     })();
-  }, [toast]);
+  }, [toast, canManageRoutes]);
 
   useEffect(() => {
     if (!activeRouteId) {
@@ -262,45 +285,67 @@ export default function RoutePlanlayiciPage() {
     <Card className="shadow-lg">
       <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-2">
-          <MapIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-          <CardTitle className="text-base sm:text-lg md:text-xl">Route Planlayıcı</CardTitle>
+          {isDriver ? (
+            <Truck className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+          ) : (
+            <MapIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+          )}
+          <CardTitle className="text-base sm:text-lg md:text-xl">
+            {isDriver ? 'Rotam' : 'Route Planlayıcı'}
+          </CardTitle>
         </div>
-        {/* Action Buttons */}
-        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
-          <Link href="/route-planlayici/gecmis" className="col-span-1">
-            <Button variant="outline" size="sm" className="w-full text-xs sm:text-sm">
-              <History className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Geçmiş</span>
-            </Button>
-          </Link>
-          <Link href="/route-planlayici/olustur" className="col-span-1">
-            <Button size="sm" className="w-full text-xs sm:text-sm">
-              <Plus className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Rota Oluştur</span>
-              <span className="sm:hidden">Oluştur</span>
-            </Button>
-          </Link>
-        </div>
+        {/* Action Buttons - Sadece yöneticiler görsün */}
+        {canManageRoutes && (
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
+            <Link href="/route-planlayici/gecmis" className="col-span-1">
+              <Button variant="outline" size="sm" className="w-full text-xs sm:text-sm">
+                <History className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Geçmiş</span>
+              </Button>
+            </Link>
+            <Link href="/route-planlayici/olustur" className="col-span-1">
+              <Button size="sm" className="w-full text-xs sm:text-sm">
+                <Plus className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Rota Oluştur</span>
+                <span className="sm:hidden">Oluştur</span>
+              </Button>
+            </Link>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="space-y-3 sm:space-y-4 relative">
-        {/* Driver Selection */}
-        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
-            <span className="text-xs sm:text-sm text-muted-foreground">Şoför:</span>
-            <Select value={viewDriverId} onValueChange={setViewDriverId}>
-              <SelectTrigger className="w-full sm:w-[200px] md:w-[240px]"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
-              <SelectContent>
-                {drivers.filter(d => d.id).map(d => (<SelectItem key={d.id} value={d.id!}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
-              </SelectContent>
-            </Select>
+        {/* Driver Selection - Sadece yöneticiler görsün */}
+        {canManageRoutes && (
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
+              <span className="text-xs sm:text-sm text-muted-foreground">Şoför:</span>
+              <Select value={viewDriverId} onValueChange={setViewDriverId}>
+                <SelectTrigger className="w-full sm:w-[200px] md:w-[240px]"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
+                <SelectContent>
+                  {drivers.filter(d => d.id).map(d => (<SelectItem key={d.id} value={d.id!}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            {activeRoute && (
+              <Badge variant={activeRoute.status === 'completed' ? 'default' : 'secondary'} className="w-fit">
+                {activeRoute.status === 'completed' ? 'Tamamlandı' : (activeRoute.status === 'in_progress' ? 'Devam Ediyor' : 'Açık')}
+              </Badge>
+            )}
           </div>
-          {activeRoute && (
+        )}
+
+        {/* Şoförler için rota durumu badge */}
+        {isDriver && activeRoute && (
+          <div className="flex items-center gap-2">
             <Badge variant={activeRoute.status === 'completed' ? 'default' : 'secondary'} className="w-fit">
-              {activeRoute.status === 'completed' ? 'Tamamlandı' : (activeRoute.status === 'in_progress' ? 'Devam Ediyor' : 'Açık')}
+              {activeRoute.status === 'completed' ? 'Tamamlandı' : (activeRoute.status === 'in_progress' ? 'Devam Ediyor' : 'Bekliyor')}
             </Badge>
-          )}
-        </div>
+            <span className="text-xs text-muted-foreground">
+              {format(new Date(activeRoute.dateISO), 'dd MMMM yyyy', { locale: tr })} • {activeRoute.stops?.length || 0} durak
+            </span>
+          </div>
+        )}
 
         {/* Route Action Buttons */}
         {activeRoute?.stops?.length ? (
