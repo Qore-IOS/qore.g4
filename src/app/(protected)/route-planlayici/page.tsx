@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { MapIcon, CalendarDays, Plus, Trash2, Loader2, History, Play, Flag, Eye, LogOut, ListChecks, Route, Map } from 'lucide-react';
+import { MapIcon, CalendarDays, Plus, Trash2, Loader2, History, Play, Flag, Eye, LogOut, ListChecks, Route, Map as MapViewIcon } from 'lucide-react';
 import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -530,7 +530,7 @@ export default function RoutePlanlayiciPage() {
               <span>Özet</span>
             </TabsTrigger>
             <TabsTrigger value="harita" className="flex items-center gap-2">
-              <Map className="h-4 w-4" />
+              <MapViewIcon className="h-4 w-4" />
               <span>Harita</span>
             </TabsTrigger>
           </TabsList>
