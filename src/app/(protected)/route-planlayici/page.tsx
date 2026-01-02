@@ -11,8 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { MapIcon, CalendarDays, Plus, Trash2, Loader2, History, Play, Flag, Eye, LogOut, ListChecks } from 'lucide-react';
+import { MapIcon, CalendarDays, Plus, Trash2, Loader2, History, Play, Flag, Eye, LogOut, ListChecks, Route, Map } from 'lucide-react';
+import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -520,13 +522,40 @@ export default function RoutePlanlayiciPage() {
           </div>
         ) : null}
 
-        {/* Map Container - Responsive Height */}
-        <div className="h-[45vh] sm:h-[50vh] md:h-[55vh] w-full rounded-xl overflow-hidden border border-white/10 route-map">
-            <LeafletRouteMap
+        {/* View Tabs - Summary (default) and Map */}
+        <Tabs defaultValue="ozet" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-3">
+            <TabsTrigger value="ozet" className="flex items-center gap-2">
+              <Route className="h-4 w-4" />
+              <span>Özet</span>
+            </TabsTrigger>
+            <TabsTrigger value="harita" className="flex items-center gap-2">
+              <Map className="h-4 w-4" />
+              <span>Harita</span>
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Summary View - Metro Style Progress */}
+          <TabsContent value="ozet" className="mt-0">
+            <div className="h-[45vh] sm:h-[50vh] md:h-[55vh] w-full rounded-xl overflow-hidden border border-white/10 bg-card/50 backdrop-blur">
+              <RouteProgressView
                 stops={(activeRoute?.stops || []).sort((a, b) => a.order - b.order)}
                 segmentStates={segmentStates}
-            />
-        </div>
+                status={activeRoute?.status}
+              />
+            </div>
+          </TabsContent>
+
+          {/* Map View */}
+          <TabsContent value="harita" className="mt-0">
+            <div className="h-[45vh] sm:h-[50vh] md:h-[55vh] w-full rounded-xl overflow-hidden border border-white/10 route-map">
+              <LeafletRouteMap
+                stops={(activeRoute?.stops || []).sort((a, b) => a.order - b.order)}
+                segmentStates={segmentStates}
+              />
+            </div>
+          </TabsContent>
+        </Tabs>
       </CardContent>
 
       <Dialog open={isPlannerOpen} onOpenChange={setIsPlannerOpen}>
