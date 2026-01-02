@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation } from 'lucide-react';
+import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation, Eye } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import {
