@@ -81,165 +81,215 @@
         box-shadow: 9px 9px 18px #bebebe, -9px -9px 18px #ffffff;
     }
 
-    /* Dark mode: Liquid Glass Card */
+    /* Dark mode: 3D Liquid Glass Card with Refraction */
     .dark .neu-card {
         position: relative;
         background: linear-gradient(
-          135deg,
-          rgba(255, 255, 255, 0.05) 0%,
-          rgba(255, 255, 255, 0.02) 50%,
+          145deg,
+          rgba(255, 255, 255, 0.07) 0%,
+          rgba(255, 255, 255, 0.02) 40%,
+          rgba(255, 255, 255, 0.01) 60%,
           rgba(255, 255, 255, 0.04) 100%
         );
         border: none;
-        backdrop-filter: blur(24px) saturate(180%);
-        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        border-radius: 20px;
+        /* Lens effect: magnification + saturation */
+        backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
+        -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
         overflow: visible;
         isolation: isolate;
+
+        /* 3D Depth: Multiple shadow layers + inner refraction shadows */
         box-shadow:
-          0 12px 48px rgba(20, 40, 80, 0.35),
-          0 4px 16px rgba(20, 40, 80, 0.25);
+          /* Dış derinlik gölgesi */
+          0 16px 56px rgba(15, 30, 60, 0.4),
+          0 6px 20px rgba(15, 30, 60, 0.3),
+          /* İç üst ışık - üst kenardan vuran ışık (Y: 1) */
+          inset 0 1px 2px rgba(255, 255, 255, 0.15),
+          /* İç alt ışık refraksiyonu - caustic effect (Y: -1) */
+          inset 0 -1px 2px rgba(255, 255, 255, 0.08),
+          /* İç kenar refraksiyon halkası - soldan */
+          inset 2px 0 3px rgba(255, 255, 255, 0.06),
+          /* İç kenar refraksiyon halkası - sağdan */
+          inset -2px 0 3px rgba(255, 255, 255, 0.06);
     }
 
-    /* Light A - Rim glow for cards */
+    /* Light A - Üst kenar rim glow (dış parlama) */
     .dark .neu-card::before {
         content: '';
         position: absolute;
-        inset: -3px;
-        border-radius: 23px;
-        background: radial-gradient(
-          ellipse 70% 30% at 50% 0%,
-          rgba(255, 255, 255, 0.12) 0%,
-          transparent 50%
-        );
-        filter: blur(10px);
-        opacity: 0.4;
+        inset: -4px;
+        border-radius: 24px;
+        background:
+          /* Üst kenar gradient ışık */
+          radial-gradient(
+            ellipse 60% 20% at 50% 0%,
+            rgba(255, 255, 255, 0.18) 0%,
+            transparent 60%
+          ),
+          /* Sol üst köşe speküler */
+          radial-gradient(
+            ellipse 30% 20% at 10% 10%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+          );
+        filter: blur(8px);
+        opacity: 0.5;
         pointer-events: none;
         z-index: -1;
     }
 
-    /* Light B/C/D - Inner glow and specular */
+    /* Light B/C/D - İç hacimsel parlama, speküler ve refraksiyon */
     .dark .neu-card::after {
         content: '';
         position: absolute;
         inset: 0;
         border-radius: inherit;
         background:
+          /* Light C - Sol üst speküler highlight (metalik parlama) */
           radial-gradient(
-            ellipse 50% 35% at 15% 15%,
-            rgba(255, 255, 255, 0.08) 0%,
+            ellipse 40% 30% at 12% 12%,
+            rgba(255, 255, 255, 0.12) 0%,
             transparent 50%
           ),
+          /* Light D - Sağ alt speküler */
           radial-gradient(
-            ellipse 40% 25% at 85% 85%,
-            rgba(255, 255, 255, 0.05) 0%,
-            transparent 50%
-          ),
-          radial-gradient(
-            ellipse 100% 60% at 50% 0%,
+            ellipse 35% 25% at 88% 88%,
             rgba(255, 255, 255, 0.06) 0%,
             transparent 50%
+          ),
+          /* Light B - Üst hacimsel iç ışık (camın içine yayılan) */
+          radial-gradient(
+            ellipse 90% 40% at 50% 5%,
+            rgba(255, 255, 255, 0.1) 0%,
+            transparent 50%
+          ),
+          /* Inner edge refraction gradient - üst kenar */
+          linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.08) 0%,
+            transparent 15%,
+            transparent 85%,
+            rgba(255, 255, 255, 0.04) 100%
           );
         pointer-events: none;
         mix-blend-mode: overlay;
     }
 
-    /* Hover state for neu-card */
+    /* Hover state - enhanced 3D effect */
     .dark .neu-card:hover {
         box-shadow:
-          0 0 30px rgba(255, 255, 255, 0.04),
-          0 16px 56px rgba(20, 40, 80, 0.4),
-          0 6px 20px rgba(20, 40, 80, 0.3);
+          0 0 35px rgba(255, 255, 255, 0.05),
+          0 20px 64px rgba(15, 30, 60, 0.45),
+          0 8px 24px rgba(15, 30, 60, 0.35),
+          inset 0 1px 3px rgba(255, 255, 255, 0.2),
+          inset 0 -1px 3px rgba(255, 255, 255, 0.1),
+          inset 2px 0 4px rgba(255, 255, 255, 0.08),
+          inset -2px 0 4px rgba(255, 255, 255, 0.08);
     }
 
     .dark .neu-card:hover::before {
-        opacity: 0.55;
+        opacity: 0.65;
     }
 
-    /* --- GLASS-CARD: For other glass elements --- */
+    /* --- GLASS-CARD: For other glass elements (same 3D effect) --- */
     .glass-card {
         @apply bg-card/60 backdrop-blur-xl;
-        /* Light mode: normal card styling */
     }
 
-    /* Dark mode: Full Liquid Glass effect */
+    /* Dark mode: 3D Liquid Glass effect for glass-card */
     .dark .glass-card {
         position: relative;
         background: linear-gradient(
-          135deg,
-          rgba(255, 255, 255, 0.05) 0%,
-          rgba(255, 255, 255, 0.02) 50%,
+          145deg,
+          rgba(255, 255, 255, 0.07) 0%,
+          rgba(255, 255, 255, 0.02) 40%,
+          rgba(255, 255, 255, 0.01) 60%,
           rgba(255, 255, 255, 0.04) 100%
         );
-        /* Kenarlık yok - ışıkla tanımlanır */
         border: none !important;
         border-radius: 20px;
-        backdrop-filter: blur(24px) saturate(180%);
-        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
+        -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
         overflow: visible;
         isolation: isolate;
 
-        /* Derinlik gölgesi - koyu mavi */
         box-shadow:
-          0 12px 48px rgba(20, 40, 80, 0.35),
-          0 4px 16px rgba(20, 40, 80, 0.25);
+          0 16px 56px rgba(15, 30, 60, 0.4),
+          0 6px 20px rgba(15, 30, 60, 0.3),
+          inset 0 1px 2px rgba(255, 255, 255, 0.15),
+          inset 0 -1px 2px rgba(255, 255, 255, 0.08),
+          inset 2px 0 3px rgba(255, 255, 255, 0.06),
+          inset -2px 0 3px rgba(255, 255, 255, 0.06);
     }
 
-    /* Light A - Üst kenar parlaması (rim glow) */
     .dark .glass-card::before {
         content: '';
         position: absolute;
-        inset: -3px;
-        border-radius: 23px;
-        background: radial-gradient(
-          ellipse 70% 30% at 50% 0%,
-          rgba(255, 255, 255, 0.12) 0%,
-          transparent 50%
-        );
-        filter: blur(10px);
-        opacity: 0.4;
+        inset: -4px;
+        border-radius: 24px;
+        background:
+          radial-gradient(
+            ellipse 60% 20% at 50% 0%,
+            rgba(255, 255, 255, 0.18) 0%,
+            transparent 60%
+          ),
+          radial-gradient(
+            ellipse 30% 20% at 10% 10%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+          );
+        filter: blur(8px);
+        opacity: 0.5;
         pointer-events: none;
         z-index: -1;
     }
 
-    /* Light B/C/D - İç hacimsel parlama ve speküler noktalar */
     .dark .glass-card::after {
         content: '';
         position: absolute;
         inset: 0;
         border-radius: inherit;
         background:
-          /* Light C - Sol üst speküler */
           radial-gradient(
-            ellipse 50% 35% at 15% 15%,
-            rgba(255, 255, 255, 0.08) 0%,
+            ellipse 40% 30% at 12% 12%,
+            rgba(255, 255, 255, 0.12) 0%,
             transparent 50%
           ),
-          /* Light D - Sağ alt speküler */
           radial-gradient(
-            ellipse 40% 25% at 85% 85%,
-            rgba(255, 255, 255, 0.05) 0%,
-            transparent 50%
-          ),
-          /* Light B - Üst hacimsel parlama */
-          radial-gradient(
-            ellipse 100% 60% at 50% 0%,
+            ellipse 35% 25% at 88% 88%,
             rgba(255, 255, 255, 0.06) 0%,
             transparent 50%
+          ),
+          radial-gradient(
+            ellipse 90% 40% at 50% 5%,
+            rgba(255, 255, 255, 0.1) 0%,
+            transparent 50%
+          ),
+          linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.08) 0%,
+            transparent 15%,
+            transparent 85%,
+            rgba(255, 255, 255, 0.04) 100%
           );
         pointer-events: none;
         mix-blend-mode: overlay;
     }
 
-    /* Hover state */
     .dark .glass-card:hover {
         box-shadow:
-          0 0 30px rgba(255, 255, 255, 0.04),
-          0 16px 56px rgba(20, 40, 80, 0.4),
-          0 6px 20px rgba(20, 40, 80, 0.3);
+          0 0 35px rgba(255, 255, 255, 0.05),
+          0 20px 64px rgba(15, 30, 60, 0.45),
+          0 8px 24px rgba(15, 30, 60, 0.35),
+          inset 0 1px 3px rgba(255, 255, 255, 0.2),
+          inset 0 -1px 3px rgba(255, 255, 255, 0.1),
+          inset 2px 0 4px rgba(255, 255, 255, 0.08),
+          inset -2px 0 4px rgba(255, 255, 255, 0.08);
     }
 
     .dark .glass-card:hover::before {
-        opacity: 0.55;
+        opacity: 0.65;
     }
 
     .text-gradient-primary {
