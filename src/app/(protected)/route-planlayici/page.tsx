@@ -2,15 +2,13 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { MapIcon, Loader2, History, Flag, LogOut, Plus, Route, Map as MapViewIcon, Truck } from 'lucide-react';
+import { MapIcon, History, Flag, LogOut, Plus, Truck } from 'lucide-react';
 import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -68,15 +66,6 @@ function openRouteInGoogleMaps(stopsOrdered: { lat:number; lng:number }[]) {
   return segments;
 }
 
-const LeafletRouteMap = dynamic(() => import('./route-map-client'), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center h-[55vh] rounded-xl bg-muted/30">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      <span className="ml-2 text-sm text-muted-foreground">Harita yükleniyor…</span>
-    </div>
-  ),
-});
 
 type RouteStop = {
   order: number;
@@ -383,40 +372,14 @@ export default function RoutePlanlayiciPage() {
           </div>
         ) : null}
 
-        {/* View Tabs - Summary (default) and Map */}
-        <Tabs defaultValue="ozet" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-3">
-            <TabsTrigger value="ozet" className="flex items-center gap-2">
-              <Route className="h-4 w-4" />
-              <span>Özet</span>
-            </TabsTrigger>
-            <TabsTrigger value="harita" className="flex items-center gap-2">
-              <MapViewIcon className="h-4 w-4" />
-              <span>Harita</span>
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Summary View - Metro Style Progress */}
-          <TabsContent value="ozet" className="mt-0">
-            <div className="h-[45vh] sm:h-[50vh] md:h-[55vh] w-full rounded-xl overflow-hidden border border-white/10 bg-card/50 backdrop-blur">
-              <RouteProgressView
-                stops={(activeRoute?.stops || []).sort((a, b) => a.order - b.order)}
-                segmentStates={segmentStates}
-                status={activeRoute?.status}
-              />
-            </div>
-          </TabsContent>
-
-          {/* Map View */}
-          <TabsContent value="harita" className="mt-0">
-            <div className="h-[45vh] sm:h-[50vh] md:h-[55vh] w-full rounded-xl overflow-hidden border border-white/10 route-map">
-              <LeafletRouteMap
-                stops={(activeRoute?.stops || []).sort((a, b) => a.order - b.order)}
-                segmentStates={segmentStates}
-              />
-            </div>
-          </TabsContent>
-        </Tabs>
+        {/* Route Progress Summary */}
+        <div className="h-[45vh] sm:h-[50vh] md:h-[55vh] w-full rounded-xl overflow-hidden border border-white/10 bg-card/50 backdrop-blur">
+          <RouteProgressView
+            stops={(activeRoute?.stops || []).sort((a, b) => a.order - b.order)}
+            segmentStates={segmentStates}
+            status={activeRoute?.status}
+          />
+        </div>
       </CardContent>
     </Card>
   );
