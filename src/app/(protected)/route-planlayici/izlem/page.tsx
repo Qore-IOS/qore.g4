@@ -6,13 +6,22 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag } from 'lucide-react';
+import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag, Car } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, onSnapshot, query, Timestamp, where } from 'firebase/firestore';
 import type { User as AppUser } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+
+type Vehicle = {
+  id: string;
+  marka: string;
+  model: string;
+  yil?: string;
+  plaka: string;
+  assignedDriverId?: string;
+};
 
 type RouteStop = {
   order: number;
@@ -43,6 +52,7 @@ type RouteDoc = {
 type DriverWithRoute = {
   driver: AppUser;
   activeRoute: RouteDoc | null;
+  vehicle: Vehicle | null;
 };
 
 const toDayKey = (d: Date) => Number(format(d, 'yyyyMMdd'));
@@ -55,11 +65,24 @@ export default function SoforIzlemPage() {
   useEffect(() => {
     const fetchDriversAndRoutes = async () => {
       try {
-        // Tüm şoförleri getir
-        const usersSnap = await getDocs(collection(db, 'users'));
+        // Tüm şoförleri ve araçları getir
+        const [usersSnap, vehiclesSnap] = await Promise.all([
+          getDocs(collection(db, 'users')),
+          getDocs(collection(db, 'vehicles')),
+        ]);
+
         const drivers = usersSnap.docs
           .map(d => ({ id: d.id, ...d.data() } as AppUser))
           .filter(u => (u as any).role === 'driver');
+
+        // Araçları şoför ID'sine göre map'e dönüştür
+        const vehiclesByDriverId = new Map<string, Vehicle>();
+        vehiclesSnap.docs.forEach(d => {
+          const vehicle = { id: d.id, ...d.data() } as Vehicle;
+          if (vehicle.assignedDriverId) {
+            vehiclesByDriverId.set(vehicle.assignedDriverId, vehicle);
+          }
+        });
 
         // Bugünün tarihini al
         const today = toDayKey(new Date());
@@ -81,7 +104,10 @@ export default function SoforIzlemPage() {
             activeRoute = routes.find(r => r.isActive) || routes[0] || null;
           }
 
-          return { driver, activeRoute };
+          // Şoföre atanmış aracı bul
+          const vehicle = vehiclesByDriverId.get(driver.id!) || null;
+
+          return { driver, activeRoute, vehicle };
         });
 
         const results = await Promise.all(driverRoutePromises);
@@ -180,8 +206,8 @@ export default function SoforIzlemPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {driversWithRoutes.map(({ driver, activeRoute }) => (
-            <DriverKPICard key={driver.id} driver={driver} activeRoute={activeRoute} />
+          {driversWithRoutes.map(({ driver, activeRoute, vehicle }) => (
+            <DriverKPICard key={driver.id} driver={driver} activeRoute={activeRoute} vehicle={vehicle} />
           ))}
         </div>
       )}
@@ -190,7 +216,7 @@ export default function SoforIzlemPage() {
 }
 
 // Şoför KPI Kartı Bileşeni
-function DriverKPICard({ driver, activeRoute }: { driver: AppUser; activeRoute: RouteDoc | null }) {
+function DriverKPICard({ driver, activeRoute, vehicle }: { driver: AppUser; activeRoute: RouteDoc | null; vehicle: Vehicle | null }) {
   const driverName = (driver as any).displayName || (driver as any).name || (driver as any).email || 'İsimsiz Şoför';
 
   // Segment durumlarını hesapla
@@ -263,12 +289,24 @@ function DriverKPICard({ driver, activeRoute }: { driver: AppUser; activeRoute: 
 
   return (
     <Card className={cn(
-      "shadow-lg transition-all duration-300",
+      "shadow-lg transition-all duration-300 relative",
       activeRoute?.status === 'in_progress' && "ring-2 ring-blue-500/50",
       !activeRoute && "opacity-60"
     )}>
+      {/* Vehicle Info - Sol Üst */}
+      {vehicle && (
+        <div className="absolute top-2 left-2 z-10">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/80 text-white text-[10px]">
+            <Car className="h-3 w-3" />
+            <span className="font-medium">{vehicle.marka} {vehicle.model}</span>
+            <span className="opacity-70">|</span>
+            <span className="font-mono">{vehicle.plaka}</span>
+          </div>
+        </div>
+      )}
+
       {/* Driver Header */}
-      <CardHeader className="pb-2">
+      <CardHeader className={cn("pb-2", vehicle && "pt-10")}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className={cn(
