@@ -124,8 +124,8 @@ export default function RoutePlanlayiciPage() {
   // Kullanıcının şoför olup olmadığını kontrol et
   const isDriver = myRole === 'driver';
 
-  // Diğer kullanıcılar (admin, lojistik_sorumlusu ve driver hariç)
-  const isOtherUser = myRole && !canManageRoutes && !isDriver;
+  // Şoför harici tüm kullanıcılar basitleştirilmiş görünümü görecek
+  const showSimplifiedView = myRole && !isDriver;
 
   useEffect(() => {
     setMyUid(currentUser?.uid || '');
@@ -313,117 +313,67 @@ export default function RoutePlanlayiciPage() {
     setShowRoutesModal(false);
   };
 
-  // Diğer kullanıcılar için basitleştirilmiş görünüm (3 büyük buton)
-  if (isOtherUser) {
+  // Şoför harici tüm kullanıcılar için basitleştirilmiş görünüm (3 büyük buton)
+  if (showSimplifiedView) {
     return (
       <Card className="shadow-lg">
-        <CardHeader>
-          <div className="flex items-center gap-2">
+        <CardHeader className="text-center">
+          <div className="flex items-center justify-center gap-2">
             <MapIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
             <CardTitle className="text-base sm:text-lg md:text-xl">Route Planlayıcı</CardTitle>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Link href="/route-planlayici/olustur" className="block">
-              <Button size="lg" className="w-full h-24 sm:h-32 flex flex-col gap-2 text-base sm:text-lg">
-                <Plus className="h-8 w-8 sm:h-10 sm:w-10" />
-                Rota Oluştur
-              </Button>
-            </Link>
-            <Link href="/route-planlayici/gecmis" className="block">
-              <Button variant="outline" size="lg" className="w-full h-24 sm:h-32 flex flex-col gap-2 text-base sm:text-lg">
-                <History className="h-8 w-8 sm:h-10 sm:w-10" />
-                Geçmiş
-              </Button>
-            </Link>
-            <Link href="/route-planlayici/izlem" className="block">
-              <Button variant="secondary" size="lg" className="w-full h-24 sm:h-32 flex flex-col gap-2 text-base sm:text-lg">
-                <Eye className="h-8 w-8 sm:h-10 sm:w-10" />
-                Şoför İzlem
-              </Button>
-            </Link>
+          <div className="flex justify-center items-center py-8 sm:py-12">
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 w-full max-w-3xl justify-center">
+              <Link href="/route-planlayici/olustur" className="block sm:w-1/5 min-w-[140px]">
+                <Button size="lg" className="w-full h-28 sm:h-36 flex flex-col gap-3 text-base sm:text-lg">
+                  <Plus className="h-10 w-10 sm:h-12 sm:w-12" />
+                  Rota Oluştur
+                </Button>
+              </Link>
+              <Link href="/route-planlayici/gecmis" className="block sm:w-1/5 min-w-[140px]">
+                <Button variant="outline" size="lg" className="w-full h-28 sm:h-36 flex flex-col gap-3 text-base sm:text-lg">
+                  <History className="h-10 w-10 sm:h-12 sm:w-12" />
+                  Geçmiş
+                </Button>
+              </Link>
+              <Link href="/route-planlayici/izlem" className="block sm:w-1/5 min-w-[140px]">
+                <Button variant="secondary" size="lg" className="w-full h-28 sm:h-36 flex flex-col gap-3 text-base sm:text-lg">
+                  <Eye className="h-10 w-10 sm:h-12 sm:w-12" />
+                  Şoför İzlem
+                </Button>
+              </Link>
+            </div>
           </div>
         </CardContent>
       </Card>
     );
   }
 
+  // Sadece şoförler bu görünümü görecek
   return (
     <Card className="shadow-lg">
       <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-2">
-          {isDriver ? (
-            <Truck className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-          ) : (
-            <MapIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-          )}
-          <CardTitle className="text-base sm:text-lg md:text-xl">
-            {isDriver ? 'Rotam' : 'Route Planlayıcı'}
-          </CardTitle>
+          <Truck className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+          <CardTitle className="text-base sm:text-lg md:text-xl">Rotam</CardTitle>
         </div>
         {/* Şoförler için rota seçim butonu */}
-        {isDriver && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleOpenRoutesModal}
-            className="text-xs sm:text-sm"
-          >
-            <ListOrdered className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Rotalarım</span>
-          </Button>
-        )}
-        {/* Action Buttons - Sadece yöneticiler görsün */}
-        {canManageRoutes && (
-          <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 w-full sm:w-auto">
-            <Link href="/route-planlayici/gecmis" className="col-span-1">
-              <Button variant="outline" size="sm" className="w-full text-xs sm:text-sm">
-                <History className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Geçmiş</span>
-              </Button>
-            </Link>
-            <Link href="/route-planlayici/izlem" className="col-span-1">
-              <Button variant="secondary" size="sm" className="w-full text-xs sm:text-sm">
-                <Eye className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Şoför İzlem</span>
-                <span className="sm:hidden">İzlem</span>
-              </Button>
-            </Link>
-            <Link href="/route-planlayici/olustur" className="col-span-1">
-              <Button size="sm" className="w-full text-xs sm:text-sm">
-                <Plus className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Rota Oluştur</span>
-                <span className="sm:hidden">Oluştur</span>
-              </Button>
-            </Link>
-          </div>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleOpenRoutesModal}
+          className="text-xs sm:text-sm"
+        >
+          <ListOrdered className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Rotalarım</span>
+        </Button>
       </CardHeader>
 
       <CardContent className="space-y-3 sm:space-y-4 relative">
-        {/* Driver Selection - Sadece yöneticiler görsün */}
-        {canManageRoutes && (
-          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
-              <span className="text-xs sm:text-sm text-muted-foreground">Şoför:</span>
-              <Select value={viewDriverId} onValueChange={setViewDriverId}>
-                <SelectTrigger className="w-full sm:w-[200px] md:w-[240px]"><SelectValue placeholder="Sürücü seçiniz" /></SelectTrigger>
-                <SelectContent>
-                  {drivers.filter(d => d.id).map(d => (<SelectItem key={d.id} value={d.id!}>{(d as any).displayName || (d as any).name || (d as any).email}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
-            {activeRoute && (
-              <Badge variant={activeRoute.status === 'completed' ? 'default' : 'secondary'} className="w-fit">
-                {activeRoute.status === 'completed' ? 'Tamamlandı' : (activeRoute.status === 'in_progress' ? 'Devam Ediyor' : 'Açık')}
-              </Badge>
-            )}
-          </div>
-        )}
-
         {/* Şoförler için rota durumu badge */}
-        {isDriver && activeRoute && (
+        {activeRoute && (
           <div className="flex items-center gap-2">
             <Badge variant={activeRoute.status === 'completed' ? 'default' : 'secondary'} className="w-fit">
               {activeRoute.status === 'completed' ? 'Tamamlandı' : (activeRoute.status === 'in_progress' ? 'Devam Ediyor' : 'Bekliyor')}
