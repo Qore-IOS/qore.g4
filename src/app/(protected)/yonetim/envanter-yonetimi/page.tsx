@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import {
   PlusCircle, Computer, Server, Barcode, Printer, BookCopy, Loader2, Edit3, Trash2, MapPin, Upload, Download,
-  Fan, Beaker, FlaskConical, Archive, QrCode
+  Fan, Beaker, FlaskConical, Archive, QrCode, Car
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -68,6 +68,7 @@ export default function EnvanterYonetimiPage() {
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [vehicleCount, setVehicleCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Partial<AssetCategory>>({});
@@ -80,15 +81,17 @@ export default function EnvanterYonetimiPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-        const [categoriesSnap, assetsSnap, hospitalsSnap, depotsSnap] = await Promise.all([
+        const [categoriesSnap, assetsSnap, hospitalsSnap, depotsSnap, vehiclesSnap] = await Promise.all([
             getDocs(query(collection(db, 'assetCategories'), orderBy('name'))),
             getDocs(collection(db, 'assets')),
             getDocs(collection(db, 'hospitals')),
             getDocs(collection(db, 'depots')),
+            getDocs(collection(db, 'vehicles')),
         ]);
         setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)));
         setAssets(assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-        
+        setVehicleCount(vehiclesSnap.size);
+
         const hospitalLocations = hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string }));
         const depotLocations = depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string }));
         setLocations([...hospitalLocations, ...depotLocations].sort((a, b) => a.name.localeCompare(b.name)));
@@ -346,6 +349,17 @@ export default function EnvanterYonetimiPage() {
                         <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {/* Araçlar - Özel Kategori */}
+                        <Card className="group relative bg-gradient-to-br from-blue-500/10 to-cyan-500/10 hover:from-blue-500/20 hover:to-cyan-500/20 border-blue-500/20 hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1">
+                          <Link href="/yonetim/envanter-yonetimi/araclar" className="block cursor-pointer">
+                            <CardContent className="flex flex-col items-center justify-center p-6 text-center">
+                              <Car className="h-10 w-10 mb-3 text-blue-500" />
+                              <CardTitle className="text-base font-semibold">Araçlar</CardTitle>
+                            </CardContent>
+                          </Link>
+                          <Badge variant="default" className="absolute top-2 right-2 bg-blue-500">{vehicleCount}</Badge>
+                        </Card>
+
                         {categories.map((category) => {
                           const Icon = getIconForCategory(category.name);
                           const count = assetCountsByCategory[category.name] || 0;
