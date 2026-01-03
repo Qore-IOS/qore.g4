@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { MapIcon, History, Flag, LogOut, Plus, Truck, ListOrdered, MapPin } from 'lucide-react';
+import { MapIcon, History, Flag, LogOut, Plus, Truck, ListOrdered, MapPin, Eye } from 'lucide-react';
 import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -123,6 +123,9 @@ export default function RoutePlanlayiciPage() {
 
   // Kullanıcının şoför olup olmadığını kontrol et
   const isDriver = myRole === 'driver';
+
+  // Diğer kullanıcılar (admin, lojistik_sorumlusu ve driver hariç)
+  const isOtherUser = myRole && !canManageRoutes && !isDriver;
 
   useEffect(() => {
     setMyUid(currentUser?.uid || '');
@@ -310,6 +313,42 @@ export default function RoutePlanlayiciPage() {
     setShowRoutesModal(false);
   };
 
+  // Diğer kullanıcılar için basitleştirilmiş görünüm (3 büyük buton)
+  if (isOtherUser) {
+    return (
+      <Card className="shadow-lg">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <MapIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+            <CardTitle className="text-base sm:text-lg md:text-xl">Route Planlayıcı</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Link href="/route-planlayici/olustur" className="block">
+              <Button size="lg" className="w-full h-24 sm:h-32 flex flex-col gap-2 text-base sm:text-lg">
+                <Plus className="h-8 w-8 sm:h-10 sm:w-10" />
+                Rota Oluştur
+              </Button>
+            </Link>
+            <Link href="/route-planlayici/gecmis" className="block">
+              <Button variant="outline" size="lg" className="w-full h-24 sm:h-32 flex flex-col gap-2 text-base sm:text-lg">
+                <History className="h-8 w-8 sm:h-10 sm:w-10" />
+                Geçmiş
+              </Button>
+            </Link>
+            <Link href="/route-planlayici/izlem" className="block">
+              <Button variant="secondary" size="lg" className="w-full h-24 sm:h-32 flex flex-col gap-2 text-base sm:text-lg">
+                <Eye className="h-8 w-8 sm:h-10 sm:w-10" />
+                Şoför İzlem
+              </Button>
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="shadow-lg">
       <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
@@ -337,11 +376,18 @@ export default function RoutePlanlayiciPage() {
         )}
         {/* Action Buttons - Sadece yöneticiler görsün */}
         {canManageRoutes && (
-          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 w-full sm:w-auto">
             <Link href="/route-planlayici/gecmis" className="col-span-1">
               <Button variant="outline" size="sm" className="w-full text-xs sm:text-sm">
                 <History className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">Geçmiş</span>
+              </Button>
+            </Link>
+            <Link href="/route-planlayici/izlem" className="col-span-1">
+              <Button variant="secondary" size="sm" className="w-full text-xs sm:text-sm">
+                <Eye className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Şoför İzlem</span>
+                <span className="sm:hidden">İzlem</span>
               </Button>
             </Link>
             <Link href="/route-planlayici/olustur" className="col-span-1">
