@@ -277,11 +277,18 @@ export default function AraclarPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Atama Yapılmadı</SelectItem>
-                  {drivers.map(driver => (
-                    <SelectItem key={driver.id} value={driver.id!}>
-                      {(driver as any).displayName || (driver as any).name || (driver as any).email}
-                    </SelectItem>
-                  ))}
+                  {drivers.length === 0 ? (
+                    <div className="px-2 py-3 text-sm text-muted-foreground text-center">
+                      Sistemde kayıtlı şoför bulunamadı.<br />
+                      <span className="text-xs">Kullanıcı yönetiminden &quot;Driver&quot; rolü atayın.</span>
+                    </div>
+                  ) : (
+                    drivers.map(driver => (
+                      <SelectItem key={driver.id} value={driver.id!}>
+                        {(driver as any).displayName || (driver as any).name || (driver as any).email}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
