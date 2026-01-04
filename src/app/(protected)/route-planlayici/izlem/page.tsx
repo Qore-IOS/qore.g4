@@ -74,11 +74,18 @@ export default function SoforIzlemPage() {
           getDocs(collection(db, 'vehicles')),
         ]);
 
+        // Şoförleri filtrele - role 'driver' olanlar
         const drivers = usersSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as AppUser))
-          .filter(u => (u as any).role === 'driver');
+          .map(d => {
+            const data = d.data();
+            return { ...data, id: d.id, uid: data.uid || d.id } as AppUser;
+          })
+          .filter(u => {
+            const role = ((u as any).role || '').toLowerCase();
+            return role === 'driver';
+          });
 
-        // Araçları şoför ID'sine göre map'e dönüştür
+        // Araçları şoför ID'sine göre map'e dönüştür (hem id hem uid ile eşleştir)
         const vehiclesByDriverId = new Map<string, Vehicle>();
         vehiclesSnap.docs.forEach(d => {
           const vehicle = { id: d.id, ...d.data() } as Vehicle;
@@ -92,10 +99,13 @@ export default function SoforIzlemPage() {
 
         // Her şoför için rotaları getir
         const driverRoutePromises = drivers.map(async (driver) => {
+          // Şoför ID'si - hem id hem uid kullan
+          const driverId = driver.id || (driver as any).uid;
+
           // Bugünkü tüm rotalar (tamamlanmış dahil)
           const todayRouteQuery = query(
             collection(db, 'routes'),
-            where('driverId', '==', driver.id),
+            where('driverId', '==', driverId),
             where('date', '==', today)
           );
           const todayRouteSnap = await getDocs(todayRouteQuery);
@@ -120,7 +130,7 @@ export default function SoforIzlemPage() {
           // Son tamamlanan rota (bugün dahil, en son tamamlanan)
           const completedRoutesQuery = query(
             collection(db, 'routes'),
-            where('driverId', '==', driver.id),
+            where('driverId', '==', driverId),
             where('status', '==', 'completed')
           );
           const completedRoutesSnap = await getDocs(completedRoutesQuery);
@@ -141,7 +151,7 @@ export default function SoforIzlemPage() {
           // En yakın gelecek rota (bugünden sonraki ilk atanmış rota)
           const futureRoutesQuery = query(
             collection(db, 'routes'),
-            where('driverId', '==', driver.id),
+            where('driverId', '==', driverId),
             where('date', '>', today)
           );
           const futureRoutesSnap = await getDocs(futureRoutesQuery);
@@ -153,8 +163,8 @@ export default function SoforIzlemPage() {
             nextAssignedRoute = futureRoutes[0] || null;
           }
 
-          // Şoföre atanmış aracı bul
-          const vehicle = vehiclesByDriverId.get(driver.id!) || null;
+          // Şoföre atanmış aracı bul (hem id hem uid ile ara)
+          const vehicle = vehiclesByDriverId.get(driverId) || vehiclesByDriverId.get((driver as any).uid) || null;
 
           return { driver, activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, vehicle };
         });
