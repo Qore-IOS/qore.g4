@@ -20,13 +20,8 @@ import { cn } from '@/lib/utils';
 
 // Kullanılabilir araç ikonları - /public/vehicles/ klasöründen
 const VEHICLE_ICONS = [
-  { id: 'van-white', src: '/vehicles/van-white.png', label: 'Beyaz Van' },
-  { id: 'van-blue', src: '/vehicles/van-blue.png', label: 'Mavi Van' },
-  { id: 'van-red', src: '/vehicles/van-red.png', label: 'Kırmızı Van' },
-  { id: 'truck-white', src: '/vehicles/truck-white.png', label: 'Beyaz Kamyonet' },
-  { id: 'truck-blue', src: '/vehicles/truck-blue.png', label: 'Mavi Kamyonet' },
-  { id: 'car-white', src: '/vehicles/car-white.png', label: 'Beyaz Araba' },
-  { id: 'car-black', src: '/vehicles/car-black.png', label: 'Siyah Araba' },
+  { id: 'custom-van', src: '/vehicles/custom_van.png', label: 'Custom Van' },
+  { id: 'transit-van', src: '/vehicles/transit_van.png', label: 'Transit Van' },
 ];
 
 interface Vehicle {
