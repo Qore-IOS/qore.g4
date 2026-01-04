@@ -52,6 +52,9 @@ type RouteDoc = {
 type DriverWithRoute = {
   driver: AppUser;
   activeRoute: RouteDoc | null;
+  todayRoute: RouteDoc | null; // Bugünkü rota (aktif/bekleyen/tamamlanmış)
+  lastCompletedRoute: RouteDoc | null; // Son tamamlanan rota
+  nextAssignedRoute: RouteDoc | null; // Atanan en yakın gelecek rota
   vehicle: Vehicle | null;
 };
 
@@ -87,27 +90,73 @@ export default function SoforIzlemPage() {
         // Bugünün tarihini al
         const today = toDayKey(new Date());
 
-        // Her şoför için aktif rotayı getir
+        // Her şoför için rotaları getir
         const driverRoutePromises = drivers.map(async (driver) => {
-          const routeQuery = query(
+          // Bugünkü tüm rotalar (tamamlanmış dahil)
+          const todayRouteQuery = query(
             collection(db, 'routes'),
             where('driverId', '==', driver.id),
-            where('date', '==', today),
-            where('status', 'in', ['open', 'in_progress'])
+            where('date', '==', today)
           );
-          const routeSnap = await getDocs(routeQuery);
+          const todayRouteSnap = await getDocs(todayRouteQuery);
 
           let activeRoute: RouteDoc | null = null;
-          if (!routeSnap.empty) {
-            const routes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() } as RouteDoc));
-            // Aktif olan rotayı veya ilk açık rotayı seç
-            activeRoute = routes.find(r => r.isActive) || routes[0] || null;
+          let todayRoute: RouteDoc | null = null;
+
+          if (!todayRouteSnap.empty) {
+            const routes = todayRouteSnap.docs.map(d => ({ id: d.id, ...d.data() } as RouteDoc));
+            // Bugünkü rotayı seç (öncelik: aktif > in_progress > open > completed)
+            todayRoute = routes.find(r => r.isActive) ||
+                        routes.find(r => r.status === 'in_progress') ||
+                        routes.find(r => r.status === 'open') ||
+                        routes.find(r => r.status === 'completed') ||
+                        routes[0] || null;
+            // Aktif rota sadece open veya in_progress olanlar
+            activeRoute = routes.find(r => r.isActive && r.status !== 'completed') ||
+                         routes.find(r => r.status === 'in_progress') ||
+                         routes.find(r => r.status === 'open') || null;
+          }
+
+          // Son tamamlanan rota (bugün dahil, en son tamamlanan)
+          const completedRoutesQuery = query(
+            collection(db, 'routes'),
+            where('driverId', '==', driver.id),
+            where('status', '==', 'completed')
+          );
+          const completedRoutesSnap = await getDocs(completedRoutesQuery);
+          let lastCompletedRoute: RouteDoc | null = null;
+          if (!completedRoutesSnap.empty) {
+            const completedRoutes = completedRoutesSnap.docs
+              .map(d => ({ id: d.id, ...d.data() } as RouteDoc))
+              .sort((a, b) => {
+                // Önce tarihe göre, sonra completedAt'e göre sırala
+                if (b.date !== a.date) return b.date - a.date;
+                const aTime = a.completedAt?.toMillis() || 0;
+                const bTime = b.completedAt?.toMillis() || 0;
+                return bTime - aTime;
+              });
+            lastCompletedRoute = completedRoutes[0] || null;
+          }
+
+          // En yakın gelecek rota (bugünden sonraki ilk atanmış rota)
+          const futureRoutesQuery = query(
+            collection(db, 'routes'),
+            where('driverId', '==', driver.id),
+            where('date', '>', today)
+          );
+          const futureRoutesSnap = await getDocs(futureRoutesQuery);
+          let nextAssignedRoute: RouteDoc | null = null;
+          if (!futureRoutesSnap.empty) {
+            const futureRoutes = futureRoutesSnap.docs
+              .map(d => ({ id: d.id, ...d.data() } as RouteDoc))
+              .sort((a, b) => a.date - b.date);
+            nextAssignedRoute = futureRoutes[0] || null;
           }
 
           // Şoföre atanmış aracı bul
           const vehicle = vehiclesByDriverId.get(driver.id!) || null;
 
-          return { driver, activeRoute, vehicle };
+          return { driver, activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, vehicle };
         });
 
         const results = await Promise.all(driverRoutePromises);
@@ -142,8 +191,9 @@ export default function SoforIzlemPage() {
     const total = driversWithRoutes.length;
     const activeDrivers = driversWithRoutes.filter(d => d.activeRoute?.status === 'in_progress').length;
     const waitingDrivers = driversWithRoutes.filter(d => d.activeRoute?.status === 'open').length;
-    const idleDrivers = driversWithRoutes.filter(d => !d.activeRoute).length;
-    return { total, activeDrivers, waitingDrivers, idleDrivers };
+    const completedDrivers = driversWithRoutes.filter(d => d.todayRoute?.status === 'completed' && !d.activeRoute).length;
+    const idleDrivers = driversWithRoutes.filter(d => !d.todayRoute).length;
+    return { total, activeDrivers, waitingDrivers, completedDrivers, idleDrivers };
   }, [driversWithRoutes]);
 
   return (
@@ -169,7 +219,7 @@ export default function SoforIzlemPage() {
         </CardHeader>
         <CardContent>
           {/* Stats Summary */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
             <div className="bg-muted/50 rounded-lg p-3 text-center">
               <div className="text-2xl font-bold text-primary">{stats.total}</div>
               <div className="text-xs text-muted-foreground">Toplam Şoför</div>
@@ -181,6 +231,10 @@ export default function SoforIzlemPage() {
             <div className="bg-yellow-500/10 rounded-lg p-3 text-center">
               <div className="text-2xl font-bold text-yellow-600">{stats.waitingDrivers}</div>
               <div className="text-xs text-muted-foreground">Beklemede</div>
+            </div>
+            <div className="bg-green-500/10 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-green-600">{stats.completedDrivers}</div>
+              <div className="text-xs text-muted-foreground">Tamamladı</div>
             </div>
             <div className="bg-gray-500/10 rounded-lg p-3 text-center">
               <div className="text-2xl font-bold text-gray-500">{stats.idleDrivers}</div>
@@ -206,8 +260,16 @@ export default function SoforIzlemPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {driversWithRoutes.map(({ driver, activeRoute, vehicle }) => (
-            <DriverKPICard key={driver.id} driver={driver} activeRoute={activeRoute} vehicle={vehicle} />
+          {driversWithRoutes.map(({ driver, activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, vehicle }) => (
+            <DriverKPICard
+              key={driver.id}
+              driver={driver}
+              activeRoute={activeRoute}
+              todayRoute={todayRoute}
+              lastCompletedRoute={lastCompletedRoute}
+              nextAssignedRoute={nextAssignedRoute}
+              vehicle={vehicle}
+            />
           ))}
         </div>
       )}
@@ -215,11 +277,226 @@ export default function SoforIzlemPage() {
   );
 }
 
+// Rota Özet Kartı - Geçmiş/Gelecek rotalar için
+function RouteSummaryMini({ route, label, variant }: { route: RouteDoc; label: string; variant: 'past' | 'future' }) {
+  const sortedStops = [...(route.stops || [])].sort((a, b) => a.order - b.order);
+  const dateStr = route.dateISO ? format(new Date(route.dateISO), 'dd MMM yyyy', { locale: tr }) : '-';
+
+  return (
+    <div className={cn(
+      "rounded-lg p-3 border",
+      variant === 'past' ? "bg-green-500/5 border-green-500/20" : "bg-purple-500/5 border-purple-500/20"
+    )}>
+      <div className="flex items-center justify-between mb-2">
+        <span className={cn(
+          "text-xs font-medium",
+          variant === 'past' ? "text-green-600" : "text-purple-600"
+        )}>{label}</span>
+        <span className="text-xs text-muted-foreground">{dateStr}</span>
+      </div>
+      <div className="flex items-center gap-1 overflow-x-auto">
+        {sortedStops.slice(0, 6).map((stop, idx) => (
+          <React.Fragment key={stop.hospitalId}>
+            <div
+              className={cn(
+                "w-3 h-3 rounded-full flex-shrink-0 flex items-center justify-center text-[7px]",
+                variant === 'past' ? "bg-green-500/20 text-green-700" : "bg-purple-500/20 text-purple-700"
+              )}
+              title={stop.name}
+            >
+              {stop.order}
+            </div>
+            {idx < Math.min(sortedStops.length - 1, 5) && (
+              <div className={cn(
+                "h-0.5 w-2 flex-shrink-0",
+                variant === 'past' ? "bg-green-500/30" : "bg-purple-500/30"
+              )} />
+            )}
+          </React.Fragment>
+        ))}
+        {sortedStops.length > 6 && (
+          <span className="text-[9px] text-muted-foreground ml-1">+{sortedStops.length - 6}</span>
+        )}
+      </div>
+      <div className="mt-2 text-[10px] text-muted-foreground truncate">
+        {sortedStops.length > 0 ? sortedStops.map(s => s.name).join(' → ') : 'Durak bilgisi yok'}
+      </div>
+    </div>
+  );
+}
+
+// Tamamlanmış Rota Detay Görünümü
+function CompletedRouteView({ route }: { route: RouteDoc }) {
+  const sortedStops = [...(route.stops || [])].sort((a, b) => a.order - b.order);
+
+  // Rota tamamlama süresini hesapla
+  const routeDuration = useMemo(() => {
+    if (!sortedStops.length) return null;
+    const firstDeparture = sortedStops[0]?.departedAt;
+    const lastArrival = sortedStops[sortedStops.length - 1]?.arrivedAt;
+    if (!firstDeparture || !lastArrival) return null;
+
+    const durationMs = lastArrival.toMillis() - firstDeparture.toMillis();
+    const hours = Math.floor(durationMs / (1000 * 60 * 60));
+    const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+    return { hours, minutes, totalMinutes: Math.round(durationMs / (1000 * 60)) };
+  }, [sortedStops]);
+
+  return (
+    <div className="space-y-3">
+      {/* Tamamlanma Özeti */}
+      <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Check className="h-4 w-4 text-green-600" />
+            <span className="text-sm font-medium text-green-600">Rota Tamamlandı</span>
+          </div>
+          {route.completedAt && (
+            <span className="text-xs text-muted-foreground">
+              {format(route.completedAt.toDate(), 'HH:mm', { locale: tr })}
+            </span>
+          )}
+        </div>
+        {routeDuration && (
+          <div className="text-xs text-muted-foreground">
+            Toplam süre: {routeDuration.hours > 0 ? `${routeDuration.hours} saat ` : ''}{routeDuration.minutes} dakika
+          </div>
+        )}
+      </div>
+
+      {/* Durak Detayları */}
+      <div className="border rounded-lg overflow-hidden">
+        <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium border-b">
+          Durak Detayları ({sortedStops.length} durak)
+        </div>
+        <div className="max-h-32 overflow-y-auto">
+          {sortedStops.map((stop, idx) => (
+            <div key={stop.hospitalId} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0">
+              <div className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[8px] flex-shrink-0">
+                {stop.order}
+              </div>
+              <span className="flex-1 truncate">{stop.name}</span>
+              <div className="flex items-center gap-2 text-muted-foreground flex-shrink-0">
+                {stop.arrivedAt && (
+                  <span className="flex items-center gap-1">
+                    <Flag className="h-2.5 w-2.5 text-green-500" />
+                    {format(stop.arrivedAt.toDate(), 'HH:mm')}
+                  </span>
+                )}
+                {stop.departedAt && idx < sortedStops.length - 1 && (
+                  <span className="flex items-center gap-1">
+                    <LogOut className="h-2.5 w-2.5 text-blue-500" />
+                    {format(stop.departedAt.toDate(), 'HH:mm')}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Bekleyen (Aktif Edilmemiş) Rota Görünümü
+function PendingRouteView({ route }: { route: RouteDoc }) {
+  const sortedStops = [...(route.stops || [])].sort((a, b) => a.order - b.order);
+
+  return (
+    <div className="space-y-3">
+      {/* Aktif Değil Uyarısı */}
+      <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-yellow-600" />
+          <span className="text-sm font-medium text-yellow-600">Rota Aktif Edilmedi</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Bu rota bugün için planlanmış ancak henüz başlatılmadı.
+        </p>
+      </div>
+
+      {/* Planlanan Duraklar */}
+      <div className="border rounded-lg overflow-hidden">
+        <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium border-b">
+          Planlanan Duraklar ({sortedStops.length} durak)
+        </div>
+        <div className="max-h-32 overflow-y-auto">
+          {sortedStops.map((stop) => (
+            <div key={stop.hospitalId} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0">
+              <div className="w-4 h-4 rounded-full bg-yellow-500/20 text-yellow-700 flex items-center justify-center text-[8px] flex-shrink-0 border border-yellow-500/30">
+                {stop.order}
+              </div>
+              <span className="flex-1 truncate">{stop.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Metro Görünümü */}
+      <div className="flex items-center gap-1 overflow-x-auto pb-1">
+        {sortedStops.map((stop, idx) => (
+          <React.Fragment key={stop.hospitalId}>
+            <div
+              className="w-4 h-4 rounded-full bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center text-[8px] text-yellow-700 flex-shrink-0"
+              title={stop.name}
+            >
+              {stop.order}
+            </div>
+            {idx < sortedStops.length - 1 && (
+              <div className="h-0.5 w-4 flex-shrink-0 bg-yellow-500/30" />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Bugün Rota Yok - Geçmiş ve Gelecek Rota Bilgisi
+function NoRouteView({ lastCompletedRoute, nextAssignedRoute }: { lastCompletedRoute: RouteDoc | null; nextAssignedRoute: RouteDoc | null }) {
+  return (
+    <div className="space-y-3">
+      <div className="text-center py-2 text-muted-foreground">
+        <MapPin className="h-6 w-6 mx-auto mb-1 opacity-50" />
+        <p className="text-xs">Bugün için atanmış rota yok</p>
+      </div>
+
+      {lastCompletedRoute && (
+        <RouteSummaryMini route={lastCompletedRoute} label="Son Tamamlanan Rota" variant="past" />
+      )}
+
+      {nextAssignedRoute && (
+        <RouteSummaryMini route={nextAssignedRoute} label="Sonraki Atanan Rota" variant="future" />
+      )}
+
+      {!lastCompletedRoute && !nextAssignedRoute && (
+        <div className="text-center text-xs text-muted-foreground py-2">
+          Geçmiş veya gelecek rota kaydı bulunamadı.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Şoför KPI Kartı Bileşeni
-function DriverKPICard({ driver, activeRoute, vehicle }: { driver: AppUser; activeRoute: RouteDoc | null; vehicle: Vehicle | null }) {
+function DriverKPICard({
+  driver,
+  activeRoute,
+  todayRoute,
+  lastCompletedRoute,
+  nextAssignedRoute,
+  vehicle
+}: {
+  driver: AppUser;
+  activeRoute: RouteDoc | null;
+  todayRoute: RouteDoc | null;
+  lastCompletedRoute: RouteDoc | null;
+  nextAssignedRoute: RouteDoc | null;
+  vehicle: Vehicle | null;
+}) {
   const driverName = (driver as any).displayName || (driver as any).name || (driver as any).email || 'İsimsiz Şoför';
 
-  // Segment durumlarını hesapla
+  // Segment durumlarını hesapla (sadece aktif rotalar için)
   const segmentStates = useMemo(() => {
     if (!activeRoute?.stops?.length) return [];
     const sortedStops = [...activeRoute.stops].sort((a, b) => a.order - b.order);
@@ -234,7 +511,7 @@ function DriverKPICard({ driver, activeRoute, vehicle }: { driver: AppUser; acti
     return arr;
   }, [activeRoute]);
 
-  // Mevcut durak bilgileri
+  // Mevcut durak bilgileri (sadece aktif rotalar için)
   const currentStopInfo = useMemo(() => {
     if (!activeRoute?.stops?.length) return null;
     const sortedStops = [...activeRoute.stops].sort((a, b) => a.order - b.order);
@@ -287,11 +564,22 @@ function DriverKPICard({ driver, activeRoute, vehicle }: { driver: AppUser; acti
     return null;
   }, [activeRoute]);
 
+  // Durum belirleme
+  const routeStatus = useMemo(() => {
+    if (activeRoute?.status === 'in_progress') return 'active';
+    if (activeRoute?.status === 'open') return 'waiting';
+    if (todayRoute?.status === 'completed') return 'completed';
+    if (todayRoute?.status === 'open') return 'pending'; // Bugün için atanmış ama aktif değil
+    return 'noRoute';
+  }, [activeRoute, todayRoute]);
+
   return (
     <Card className={cn(
       "shadow-lg transition-all duration-300 relative",
-      activeRoute?.status === 'in_progress' && "ring-2 ring-blue-500/50",
-      !activeRoute && "opacity-60"
+      routeStatus === 'active' && "ring-2 ring-blue-500/50",
+      routeStatus === 'completed' && "ring-2 ring-green-500/30",
+      routeStatus === 'pending' && "ring-2 ring-yellow-500/30",
+      routeStatus === 'noRoute' && "opacity-70"
     )}>
       {/* Vehicle Info - Sol Üst */}
       {vehicle && (
@@ -311,35 +599,43 @@ function DriverKPICard({ driver, activeRoute, vehicle }: { driver: AppUser; acti
           <div className="flex items-center gap-3">
             <div className={cn(
               "w-10 h-10 rounded-full flex items-center justify-center",
-              activeRoute?.status === 'in_progress' && "bg-blue-500 text-white",
-              activeRoute?.status === 'open' && "bg-yellow-500 text-white",
-              !activeRoute && "bg-muted text-muted-foreground"
+              routeStatus === 'active' && "bg-blue-500 text-white",
+              routeStatus === 'waiting' && "bg-yellow-500 text-white",
+              routeStatus === 'completed' && "bg-green-500 text-white",
+              routeStatus === 'pending' && "bg-yellow-500/50 text-yellow-700",
+              routeStatus === 'noRoute' && "bg-muted text-muted-foreground"
             )}>
               <Truck className="h-5 w-5" />
             </div>
             <div>
               <h3 className="font-semibold text-base">{driverName}</h3>
-              {activeRoute && (
+              {(todayRoute || activeRoute) && (
                 <span className="text-xs text-muted-foreground">
-                  {format(new Date(activeRoute.dateISO), 'dd MMM yyyy', { locale: tr })}
+                  {format(new Date((todayRoute || activeRoute)!.dateISO), 'dd MMM yyyy', { locale: tr })}
                 </span>
               )}
             </div>
           </div>
           <Badge variant={
-            activeRoute?.status === 'in_progress' ? 'default' :
-            activeRoute?.status === 'open' ? 'secondary' : 'outline'
+            routeStatus === 'active' ? 'default' :
+            routeStatus === 'completed' ? 'default' :
+            routeStatus === 'waiting' || routeStatus === 'pending' ? 'secondary' : 'outline'
           } className={cn(
-            activeRoute?.status === 'in_progress' && "bg-blue-500"
+            routeStatus === 'active' && "bg-blue-500",
+            routeStatus === 'completed' && "bg-green-500",
+            routeStatus === 'pending' && "bg-yellow-500/50 text-yellow-800"
           )}>
-            {activeRoute?.status === 'in_progress' ? 'Aktif' :
-             activeRoute?.status === 'open' ? 'Bekliyor' : 'Rotasız'}
+            {routeStatus === 'active' ? 'Aktif' :
+             routeStatus === 'waiting' ? 'Bekliyor' :
+             routeStatus === 'completed' ? 'Tamamlandı' :
+             routeStatus === 'pending' ? 'Aktif Değil' : 'Rotasız'}
           </Badge>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-3">
-        {activeRoute ? (
+        {/* Aktif Rota Görünümü */}
+        {(routeStatus === 'active' || routeStatus === 'waiting') && activeRoute && (
           <>
             {/* Progress Bar */}
             <div>
@@ -353,7 +649,7 @@ function DriverKPICard({ driver, activeRoute, vehicle }: { driver: AppUser; acti
                 <div
                   className={cn(
                     "h-full transition-all duration-500",
-                    activeRoute.status === 'in_progress'
+                    routeStatus === 'active'
                       ? "bg-gradient-to-r from-blue-500 to-blue-400"
                       : "bg-gradient-to-r from-yellow-500 to-yellow-400"
                   )}
@@ -456,11 +752,21 @@ function DriverKPICard({ driver, activeRoute, vehicle }: { driver: AppUser; acti
               </div>
             </div>
           </>
-        ) : (
-          <div className="text-center py-4 text-muted-foreground">
-            <MapPin className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">Bugün için atanmış rota yok</p>
-          </div>
+        )}
+
+        {/* Tamamlanmış Rota Görünümü */}
+        {routeStatus === 'completed' && todayRoute && (
+          <CompletedRouteView route={todayRoute} />
+        )}
+
+        {/* Bekleyen (Aktif Edilmemiş) Rota Görünümü */}
+        {routeStatus === 'pending' && todayRoute && (
+          <PendingRouteView route={todayRoute} />
+        )}
+
+        {/* Bugün Rota Yok Görünümü */}
+        {routeStatus === 'noRoute' && (
+          <NoRouteView lastCompletedRoute={lastCompletedRoute} nextAssignedRoute={nextAssignedRoute} />
         )}
       </CardContent>
     </Card>
