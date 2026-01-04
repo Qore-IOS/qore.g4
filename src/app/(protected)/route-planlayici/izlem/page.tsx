@@ -74,16 +74,21 @@ export default function SoforIzlemPage() {
           getDocs(collection(db, 'vehicles')),
         ]);
 
-        // Şoförleri filtrele - role 'driver' olanlar
-        const drivers = usersSnap.docs
-          .map(d => {
-            const data = d.data();
-            return { ...data, id: d.id, uid: data.uid || d.id } as AppUser;
-          })
-          .filter(u => {
-            const role = ((u as any).role || '').toLowerCase();
-            return role === 'driver';
-          });
+        // Debug: Tüm kullanıcıları ve rollerini logla
+        const allUsers = usersSnap.docs.map(d => {
+          const data = d.data();
+          return { ...data, id: d.id, uid: data.uid || d.id };
+        });
+        console.log('Tüm kullanıcılar:', allUsers.map(u => ({ id: u.id, name: (u as any).name, role: (u as any).role })));
+
+        // Şoförleri filtrele - role 'driver' olanlar (case-insensitive ve çeşitli varyasyonlar)
+        const drivers = allUsers.filter(u => {
+          const role = ((u as any).role || '').toString().toLowerCase().trim();
+          // driver, Driver, DRIVER, şoför, sofor varyasyonlarını kontrol et
+          return role === 'driver' || role === 'şoför' || role === 'sofor' || role === 'sürücü' || role === 'surucu';
+        }) as AppUser[];
+
+        console.log('Bulunan şoförler:', drivers.length, drivers.map(d => ({ id: d.id, name: (d as any).name, role: (d as any).role })));
 
         // Araçları şoför ID'sine göre map'e dönüştür (hem id hem uid ile eşleştir)
         const vehiclesByDriverId = new Map<string, Vehicle>();
