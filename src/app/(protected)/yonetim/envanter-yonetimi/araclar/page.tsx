@@ -9,12 +9,25 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { PlusCircle, Trash2, Loader2, Car, Edit3, UserCheck } from 'lucide-react';
+import { PlusCircle, Trash2, Loader2, Car, Edit3, UserCheck, ImageIcon, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import BackButton from '@/components/BackButton';
 import type { User as AppUser } from '@/lib/types';
+import Image from 'next/image';
+import { cn } from '@/lib/utils';
+
+// Kullanılabilir araç ikonları - /public/vehicles/ klasöründen
+const VEHICLE_ICONS = [
+  { id: 'van-white', src: '/vehicles/van-white.png', label: 'Beyaz Van' },
+  { id: 'van-blue', src: '/vehicles/van-blue.png', label: 'Mavi Van' },
+  { id: 'van-red', src: '/vehicles/van-red.png', label: 'Kırmızı Van' },
+  { id: 'truck-white', src: '/vehicles/truck-white.png', label: 'Beyaz Kamyonet' },
+  { id: 'truck-blue', src: '/vehicles/truck-blue.png', label: 'Mavi Kamyonet' },
+  { id: 'car-white', src: '/vehicles/car-white.png', label: 'Beyaz Araba' },
+  { id: 'car-black', src: '/vehicles/car-black.png', label: 'Siyah Araba' },
+];
 
 interface Vehicle {
   id: string;
@@ -22,6 +35,7 @@ interface Vehicle {
   model: string;
   yil: string;
   plaka: string;
+  icon?: string; // Araç ikonu yolu
   assignedDriverId?: string;
   assignedDriverName?: string;
   createdAt?: any;
@@ -89,6 +103,7 @@ export default function AraclarPage() {
       model: editingVehicle.model,
       yil: editingVehicle.yil || '',
       plaka: editingVehicle.plaka.toUpperCase(),
+      icon: editingVehicle.icon || null,
       assignedDriverId: editingVehicle.assignedDriverId || null,
       assignedDriverName: assignedDriverName || null,
     };
@@ -156,6 +171,7 @@ export default function AraclarPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-16">İkon</TableHead>
                       <TableHead>Plaka</TableHead>
                       <TableHead>Marka</TableHead>
                       <TableHead>Model</TableHead>
@@ -167,13 +183,29 @@ export default function AraclarPage() {
                   <TableBody>
                     {vehicles.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8">
+                        <TableCell colSpan={7} className="text-center py-8">
                           Henüz araç kaydı bulunmuyor.
                         </TableCell>
                       </TableRow>
                     ) : (
                       vehicles.map(vehicle => (
                         <TableRow key={vehicle.id}>
+                          <TableCell>
+                            {vehicle.icon ? (
+                              <div className="w-10 h-10 relative">
+                                <Image
+                                  src={vehicle.icon}
+                                  alt={`${vehicle.marka} ${vehicle.model}`}
+                                  fill
+                                  className="object-contain"
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
+                                <Car className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell className="font-mono font-bold">{vehicle.plaka}</TableCell>
                           <TableCell>{vehicle.marka}</TableCell>
                           <TableCell>{vehicle.model}</TableCell>
@@ -222,44 +254,109 @@ export default function AraclarPage() {
       </div>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingVehicle.id ? 'Araç Düzenle' : 'Yeni Araç Ekle'}</DialogTitle>
           </DialogHeader>
           <div className="py-4 space-y-4">
+            {/* Araç İkonu Seçimi */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Marka *</label>
-              <Input
-                placeholder="örn: Ford, Mercedes, Volkswagen"
-                value={editingVehicle.marka || ''}
-                onChange={e => setEditingVehicle({ ...editingVehicle, marka: e.target.value })}
-              />
+              <label className="text-sm font-medium flex items-center gap-2">
+                <ImageIcon className="h-4 w-4" />
+                Araç İkonu
+              </label>
+              <div className="grid grid-cols-4 gap-2 p-3 border rounded-lg bg-muted/30">
+                {/* İkon yok seçeneği */}
+                <button
+                  type="button"
+                  onClick={() => setEditingVehicle({ ...editingVehicle, icon: undefined })}
+                  className={cn(
+                    "relative aspect-square rounded-lg border-2 flex items-center justify-center transition-all hover:bg-accent",
+                    !editingVehicle.icon
+                      ? "border-primary bg-primary/10"
+                      : "border-transparent bg-background"
+                  )}
+                >
+                  <Car className="h-8 w-8 text-muted-foreground" />
+                  {!editingVehicle.icon && (
+                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+                      <Check className="h-3 w-3 text-primary-foreground" />
+                    </div>
+                  )}
+                </button>
+                {VEHICLE_ICONS.map(icon => (
+                  <button
+                    key={icon.id}
+                    type="button"
+                    onClick={() => setEditingVehicle({ ...editingVehicle, icon: icon.src })}
+                    className={cn(
+                      "relative aspect-square rounded-lg border-2 p-1 transition-all hover:bg-accent overflow-hidden",
+                      editingVehicle.icon === icon.src
+                        ? "border-primary bg-primary/10"
+                        : "border-transparent bg-background"
+                    )}
+                    title={icon.label}
+                  >
+                    <Image
+                      src={icon.src}
+                      alt={icon.label}
+                      fill
+                      className="object-contain p-1"
+                      onError={(e) => {
+                        // Resim yüklenemezse gizle
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                    {editingVehicle.icon === icon.src && (
+                      <div className="absolute -top-1 -right-1 w-5 h-5 bg-primary rounded-full flex items-center justify-center z-10">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                İkonlar /public/vehicles/ klasöründen yüklenir. Yeni ikon eklemek için PNG dosyası ekleyin.
+              </p>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Model *</label>
-              <Input
-                placeholder="örn: Transit, Sprinter, Crafter"
-                value={editingVehicle.model || ''}
-                onChange={e => setEditingVehicle({ ...editingVehicle, model: e.target.value })}
-              />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Marka *</label>
+                <Input
+                  placeholder="örn: Ford"
+                  value={editingVehicle.marka || ''}
+                  onChange={e => setEditingVehicle({ ...editingVehicle, marka: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Model *</label>
+                <Input
+                  placeholder="örn: Transit"
+                  value={editingVehicle.model || ''}
+                  onChange={e => setEditingVehicle({ ...editingVehicle, model: e.target.value })}
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Yıl</label>
-              <Input
-                placeholder="örn: 2023"
-                value={editingVehicle.yil || ''}
-                onChange={e => setEditingVehicle({ ...editingVehicle, yil: e.target.value })}
-                maxLength={4}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Plaka *</label>
-              <Input
-                placeholder="örn: 34 ABC 123"
-                value={editingVehicle.plaka || ''}
-                onChange={e => setEditingVehicle({ ...editingVehicle, plaka: e.target.value.toUpperCase() })}
-                className="uppercase"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Yıl</label>
+                <Input
+                  placeholder="örn: 2023"
+                  value={editingVehicle.yil || ''}
+                  onChange={e => setEditingVehicle({ ...editingVehicle, yil: e.target.value })}
+                  maxLength={4}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Plaka *</label>
+                <Input
+                  placeholder="örn: 34 ABC 123"
+                  value={editingVehicle.plaka || ''}
+                  onChange={e => setEditingVehicle({ ...editingVehicle, plaka: e.target.value.toUpperCase() })}
+                  className="uppercase"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Atanan Şoför</label>

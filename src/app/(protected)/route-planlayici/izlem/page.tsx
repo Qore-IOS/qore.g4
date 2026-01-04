@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +21,7 @@ type Vehicle = {
   model: string;
   yil?: string;
   plaka: string;
+  icon?: string;
   assignedDriverId?: string;
 };
 
@@ -573,26 +575,42 @@ function DriverKPICard({
 
   return (
     <Card className={cn(
-      "shadow-lg transition-all duration-300 relative",
+      "shadow-lg transition-all duration-300 relative overflow-visible",
+      vehicle && "mt-6", // Araç ikonu için üst boşluk
       routeStatus === 'active' && "ring-2 ring-blue-500/50",
       routeStatus === 'completed' && "ring-2 ring-green-500/30",
       routeStatus === 'pending' && "ring-2 ring-yellow-500/30",
       routeStatus === 'noRoute' && "opacity-70"
     )}>
-      {/* Vehicle Info - Sol Üst */}
+      {/* Vehicle Icon - Sol Üst, yarısı kartın dışında */}
       {vehicle && (
-        <div className="absolute top-2 left-2 z-10">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/80 text-white text-[10px]">
-            <Car className="h-3 w-3" />
-            <span className="font-medium">{vehicle.marka} {vehicle.model}</span>
-            <span className="opacity-70">|</span>
-            <span className="font-mono">{vehicle.plaka}</span>
+        <div className="absolute -top-6 left-4 z-10">
+          {vehicle.icon ? (
+            <div className="relative w-14 h-14 drop-shadow-lg" title={`${vehicle.marka} ${vehicle.model} - ${vehicle.plaka}`}>
+              <Image
+                src={vehicle.icon}
+                alt={`${vehicle.marka} ${vehicle.model}`}
+                fill
+                className="object-contain"
+              />
+            </div>
+          ) : (
+            <div
+              className="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center shadow-lg border-2 border-background"
+              title={`${vehicle.marka} ${vehicle.model} - ${vehicle.plaka}`}
+            >
+              <Car className="h-7 w-7 text-white" />
+            </div>
+          )}
+          {/* Plaka etiketi */}
+          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-slate-900/90 text-white text-[9px] font-mono whitespace-nowrap shadow">
+            {vehicle.plaka}
           </div>
         </div>
       )}
 
       {/* Driver Header */}
-      <CardHeader className={cn("pb-2", vehicle && "pt-10")}>
+      <CardHeader className={cn("pb-2", vehicle && "pt-12 pl-20")}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className={cn(
