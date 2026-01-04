@@ -102,71 +102,54 @@ export default function SoforIzlemPage() {
         // Bugünün tarihini al
         const today = toDayKey(new Date());
 
-        // Her şoför için rotaları getir
+        // Her şoför için rotaları getir (tek sorgu ile tüm rotaları çek, client-side filtrele)
         const driverRoutePromises = drivers.map(async (driver) => {
           // Şoför ID'si - hem id hem uid kullan
           const driverId = driver.id || (driver as any).uid;
 
-          // Bugünkü tüm rotalar (tamamlanmış dahil)
-          const todayRouteQuery = query(
+          // Şoföre ait tüm rotaları tek sorguda getir (index gerektirmez)
+          const allRoutesQuery = query(
             collection(db, 'routes'),
-            where('driverId', '==', driverId),
-            where('date', '==', today)
+            where('driverId', '==', driverId)
           );
-          const todayRouteSnap = await getDocs(todayRouteQuery);
+          const allRoutesSnap = await getDocs(allRoutesQuery);
+          const allRoutes = allRoutesSnap.docs.map(d => ({ id: d.id, ...d.data() } as RouteDoc));
 
+          // Bugünkü rotalar
+          const todayRoutes = allRoutes.filter(r => r.date === today);
           let activeRoute: RouteDoc | null = null;
           let todayRoute: RouteDoc | null = null;
 
-          if (!todayRouteSnap.empty) {
-            const routes = todayRouteSnap.docs.map(d => ({ id: d.id, ...d.data() } as RouteDoc));
+          if (todayRoutes.length > 0) {
             // Bugünkü rotayı seç (öncelik: aktif > in_progress > open > completed)
-            todayRoute = routes.find(r => r.isActive) ||
-                        routes.find(r => r.status === 'in_progress') ||
-                        routes.find(r => r.status === 'open') ||
-                        routes.find(r => r.status === 'completed') ||
-                        routes[0] || null;
+            todayRoute = todayRoutes.find(r => r.isActive) ||
+                        todayRoutes.find(r => r.status === 'in_progress') ||
+                        todayRoutes.find(r => r.status === 'open') ||
+                        todayRoutes.find(r => r.status === 'completed') ||
+                        todayRoutes[0] || null;
             // Aktif rota sadece open veya in_progress olanlar
-            activeRoute = routes.find(r => r.isActive && r.status !== 'completed') ||
-                         routes.find(r => r.status === 'in_progress') ||
-                         routes.find(r => r.status === 'open') || null;
+            activeRoute = todayRoutes.find(r => r.isActive && r.status !== 'completed') ||
+                         todayRoutes.find(r => r.status === 'in_progress') ||
+                         todayRoutes.find(r => r.status === 'open') || null;
           }
 
-          // Son tamamlanan rota (bugün dahil, en son tamamlanan)
-          const completedRoutesQuery = query(
-            collection(db, 'routes'),
-            where('driverId', '==', driverId),
-            where('status', '==', 'completed')
-          );
-          const completedRoutesSnap = await getDocs(completedRoutesQuery);
-          let lastCompletedRoute: RouteDoc | null = null;
-          if (!completedRoutesSnap.empty) {
-            const completedRoutes = completedRoutesSnap.docs
-              .map(d => ({ id: d.id, ...d.data() } as RouteDoc))
-              .sort((a, b) => {
-                // Önce tarihe göre, sonra completedAt'e göre sırala
-                if (b.date !== a.date) return b.date - a.date;
-                const aTime = a.completedAt?.toMillis() || 0;
-                const bTime = b.completedAt?.toMillis() || 0;
-                return bTime - aTime;
-              });
-            lastCompletedRoute = completedRoutes[0] || null;
-          }
+          // Son tamamlanan rota (client-side filtreleme)
+          const completedRoutes = allRoutes
+            .filter(r => r.status === 'completed')
+            .sort((a, b) => {
+              // Önce tarihe göre, sonra completedAt'e göre sırala
+              if (b.date !== a.date) return b.date - a.date;
+              const aTime = a.completedAt?.toMillis() || 0;
+              const bTime = b.completedAt?.toMillis() || 0;
+              return bTime - aTime;
+            });
+          const lastCompletedRoute = completedRoutes[0] || null;
 
-          // En yakın gelecek rota (bugünden sonraki ilk atanmış rota)
-          const futureRoutesQuery = query(
-            collection(db, 'routes'),
-            where('driverId', '==', driverId),
-            where('date', '>', today)
-          );
-          const futureRoutesSnap = await getDocs(futureRoutesQuery);
-          let nextAssignedRoute: RouteDoc | null = null;
-          if (!futureRoutesSnap.empty) {
-            const futureRoutes = futureRoutesSnap.docs
-              .map(d => ({ id: d.id, ...d.data() } as RouteDoc))
-              .sort((a, b) => a.date - b.date);
-            nextAssignedRoute = futureRoutes[0] || null;
-          }
+          // En yakın gelecek rota (client-side filtreleme)
+          const futureRoutes = allRoutes
+            .filter(r => r.date > today)
+            .sort((a, b) => a.date - b.date);
+          const nextAssignedRoute = futureRoutes[0] || null;
 
           // Şoföre atanmış aracı bul (hem id hem uid ile ara)
           const vehicle = vehiclesByDriverId.get(driverId) || vehiclesByDriverId.get((driver as any).uid) || null;
