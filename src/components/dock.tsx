@@ -521,7 +521,7 @@ const DockItem = ({
             </motion.div>
           </TooltipTrigger>
           {!isLiquidMode && (
-            <TooltipContent side="bottom" align="center" sideOffset={35} avoidCollisions={false} className="glass-card z-[100]">
+            <TooltipContent side="bottom" align="center" sideOffset={6} className="glass-card z-[100]">
               <p>{item.label}</p>
             </TooltipContent>
           )}
