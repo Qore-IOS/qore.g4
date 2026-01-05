@@ -147,9 +147,9 @@ export default function SoforIzlemPage() {
             });
           const lastCompletedRoute = completedRoutes[0] || null;
 
-          // En yakın gelecek rota (client-side filtreleme)
+          // En yakın gelecek rota (client-side filtreleme) - tamamlanmış rotalar hariç
           const futureRoutes = allRoutes
-            .filter(r => r.date > today)
+            .filter(r => r.date > today && r.status !== 'completed')
             .sort((a, b) => a.date - b.date);
           const nextAssignedRoute = futureRoutes[0] || null;
 
