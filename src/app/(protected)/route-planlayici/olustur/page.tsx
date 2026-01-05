@@ -249,6 +249,17 @@ export default function RotaOlusturPage() {
       toast({ title: 'Yetki Hatası', description: 'Sadece atanmış şoför rotayı aktifleştirebilir.', variant: 'destructive' });
       return;
     }
+    // Tarih kontrolü - rota sadece planlanan gün aktif edilebilir
+    const today = Number(format(new Date(), 'yyyyMMdd'));
+    if (r.date !== today) {
+      const routeDateStr = format(new Date(r.dateISO), 'dd MMMM yyyy', { locale: tr });
+      toast({
+        title: 'Tarih Uyumsuzluğu',
+        description: `Bu rota ${routeDateStr} için planlanmış. Rota sadece planlanan günde aktif edilebilir.`,
+        variant: 'destructive'
+      });
+      return;
+    }
     try {
       await updateDoc(doc(db, 'routes', r.id), { isActive: true, activatedAt: serverTimestamp(), activatedBy: myUid, updatedAt: serverTimestamp() });
       toast({ title: 'Rota aktif', description: `${format(new Date(r.dateISO),'dd.MM.yyyy')} • #${r.sequence} • ${r.stops?.length||0} durak` });
