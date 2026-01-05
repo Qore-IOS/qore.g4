@@ -199,7 +199,6 @@
 
     /* Dark mode: 3D Liquid Glass effect for glass-card */
     .dark .glass-card {
-        position: relative;
         background: linear-gradient(
           145deg,
           rgba(255, 255, 255, 0.07) 0%,
@@ -211,8 +210,6 @@
         border-radius: 20px;
         backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
         -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
-        overflow: visible;
-        isolation: isolate;
 
         box-shadow:
           0 16px 56px rgba(15, 30, 60, 0.4),
@@ -223,7 +220,14 @@
           inset -2px 0 3px rgba(255, 255, 255, 0.06);
     }
 
-    .dark .glass-card::before {
+    /* Apply position and isolation only for non-fixed elements */
+    .dark .glass-card:not([data-fixed="true"]) {
+        position: relative;
+        overflow: visible;
+        isolation: isolate;
+    }
+
+    .dark .glass-card:not([data-fixed="true"])::before {
         content: '';
         position: absolute;
         inset: -4px;
@@ -245,7 +249,7 @@
         z-index: -1;
     }
 
-    .dark .glass-card::after {
+    .dark .glass-card:not([data-fixed="true"])::after {
         content: '';
         position: absolute;
         inset: 0;
@@ -756,6 +760,27 @@
      background-image: none;
      background-color: hsla(var(--hue), 50%, 50%, 1);
   }
+}
+
+/* Dialog/Modal specific styles */
+.animation-dialog-content {
+  animation: dialogContentShow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dialogContentShow {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* Ensure dialogs with glass-card maintain fixed positioning */
+[data-radix-dialog-content] {
+  position: fixed !important;
 }
 
 /* Leaflet map z-index fix - ensure maps don't overlap dialogs */
