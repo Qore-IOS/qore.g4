@@ -584,9 +584,9 @@ function DriverKPICard({
     )}>
       {/* Vehicle Icon - Sol Üst, yarısı kartın dışında */}
       {vehicle && (
-        <div className="absolute -top-6 left-4 z-10">
+        <div className="absolute -top-10 left-4 z-10">
           {vehicle.icon ? (
-            <div className="relative w-14 h-14 drop-shadow-lg" title={`${vehicle.marka} ${vehicle.model} - ${vehicle.plaka}`}>
+            <div className="relative w-20 h-20 drop-shadow-lg" title={`${vehicle.marka} ${vehicle.model} - ${vehicle.plaka}`}>
               <Image
                 src={vehicle.icon}
                 alt={`${vehicle.marka} ${vehicle.model}`}
@@ -596,10 +596,10 @@ function DriverKPICard({
             </div>
           ) : (
             <div
-              className="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center shadow-lg border-2 border-background"
+              className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center shadow-lg border-2 border-background"
               title={`${vehicle.marka} ${vehicle.model} - ${vehicle.plaka}`}
             >
-              <Car className="h-7 w-7 text-white" />
+              <Car className="h-10 w-10 text-white" />
             </div>
           )}
           {/* Plaka etiketi */}
@@ -610,7 +610,7 @@ function DriverKPICard({
       )}
 
       {/* Driver Header */}
-      <CardHeader className={cn("pb-2", vehicle && "pt-12 pl-20")}>
+      <CardHeader className={cn("pb-2", vehicle && "pt-14 pl-28")}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className={cn(
