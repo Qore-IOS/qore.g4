@@ -593,10 +593,14 @@ export default function DepoSayimPage() {
                         </div>
                         <div>
                             <Label>Ürün Kategorisi</Label>
-                            <Select value={categoryForCount} onValueChange={(v) => setCategoryForCount(v as 'kit' | 'sarf' | '')} disabled={isCounting}>
+                            <Select
+                                value={categoryForCount || '__all__'}
+                                onValueChange={(v) => setCategoryForCount(v === '__all__' ? '' : v as 'kit' | 'sarf')}
+                                disabled={isCounting}
+                            >
                                 <SelectTrigger><SelectValue placeholder="Kategori Seçin (Opsiyonel)..." /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="">Tümü</SelectItem>
+                                    <SelectItem value="__all__">Tümü</SelectItem>
                                     {availableCategories.map(c => (
                                         <SelectItem key={c} value={c}>{c === 'kit' ? 'Kit' : 'Sarf'}</SelectItem>
                                     ))}
