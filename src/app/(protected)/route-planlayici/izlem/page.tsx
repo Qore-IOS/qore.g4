@@ -729,26 +729,42 @@ function DriverKPICard({
     if (!activeRoute?.stops?.length) return null;
     const sortedStops = [...activeRoute.stops].sort((a, b) => a.order - b.order);
 
-    // Aktif olarak gidilen durak
+    // Aktif olarak gidilen durak (yolda)
     for (let i = 0; i < sortedStops.length - 1; i++) {
       if (sortedStops[i].departedAt && !sortedStops[i + 1].arrivedAt) {
         return {
           from: sortedStops[i],
           to: sortedStops[i + 1],
           currentIndex: i + 1,
-          total: sortedStops.length
+          total: sortedStops.length,
+          onTheRoad: true // Yolda
         };
       }
     }
 
-    // Henüz başlamamış
+    // Bir durağa varılmış ama çıkış yapılmamış (çıkış bekleniyor)
+    for (let i = 0; i < sortedStops.length - 1; i++) {
+      if (sortedStops[i].arrivedAt && !sortedStops[i].departedAt) {
+        return {
+          from: null,
+          to: sortedStops[i],
+          nextStop: sortedStops[i + 1],
+          currentIndex: i,
+          total: sortedStops.length,
+          waitingDeparture: true // Çıkış bekleniyor
+        };
+      }
+    }
+
+    // Henüz başlamamış (ilk duraktan çıkış bekleniyor)
     if (!sortedStops[0].departedAt) {
       return {
         from: null,
         to: sortedStops[0],
+        nextStop: sortedStops[1] || null,
         currentIndex: 0,
         total: sortedStops.length,
-        waiting: true
+        waitingStart: true // İlk çıkış bekleniyor
       };
     }
 
@@ -900,25 +916,56 @@ function DriverKPICard({
             {/* Current Status */}
             {currentStopInfo && (
               <div className={cn(
-                "rounded-lg p-3 border",
-                currentStopInfo.waiting
+                "rounded-lg p-3 border relative overflow-hidden",
+                (currentStopInfo.waitingDeparture || currentStopInfo.waitingStart)
                   ? "bg-yellow-500/10 border-yellow-500/20"
                   : "bg-blue-500/10 border-blue-500/20"
               )}>
-                {currentStopInfo.waiting ? (
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-yellow-600" />
-                    <span className="text-sm">
-                      <span className="font-medium">{currentStopInfo.to.name}</span>
-                      <span className="text-muted-foreground ml-1">- Çıkış bekleniyor</span>
-                    </span>
+                {/* Flow animation for on the road state */}
+                {currentStopInfo.onTheRoad && (
+                  <div className="absolute inset-0 overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-400/20 to-transparent animate-flow" />
+                  </div>
+                )}
+
+                {currentStopInfo.waitingDeparture ? (
+                  <div className="relative z-10 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-yellow-600" />
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Çıkış bekleniyor: </span>
+                        <span className="font-medium text-yellow-700">{currentStopInfo.to.name}</span>
+                      </span>
+                    </div>
+                    {currentStopInfo.nextStop && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Navigation className="h-3 w-3" />
+                        <span>Sonraki durak: {currentStopInfo.nextStop.name}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : currentStopInfo.waitingStart ? (
+                  <div className="relative z-10 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-yellow-600" />
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Başlangıç bekleniyor: </span>
+                        <span className="font-medium text-yellow-700">{currentStopInfo.to.name}</span>
+                      </span>
+                    </div>
+                    {currentStopInfo.nextStop && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Navigation className="h-3 w-3" />
+                        <span>Sonraki durak: {currentStopInfo.nextStop.name}</span>
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="relative z-10 space-y-2">
                     <div className="flex items-center gap-2">
                       <Navigation className="h-4 w-4 text-blue-600 animate-pulse" />
                       <span className="text-sm font-medium text-blue-600">
-                        {currentStopInfo.to.name}&apos;a gidiyor
+                        Varış: {currentStopInfo.to.name}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -952,16 +999,17 @@ function DriverKPICard({
               </div>
             )}
 
-            {/* Durak Listesi - Tümü alt alta gösterilir */}
+            {/* Durak Listesi - Tümü alt alta gösterilir, varış ve çıkış saatleriyle */}
             <div className="border-t pt-3">
               <div className="space-y-1">
-                {activeRoute.stops?.sort((a, b) => a.order - b.order).map((stop, index) => {
+                {activeRoute.stops?.sort((a, b) => a.order - b.order).map((stop, index, sortedStops) => {
                   const isCompleted = stop.arrivedAt || (index === 0 && stop.departedAt);
                   const isCurrent = !isCompleted && (
                     (index === 0 && !stop.departedAt) ||
                     (index > 0 && segmentStates[index - 1] === 'current')
                   );
                   const isHighlighted = highlightHospitalId && stop.hospitalId === highlightHospitalId;
+                  const isLastStop = index === sortedStops.length - 1;
 
                   return (
                     <div
@@ -991,11 +1039,21 @@ function DriverKPICard({
                       )}>
                         {stop.name}
                       </span>
-                      {stop.arrivedAt && (
-                        <span className="text-muted-foreground text-[10px]">
-                          {format(stop.arrivedAt.toDate(), 'HH:mm')}
-                        </span>
-                      )}
+                      {/* Varış ve Çıkış saatleri */}
+                      <div className="flex items-center gap-2 text-muted-foreground flex-shrink-0">
+                        {stop.arrivedAt && (
+                          <span className="flex items-center gap-0.5 text-[10px]">
+                            <Flag className="h-2.5 w-2.5 text-green-500" />
+                            {format(stop.arrivedAt.toDate(), 'HH:mm')}
+                          </span>
+                        )}
+                        {stop.departedAt && !isLastStop && (
+                          <span className="flex items-center gap-0.5 text-[10px]">
+                            <LogOut className="h-2.5 w-2.5 text-blue-500" />
+                            {format(stop.departedAt.toDate(), 'HH:mm')}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

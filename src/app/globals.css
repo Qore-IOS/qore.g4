@@ -783,3 +783,17 @@
 .route-map .leaflet-bottom {
   z-index: 10 !important;
 }
+
+/* Flow animation for on-the-road status */
+@keyframes flow {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-flow {
+  animation: flow 2s ease-in-out infinite;
+}
