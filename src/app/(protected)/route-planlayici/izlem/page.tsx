@@ -7,10 +7,11 @@ import Image from 'next/image';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag, Car } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag, Car, Search, X, Building2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, onSnapshot, query, Timestamp, where } from 'firebase/firestore';
-import type { User as AppUser } from '@/lib/types';
+import type { User as AppUser, Hospital } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,7 @@ type DriverWithRoute = {
   todayRoute: RouteDoc | null; // Bugünkü rota (aktif/bekleyen/tamamlanmış)
   lastCompletedRoute: RouteDoc | null; // Son tamamlanan rota
   nextAssignedRoute: RouteDoc | null; // Atanan en yakın gelecek rota
+  allRoutes: RouteDoc[]; // Şoföre ait tüm rotalar (arama için)
   vehicle: Vehicle | null;
 };
 
@@ -65,6 +67,28 @@ const toDayKey = (d: Date) => Number(format(d, 'yyyyMMdd'));
 export default function SoforIzlemPage() {
   const [driversWithRoutes, setDriversWithRoutes] = useState<DriverWithRoute[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Laboratuvar arama state'leri
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null);
+  const [hospitalSearchTerm, setHospitalSearchTerm] = useState('');
+  const [isHospitalDropdownOpen, setIsHospitalDropdownOpen] = useState(false);
+
+  // Laboratuvarları getir
+  useEffect(() => {
+    const fetchHospitals = async () => {
+      try {
+        const hospitalsSnap = await getDocs(collection(db, 'hospitals'));
+        const hospitalsList = hospitalsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Hospital))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
+        setHospitals(hospitalsList);
+      } catch (error) {
+        console.error('Laboratuvarlar yüklenirken hata:', error);
+      }
+    };
+    fetchHospitals();
+  }, []);
 
   // Şoförleri ve aktif rotalarını getir
   useEffect(() => {
@@ -156,7 +180,7 @@ export default function SoforIzlemPage() {
           // Şoföre atanmış aracı bul (hem id hem uid ile ara)
           const vehicle = vehiclesByDriverId.get(driverId) || vehiclesByDriverId.get((driver as any).uid) || null;
 
-          return { driver, activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, vehicle };
+          return { driver, activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, allRoutes, vehicle };
         });
 
         const results = await Promise.all(driverRoutePromises);
@@ -195,6 +219,96 @@ export default function SoforIzlemPage() {
     const idleDrivers = driversWithRoutes.filter(d => !d.todayRoute).length;
     return { total, activeDrivers, waitingDrivers, completedDrivers, idleDrivers };
   }, [driversWithRoutes]);
+
+  // Seçili laboratuvar bilgisi
+  const selectedHospital = useMemo(() => {
+    if (!selectedHospitalId) return null;
+    return hospitals.find(h => h.id === selectedHospitalId) || null;
+  }, [selectedHospitalId, hospitals]);
+
+  // Filtrelenmiş laboratuvar listesi (arama için)
+  const filteredHospitals = useMemo(() => {
+    if (!hospitalSearchTerm.trim()) return hospitals;
+    const term = hospitalSearchTerm.toLowerCase().trim();
+    return hospitals.filter(h => (h.name || '').toLowerCase().includes(term));
+  }, [hospitals, hospitalSearchTerm]);
+
+  // Laboratuvar seçimine göre filtrelenmiş şoförler ve gösterilecek rotalar
+  const filteredDriversData = useMemo(() => {
+    if (!selectedHospitalId) {
+      // Filtre yok - tüm şoförleri normal şekilde göster
+      return driversWithRoutes.map(d => ({
+        ...d,
+        displayRoute: null as RouteDoc | null, // Normal görünüm
+        highlightHospitalId: null as string | null,
+      }));
+    }
+
+    const today = toDayKey(new Date());
+    const results: Array<typeof driversWithRoutes[0] & { displayRoute: RouteDoc | null; highlightHospitalId: string | null }> = [];
+
+    for (const driverData of driversWithRoutes) {
+      const { activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, allRoutes } = driverData;
+
+      // Seçili laboratuvarı içeren rotaları bul
+      const routesWithHospital = allRoutes
+        .filter(r => r.stops?.some(s => s.hospitalId === selectedHospitalId))
+        .sort((a, b) => a.date - b.date);
+
+      if (routesWithHospital.length === 0) continue; // Bu şoförün rotalarında bu laboratuvar yok
+
+      // Hangi rotayı göstereceğimizi belirle
+      let displayRoute: RouteDoc | null = null;
+
+      // 1. Aktif rotada mı kontrol et
+      if (activeRoute && activeRoute.stops?.some(s => s.hospitalId === selectedHospitalId)) {
+        // Aktif rotada ve henüz uğranmamış mı?
+        const stopInActiveRoute = activeRoute.stops.find(s => s.hospitalId === selectedHospitalId);
+        if (stopInActiveRoute && !stopInActiveRoute.arrivedAt) {
+          displayRoute = activeRoute;
+        } else {
+          // Aktif rotada ama zaten uğranılmış, sonraki rotaya bak
+          displayRoute = activeRoute;
+        }
+      }
+      // 2. Bugünkü rotada mı (tamamlanmış dahil)
+      else if (todayRoute && todayRoute.stops?.some(s => s.hospitalId === selectedHospitalId)) {
+        displayRoute = todayRoute;
+      }
+      // 3. Son tamamlanan rotada mı
+      else if (lastCompletedRoute && lastCompletedRoute.stops?.some(s => s.hospitalId === selectedHospitalId)) {
+        displayRoute = lastCompletedRoute;
+      }
+      // 4. En yakın gelecek rotada mı
+      else if (nextAssignedRoute && nextAssignedRoute.stops?.some(s => s.hospitalId === selectedHospitalId)) {
+        displayRoute = nextAssignedRoute;
+      }
+      // 5. Daha ileri bir tarihte mi
+      else {
+        const futureRoute = routesWithHospital.find(r => r.date > today && r.status !== 'completed');
+        if (futureRoute) {
+          displayRoute = futureRoute;
+        }
+      }
+
+      if (displayRoute) {
+        results.push({
+          ...driverData,
+          displayRoute,
+          highlightHospitalId: selectedHospitalId,
+        });
+      }
+    }
+
+    return results;
+  }, [driversWithRoutes, selectedHospitalId]);
+
+  // Filtre temizle
+  const clearHospitalFilter = () => {
+    setSelectedHospitalId(null);
+    setHospitalSearchTerm('');
+    setIsHospitalDropdownOpen(false);
+  };
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -244,23 +358,98 @@ export default function SoforIzlemPage() {
         </CardContent>
       </Card>
 
+      {/* Laboratuvar Arama */}
+      <Card className="shadow-lg">
+        <CardContent className="py-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Building2 className="h-4 w-4" />
+              <span>Laboratuvar Ara:</span>
+            </div>
+            <div className="relative flex-1 max-w-md">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Laboratuvar adı yazın..."
+                  value={selectedHospital ? selectedHospital.name : hospitalSearchTerm}
+                  onChange={(e) => {
+                    setHospitalSearchTerm(e.target.value);
+                    setSelectedHospitalId(null);
+                    setIsHospitalDropdownOpen(true);
+                  }}
+                  onFocus={() => setIsHospitalDropdownOpen(true)}
+                  className="pl-9 pr-9"
+                />
+                {(selectedHospitalId || hospitalSearchTerm) && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={clearHospitalFilter}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+              {/* Dropdown */}
+              {isHospitalDropdownOpen && !selectedHospitalId && (
+                <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  {filteredHospitals.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">Laboratuvar bulunamadı</div>
+                  ) : (
+                    filteredHospitals.map(hospital => (
+                      <button
+                        key={hospital.id}
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
+                        onClick={() => {
+                          setSelectedHospitalId(hospital.id!);
+                          setHospitalSearchTerm('');
+                          setIsHospitalDropdownOpen(false);
+                        }}
+                      >
+                        <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="truncate">{hospital.name}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            {selectedHospital && (
+              <Badge variant="secondary" className="flex items-center gap-1">
+                <Building2 className="h-3 w-3" />
+                {selectedHospital.name}
+                <button onClick={clearHospitalFilter} className="ml-1 hover:text-destructive">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+          </div>
+          {selectedHospitalId && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              {filteredDriversData.length} şoförün rotasında bu laboratuvar bulunuyor
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Driver Cards Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
-      ) : driversWithRoutes.length === 0 ? (
+      ) : filteredDriversData.length === 0 ? (
         <Card className="shadow-lg">
           <CardContent className="py-12">
             <div className="text-center text-muted-foreground">
               <Truck className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>Sistemde kayıtlı şoför bulunamadı.</p>
+              <p>{selectedHospitalId ? 'Bu laboratuvarı içeren rota bulunamadı.' : 'Sistemde kayıtlı şoför bulunamadı.'}</p>
             </div>
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {driversWithRoutes.map(({ driver, activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, vehicle }) => (
+          {filteredDriversData.map(({ driver, activeRoute, todayRoute, lastCompletedRoute, nextAssignedRoute, vehicle, displayRoute, highlightHospitalId }) => (
             <DriverKPICard
               key={driver.id}
               driver={driver}
@@ -269,6 +458,8 @@ export default function SoforIzlemPage() {
               lastCompletedRoute={lastCompletedRoute}
               nextAssignedRoute={nextAssignedRoute}
               vehicle={vehicle}
+              displayRoute={displayRoute}
+              highlightHospitalId={highlightHospitalId}
             />
           ))}
         </div>
@@ -278,7 +469,7 @@ export default function SoforIzlemPage() {
 }
 
 // Rota Özet Kartı - Geçmiş/Gelecek rotalar için
-function RouteSummaryMini({ route, label, variant }: { route: RouteDoc; label: string; variant: 'past' | 'future' }) {
+function RouteSummaryMini({ route, label, variant, highlightHospitalId }: { route: RouteDoc; label: string; variant: 'past' | 'future'; highlightHospitalId?: string | null }) {
   const sortedStops = [...(route.stops || [])].sort((a, b) => a.order - b.order);
   const dateStr = route.dateISO ? format(new Date(route.dateISO), 'dd MMM yyyy', { locale: tr }) : '-';
 
@@ -296,26 +487,42 @@ function RouteSummaryMini({ route, label, variant }: { route: RouteDoc; label: s
       </div>
       {/* Duraklar - Alt alta liste */}
       <div className="space-y-1">
-        {sortedStops.map((stop, idx) => (
-          <div key={stop.hospitalId} className="flex items-center gap-2 text-xs">
+        {sortedStops.map((stop, idx) => {
+          const isHighlighted = highlightHospitalId && stop.hospitalId === highlightHospitalId;
+          return (
             <div
+              key={stop.hospitalId}
               className={cn(
-                "w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center text-[8px] font-medium",
-                variant === 'past' ? "bg-green-500/20 text-green-700" : "bg-purple-500/20 text-purple-700"
+                "flex items-center gap-2 text-xs rounded px-1 -mx-1 transition-all",
+                isHighlighted && "bg-amber-500/20 ring-2 ring-amber-500/50"
               )}
             >
-              {stop.order}
+              <div
+                className={cn(
+                  "w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center text-[8px] font-medium",
+                  isHighlighted
+                    ? "bg-amber-500 text-white"
+                    : variant === 'past' ? "bg-green-500/20 text-green-700" : "bg-purple-500/20 text-purple-700"
+                )}
+              >
+                {stop.order}
+              </div>
+              <span className={cn(
+                "flex-1",
+                isHighlighted ? "text-amber-700 font-semibold" : "text-muted-foreground"
+              )}>
+                {stop.name}
+              </span>
             </div>
-            <span className="flex-1 text-muted-foreground">{stop.name}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 }
 
 // Tamamlanmış Rota Detay Görünümü
-function CompletedRouteView({ route }: { route: RouteDoc }) {
+function CompletedRouteView({ route, highlightHospitalId }: { route: RouteDoc; highlightHospitalId?: string | null }) {
   const sortedStops = [...(route.stops || [])].sort((a, b) => a.order - b.order);
 
   // Rota tamamlama süresini hesapla
@@ -359,28 +566,40 @@ function CompletedRouteView({ route }: { route: RouteDoc }) {
           Durak Detayları ({sortedStops.length} durak)
         </div>
         <div>
-          {sortedStops.map((stop, idx) => (
-            <div key={stop.hospitalId} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0">
-              <div className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[8px] flex-shrink-0">
-                {stop.order}
-              </div>
-              <span className="flex-1">{stop.name}</span>
-              <div className="flex items-center gap-2 text-muted-foreground flex-shrink-0">
-                {stop.arrivedAt && (
-                  <span className="flex items-center gap-1">
-                    <Flag className="h-2.5 w-2.5 text-green-500" />
-                    {format(stop.arrivedAt.toDate(), 'HH:mm')}
-                  </span>
+          {sortedStops.map((stop, idx) => {
+            const isHighlighted = highlightHospitalId && stop.hospitalId === highlightHospitalId;
+            return (
+              <div
+                key={stop.hospitalId}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0 transition-all",
+                  isHighlighted && "bg-amber-500/20 ring-2 ring-inset ring-amber-500/50"
                 )}
-                {stop.departedAt && idx < sortedStops.length - 1 && (
-                  <span className="flex items-center gap-1">
-                    <LogOut className="h-2.5 w-2.5 text-blue-500" />
-                    {format(stop.departedAt.toDate(), 'HH:mm')}
-                  </span>
-                )}
+              >
+                <div className={cn(
+                  "w-4 h-4 rounded-full text-white flex items-center justify-center text-[8px] flex-shrink-0",
+                  isHighlighted ? "bg-amber-500" : "bg-green-500"
+                )}>
+                  {stop.order}
+                </div>
+                <span className={cn("flex-1", isHighlighted && "text-amber-700 font-semibold")}>{stop.name}</span>
+                <div className="flex items-center gap-2 text-muted-foreground flex-shrink-0">
+                  {stop.arrivedAt && (
+                    <span className="flex items-center gap-1">
+                      <Flag className="h-2.5 w-2.5 text-green-500" />
+                      {format(stop.arrivedAt.toDate(), 'HH:mm')}
+                    </span>
+                  )}
+                  {stop.departedAt && idx < sortedStops.length - 1 && (
+                    <span className="flex items-center gap-1">
+                      <LogOut className="h-2.5 w-2.5 text-blue-500" />
+                      {format(stop.departedAt.toDate(), 'HH:mm')}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -388,7 +607,7 @@ function CompletedRouteView({ route }: { route: RouteDoc }) {
 }
 
 // Bekleyen (Aktif Edilmemiş) Rota Görünümü
-function PendingRouteView({ route }: { route: RouteDoc }) {
+function PendingRouteView({ route, highlightHospitalId }: { route: RouteDoc; highlightHospitalId?: string | null }) {
   const sortedStops = [...(route.stops || [])].sort((a, b) => a.order - b.order);
 
   return (
@@ -410,14 +629,28 @@ function PendingRouteView({ route }: { route: RouteDoc }) {
           Planlanan Duraklar ({sortedStops.length} durak)
         </div>
         <div>
-          {sortedStops.map((stop) => (
-            <div key={stop.hospitalId} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0">
-              <div className="w-4 h-4 rounded-full bg-yellow-500/20 text-yellow-700 flex items-center justify-center text-[8px] flex-shrink-0 border border-yellow-500/30">
-                {stop.order}
+          {sortedStops.map((stop) => {
+            const isHighlighted = highlightHospitalId && stop.hospitalId === highlightHospitalId;
+            return (
+              <div
+                key={stop.hospitalId}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0 transition-all",
+                  isHighlighted && "bg-amber-500/20 ring-2 ring-inset ring-amber-500/50"
+                )}
+              >
+                <div className={cn(
+                  "w-4 h-4 rounded-full flex items-center justify-center text-[8px] flex-shrink-0 border",
+                  isHighlighted
+                    ? "bg-amber-500 text-white border-amber-600"
+                    : "bg-yellow-500/20 text-yellow-700 border-yellow-500/30"
+                )}>
+                  {stop.order}
+                </div>
+                <span className={cn("flex-1", isHighlighted && "text-amber-700 font-semibold")}>{stop.name}</span>
               </div>
-              <span className="flex-1">{stop.name}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -425,7 +658,7 @@ function PendingRouteView({ route }: { route: RouteDoc }) {
 }
 
 // Bugün Rota Yok - Geçmiş ve Gelecek Rota Bilgisi
-function NoRouteView({ lastCompletedRoute, nextAssignedRoute }: { lastCompletedRoute: RouteDoc | null; nextAssignedRoute: RouteDoc | null }) {
+function NoRouteView({ lastCompletedRoute, nextAssignedRoute, highlightHospitalId }: { lastCompletedRoute: RouteDoc | null; nextAssignedRoute: RouteDoc | null; highlightHospitalId?: string | null }) {
   return (
     <div className="space-y-3">
       <div className="text-center py-2 text-muted-foreground">
@@ -434,11 +667,11 @@ function NoRouteView({ lastCompletedRoute, nextAssignedRoute }: { lastCompletedR
       </div>
 
       {lastCompletedRoute && (
-        <RouteSummaryMini route={lastCompletedRoute} label="Son Tamamlanan Rota" variant="past" />
+        <RouteSummaryMini route={lastCompletedRoute} label="Son Tamamlanan Rota" variant="past" highlightHospitalId={highlightHospitalId} />
       )}
 
       {nextAssignedRoute && (
-        <RouteSummaryMini route={nextAssignedRoute} label="Sonraki Atanan Rota" variant="future" />
+        <RouteSummaryMini route={nextAssignedRoute} label="Sonraki Atanan Rota" variant="future" highlightHospitalId={highlightHospitalId} />
       )}
 
       {!lastCompletedRoute && !nextAssignedRoute && (
@@ -457,7 +690,9 @@ function DriverKPICard({
   todayRoute,
   lastCompletedRoute,
   nextAssignedRoute,
-  vehicle
+  vehicle,
+  displayRoute,
+  highlightHospitalId
 }: {
   driver: AppUser;
   activeRoute: RouteDoc | null;
@@ -465,13 +700,19 @@ function DriverKPICard({
   lastCompletedRoute: RouteDoc | null;
   nextAssignedRoute: RouteDoc | null;
   vehicle: Vehicle | null;
+  displayRoute?: RouteDoc | null;
+  highlightHospitalId?: string | null;
 }) {
   const driverName = (driver as any).displayName || (driver as any).name || (driver as any).email || 'İsimsiz Şoför';
 
+  // Filtre aktifse ve farklı bir rota gösterilecekse
+  const isFilteredView = !!highlightHospitalId && !!displayRoute;
+  const routeToShow = isFilteredView ? displayRoute : activeRoute;
+
   // Segment durumlarını hesapla (sadece aktif rotalar için)
   const segmentStates = useMemo(() => {
-    if (!activeRoute?.stops?.length) return [];
-    const sortedStops = [...activeRoute.stops].sort((a, b) => a.order - b.order);
+    if (!routeToShow?.stops?.length) return [];
+    const sortedStops = [...routeToShow.stops].sort((a, b) => a.order - b.order);
     const arr: ('completed' | 'current' | 'future')[] = [];
     for (let i = 0; i < Math.max(0, sortedStops.length - 1); i++) {
       const from = sortedStops[i];
@@ -481,7 +722,7 @@ function DriverKPICard({
       arr.push(completed ? 'completed' : current ? 'current' : 'future');
     }
     return arr;
-  }, [activeRoute]);
+  }, [routeToShow]);
 
   // Mevcut durak bilgileri (sadece aktif rotalar için)
   const currentStopInfo = useMemo(() => {
@@ -720,24 +961,33 @@ function DriverKPICard({
                     (index === 0 && !stop.departedAt) ||
                     (index > 0 && segmentStates[index - 1] === 'current')
                   );
+                  const isHighlighted = highlightHospitalId && stop.hospitalId === highlightHospitalId;
 
                   return (
-                    <div key={stop.hospitalId} className="flex items-center gap-2 text-xs">
+                    <div
+                      key={stop.hospitalId}
+                      className={cn(
+                        "flex items-center gap-2 text-xs rounded px-1 -mx-1 transition-all",
+                        isHighlighted && "bg-amber-500/20 ring-2 ring-amber-500/50"
+                      )}
+                    >
                       <div className={cn(
                         "w-4 h-4 rounded-full flex items-center justify-center text-[8px] flex-shrink-0",
-                        isCompleted && "bg-green-500 text-white",
-                        isCurrent && "bg-blue-500 text-white animate-pulse",
-                        !isCompleted && !isCurrent && "bg-muted border border-border"
+                        isHighlighted && "bg-amber-500 text-white",
+                        !isHighlighted && isCompleted && "bg-green-500 text-white",
+                        !isHighlighted && isCurrent && "bg-blue-500 text-white animate-pulse",
+                        !isHighlighted && !isCompleted && !isCurrent && "bg-muted border border-border"
                       )}>
-                        {isCompleted && <Check className="h-2.5 w-2.5" />}
-                        {isCurrent && <Navigation className="h-2.5 w-2.5" />}
-                        {!isCompleted && !isCurrent && <span>{stop.order}</span>}
+                        {isCompleted && !isHighlighted && <Check className="h-2.5 w-2.5" />}
+                        {isCurrent && !isHighlighted && <Navigation className="h-2.5 w-2.5" />}
+                        {((!isCompleted && !isCurrent) || isHighlighted) && <span>{stop.order}</span>}
                       </div>
                       <span className={cn(
                         "flex-1",
-                        isCompleted && "text-green-600",
-                        isCurrent && "text-blue-600 font-medium",
-                        !isCompleted && !isCurrent && "text-muted-foreground"
+                        isHighlighted && "text-amber-700 font-semibold",
+                        !isHighlighted && isCompleted && "text-green-600",
+                        !isHighlighted && isCurrent && "text-blue-600 font-medium",
+                        !isHighlighted && !isCompleted && !isCurrent && "text-muted-foreground"
                       )}>
                         {stop.name}
                       </span>
@@ -754,19 +1004,66 @@ function DriverKPICard({
           </>
         )}
 
+        {/* Filtreli Rota Görünümü - Aktif rota dışındaki bir rota gösterilecekse */}
+        {isFilteredView && displayRoute && displayRoute.id !== activeRoute?.id && (
+          <div className="space-y-3">
+            {/* Filtre bilgisi */}
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <Search className="h-4 w-4 text-amber-600" />
+                <span className="text-sm font-medium text-amber-600">Filtrelenmiş Rota</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {format(new Date(displayRoute.dateISO), 'dd MMMM yyyy', { locale: tr })} tarihli rota
+              </p>
+            </div>
+
+            {/* Duraklar */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium border-b">
+                Rota Durakları ({displayRoute.stops?.length || 0} durak)
+              </div>
+              <div>
+                {displayRoute.stops?.sort((a, b) => a.order - b.order).map((stop) => {
+                  const isHighlighted = highlightHospitalId && stop.hospitalId === highlightHospitalId;
+                  return (
+                    <div
+                      key={stop.hospitalId}
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0 transition-all",
+                        isHighlighted && "bg-amber-500/20 ring-2 ring-inset ring-amber-500/50"
+                      )}
+                    >
+                      <div className={cn(
+                        "w-4 h-4 rounded-full flex items-center justify-center text-[8px] flex-shrink-0",
+                        isHighlighted
+                          ? "bg-amber-500 text-white"
+                          : "bg-purple-500/20 text-purple-700"
+                      )}>
+                        {stop.order}
+                      </div>
+                      <span className={cn("flex-1", isHighlighted && "text-amber-700 font-semibold")}>{stop.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Tamamlanmış Rota Görünümü */}
-        {routeStatus === 'completed' && todayRoute && (
-          <CompletedRouteView route={todayRoute} />
+        {routeStatus === 'completed' && todayRoute && !isFilteredView && (
+          <CompletedRouteView route={todayRoute} highlightHospitalId={highlightHospitalId} />
         )}
 
         {/* Bekleyen (Aktif Edilmemiş) Rota Görünümü */}
-        {routeStatus === 'pending' && todayRoute && (
-          <PendingRouteView route={todayRoute} />
+        {routeStatus === 'pending' && todayRoute && !isFilteredView && (
+          <PendingRouteView route={todayRoute} highlightHospitalId={highlightHospitalId} />
         )}
 
         {/* Bugün Rota Yok Görünümü */}
-        {routeStatus === 'noRoute' && (
-          <NoRouteView lastCompletedRoute={lastCompletedRoute} nextAssignedRoute={nextAssignedRoute} />
+        {routeStatus === 'noRoute' && !isFilteredView && (
+          <NoRouteView lastCompletedRoute={lastCompletedRoute} nextAssignedRoute={nextAssignedRoute} highlightHospitalId={highlightHospitalId} />
         )}
       </CardContent>
     </Card>
