@@ -384,25 +384,51 @@ export default function RoutePlanlayiciPage() {
           </div>
         )}
 
-        {/* Route Action Buttons */}
+        {/* Route Action Buttons - Prominent with colors and lab names */}
         {activeRoute?.stops?.length ? (
-          <div className="grid grid-cols-3 sm:flex sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
-            <div className="flex flex-col items-center">
-              <button type="button" onClick={handleDepart} disabled={!isDriverOwner || !canStartLeg}
-                className="w-full h-10 sm:h-12 px-3 sm:px-4 rounded-xl bg-white/10 border border-white/15 backdrop-blur shadow-lg ring-1 ring-white/10 hover:bg-white/20 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
-                <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
+          <div className="space-y-3">
+            {/* Main action buttons - horizontal, colorful */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Departure Button - Green/Emerald */}
+              <button
+                type="button"
+                onClick={handleDepart}
+                disabled={!isDriverOwner || !canStartLeg}
+                className="flex-1 h-14 sm:h-16 px-4 sm:px-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-semibold shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-none flex items-center justify-start gap-3 sm:gap-4"
+              >
+                <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/20 flex items-center justify-center">
+                  <LogOut className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <div className="flex flex-col items-start text-left min-w-0">
+                  <span className="text-[10px] sm:text-xs uppercase tracking-wide opacity-80">Çıkış Yap</span>
+                  <span className="text-sm sm:text-base font-bold truncate max-w-full">
+                    {canStartLeg ? (lastArrivedIndex >= 0 ? activeRoute.stops[lastArrivedIndex]?.name : activeRoute.stops[0]?.name) : '—'}
+                  </span>
+                </div>
               </button>
-              <div className="mt-1 text-[10px] sm:text-xs text-center max-w-[6rem] sm:max-w-[9rem] text-white/90 truncate">{departFromLabel}</div>
-            </div>
-            <div className="flex flex-col items-center">
-              <button type="button" onClick={handleArrive} disabled={!isDriverOwner || !canArrive}
-                className="h-10 sm:h-12 px-3 sm:px-5 rounded-xl sm:rounded-2xl bg-white/10 border border-white/15 backdrop-blur shadow-lg ring-1 ring-white/10 hover:bg-white/20 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2">
-                <Flag className="h-4 w-4 sm:h-5 sm:w-5" />
-                <span className="max-w-[4rem] sm:max-w-[12rem] truncate text-xs sm:text-sm">{arriveToLabel}</span>
+
+              {/* Arrival Button - Blue */}
+              <button
+                type="button"
+                onClick={handleArrive}
+                disabled={!isDriverOwner || !canArrive}
+                className="flex-1 h-14 sm:h-16 px-4 sm:px-6 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-semibold shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-none flex items-center justify-start gap-3 sm:gap-4"
+              >
+                <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Flag className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <div className="flex flex-col items-start text-left min-w-0">
+                  <span className="text-[10px] sm:text-xs uppercase tracking-wide opacity-80">Varış Bildir</span>
+                  <span className="text-sm sm:text-base font-bold truncate max-w-full">
+                    {currentLegIndex >= 0 ? activeRoute.stops[currentLegIndex + 1]?.name : '—'}
+                  </span>
+                </div>
               </button>
             </div>
-            <div className="flex flex-col items-center">
-              <Button onClick={() => {
+
+            {/* Google Maps Button - Secondary */}
+            <Button
+              onClick={() => {
                 const ordered = (activeRoute.stops || []).slice().sort((a, b) => a.order - b.order);
                 const segments = openRouteInGoogleMaps(ordered);
                 if (segments && segments.length > 1) {
@@ -412,11 +438,13 @@ export default function RoutePlanlayiciPage() {
                   });
                 }
               }}
-                disabled={!isDriverOwner} variant="outline" size="sm" className="h-10 sm:h-12 px-2 sm:px-4 rounded-xl text-xs sm:text-sm">
-                <span className="hidden sm:inline">Google Maps'te Aç</span>
-                <span className="sm:hidden">Maps</span>
-              </Button>
-            </div>
+              disabled={!isDriverOwner}
+              variant="outline"
+              className="w-full h-11 rounded-xl text-sm"
+            >
+              <MapIcon className="h-4 w-4 mr-2" />
+              Google Maps&apos;te Rotayı Aç
+            </Button>
           </div>
         ) : null}
 
