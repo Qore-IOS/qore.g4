@@ -294,32 +294,21 @@ function RouteSummaryMini({ route, label, variant }: { route: RouteDoc; label: s
         )}>{label}</span>
         <span className="text-xs text-muted-foreground">{dateStr}</span>
       </div>
-      <div className="flex items-center gap-1 overflow-x-auto">
-        {sortedStops.slice(0, 6).map((stop, idx) => (
-          <React.Fragment key={stop.hospitalId}>
+      {/* Duraklar - Alt alta liste */}
+      <div className="space-y-1">
+        {sortedStops.map((stop, idx) => (
+          <div key={stop.hospitalId} className="flex items-center gap-2 text-xs">
             <div
               className={cn(
-                "w-3 h-3 rounded-full flex-shrink-0 flex items-center justify-center text-[7px]",
+                "w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center text-[8px] font-medium",
                 variant === 'past' ? "bg-green-500/20 text-green-700" : "bg-purple-500/20 text-purple-700"
               )}
-              title={stop.name}
             >
               {stop.order}
             </div>
-            {idx < Math.min(sortedStops.length - 1, 5) && (
-              <div className={cn(
-                "h-0.5 w-2 flex-shrink-0",
-                variant === 'past' ? "bg-green-500/30" : "bg-purple-500/30"
-              )} />
-            )}
-          </React.Fragment>
+            <span className="flex-1 text-muted-foreground">{stop.name}</span>
+          </div>
         ))}
-        {sortedStops.length > 6 && (
-          <span className="text-[9px] text-muted-foreground ml-1">+{sortedStops.length - 6}</span>
-        )}
-      </div>
-      <div className="mt-2 text-[10px] text-muted-foreground truncate">
-        {sortedStops.length > 0 ? sortedStops.map(s => s.name).join(' → ') : 'Durak bilgisi yok'}
       </div>
     </div>
   );
@@ -364,18 +353,18 @@ function CompletedRouteView({ route }: { route: RouteDoc }) {
         )}
       </div>
 
-      {/* Durak Detayları */}
+      {/* Durak Detayları - Tümü gösterilir */}
       <div className="border rounded-lg overflow-hidden">
         <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium border-b">
           Durak Detayları ({sortedStops.length} durak)
         </div>
-        <div className="max-h-32 overflow-y-auto">
+        <div>
           {sortedStops.map((stop, idx) => (
             <div key={stop.hospitalId} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0">
               <div className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[8px] flex-shrink-0">
                 {stop.order}
               </div>
-              <span className="flex-1 truncate">{stop.name}</span>
+              <span className="flex-1">{stop.name}</span>
               <div className="flex items-center gap-2 text-muted-foreground flex-shrink-0">
                 {stop.arrivedAt && (
                   <span className="flex items-center gap-1">
@@ -415,38 +404,21 @@ function PendingRouteView({ route }: { route: RouteDoc }) {
         </p>
       </div>
 
-      {/* Planlanan Duraklar */}
+      {/* Planlanan Duraklar - Tümü gösterilir */}
       <div className="border rounded-lg overflow-hidden">
         <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium border-b">
           Planlanan Duraklar ({sortedStops.length} durak)
         </div>
-        <div className="max-h-32 overflow-y-auto">
+        <div>
           {sortedStops.map((stop) => (
             <div key={stop.hospitalId} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b last:border-0">
               <div className="w-4 h-4 rounded-full bg-yellow-500/20 text-yellow-700 flex items-center justify-center text-[8px] flex-shrink-0 border border-yellow-500/30">
                 {stop.order}
               </div>
-              <span className="flex-1 truncate">{stop.name}</span>
+              <span className="flex-1">{stop.name}</span>
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Metro Görünümü */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-1">
-        {sortedStops.map((stop, idx) => (
-          <React.Fragment key={stop.hospitalId}>
-            <div
-              className="w-4 h-4 rounded-full bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center text-[8px] text-yellow-700 flex-shrink-0"
-              title={stop.name}
-            >
-              {stop.order}
-            </div>
-            {idx < sortedStops.length - 1 && (
-              <div className="h-0.5 w-4 flex-shrink-0 bg-yellow-500/30" />
-            )}
-          </React.Fragment>
-        ))}
       </div>
     </div>
   );
@@ -739,40 +711,42 @@ function DriverKPICard({
               </div>
             )}
 
-            {/* Mini Metro View */}
+            {/* Durak Listesi - Tümü alt alta gösterilir */}
             <div className="border-t pt-3">
-              <div className="flex items-center gap-1 overflow-x-auto pb-1">
+              <div className="space-y-1">
                 {activeRoute.stops?.sort((a, b) => a.order - b.order).map((stop, index) => {
                   const isCompleted = stop.arrivedAt || (index === 0 && stop.departedAt);
                   const isCurrent = !isCompleted && (
                     (index === 0 && !stop.departedAt) ||
                     (index > 0 && segmentStates[index - 1] === 'current')
                   );
-                  const isLast = index === activeRoute.stops.length - 1;
 
                   return (
-                    <React.Fragment key={stop.hospitalId}>
-                      <div className="flex flex-col items-center flex-shrink-0" title={stop.name}>
-                        <div className={cn(
-                          "w-4 h-4 rounded-full flex items-center justify-center text-[8px]",
-                          isCompleted && "bg-green-500 text-white",
-                          isCurrent && "bg-blue-500 text-white animate-pulse",
-                          !isCompleted && !isCurrent && "bg-muted border border-border"
-                        )}>
-                          {isCompleted && <Check className="h-2.5 w-2.5" />}
-                          {isCurrent && <Navigation className="h-2.5 w-2.5" />}
-                          {!isCompleted && !isCurrent && <span>{stop.order}</span>}
-                        </div>
+                    <div key={stop.hospitalId} className="flex items-center gap-2 text-xs">
+                      <div className={cn(
+                        "w-4 h-4 rounded-full flex items-center justify-center text-[8px] flex-shrink-0",
+                        isCompleted && "bg-green-500 text-white",
+                        isCurrent && "bg-blue-500 text-white animate-pulse",
+                        !isCompleted && !isCurrent && "bg-muted border border-border"
+                      )}>
+                        {isCompleted && <Check className="h-2.5 w-2.5" />}
+                        {isCurrent && <Navigation className="h-2.5 w-2.5" />}
+                        {!isCompleted && !isCurrent && <span>{stop.order}</span>}
                       </div>
-                      {!isLast && (
-                        <div className={cn(
-                          "h-0.5 w-4 flex-shrink-0",
-                          segmentStates[index] === 'completed' && "bg-green-500",
-                          segmentStates[index] === 'current' && "bg-blue-500",
-                          segmentStates[index] === 'future' && "bg-muted"
-                        )} />
+                      <span className={cn(
+                        "flex-1",
+                        isCompleted && "text-green-600",
+                        isCurrent && "text-blue-600 font-medium",
+                        !isCompleted && !isCurrent && "text-muted-foreground"
+                      )}>
+                        {stop.name}
+                      </span>
+                      {stop.arrivedAt && (
+                        <span className="text-muted-foreground text-[10px]">
+                          {format(stop.arrivedAt.toDate(), 'HH:mm')}
+                        </span>
                       )}
-                    </React.Fragment>
+                    </div>
                   );
                 })}
               </div>
