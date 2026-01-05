@@ -576,17 +576,17 @@ function DriverKPICard({
   return (
     <Card className={cn(
       "shadow-lg transition-all duration-300 relative overflow-visible",
-      vehicle && "mt-6", // Araç ikonu için üst boşluk
+      vehicle && "mt-16", // Araç ikonu için üst boşluk (büyük ikon)
       routeStatus === 'active' && "ring-2 ring-blue-500/50",
       routeStatus === 'completed' && "ring-2 ring-green-500/30",
       routeStatus === 'pending' && "ring-2 ring-yellow-500/30",
       routeStatus === 'noRoute' && "opacity-70"
     )}>
-      {/* Vehicle Icon - Sol Üst, yarısı kartın dışında */}
+      {/* Vehicle Icon - Sol Üst, yarısı kartın dışında + Araç bilgisi sağda */}
       {vehicle && (
-        <div className="absolute -top-10 left-4 z-10">
+        <div className="absolute -top-12 left-4 z-10 flex items-end gap-3">
           {vehicle.icon ? (
-            <div className="relative w-20 h-20 drop-shadow-lg" title={`${vehicle.marka} ${vehicle.model} - ${vehicle.plaka}`}>
+            <div className="relative w-32 h-32 drop-shadow-lg flex-shrink-0">
               <Image
                 src={vehicle.icon}
                 alt={`${vehicle.marka} ${vehicle.model}`}
@@ -596,33 +596,40 @@ function DriverKPICard({
             </div>
           ) : (
             <div
-              className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center shadow-lg border-2 border-background"
-              title={`${vehicle.marka} ${vehicle.model} - ${vehicle.plaka}`}
+              className="w-32 h-32 rounded-full bg-slate-800 flex items-center justify-center shadow-lg border-2 border-background flex-shrink-0"
             >
-              <Car className="h-10 w-10 text-white" />
+              <Car className="h-16 w-16 text-white" />
             </div>
           )}
-          {/* Plaka etiketi */}
-          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-slate-900/90 text-white text-[9px] font-mono whitespace-nowrap shadow">
-            {vehicle.plaka}
+          {/* Araç adı ve plaka - resmin sağında */}
+          <div className="pb-4 flex flex-col">
+            <span className="text-sm font-semibold text-foreground whitespace-nowrap">
+              {vehicle.marka} {vehicle.model}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900/90 text-white text-xs font-mono whitespace-nowrap shadow w-fit">
+              {vehicle.plaka}
+            </span>
           </div>
         </div>
       )}
 
       {/* Driver Header */}
-      <CardHeader className={cn("pb-2", vehicle && "pt-14 pl-28")}>
+      <CardHeader className={cn("pb-2", vehicle && "pt-20 pl-4")}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={cn(
-              "w-10 h-10 rounded-full flex items-center justify-center",
-              routeStatus === 'active' && "bg-blue-500 text-white",
-              routeStatus === 'waiting' && "bg-yellow-500 text-white",
-              routeStatus === 'completed' && "bg-green-500 text-white",
-              routeStatus === 'pending' && "bg-yellow-500/50 text-yellow-700",
-              routeStatus === 'noRoute' && "bg-muted text-muted-foreground"
-            )}>
-              <Truck className="h-5 w-5" />
-            </div>
+            {/* Kamyonet ikonu sadece araç resmi yoksa göster */}
+            {!vehicle?.icon && (
+              <div className={cn(
+                "w-10 h-10 rounded-full flex items-center justify-center",
+                routeStatus === 'active' && "bg-blue-500 text-white",
+                routeStatus === 'waiting' && "bg-yellow-500 text-white",
+                routeStatus === 'completed' && "bg-green-500 text-white",
+                routeStatus === 'pending' && "bg-yellow-500/50 text-yellow-700",
+                routeStatus === 'noRoute' && "bg-muted text-muted-foreground"
+              )}>
+                <Truck className="h-5 w-5" />
+              </div>
+            )}
             <div>
               <h3 className="font-semibold text-base">{driverName}</h3>
               {(todayRoute || activeRoute) && (
