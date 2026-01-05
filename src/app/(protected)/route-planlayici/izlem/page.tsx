@@ -582,7 +582,7 @@ function DriverKPICard({
       routeStatus === 'pending' && "ring-2 ring-yellow-500/30",
       routeStatus === 'noRoute' && "opacity-70"
     )}>
-      {/* Vehicle Icon - Sol Üst, yarısı kartın dışında + Araç bilgisi sağda */}
+      {/* Vehicle Icon - Sol Üst, yarısı kartın dışında + Şoför ismi ve plaka sağda */}
       {vehicle && (
         <div className="absolute -top-12 left-4 z-10 flex items-end gap-3">
           {vehicle.icon ? (
@@ -601,10 +601,10 @@ function DriverKPICard({
               <Car className="h-16 w-16 text-white" />
             </div>
           )}
-          {/* Araç adı ve plaka - resmin sağında */}
-          <div className="pb-4 flex flex-col">
-            <span className="text-sm font-semibold text-foreground whitespace-nowrap">
-              {vehicle.marka} {vehicle.model}
+          {/* Şoför ismi ve plaka - resmin sağında */}
+          <div className="pb-4 flex flex-col gap-1">
+            <span className="text-base font-semibold text-foreground whitespace-nowrap">
+              {driverName}
             </span>
             <span className="px-2 py-0.5 rounded bg-slate-900/90 text-white text-xs font-mono whitespace-nowrap shadow w-fit">
               {vehicle.plaka}
@@ -630,14 +630,17 @@ function DriverKPICard({
                 <Truck className="h-5 w-5" />
               </div>
             )}
-            <div>
-              <h3 className="font-semibold text-base">{driverName}</h3>
-              {(todayRoute || activeRoute) && (
-                <span className="text-xs text-muted-foreground">
-                  {format(new Date((todayRoute || activeRoute)!.dateISO), 'dd MMM yyyy', { locale: tr })}
-                </span>
-              )}
-            </div>
+            {/* Şoför ismi sadece araç resmi yoksa burada göster */}
+            {!vehicle?.icon && (
+              <div>
+                <h3 className="font-semibold text-base">{driverName}</h3>
+                {(todayRoute || activeRoute) && (
+                  <span className="text-xs text-muted-foreground">
+                    {format(new Date((todayRoute || activeRoute)!.dateISO), 'dd MMM yyyy', { locale: tr })}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <Badge variant={
             routeStatus === 'active' ? 'default' :
