@@ -57,13 +57,19 @@ export default function DepoSayimPage() {
     
     const [selectedDepotId, setSelectedDepotId] = useState('');
     const [brandForCount, setBrandForCount] = useState('');
+    const [categoryForCount, setCategoryForCount] = useState<'kit' | 'sarf' | ''>('');
     const [brandCountItems, setBrandCountItems] = useState<CountGroup[]>([]);
     const [isCounting, setIsCounting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    
+
     const availableBrands = useMemo(() => {
         const brands = new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]);
         return Array.from(brands).sort();
+    }, [productCodes]);
+
+    const availableCategories = useMemo(() => {
+        const categories = new Set(productCodes.map(p => p.urunGrubu).filter(Boolean) as string[]);
+        return Array.from(categories).sort();
     }, [productCodes]);
 
     const fetchData = useCallback(async () => {
@@ -100,7 +106,12 @@ export default function DepoSayimPage() {
         }
         const items = fullDepotStok.filter(item => {
           const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-          return product?.marka === brandForCount && !item.isShipped && item.depotId === selectedDepotId;
+          if (!product?.marka || product.marka !== brandForCount) return false;
+          if (!item.depotId || item.depotId !== selectedDepotId) return false;
+          if (item.isShipped) return false;
+          // Kategori seçildiyse, sadece o kategorideki ürünleri filtrele
+          if (categoryForCount && product.urunGrubu !== categoryForCount) return false;
+          return true;
         });
 
         const grouped = items.reduce((acc, item) => {
@@ -147,7 +158,8 @@ export default function DepoSayimPage() {
     
         if (groupIndex === -1) {
             playFeedback(true);
-            toast({ title: 'Listede Yok', description: 'Okutulan ürün bu markanın sayım listesinde bulunmuyor.', variant: 'destructive' });
+            const categoryText = categoryForCount ? ` ve ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'} kategorisinin` : '';
+            toast({ title: 'Listede Yok', description: `Okutulan ürün bu markanın${categoryText} sayım listesinde bulunmuyor.`, variant: 'destructive' });
             return;
         }
     
@@ -180,7 +192,7 @@ export default function DepoSayimPage() {
             return newItems;
         });
     
-    }, [brandCountItems, productCodes, parseAuto, toast]);
+    }, [brandCountItems, productCodes, parseAuto, toast, categoryForCount]);
     
     const handleManualVerifyGroup = useCallback((groupId: string) => {
         setBrandCountItems(prevItems => {
@@ -310,11 +322,11 @@ export default function DepoSayimPage() {
                         Depo Sayımı
                     </CardTitle>
                     <CardDescription>
-                        Belirli bir markaya ait ürünlerin depo sayımını yapmak için depo ve marka seçin.
+                        Belirli bir markaya ve opsiyonel olarak ürün kategorisine (Kit/Sarf) ait ürünlerin depo sayımını yapmak için depo, marka ve kategori seçin.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <Label>Depo</Label>
                             <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isCounting}>
@@ -327,6 +339,18 @@ export default function DepoSayimPage() {
                             <Select value={brandForCount} onValueChange={setBrandForCount} disabled={isCounting}>
                                 <SelectTrigger><SelectValue placeholder="Marka Seçin..." /></SelectTrigger>
                                 <SelectContent>{availableBrands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Ürün Kategorisi</Label>
+                            <Select value={categoryForCount} onValueChange={(v) => setCategoryForCount(v as 'kit' | 'sarf' | '')} disabled={isCounting}>
+                                <SelectTrigger><SelectValue placeholder="Kategori Seçin (Opsiyonel)..." /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="">Tümü</SelectItem>
+                                    {availableCategories.map(c => (
+                                        <SelectItem key={c} value={c}>{c === 'kit' ? 'Kit' : 'Sarf'}</SelectItem>
+                                    ))}
+                                </SelectContent>
                             </Select>
                         </div>
                     </div>
@@ -346,7 +370,7 @@ export default function DepoSayimPage() {
             {isCounting && (
                  <Card className="shadow-lg">
                   <CardHeader>
-                    <CardTitle>Marka Sayımı: {brandForCount}</CardTitle>
+                    <CardTitle>Sayım: {brandForCount}{categoryForCount ? ` - ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'}` : ''}</CardTitle>
                     <CardDescription>Okutulan ürünler yeşil, kalanlar kırmızı ile gösterilir. Tümünü doğrulamak için satır yanındaki tik butonunu kullanın.</CardDescription>
                   </CardHeader>
                   <CardContent>
