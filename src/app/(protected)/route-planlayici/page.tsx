@@ -252,10 +252,25 @@ export default function RoutePlanlayiciPage() {
 
   // Şu anki hedef durak indeksi (varış için)
   const currentTargetIndex = useMemo(() => {
-    if (currentLegIndex >= 0) return currentLegIndex + 1; // Yolda: bir sonraki durak
-    if (canStartLeg) return lastArrivedIndex >= 0 ? lastArrivedIndex : 0; // Çıkış bekliyor: mevcut durak
+    if (!activeRoute?.stops?.length) return -1;
+
+    // Yolda: bir sonraki durak (currentLegIndex + 1)
+    if (currentLegIndex >= 0) return currentLegIndex + 1;
+
+    // İlk durağa henüz varılmadıysa: ilk durak hedef
+    if (lastArrivedIndex === -1) {
+      const firstStop = activeRoute.stops[0];
+      if (!firstStop?.arrivedAt) return 0;
+    }
+
+    // Bir durağa varılmış ve çıkış bekliyor: bir sonraki durak hedef
+    if (canStartLeg && lastArrivedIndex >= 0) {
+      const nextIdx = lastArrivedIndex + 1;
+      if (nextIdx < activeRoute.stops.length) return nextIdx;
+    }
+
     return -1;
-  }, [currentLegIndex, canStartLeg, lastArrivedIndex]);
+  }, [activeRoute?.stops, currentLegIndex, canStartLeg, lastArrivedIndex]);
 
   // Şu an bir durakta mı (varış yapılmış ama ayrılma yapılmamış)
   const isCurrentlyAtStop = useMemo(() => {
@@ -267,9 +282,27 @@ export default function RoutePlanlayiciPage() {
 
   // Otomatik varış handler
   const handleAutoArrival = useCallback(async (stop: GeofenceStop) => {
-    if (!activeRoute || !isDriverOwner || currentLegIndex < 0) return;
-    const toIdx = currentLegIndex + 1;
+    if (!activeRoute || !isDriverOwner) return;
+
+    // Hedef durak indeksini belirle
+    let toIdx = -1;
+
+    // Yoldaysa: currentLegIndex + 1
+    if (currentLegIndex >= 0) {
+      toIdx = currentLegIndex + 1;
+    }
+    // İlk durağa henüz varılmadıysa: ilk durak
+    else if (lastArrivedIndex === -1 && !activeRoute.stops[0]?.arrivedAt) {
+      toIdx = 0;
+    }
+    // Bir durağa varılmış, çıkış yapılmış, yoldaysa
+    else if (lastArrivedIndex >= 0 && activeRoute.stops[lastArrivedIndex]?.departedAt) {
+      toIdx = lastArrivedIndex + 1;
+    }
+
+    if (toIdx < 0 || toIdx >= activeRoute.stops.length) return;
     if (activeRoute.stops[toIdx]?.hospitalId !== stop.id) return; // Doğru durak değil
+    if (activeRoute.stops[toIdx]?.arrivedAt) return; // Zaten varılmış
 
     toast({
       title: '📍 Otomatik Varış',
@@ -296,7 +329,7 @@ export default function RoutePlanlayiciPage() {
     } catch {
       toast({ title: 'Hata', description: 'Otomatik varış kaydedilemedi.', variant: 'destructive' });
     }
-  }, [activeRoute, isDriverOwner, currentLegIndex, toast]);
+  }, [activeRoute, isDriverOwner, currentLegIndex, lastArrivedIndex, toast]);
 
   // Otomatik ayrılma handler
   const handleAutoDeparture = useCallback(async (stop: GeofenceStop) => {
@@ -331,6 +364,38 @@ export default function RoutePlanlayiciPage() {
       onAutoDeparture: handleAutoDeparture,
     }
   );
+
+  // Mesafeyi Firestore'a kaydet (izlem panelinde göstermek için)
+  const lastDistanceUpdateRef = React.useRef<number>(0);
+  useEffect(() => {
+    if (!liveTrackingEnabled || !activeRoute || !isDriverOwner) return;
+    if (geofencing.distanceToTarget === null) return;
+
+    // Her 5 saniyede bir güncelle (çok sık yazma yapmamak için)
+    const now = Date.now();
+    if (now - lastDistanceUpdateRef.current < 5000) return;
+    lastDistanceUpdateRef.current = now;
+
+    // Sadece yolda iken veya ilk durağa yaklaşırken güncelle
+    const targetIdx = currentTargetIndex >= 0 ? currentTargetIndex : 0;
+    if (targetIdx >= activeRoute.stops.length) return;
+
+    const targetStopName = activeRoute.stops[targetIdx]?.name || '';
+
+    // Firestore'a kaydet
+    updateDoc(doc(db, 'routes', activeRoute.id), {
+      liveTracking: {
+        distanceToTarget: geofencing.distanceToTarget,
+        targetStopIndex: targetIdx,
+        targetStopName,
+        isApproaching: geofencing.isApproaching,
+        isInRange: geofencing.isInRange,
+        lastUpdate: serverTimestamp(),
+      },
+    }).catch(() => {
+      // Hata olursa sessizce geç (offline durumunda otomatik senkronize edilecek)
+    });
+  }, [liveTrackingEnabled, activeRoute, isDriverOwner, geofencing.distanceToTarget, geofencing.isApproaching, geofencing.isInRange, currentTargetIndex]);
 
   // Canlı takip toggle
   const toggleLiveTracking = useCallback(async () => {
@@ -544,9 +609,11 @@ export default function RoutePlanlayiciPage() {
                       ) : geofencing.distanceToTarget !== null ? (
                         <>
                           Hedefe mesafe: <span className="font-mono font-semibold">{geofencing.distanceToTarget}m</span>
-                          {geofencing.distanceToTarget <= 75 && (
-                            <span className="ml-1 text-emerald-600">(Menzilde!)</span>
-                          )}
+                          {geofencing.isInRange ? (
+                            <span className="ml-1 text-emerald-600 font-medium">(Menzilde!)</span>
+                          ) : geofencing.isApproaching ? (
+                            <span className="ml-1 text-amber-600">(Yaklaşıldı)</span>
+                          ) : null}
                         </>
                       ) : (
                         'Konum alınıyor...'

@@ -49,6 +49,10 @@ export interface GeofencingState {
   targetStop: GeofenceStop | null;
   /** Hedef durağa olan mesafe (metre) */
   distanceToTarget: number | null;
+  /** Hedefe yaklaşıldı mı? (200m içinde) */
+  isApproaching: boolean;
+  /** Menzilde mi? (100m içinde) */
+  isInRange: boolean;
   /** Otomatik varış tetiklendi mi? */
   autoArrivalTriggered: boolean;
   /** Otomatik ayrılma tetiklendi mi? */
@@ -71,12 +75,15 @@ export interface GeofencingCallbacks {
 }
 
 const DEFAULT_CONFIG: Required<GeofencingConfig> = {
-  arrivalThreshold: 75, // 75 metre yaklaşınca varış
-  departureThreshold: 100, // 100 metre uzaklaşınca ayrılma
+  arrivalThreshold: 100, // 100 metre yaklaşınca varış (geofence alanına giriş)
+  departureThreshold: 100, // 100 metre uzaklaşınca ayrılma (geofence alanından çıkış)
   maxAccuracy: 100, // 100 metreden fazla hata payı varsa işlem yapma
   minUpdateInterval: 3000, // En az 3 saniyede bir güncelle
   enabled: true,
 };
+
+/** Yaklaşma uyarı eşiği - bu mesafede "Hedefe yaklaşıldı" gösterilir */
+const APPROACHING_THRESHOLD = 200; // 200 metre
 
 export function useGeofencing(
   stops: GeofenceStop[],
@@ -93,6 +100,8 @@ export function useGeofencing(
     userLocation: null,
     targetStop: null,
     distanceToTarget: null,
+    isApproaching: false,
+    isInRange: false,
     autoArrivalTriggered: false,
     autoDepartureTriggered: false,
     error: null,
@@ -121,12 +130,17 @@ export function useGeofencing(
       targetStop.lng
     );
 
+    const isApproaching = distance <= APPROACHING_THRESHOLD;
+    const isInRange = distance <= mergedConfig.arrivalThreshold;
+
     setState(s => ({
       ...s,
       targetStop,
       distanceToTarget: Math.round(distance),
+      isApproaching,
+      isInRange,
     }));
-  }, [targetStop?.id, state.userLocation?.lat, state.userLocation?.lng]);
+  }, [targetStop?.id, state.userLocation?.lat, state.userLocation?.lng, mergedConfig.arrivalThreshold]);
 
   // Wake Lock API ile ekranı açık tut (opsiyonel)
   const requestWakeLock = useCallback(async () => {
@@ -208,11 +222,17 @@ export function useGeofencing(
     // Hedef durağa mesafeyi hesapla
     const distance = calculateDistance(lat, lng, targetStop.lat, targetStop.lng);
 
+    // Yaklaşma ve menzil durumlarını hesapla
+    const isApproaching = distance <= APPROACHING_THRESHOLD;
+    const isInRange = distance <= mergedConfig.arrivalThreshold;
+
     setState(s => ({
       ...s,
       userLocation: { lat, lng, accuracy },
       targetStop,
       distanceToTarget: Math.round(distance),
+      isApproaching,
+      isInRange,
       error: null,
       isBackgroundMode: false,
     }));

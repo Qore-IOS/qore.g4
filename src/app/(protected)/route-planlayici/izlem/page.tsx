@@ -36,6 +36,15 @@ type RouteStop = {
   arrivedAt?: Timestamp | null;
 };
 
+type LiveTracking = {
+  distanceToTarget: number;
+  targetStopIndex: number;
+  targetStopName: string;
+  isApproaching: boolean;
+  isInRange: boolean;
+  lastUpdate: Timestamp;
+};
+
 type RouteDoc = {
   id: string;
   runId: string;
@@ -50,6 +59,7 @@ type RouteDoc = {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   completedAt?: Timestamp;
+  liveTracking?: LiveTracking;
 };
 
 type DriverWithRoute = {
@@ -962,11 +972,27 @@ function DriverKPICard({
                   </div>
                 ) : (
                   <div className="relative z-10 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Navigation className="h-4 w-4 text-blue-600 animate-pulse" />
-                      <span className="text-sm font-medium text-blue-600">
-                        Varış: {currentStopInfo.to.name}
-                      </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Navigation className="h-4 w-4 text-blue-600 animate-pulse" />
+                        <span className="text-sm font-medium text-blue-600">
+                          Varış: {currentStopInfo.to.name}
+                        </span>
+                      </div>
+                      {/* Canlı mesafe göstergesi */}
+                      {activeRoute.liveTracking?.distanceToTarget != null && (
+                        <div className={cn(
+                          "px-2 py-0.5 rounded-full text-xs font-mono font-semibold",
+                          activeRoute.liveTracking.isInRange
+                            ? "bg-emerald-500/20 text-emerald-600"
+                            : activeRoute.liveTracking.isApproaching
+                              ? "bg-amber-500/20 text-amber-600"
+                              : "bg-blue-500/20 text-blue-600"
+                        )}>
+                          {activeRoute.liveTracking.distanceToTarget}m
+                          {activeRoute.liveTracking.isInRange && " ✓"}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <LogOut className="h-3 w-3" />
@@ -1039,6 +1065,19 @@ function DriverKPICard({
                       )}>
                         {stop.name}
                       </span>
+                      {/* Mevcut hedef için mesafe göster */}
+                      {isCurrent && activeRoute.liveTracking?.distanceToTarget != null && (
+                        <span className={cn(
+                          "px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold",
+                          activeRoute.liveTracking.isInRange
+                            ? "bg-emerald-500/20 text-emerald-600"
+                            : activeRoute.liveTracking.isApproaching
+                              ? "bg-amber-500/20 text-amber-600"
+                              : "bg-blue-500/20 text-blue-600"
+                        )}>
+                          {activeRoute.liveTracking.distanceToTarget}m
+                        </span>
+                      )}
                       {/* Varış ve Çıkış saatleri */}
                       <div className="flex items-center gap-2 text-muted-foreground flex-shrink-0">
                         {stop.arrivedAt && (
