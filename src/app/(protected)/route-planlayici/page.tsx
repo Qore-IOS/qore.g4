@@ -502,9 +502,11 @@ export default function RoutePlanlayiciPage() {
           <div className={cn(
             "rounded-xl p-3 border transition-all",
             liveTrackingEnabled
-              ? geofencing.isBackgroundMode
-                ? "bg-amber-500/10 border-amber-500/30"
-                : "bg-emerald-500/10 border-emerald-500/30"
+              ? !geofencing.isOnline
+                ? "bg-red-500/10 border-red-500/30"
+                : geofencing.isBackgroundMode
+                  ? "bg-amber-500/10 border-amber-500/30"
+                  : "bg-emerald-500/10 border-emerald-500/30"
               : "bg-muted/50 border-border"
           )}>
             <div className="flex items-center justify-between gap-3">
@@ -512,13 +514,17 @@ export default function RoutePlanlayiciPage() {
                 <div className={cn(
                   "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
                   liveTrackingEnabled
-                    ? geofencing.isBackgroundMode
-                      ? "bg-amber-500/20"
-                      : "bg-emerald-500/20"
+                    ? !geofencing.isOnline
+                      ? "bg-red-500/20"
+                      : geofencing.isBackgroundMode
+                        ? "bg-amber-500/20"
+                        : "bg-emerald-500/20"
                     : "bg-muted"
                 )}>
                   {liveTrackingEnabled ? (
-                    geofencing.isBackgroundMode ? (
+                    !geofencing.isOnline ? (
+                      <WifiOff className="h-5 w-5 text-red-600" />
+                    ) : geofencing.isBackgroundMode ? (
                       <WifiOff className="h-5 w-5 text-amber-600" />
                     ) : (
                       <Navigation className="h-5 w-5 text-emerald-600 animate-pulse" />
@@ -584,6 +590,19 @@ export default function RoutePlanlayiciPage() {
                 <p className="text-xs text-amber-700">
                   Uygulama arka planda. Tam doğruluk için bu sayfayı açık tutun.
                 </p>
+              </div>
+            )}
+
+            {/* Çevrimdışı uyarısı */}
+            {liveTrackingEnabled && !geofencing.isOnline && (
+              <div className="mt-2 pt-2 border-t border-red-500/20 flex items-start gap-2">
+                <WifiOff className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <p className="text-red-600 font-medium">İnternet bağlantısı yok</p>
+                  <p className="text-muted-foreground">
+                    GPS takibi devam ediyor. Varış/çıkış kayıtları bağlantı geldiğinde otomatik senkronize edilecek.
+                  </p>
+                </div>
               </div>
             )}
           </div>

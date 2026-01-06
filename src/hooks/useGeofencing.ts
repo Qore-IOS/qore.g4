@@ -57,6 +57,10 @@ export interface GeofencingState {
   error: string | null;
   /** Arka plan modu aktif mi? */
   isBackgroundMode: boolean;
+  /** İnternet bağlantısı var mı? */
+  isOnline: boolean;
+  /** Bekleyen işlem sayısı (offline iken biriken) */
+  pendingActionsCount: number;
 }
 
 export interface GeofencingCallbacks {
@@ -93,6 +97,8 @@ export function useGeofencing(
     autoDepartureTriggered: false,
     error: null,
     isBackgroundMode: false,
+    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    pendingActionsCount: 0,
   });
 
   const watchIdRef = useRef<number | null>(null);
@@ -358,6 +364,24 @@ export function useGeofencing(
     autoArrivalCooldownRef.current = false;
     autoDepartureCooldownRef.current = false;
   }, [currentStopIndex]);
+
+  // İnternet bağlantısı durumunu takip et
+  useEffect(() => {
+    const handleOnline = () => {
+      setState(s => ({ ...s, isOnline: true, error: null }));
+    };
+    const handleOffline = () => {
+      setState(s => ({ ...s, isOnline: false }));
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   return {
     ...state,
