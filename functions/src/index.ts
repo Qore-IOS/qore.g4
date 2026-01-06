@@ -76,11 +76,11 @@ export const sendFaultReportEmail = functions
             'ysahan@nukleus.com.tr',
             'dkilic@nukleus.com.tr',
             'bbasar@nukleus.com.tr',
-            'aturhan@nukleus.com.tr'
+            'aturhan@nukleus.com.tr',
+            'bkahraman@nukleus.com.tr'
         ];
 
         const aplikasyonListesi = [
-            'bkahraman@nukleus.com.tr',
             'iertugrul@nukleus.com.tr',
             'ehoscanli@nukleus.com.tr',
             'helkoca@nukleus.com.tr',
