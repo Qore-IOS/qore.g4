@@ -309,8 +309,20 @@ export default function LaboratuvarSayimPage() {
       seriNumarasi: s.seriNumarasi || '',
     }));
 
-    const rawSerials = new Set(raw.map(r => r.seriNumarasi));
-    const stagedButNotPersisted = newFromCount.filter(n => !rawSerials.has(n.seriNumarasi));
+    // Build sets for checking existing items
+    const rawSerials = new Set(raw.filter(r => r.seriNumarasi).map(r => r.seriNumarasi));
+    const rawLotKeys = new Set(raw.filter(r => !r.seriNumarasi).map(r => `${r.stokKodu}-${r.lotNumarasi || ''}-${r.miad || ''}`));
+
+    // Filter staged items that are not yet in raw stock
+    const stagedButNotPersisted = newFromCount.filter(n => {
+      // For serial-tracked items, check if serial exists in rawSerials
+      if (n.seriNumarasi) {
+        return !rawSerials.has(n.seriNumarasi);
+      }
+      // For lot-tracked items, check if stokKodu+lot+miad combination exists
+      const lotKey = `${n.stokKodu}-${n.lotNumarasi || ''}-${n.miad || ''}`;
+      return !rawLotKeys.has(lotKey);
+    });
 
     const all = [...raw, ...stagedButNotPersisted];
 

@@ -351,7 +351,23 @@ export function useLabCountMissingStock(params: {
         sourceLabName: transferResult?.sourceLabName,
       };
 
-      setNewFromCount(prev => (prev.some(p => p.seriNumarasi === staged.seriNumarasi) ? prev : [...prev, staged]));
+      // Check for duplicates: use serial for serial-tracked items, or stokKodu+lot+miad for lot-tracked items
+      setNewFromCount(prev => {
+        const isDuplicate = prev.some(p => {
+          // If both have serials, compare by serial (for serial-tracked items)
+          if (staged.seriNumarasi && p.seriNumarasi) {
+            return p.seriNumarasi === staged.seriNumarasi;
+          }
+          // For lot-tracked items (no serial), compare by stokKodu + lot + miad
+          if (!staged.seriNumarasi && !p.seriNumarasi) {
+            return p.stokKodu === staged.stokKodu &&
+                   p.lotNumarasi === staged.lotNumarasi &&
+                   p.miad === staged.miad;
+          }
+          return false;
+        });
+        return isDuplicate ? prev : [...prev, staged];
+      });
 
       if (transferResult) {
         if (transferResult.transferSource === 'depot') {
