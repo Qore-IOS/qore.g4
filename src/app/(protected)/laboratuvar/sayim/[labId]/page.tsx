@@ -60,6 +60,12 @@ export default function LaboratuvarSayimPage() {
     setIsLoading(true);
 
     try {
+        // 0. First, commit any new items that were staged but not yet persisted (from unknown products)
+        const newItemsCommitted = await commitNewItems();
+        if (newItemsCommitted > 0) {
+            console.log(`Committed ${newItemsCommitted} new items from counting`);
+        }
+
         const batch = writeBatch(db);
 
         // 1. Build a set of all scanned serial numbers

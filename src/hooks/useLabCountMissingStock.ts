@@ -122,9 +122,10 @@ export function useLabCountMissingStock(params: {
       if (!depotSource) return null;
 
       const batch = writeBatch(db);
+      const sourceDepotId = depotSource.depotId;
+      const sourceDepotName = depotSource.depotName || '';
 
-      // CRITICAL FIX: Only update the existing record, don't create a duplicate
-      // Transfer the item by marking it as shipped and assigning to the lab
+      // Update the existing record - transfer from depot to lab
       const oldRef = doc(db, 'depoStok', depotSource.id);
       batch.update(oldRef, {
         isShipped: true,
@@ -134,6 +135,51 @@ export function useLabCountMissingStock(params: {
         depotId: null,   // Clear depot-specific info since it's now in lab
         rafAdresi: null, // Clear shelf location
       });
+
+      // Create transfer record for traceability
+      const transferRef = doc(collection(db, 'transfers'));
+      batch.set(transferRef, {
+        id: transferRef.id,
+        timestamp: serverTimestamp(),
+        sourceDepotId: sourceDepotId,
+        sourceDepotName: sourceDepotName,
+        targetHospitalId: labId,
+        targetName: labName,
+        mode: 'depot_to_lab',
+        itemCount: 1,
+        createdByUid: 'system',
+        createdByName: 'Sayım Otomatik Transfer',
+      });
+
+      // Add item to transfer subcollection
+      const transferItemRef = doc(collection(db, 'transfers', transferRef.id, 'items'), depotSource.id);
+      batch.set(transferItemRef, {
+        stokKodu: depotSource.stokKodu,
+        stokAdi: depotSource.stokAdi || '',
+        lotNumarasi: depotSource.lotNumarasi || '',
+        miad: depotSource.miad || '',
+        seriNumarasi: serial,
+      });
+
+      // Add serial history if serial exists
+      if (serial) {
+        const histRef = doc(collection(db, `serialHistory/${serial}/events`));
+        batch.set(histRef, {
+          type: 'depot_to_lab_transfer',
+          transferId: transferRef.id,
+          details: {
+            sourceDepotId,
+            sourceDepotName,
+            targetLabId: labId,
+            targetLabName: labName,
+            stokKodu: depotSource.stokKodu,
+            stokAdi: depotSource.stokAdi || '',
+            lotNumarasi: depotSource.lotNumarasi || '',
+            miad: depotSource.miad || '',
+          },
+          timestamp: serverTimestamp(),
+        });
+      }
 
       await batch.commit();
 
