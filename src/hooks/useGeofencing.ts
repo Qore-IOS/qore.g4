@@ -116,6 +116,10 @@ export function useGeofencing(
   const autoArrivalCooldownRef = useRef<boolean>(false);
   const autoDepartureCooldownRef = useRef<boolean>(false);
 
+  // Şoför mevcut durağa hiç yaklaştı mı? (otomatik çıkış için gerekli)
+  // Bu flag, şoförün en az bir kez menzile girdikten sonra çıkış yapmasını sağlar
+  const wasInRangeRef = useRef<boolean>(false);
+
   // Hedef durağı belirle
   const targetStop = stops[currentStopIndex] || null;
 
@@ -237,6 +241,11 @@ export function useGeofencing(
       isBackgroundMode: false,
     }));
 
+    // Menzile girdiyse flag'i işaretle (otomatik çıkış için gerekli)
+    if (isInRange) {
+      wasInRangeRef.current = true;
+    }
+
     // Otomatik varış kontrolü
     if (
       mergedConfig.enabled &&
@@ -245,6 +254,7 @@ export function useGeofencing(
       distance <= mergedConfig.arrivalThreshold
     ) {
       autoArrivalCooldownRef.current = true;
+      wasInRangeRef.current = true; // Varış tetiklendiyse menzile girmiş demektir
       setState(s => ({ ...s, autoArrivalTriggered: true }));
       callbacks.onAutoArrival?.(targetStop);
 
@@ -256,9 +266,12 @@ export function useGeofencing(
     }
 
     // Otomatik ayrılma kontrolü
+    // SADECE daha önce menzile girmiş olan şoför için çıkış tetiklenir
+    // Bu sayede uzaktaki şoför için yanlışlıkla çıkış tetiklenmez
     if (
       mergedConfig.enabled &&
       isAtStop &&
+      wasInRangeRef.current && // ÖNEMLİ: En az bir kez menzile girmiş olmalı
       !autoDepartureCooldownRef.current &&
       distance > mergedConfig.departureThreshold
     ) {
@@ -379,10 +392,11 @@ export function useGeofencing(
     checkPermission();
   }, [checkPermission]);
 
-  // currentStopIndex değiştiğinde cooldown'ları sıfırla
+  // currentStopIndex değiştiğinde cooldown'ları ve wasInRange flag'ini sıfırla
   useEffect(() => {
     autoArrivalCooldownRef.current = false;
     autoDepartureCooldownRef.current = false;
+    wasInRangeRef.current = false;
   }, [currentStopIndex]);
 
   // İnternet bağlantısı durumunu takip et

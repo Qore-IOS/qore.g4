@@ -273,10 +273,20 @@ export default function RoutePlanlayiciPage() {
   }, [activeRoute?.stops, currentLegIndex, canStartLeg, lastArrivedIndex]);
 
   // Şu an bir durakta mı (varış yapılmış ama ayrılma yapılmamış)
+  // İlk durak için özel: arrivedAt olmasa bile "durakta" kabul edilir
   const isCurrentlyAtStop = useMemo(() => {
     if (!activeRoute?.stops?.length) return false;
-    const k = lastArrivedIndex >= 0 ? lastArrivedIndex : 0;
-    const stop = activeRoute.stops[k];
+
+    // İlk durağa henüz varış kaydedilmediyse ve çıkış da yapılmadıysa
+    // şoförün ilk durakta olduğunu varsay (rota aktifleştirildiğinde başlangıç noktası)
+    if (lastArrivedIndex === -1) {
+      const firstStop = activeRoute.stops[0];
+      // İlk duraktan çıkış yapılmamışsa, şoför hala orada kabul edilir
+      return !firstStop?.departedAt;
+    }
+
+    // Normal durum: bir durağa varılmış ve oradan çıkış yapılmamışsa
+    const stop = activeRoute.stops[lastArrivedIndex];
     return !!(stop?.arrivedAt && !stop?.departedAt);
   }, [activeRoute?.stops, lastArrivedIndex]);
 
