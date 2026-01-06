@@ -104,6 +104,24 @@ export function useGeofencing(
   // Hedef durağı belirle
   const targetStop = stops[currentStopIndex] || null;
 
+  // Hedef değiştiğinde mesafeyi yeniden hesapla (son bilinen konumla)
+  useEffect(() => {
+    if (!targetStop || !state.userLocation) return;
+
+    const distance = calculateDistance(
+      state.userLocation.lat,
+      state.userLocation.lng,
+      targetStop.lat,
+      targetStop.lng
+    );
+
+    setState(s => ({
+      ...s,
+      targetStop,
+      distanceToTarget: Math.round(distance),
+    }));
+  }, [targetStop?.id, state.userLocation?.lat, state.userLocation?.lng]);
+
   // Wake Lock API ile ekranı açık tut (opsiyonel)
   const requestWakeLock = useCallback(async () => {
     if ('wakeLock' in navigator) {

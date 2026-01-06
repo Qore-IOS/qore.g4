@@ -106,6 +106,10 @@ export interface Depot {
   name: string;
   mapDefinition?: GridDefinition;
   companies?: string[]; // Added for Borç Depo
+  // Konum bilgileri - rota planlama için
+  lat?: number;
+  lng?: number;
+  address?: string;
   [k: string]: any;
 }
 
