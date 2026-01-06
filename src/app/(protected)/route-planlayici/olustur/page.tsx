@@ -10,14 +10,14 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation, Eye } from 'lucide-react';
+import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation, Eye, Warehouse, FlaskConical } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, increment
 } from 'firebase/firestore';
-import type { Hospital, User as AppUser } from '@/lib/types';
+import type { Hospital, User as AppUser, Depot } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -90,7 +90,11 @@ export default function RotaOlusturPage() {
 
   const [myUid, setMyUid] = useState<string>('');
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [depots, setDepots] = useState<Depot[]>([]);
   const [drivers, setDrivers] = useState<AppUser[]>([]);
+
+  // Lokasyon listesi filtresi (laboratuvar/depo)
+  const [locationFilter, setLocationFilter] = useState<'all' | 'labs' | 'depots'>('all');
 
   // Planlama state'leri
   const [planDriverId, setPlanDriverId] = useState<string>('');
@@ -124,18 +128,20 @@ export default function RotaOlusturPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [hSnap, uSnap] = await Promise.all([
+        const [hSnap, uSnap, dSnap] = await Promise.all([
           getDocs(collection(db, 'hospitals')),
           getDocs(collection(db, 'users')),
+          getDocs(collection(db, 'depots')),
         ]);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Hospital[]);
+        setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Depot[]);
         const ds = uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)).filter(u => (u as any).role === 'driver');
         setDrivers(ds);
         if (ds.length > 0 && !planDriverId) {
           setPlanDriverId(ds[0].id || '');
         }
       } catch {
-        toast({ title: 'Veri Hatası', description: 'Sürücüler veya laboratuvarlar alınamadı.', variant: 'destructive' });
+        toast({ title: 'Veri Hatası', description: 'Veriler alınamadı.', variant: 'destructive' });
       }
     })();
   }, [toast, planDriverId]);
@@ -164,12 +170,71 @@ export default function RotaOlusturPage() {
     return () => unsub();
   }, [myUid]);
 
-  const hospitalsFiltered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return hospitals;
-    return hospitals.filter(h => (((h as any).name || (h as any).ad || '') as string).toLowerCase().includes(q));
-  }, [hospitals, search]);
+  // Birleştirilmiş lokasyon listesi (laboratuvarlar + depolar)
+  type LocationItem = { id: string; name: string; address?: string; lat?: number; lng?: number; type: 'lab' | 'depot' };
 
+  const allLocations = useMemo((): LocationItem[] => {
+    const labs: LocationItem[] = hospitals.map(h => ({
+      id: h.id,
+      name: (h as any).name || (h as any).ad || h.id,
+      address: (h as any).address || (h as any).adres,
+      lat: h.lat,
+      lng: h.lng,
+      type: 'lab' as const,
+    }));
+    const deps: LocationItem[] = depots.map(d => ({
+      id: d.id,
+      name: d.name,
+      address: d.address,
+      lat: d.lat,
+      lng: d.lng,
+      type: 'depot' as const,
+    }));
+    return [...deps, ...labs]; // Depolar önce gösterilsin
+  }, [hospitals, depots]);
+
+  const locationsFiltered = useMemo(() => {
+    let list = allLocations;
+
+    // Filtre uygula
+    if (locationFilter === 'labs') {
+      list = list.filter(l => l.type === 'lab');
+    } else if (locationFilter === 'depots') {
+      list = list.filter(l => l.type === 'depot');
+    }
+
+    // Arama uygula
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(l => l.name.toLowerCase().includes(q) || (l.address || '').toLowerCase().includes(q));
+    }
+
+    return list;
+  }, [allLocations, locationFilter, search]);
+
+  const addStopFromLocation = (loc: LocationItem) => {
+    if (typeof loc.lat !== 'number' || typeof loc.lng !== 'number') {
+      toast({
+        title: 'Konum Eksik',
+        description: `${loc.type === 'depot' ? 'Seçtiğiniz deponun' : 'Seçtiğiniz laboratuvarın'} konumu tanımlanmamış.`,
+        variant: 'destructive'
+      });
+      return;
+    }
+    if (draftStops.some(s => s.hospitalId === loc.id)) return;
+    setDraftStops(prev => [...prev, {
+      order: prev.length + 1,
+      hospitalId: loc.id,
+      name: loc.name,
+      lat: loc.lat!,
+      lng: loc.lng!,
+      departedAt: null,
+      arrivedAt: null
+    }]);
+    if (!startStopId) setStartStopId(loc.id);
+  };
+
+  // Eski fonksiyon - geriye uyumluluk için
   const addStop = (h: Hospital) => {
     const { lat, lng } = getHospitalLatLng(h);
     if (typeof lat !== 'number' || typeof lng !== 'number') {
@@ -345,29 +410,73 @@ export default function RotaOlusturPage() {
                   </Button>
                 </div>
 
+                {/* Filtre Butonları */}
+                <div className="flex gap-2">
+                  <Button
+                    variant={locationFilter === 'all' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setLocationFilter('all')}
+                    className="flex-1"
+                  >
+                    Tümü
+                  </Button>
+                  <Button
+                    variant={locationFilter === 'depots' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setLocationFilter('depots')}
+                    className="flex-1"
+                  >
+                    <Warehouse className="h-4 w-4 mr-1" />
+                    Depolar
+                  </Button>
+                  <Button
+                    variant={locationFilter === 'labs' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setLocationFilter('labs')}
+                    className="flex-1"
+                  >
+                    <FlaskConical className="h-4 w-4 mr-1" />
+                    Lablar
+                  </Button>
+                </div>
+
                 {/* Arama */}
                 <Input
-                  placeholder="Laboratuvar ara…"
+                  placeholder="Lokasyon ara…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
 
-                {/* Laboratuvar Listesi */}
-                <div className="h-[280px] sm:h-[320px] overflow-auto space-y-2 pr-1">
-                  {hospitalsFiltered.map(h => {
-                    const name = (h as any).name || (h as any).ad || h.id;
-                    const isAdded = draftStops.some(s => s.hospitalId === (h as any).id);
+                {/* Lokasyon Listesi (Depolar + Laboratuvarlar) */}
+                <div className="h-[240px] sm:h-[280px] overflow-auto space-y-2 pr-1">
+                  {locationsFiltered.map(loc => {
+                    const isAdded = draftStops.some(s => s.hospitalId === loc.id);
+                    const hasLocation = typeof loc.lat === 'number' && typeof loc.lng === 'number';
                     return (
-                      <div key={(h as any).id} className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${isAdded ? 'bg-primary/10 border-primary/30' : 'hover:bg-accent/30'}`}>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium truncate">{name}</div>
-                          <div className="text-xs text-muted-foreground truncate">{(h as any).address || (h as any).adres || '-'}</div>
+                      <div key={loc.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${isAdded ? 'bg-primary/10 border-primary/30' : 'hover:bg-accent/30'}`}>
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${loc.type === 'depot' ? 'bg-orange-500/10' : 'bg-green-500/10'}`}>
+                            {loc.type === 'depot' ? (
+                              <Warehouse className="h-4 w-4 text-orange-500" />
+                            ) : (
+                              <FlaskConical className="h-4 w-4 text-green-500" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate flex items-center gap-1">
+                              {loc.name}
+                              {!hasLocation && (
+                                <span className="text-[10px] text-amber-500 bg-amber-500/10 px-1 rounded">Konum yok</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground truncate">{loc.address || '-'}</div>
+                          </div>
                         </div>
                         <Button
                           variant={isAdded ? "secondary" : "outline"}
                           size="sm"
-                          onClick={() => addStop(h)}
-                          disabled={isAdded}
+                          onClick={() => addStopFromLocation(loc)}
+                          disabled={isAdded || !hasLocation}
                           className="flex-shrink-0"
                         >
                           {isAdded ? '✓' : <><Plus className="h-4 w-4 mr-1" />Ekle</>}
@@ -375,6 +484,12 @@ export default function RotaOlusturPage() {
                       </div>
                     );
                   })}
+                  {locationsFiltered.length === 0 && (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-8">
+                      <MapPin className="h-8 w-8 mb-2 opacity-50" />
+                      <p className="text-sm">Lokasyon bulunamadı</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
