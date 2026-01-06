@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { MapIcon, History, Flag, LogOut, Plus, Truck, ListOrdered, MapPin, Eye } from 'lucide-react';
+import { MapIcon, History, Flag, LogOut, Plus, Truck, ListOrdered, MapPin, Eye, Navigation, Wifi, WifiOff, Locate, LocateOff, AlertCircle } from 'lucide-react';
 import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -20,6 +20,8 @@ import {
 import type { User as AppUser } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { useGeofencing, type GeofenceStop } from '@/hooks/useGeofencing';
+import { cn } from '@/lib/utils';
 
 // Yönetim yetkisi olan roller
 const MANAGEMENT_ROLES = ['admin', 'lojistik_sorumlusu'];
@@ -115,6 +117,9 @@ export default function RoutePlanlayiciPage() {
   const [showRoutesModal, setShowRoutesModal] = useState(false);
   const [assignedRoutes, setAssignedRoutes] = useState<RouteDoc[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(false);
+
+  // Canlı konum takibi
+  const [liveTrackingEnabled, setLiveTrackingEnabled] = useState(false);
 
   // Yönetim yetkisi kontrolü
   const canManageRoutes = useMemo(() => {
@@ -230,6 +235,126 @@ export default function RoutePlanlayiciPage() {
 
   const canArrive = useMemo(() => currentLegIndex >= 0, [currentLegIndex]);
   const isDriverOwner = !!(activeRoute && myUid && activeRoute.driverId === myUid && activeRoute.status !== 'completed');
+
+  // Geofencing için durakları hazırla
+  const geofenceStops: GeofenceStop[] = useMemo(() => {
+    if (!activeRoute?.stops) return [];
+    return activeRoute.stops.map((s, i) => ({
+      id: s.hospitalId,
+      name: s.name,
+      lat: s.lat,
+      lng: s.lng,
+      order: s.order,
+      hasArrived: !!s.arrivedAt,
+      hasDeparted: !!s.departedAt,
+    }));
+  }, [activeRoute?.stops]);
+
+  // Şu anki hedef durak indeksi (varış için)
+  const currentTargetIndex = useMemo(() => {
+    if (currentLegIndex >= 0) return currentLegIndex + 1; // Yolda: bir sonraki durak
+    if (canStartLeg) return lastArrivedIndex >= 0 ? lastArrivedIndex : 0; // Çıkış bekliyor: mevcut durak
+    return -1;
+  }, [currentLegIndex, canStartLeg, lastArrivedIndex]);
+
+  // Şu an bir durakta mı (varış yapılmış ama ayrılma yapılmamış)
+  const isCurrentlyAtStop = useMemo(() => {
+    if (!activeRoute?.stops?.length) return false;
+    const k = lastArrivedIndex >= 0 ? lastArrivedIndex : 0;
+    const stop = activeRoute.stops[k];
+    return !!(stop?.arrivedAt && !stop?.departedAt);
+  }, [activeRoute?.stops, lastArrivedIndex]);
+
+  // Otomatik varış handler
+  const handleAutoArrival = useCallback(async (stop: GeofenceStop) => {
+    if (!activeRoute || !isDriverOwner || currentLegIndex < 0) return;
+    const toIdx = currentLegIndex + 1;
+    if (activeRoute.stops[toIdx]?.hospitalId !== stop.id) return; // Doğru durak değil
+
+    toast({
+      title: '📍 Otomatik Varış',
+      description: `${stop.name} konumuna ulaştınız!`,
+    });
+
+    // Varış işlemini gerçekleştir
+    const isFinal = toIdx === activeRoute.stops.length - 1;
+    const newStops = cloneStops(activeRoute.stops);
+    newStops[toIdx] = { ...newStops[toIdx], arrivedAt: Timestamp.now() };
+
+    try {
+      const update: Record<string, any> = { status: isFinal ? 'completed' : 'in_progress', stops: newStops, updatedAt: serverTimestamp() };
+      if (isFinal) {
+        update.completedAt = serverTimestamp();
+        update.isActive = false;
+      }
+      await updateDoc(doc(db, 'routes', activeRoute.id), update);
+      if (isFinal) {
+        setActiveRoute(null);
+        setActiveRouteId(null);
+        toast({ title: '🎉 Rota tamamlandı', description: 'Tüm duraklara ulaşıldı!' });
+      }
+    } catch {
+      toast({ title: 'Hata', description: 'Otomatik varış kaydedilemedi.', variant: 'destructive' });
+    }
+  }, [activeRoute, isDriverOwner, currentLegIndex, toast]);
+
+  // Otomatik ayrılma handler
+  const handleAutoDeparture = useCallback(async (stop: GeofenceStop) => {
+    if (!activeRoute || !isDriverOwner || !canStartLeg) return;
+    const k = lastArrivedIndex >= 0 ? lastArrivedIndex : 0;
+    if (activeRoute.stops[k]?.hospitalId !== stop.id) return; // Doğru durak değil
+
+    toast({
+      title: '🚗 Otomatik Çıkış',
+      description: `${stop.name} konumundan ayrıldınız!`,
+    });
+
+    // Çıkış işlemini gerçekleştir
+    const newStops = cloneStops(activeRoute.stops);
+    newStops[k] = { ...newStops[k], departedAt: Timestamp.now() };
+
+    try {
+      await updateDoc(doc(db, 'routes', activeRoute.id), { status: 'in_progress', stops: newStops, updatedAt: serverTimestamp() });
+    } catch {
+      toast({ title: 'Hata', description: 'Otomatik çıkış kaydedilemedi.', variant: 'destructive' });
+    }
+  }, [activeRoute, isDriverOwner, canStartLeg, lastArrivedIndex, toast]);
+
+  // Geofencing hook
+  const geofencing = useGeofencing(
+    geofenceStops,
+    currentTargetIndex,
+    isCurrentlyAtStop,
+    { enabled: liveTrackingEnabled && isDriverOwner },
+    {
+      onAutoArrival: handleAutoArrival,
+      onAutoDeparture: handleAutoDeparture,
+    }
+  );
+
+  // Canlı takip toggle
+  const toggleLiveTracking = useCallback(async () => {
+    if (liveTrackingEnabled) {
+      geofencing.stopTracking();
+      setLiveTrackingEnabled(false);
+      toast({ title: 'Konum takibi durduruldu' });
+    } else {
+      const success = await geofencing.startTracking();
+      if (success) {
+        setLiveTrackingEnabled(true);
+        toast({
+          title: 'Konum takibi başlatıldı',
+          description: 'Konumlara yaklaştığınızda otomatik varış/ayrılma kaydedilecek.',
+        });
+      } else {
+        toast({
+          title: 'Konum izni gerekli',
+          description: 'Lütfen tarayıcı ayarlarından konum iznini etkinleştirin.',
+          variant: 'destructive',
+        });
+      }
+    }
+  }, [liveTrackingEnabled, geofencing, toast]);
 
   const departFromLabel = useMemo(() => {
     if (!activeRoute?.stops?.length) return '—';
@@ -372,6 +497,98 @@ export default function RoutePlanlayiciPage() {
       </CardHeader>
 
       <CardContent className="space-y-3 sm:space-y-4 relative">
+        {/* Canlı Konum Takibi Durumu */}
+        {activeRoute && isDriverOwner && (
+          <div className={cn(
+            "rounded-xl p-3 border transition-all",
+            liveTrackingEnabled
+              ? geofencing.isBackgroundMode
+                ? "bg-amber-500/10 border-amber-500/30"
+                : "bg-emerald-500/10 border-emerald-500/30"
+              : "bg-muted/50 border-border"
+          )}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={cn(
+                  "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
+                  liveTrackingEnabled
+                    ? geofencing.isBackgroundMode
+                      ? "bg-amber-500/20"
+                      : "bg-emerald-500/20"
+                    : "bg-muted"
+                )}>
+                  {liveTrackingEnabled ? (
+                    geofencing.isBackgroundMode ? (
+                      <WifiOff className="h-5 w-5 text-amber-600" />
+                    ) : (
+                      <Navigation className="h-5 w-5 text-emerald-600 animate-pulse" />
+                    )
+                  ) : (
+                    <LocateOff className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-medium text-sm">
+                    {liveTrackingEnabled ? 'Konum Takibi Aktif' : 'Konum Takibi Kapalı'}
+                  </div>
+                  {liveTrackingEnabled && (
+                    <div className="text-xs text-muted-foreground truncate">
+                      {geofencing.error ? (
+                        <span className="text-amber-600">{geofencing.error}</span>
+                      ) : geofencing.distanceToTarget !== null ? (
+                        <>
+                          Hedefe mesafe: <span className="font-mono font-semibold">{geofencing.distanceToTarget}m</span>
+                          {geofencing.distanceToTarget <= 75 && (
+                            <span className="ml-1 text-emerald-600">(Menzilde!)</span>
+                          )}
+                        </>
+                      ) : (
+                        'Konum alınıyor...'
+                      )}
+                    </div>
+                  )}
+                  {!liveTrackingEnabled && (
+                    <div className="text-xs text-muted-foreground">
+                      Varış/ayrılma otomatik kaydedilsin
+                    </div>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant={liveTrackingEnabled ? "outline" : "default"}
+                size="sm"
+                onClick={toggleLiveTracking}
+                className={cn(
+                  "flex-shrink-0",
+                  liveTrackingEnabled && "border-red-500/50 text-red-600 hover:bg-red-500/10"
+                )}
+              >
+                {liveTrackingEnabled ? (
+                  <>
+                    <LocateOff className="h-4 w-4 mr-1" />
+                    Durdur
+                  </>
+                ) : (
+                  <>
+                    <Locate className="h-4 w-4 mr-1" />
+                    Başlat
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Arka plan uyarısı */}
+            {liveTrackingEnabled && geofencing.isBackgroundMode && (
+              <div className="mt-2 pt-2 border-t border-amber-500/20 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700">
+                  Uygulama arka planda. Tam doğruluk için bu sayfayı açık tutun.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Şoförler için rota durumu badge */}
         {activeRoute && (
           <div className="flex items-center gap-2">
