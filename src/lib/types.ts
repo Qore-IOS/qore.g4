@@ -28,6 +28,10 @@ export interface ProductCode {
   barcodeFormatIds?: string[]; // Çoklu barkod formatları (yeni sistem)
   barcodeNumber?: string; // The unique identifier part of the barcode for this product (UDI)
   trackingMode?: TrackingMode;
+  // Ürün boyutları (cm cinsinden) - araç doluluk oranı hesaplaması için
+  genislik?: number; // Genişlik (cm)
+  yukseklik?: number; // Yükseklik (cm)
+  derinlik?: number; // Derinlik/Uzunluk (cm)
   [k: string]: any;
 }
 

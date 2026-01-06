@@ -30,6 +30,7 @@ interface Vehicle {
   model: string;
   yil: string;
   plaka: string;
+  kapasite?: number; // Araç kapasitesi (litre cinsinden, örn: 550, 900)
   icon?: string; // Araç ikonu yolu
   assignedDriverId?: string;
   assignedDriverName?: string;
@@ -98,6 +99,7 @@ export default function AraclarPage() {
       model: editingVehicle.model,
       yil: editingVehicle.yil || '',
       plaka: editingVehicle.plaka.toUpperCase(),
+      kapasite: editingVehicle.kapasite || null,
       icon: editingVehicle.icon || null,
       assignedDriverId: editingVehicle.assignedDriverId || null,
       assignedDriverName: assignedDriverName || null,
@@ -171,6 +173,7 @@ export default function AraclarPage() {
                       <TableHead>Marka</TableHead>
                       <TableHead>Model</TableHead>
                       <TableHead>Yıl</TableHead>
+                      <TableHead>Kapasite</TableHead>
                       <TableHead>Atanan Şoför</TableHead>
                       <TableHead className="text-right">İşlemler</TableHead>
                     </TableRow>
@@ -178,7 +181,7 @@ export default function AraclarPage() {
                   <TableBody>
                     {vehicles.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8">
+                        <TableCell colSpan={8} className="text-center py-8">
                           Henüz araç kaydı bulunmuyor.
                         </TableCell>
                       </TableRow>
@@ -205,6 +208,15 @@ export default function AraclarPage() {
                           <TableCell>{vehicle.marka}</TableCell>
                           <TableCell>{vehicle.model}</TableCell>
                           <TableCell>{vehicle.yil || '-'}</TableCell>
+                          <TableCell>
+                            {vehicle.kapasite ? (
+                              <Badge variant="outline" className="font-mono">
+                                {vehicle.kapasite} L
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
                           <TableCell>
                             {vehicle.assignedDriverId ? (
                               <Badge variant="default" className="flex items-center gap-1 w-fit">
@@ -352,6 +364,19 @@ export default function AraclarPage() {
                   className="uppercase"
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Araç Kapasitesi (Litre)</label>
+              <Input
+                type="number"
+                placeholder="örn: 550, 900"
+                value={editingVehicle.kapasite || ''}
+                onChange={e => setEditingVehicle({ ...editingVehicle, kapasite: e.target.value ? Number(e.target.value) : undefined })}
+                min="0"
+              />
+              <p className="text-xs text-muted-foreground">
+                Araç yükleme kapasitesi litre cinsinden. İleride doluluk oranı hesaplamalarında kullanılacak.
+              </p>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Atanan Şoför</label>
