@@ -2846,13 +2846,13 @@ export default function TotalVerimlilikPanel({
                             <TableCell className="bg-red-50/50 dark:bg-red-950/50 text-center">
                               <div className="flex flex-col items-center gap-0.5">
                                 <span className={`font-semibold ${row.stokDogrulukFark !== 0 ? (row.stokDogrulukFark > 0 ? 'text-red-600' : 'text-green-600') : ''}`}>
-                                  Fark {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} test
+                                  Fark {row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '')}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} test
                                 </span>
                                 <span className={`text-xs ${row.stokDogrulukYuzde !== 0 ? (row.stokDogrulukYuzde > 0 ? 'text-red-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
+                                  {row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '')}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{row.stokDogrulukYuzde > 0 ? '-' : (row.stokDogrulukYuzde < 0 ? '+' : '')}{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">
-                                  S({(row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest).toLocaleString('tr-TR')}) - K({row.kumulatifTotal.toLocaleString('tr-TR')}) = {row.stokDogrulukFark.toLocaleString('tr-TR')}
+                                  S({(row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest).toLocaleString('tr-TR')}) - K({row.kumulatifTotal.toLocaleString('tr-TR')}) = {row.stokDogrulukFark > 0 ? '-' : ''}{row.stokDogrulukFark.toLocaleString('tr-TR')}
                                 </span>
                               </div>
                             </TableCell>
@@ -2860,13 +2860,13 @@ export default function TotalVerimlilikPanel({
                             <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
                               <div className="flex flex-col items-center gap-0.5">
                                 <span className={`font-semibold ${row.kitVerimlilikFark !== 0 ? (row.kitVerimlilikFark > 0 ? 'text-orange-600' : 'text-green-600') : ''}`}>
-                                  Fark {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} test
+                                  Fark {row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} test
                                 </span>
                                 <span className={`text-xs ${row.kitVerimlilikYuzde !== 0 ? (row.kitVerimlilikYuzde > 0 ? 'text-orange-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
+                                  {row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{row.kitVerimlilikYuzde > 0 ? '-' : (row.kitVerimlilikYuzde < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">
-                                  K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark.toLocaleString('tr-TR')}
+                                  K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark > 0 ? '-' : ''}{row.kitVerimlilikFark.toLocaleString('tr-TR')}
                                 </span>
                               </div>
                             </TableCell>
@@ -3069,7 +3069,7 @@ export default function TotalVerimlilikPanel({
                                       {currencySymbol}{zarar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                     <span className="text-[10px] text-muted-foreground">
-                                      {row.stokDogrulukFark.toLocaleString('tr-TR')} test × maliyet
+                                      -{row.stokDogrulukFark.toLocaleString('tr-TR')} test × maliyet
                                     </span>
                                   </div>
                                 );
