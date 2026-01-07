@@ -141,6 +141,9 @@ export default function TotalVerimlilikPanel({
   // Sütun 22 - Kutu Kayıp Görünüm Modu
   const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
 
+  // Sütun 23-25 Maliyet Sütunları Göster/Gizle (default: kapalı)
+  const [showCostColumns, setShowCostColumns] = useState(false);
+
   // Sütun 23 - Maliyet Hesabı için Para Birimi ve Döviz Kurları
   const [costCurrency, setCostCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
@@ -2435,7 +2438,28 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        {/* Maliyet Sütunları Toggle Butonu */}
+                        <TableHead className={`${showCostColumns ? 'min-w-[60px]' : 'min-w-[140px]'} bg-gradient-to-r from-emerald-50 via-amber-50 to-sky-50 dark:from-emerald-950 dark:via-amber-950 dark:to-sky-950 text-center`}>
+                          <button
+                            onClick={() => setShowCostColumns(!showCostColumns)}
+                            className="flex flex-col items-center justify-center gap-1 w-full py-2 hover:bg-white/50 dark:hover:bg-black/20 rounded transition-colors"
+                          >
+                            {showCostColumns ? (
+                              <>
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">Gizle</span>
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="h-4 w-4 text-emerald-600" />
+                                <span className="text-xs font-medium">Maliyet</span>
+                                <span className="text-[10px] text-muted-foreground">23-24-25</span>
+                              </>
+                            )}
+                          </button>
+                        </TableHead>
                         {/* Sütun 23: Dönem İçi Sarfiyat Maliyeti */}
+                        {showCostColumns && (
                         <TableHead className="min-w-[180px] bg-emerald-50 dark:bg-emerald-950 text-center p-0">
                           <div className="flex flex-col">
                             <div className="flex">
@@ -2478,7 +2502,9 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        )}
                         {/* Sütun 24: Hak Ediş Karşılığı */}
+                        {showCostColumns && (
                         <TableHead className="min-w-[180px] bg-amber-50 dark:bg-amber-950 text-center p-0">
                           <div className="flex flex-col">
                             <div className="flex">
@@ -2521,7 +2547,9 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        )}
                         {/* Sütun 25: Kâr */}
+                        {showCostColumns && (
                         <TableHead className="min-w-[180px] bg-sky-50 dark:bg-sky-950 text-center p-0">
                           <div className="flex flex-col">
                             <div className="flex">
@@ -2564,6 +2592,7 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        )}
                         {/* Sütun 26: Zarar Maliyeti */}
                         <TableHead className="min-w-[180px] bg-rose-50 dark:bg-rose-950 text-center">
                           <div className="flex flex-col gap-1">
@@ -2844,7 +2873,14 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
+                            {/* Maliyet Sütunları Toggle Hücre */}
+                            <TableCell className="bg-gradient-to-r from-emerald-50/50 via-amber-50/50 to-sky-50/50 dark:from-emerald-950/30 dark:via-amber-950/30 dark:to-sky-950/30 text-center">
+                              {!showCostColumns && (
+                                <span className="text-xs text-muted-foreground">...</span>
+                              )}
+                            </TableCell>
                             {/* Sütun 23: Sarfiyat Maliyeti */}
+                            {showCostColumns && (
                             <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
                               {(() => {
                                 const { cost, hasData } = calculateRowCost(row);
@@ -2884,7 +2920,9 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
+                            )}
                             {/* Sütun 24: Hak Ediş Karşılığı */}
+                            {showCostColumns && (
                             <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-amber-200/50 dark:bg-amber-900/50' : 'bg-amber-50/50 dark:bg-amber-950/50'} text-center`}>
                               {(() => {
                                 // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
@@ -2930,7 +2968,9 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
+                            )}
                             {/* Sütun 25: Kâr */}
+                            {showCostColumns && (
                             <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-sky-200/50 dark:bg-sky-900/50' : 'bg-sky-50/50 dark:bg-sky-950/50'} text-center`}>
                               {(() => {
                                 // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
@@ -2972,6 +3012,7 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
+                            )}
                             {/* Sütun 26: Zarar Maliyeti */}
                             <TableCell className="bg-rose-50/50 dark:bg-rose-950/50 text-center">
                               {(() => {
