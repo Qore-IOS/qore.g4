@@ -73,6 +73,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tutanak-autoprint';
 import { emitFefoOverride } from '@/lib/notifications';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -83,65 +84,94 @@ const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'
 // TransferRow and FefoViolation types imported from @/lib/direkt-transfer/types
 
 
-// YENİ EKLENEN YARDIMCI FONKSİYON:
-// Tüm depoyu indirmek yerine, sadece listedeki ürünlerin stok kodlarını sorgular.
+// OPTIMIZED FEFO CHECK:
+// Uses batch queries with Firestore 'in' clause (max 30 values) to reduce round trips
 const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string): Promise<FefoViolation[]> => {
   const violations: FefoViolation[] = [];
-  
+
   // Transfer listesindeki benzersiz stok kodlarını bul
   const uniqueStokKodlari = Array.from(new Set(itemsToShip.map(i => i.stokKodu)));
 
-  // Her bir stok kodu için paralel sorgu at (Tüm depo yerine parça parça sorgu)
-  await Promise.all(uniqueStokKodlari.map(async (kod) => {
-    // Bu ürün kodu için depodaki tüm mevcut stoğu çek
+  if (uniqueStokKodlari.length === 0) return violations;
+
+  // OPTIMIZED: Batch queries using 'in' clause (max 30 values per query)
+  // This reduces N queries to ceil(N/30) queries
+  const allProductStock: DepoStokItem[] = [];
+
+  // Process in batches of 30 (Firestore 'in' clause limit)
+  const batchSize = 30;
+  for (let i = 0; i < uniqueStokKodlari.length; i += batchSize) {
+    const batchCodes = uniqueStokKodlari.slice(i, i + batchSize);
+
     const q = query(
-      collection(db, 'depoStok'), 
-      where('depotId', '==', depotId), 
-      where('stokKodu', '==', kod), 
+      collection(db, 'depoStok'),
+      where('depotId', '==', depotId),
+      where('stokKodu', 'in', batchCodes),
       where('isShipped', '==', false)
     );
     const snap = await getDocs(q);
-    const productStockInDepot = snap.docs.map(d => ({id: d.id, ...d.data()} as DepoStokItem));
+    snap.docs.forEach(d => {
+      allProductStock.push({ id: d.id, ...d.data() } as DepoStokItem);
+    });
+  }
 
-    // Bu stok kodu için transfer edilecek item'ları bul
-    const shipItemsForThisCode = itemsToShip.filter(i => i.stokKodu === kod);
+  // Group stock by stokKodu for efficient lookups
+  const stockByCode = new Map<string, DepoStokItem[]>();
+  allProductStock.forEach(item => {
+    const existing = stockByCode.get(item.stokKodu) || [];
+    existing.push(item);
+    stockByCode.set(item.stokKodu, existing);
+  });
 
-    // FEFO Kontrol Mantığı (Date-fns ile tarih karşılaştırma)
-    for (const item of shipItemsForThisCode) {
-      try {
-        const itemMiadStr = formatMiad(item.miad, '');
-        const itemDate = parseDate(itemMiadStr, 'dd.MM.yyyy', new Date());
+  // Create a Set of item IDs being shipped for O(1) lookup
+  const shippingIds = new Set(itemsToShip.map(i => i.id));
 
-        // Depodaki, transfer listesinde OLMAYAN ve miadı daha eski olan ürünleri bul
-        const earlierItems = productStockInDepot.filter(s => {
-          // Kendisi veya transfer listesindeki başka bir item olmamalı
-          const isBeingShipped = itemsToShip.some(shipped => shipped.id === s.id);
-          if (isBeingShipped) return false;
+  // FEFO check for each item being shipped
+  for (const item of itemsToShip) {
+    try {
+      const itemMiadStr = formatMiad(item.miad, '');
+      const itemDate = parseDate(itemMiadStr, 'dd.MM.yyyy', new Date());
 
-          // Tarih kontrolü
+      const productStockInDepot = stockByCode.get(item.stokKodu) || [];
+
+      // Depodaki, transfer listesinde OLMAYAN ve miadı daha eski olan ürünleri bul
+      const earlierItems = productStockInDepot.filter(s => {
+        // Kendisi veya transfer listesindeki başka bir item olmamalı
+        if (shippingIds.has(s.id)) return false;
+
+        // Tarih kontrolü
+        try {
           const sMiadStr = formatMiad(s.miad, '');
           const stockDate = parseDate(sMiadStr, 'dd.MM.yyyy', new Date());
           // Stoktaki tarih < Transfer edilen tarih ise violation vardır
           return compareAsc(stockDate, itemDate) < 0;
-        });
-
-        if (earlierItems.length > 0) {
-          // En eski tarihli olanı öneri olarak ekle
-          earlierItems.sort((a, b) => compareAsc(
-            parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date()),
-            parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date())
-          ));
-
-          violations.push({ scannedItem: item, recommendedItem: earlierItems[0] });
+        } catch {
+          return false;
         }
-      } catch (e) {
-        direktTransferLogger.warn('Tarih parslama hatası, FEFO kontrolü atlanıyor', {
-          stokKodu: item.stokKodu,
-          miad: item.miad,
+      });
+
+      if (earlierItems.length > 0) {
+        // En eski tarihli olanı öneri olarak ekle
+        earlierItems.sort((a, b) => {
+          try {
+            return compareAsc(
+              parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date()),
+              parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date())
+            );
+          } catch {
+            return 0;
+          }
         });
+
+        violations.push({ scannedItem: item, recommendedItem: earlierItems[0] });
       }
+    } catch (e) {
+      direktTransferLogger.warn('Tarih parslama hatası, FEFO kontrolü atlanıyor', {
+        stokKodu: item.stokKodu,
+        miad: item.miad,
+      });
     }
-  }));
+  }
 
   return violations;
 };
@@ -426,41 +456,88 @@ export default function DirektTransferPanel() {
     if (isCameraScannerOpen) setIsCameraScannerOpen(false);
   };
 
-  const allocateDocsForGroup = useCallback(async (row: TransferRow): Promise<DepoStokItem[] | null> => {
+  // OPTIMIZED: Batch allocate all groups at once instead of one query per group
+  const batchAllocateForGroups = useCallback(async (groupRows: TransferRow[]): Promise<{ allocations: Map<string, DepoStokItem[]>; error: TransferRow | null }> => {
     const alreadyAllocatedIds = new Set(
-        directTransferItems
-            .filter(item => !item.isGroup)
-            .map(item => item.id)
+      directTransferItems
+        .filter(item => !item.isGroup)
+        .map(item => item.id)
     );
 
-    const constraints = [
-        where('depotId', '==', selectedDepotId),
-        where('stokKodu', '==', row.stokKodu),
-        where('isShipped', '==', false),
-    ];
-    if (row.lotNumarasi) {
-        constraints.push(where('lotNumarasi', '==', row.lotNumarasi));
-    }
-    
-    const q = query(collection(db, 'depoStok'), ...constraints);
-    const snap = await getDocs(q);
+    // Collect unique stokKodu values from all groups
+    const uniqueStokKodlari = Array.from(new Set(groupRows.map(r => r.stokKodu)));
 
-    let pool = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
-        .filter(s => !alreadyAllocatedIds.has(s.id));
-    
-    pool.sort((a,b) => {
-      try {
-        const ad = parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date());
-        const bd = parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date());
-        return compareAsc(ad, bd);
-      } catch { return 0; }
+    if (uniqueStokKodlari.length === 0) {
+      return { allocations: new Map(), error: null };
+    }
+
+    // Batch query all stock codes at once
+    const allStock: DepoStokItem[] = [];
+    const batchSize = 30;
+
+    for (let i = 0; i < uniqueStokKodlari.length; i += batchSize) {
+      const batchCodes = uniqueStokKodlari.slice(i, i + batchSize);
+      const q = query(
+        collection(db, 'depoStok'),
+        where('depotId', '==', selectedDepotId),
+        where('stokKodu', 'in', batchCodes),
+        where('isShipped', '==', false)
+      );
+      const snap = await getDocs(q);
+      snap.docs.forEach(d => {
+        allStock.push({ id: d.id, ...d.data() } as DepoStokItem);
+      });
+    }
+
+    // Group stock by stokKodu and lotNumarasi for efficient allocation
+    const stockByCodeAndLot = new Map<string, DepoStokItem[]>();
+    allStock.forEach(item => {
+      const key = `${item.stokKodu}__${item.lotNumarasi || ''}`;
+      const existing = stockByCodeAndLot.get(key) || [];
+      existing.push(item);
+      stockByCodeAndLot.set(key, existing);
     });
-    
-    const need = Math.max(1, row.adet ?? 1);
-    if (pool.length < need) return null;
-    return pool.slice(0, need);
+
+    // Sort each group by FEFO (earliest expiry first)
+    stockByCodeAndLot.forEach((items, key) => {
+      items.sort((a, b) => {
+        try {
+          const ad = parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date());
+          const bd = parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date());
+          return compareAsc(ad, bd);
+        } catch {
+          return 0;
+        }
+      });
+    });
+
+    // Allocate for each group
+    const allocations = new Map<string, DepoStokItem[]>();
+    const usedIds = new Set<string>(alreadyAllocatedIds);
+
+    for (const row of groupRows) {
+      const key = `${row.stokKodu}__${row.lotNumarasi || ''}`;
+      const pool = (stockByCodeAndLot.get(key) || []).filter(s => !usedIds.has(s.id));
+
+      const need = Math.max(1, row.adet ?? 1);
+      if (pool.length < need) {
+        return { allocations: new Map(), error: row };
+      }
+
+      const picks = pool.slice(0, need);
+      picks.forEach(p => usedIds.add(p.id));
+      allocations.set(row.key, picks);
+    }
+
+    return { allocations, error: null };
   }, [directTransferItems, selectedDepotId]);
+
+  // Legacy function kept for compatibility
+  const allocateDocsForGroup = useCallback(async (row: TransferRow): Promise<DepoStokItem[] | null> => {
+    const { allocations, error } = await batchAllocateForGroups([row]);
+    if (error) return null;
+    return allocations.get(row.key) || null;
+  }, [batchAllocateForGroups]);
 
   const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = []) => {
     if (!currentUser || !currentUserProfile) return;
@@ -634,31 +711,51 @@ export default function DirektTransferPanel() {
 
   const handleCompleteDirectTransfer = async () => {
     if (directTransferItems.length === 0) return;
-    
+
     setShipmentLoading(true);
 
     const itemsToShip: DepoStokItem[] = [];
-    
-    // 1. Adım: Gruplanmış ürünler için stok tahsisi (Allocation)
-    for (const row of directTransferItems) {
-      const picks = row.isGroup ? await allocateDocsForGroup(row) : [row];
-      if (!picks) {
-        toast({ title: 'Yetersiz Stok', description: `${row.stokAdi} için yeterli stok bulunmuyor veya başkası tarafından rezerve edilmiş.`, variant: 'destructive' });
+
+    // OPTIMIZED: Use batch allocation for all groups at once
+    const groupRows = directTransferItems.filter(row => row.isGroup);
+    const nonGroupRows = directTransferItems.filter(row => !row.isGroup);
+
+    // Add non-group items directly (already allocated)
+    itemsToShip.push(...nonGroupRows as DepoStokItem[]);
+
+    // Batch allocate all groups in one query
+    if (groupRows.length > 0) {
+      const { allocations, error } = await batchAllocateForGroups(groupRows);
+
+      if (error) {
+        toast({
+          title: 'Yetersiz Stok',
+          description: `${error.stokAdi} ${error.lotNumarasi ? `(Lot: ${error.lotNumarasi})` : ''} için yeterli stok bulunmuyor.`,
+          variant: 'destructive'
+        });
         setShipmentLoading(false);
         return;
       }
-      itemsToShip.push(...picks);
+
+      // Collect all allocated items
+      groupRows.forEach(row => {
+        const picks = allocations.get(row.key);
+        if (picks) {
+          itemsToShip.push(...picks);
+        }
+      });
     }
-    
-    // YENİ KOD (OPTİMİZE EDİLMİŞ):
-    // Sadece ilgili ürünler için FEFO kontrolü yap
+
+    // OPTIMIZED FEFO CHECK: Sadece ilgili ürünler için FEFO kontrolü yap
     const violations = await checkFefoOptimized(itemsToShip, selectedDepotId);
-    
+
     setShipmentLoading(false);
 
     if (violations.length > 0) {
-      // Benzersiz violationları filtrele (aynı ürün için birden fazla uyarı vermemek için opsiyonel)
-      const uniqueViolations = violations.filter((v, i, a) => a.findIndex(t => t.scannedItem.id === v.scannedItem.id) === i);
+      // Benzersiz violationları filtrele
+      const uniqueViolations = violations.filter((v, i, a) =>
+        a.findIndex(t => t.scannedItem.id === v.scannedItem.id) === i
+      );
       setFefoViolations(uniqueViolations);
     } else {
       processTransfer();
@@ -934,43 +1031,60 @@ export default function DirektTransferPanel() {
           />
 
           {directTransferItems.length > 0 && (
-              <ScrollArea className="h-64 border rounded-md p-2">
-                <Accordion type="multiple" className="w-full">
-                  {groupedTransferItems.map(group => (
-                    <AccordionItem value={group.key} key={group.key}>
-                      <AccordionTrigger>
-                        <div className="flex-1 text-left font-medium">{group.stokAdi} <span className="text-xs text-muted-foreground">({group.stokKodu})</span></div>
-                        <div className="flex-1 text-left text-sm">Lot: {group.lotNumarasi || '-'}</div>
-                        <div className="flex-1 text-left text-sm">Miad: {group.miad || '-'}</div>
-                        <div className="font-bold flex items-center gap-2">
-                           {group.isGroup ? (
-                                <Input type="number" value={group.adet} onChange={(e) => handleGroupAdetChange(group.key, e.target.value)} onClick={(e) => e.stopPropagation()} className="w-20 h-7" />
-                           ) : (
-                                <span>{group.adet} Adet</span>
-                           )}
-                           <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); removeTransferItem(group.key, true); }}><Trash2 className="h-4 w-4 text-destructive"/></Button>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="p-2 bg-muted/50">
-                        {group.serials.length > 0 ? (
-                          <ul className="space-y-1">
-                            {group.serials.map(serial => (
-                              <li key={serial.id} className="flex justify-between items-center text-xs font-mono">
-                                {serial.seriNumarasi}
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeTransferItem(serial.id, false)}>
-                                  <Trash2 className="h-3 w-3 text-destructive" />
-                                </Button>
-                              </li>
-                            ))}
-                          </ul>
+            <div className="border rounded-md">
+              <VirtualizedList
+                items={groupedTransferItems}
+                height={256}
+                estimateSize={56}
+                overscan={5}
+                getItemKey={(item) => item.key}
+                className="p-2"
+                renderItem={(group) => (
+                  <div className="border-b last:border-b-0 py-1">
+                    <div className="flex items-center gap-2 p-2 hover:bg-muted/50">
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium truncate block">{group.stokAdi}</span>
+                        <span className="text-xs text-muted-foreground">{group.stokKodu}</span>
+                      </div>
+                      <div className="flex-1 text-sm hidden sm:block">Lot: {group.lotNumarasi || '-'}</div>
+                      <div className="flex-1 text-sm hidden sm:block">Miad: {group.miad || '-'}</div>
+                      <div className="font-bold flex items-center gap-2">
+                        {group.isGroup ? (
+                          <Input
+                            type="number"
+                            value={group.adet}
+                            onChange={(e) => handleGroupAdetChange(group.key, e.target.value)}
+                            className="w-20 h-7"
+                            min="1"
+                          />
                         ) : (
-                           <p className="text-xs text-muted-foreground">Bu grup manuel olarak eklendi, seri numarası detayı yok.</p>
+                          <span>{group.adet} Adet</span>
                         )}
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              </ScrollArea>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeTransferItem(group.key, true)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                    {group.serials.length > 0 && (
+                      <div className="px-4 py-2 bg-muted/50 max-h-24 overflow-y-auto">
+                        <div className="text-xs font-mono grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+                          {group.serials.slice(0, 50).map(serial => (
+                            <span key={serial.id} className="truncate">{serial.seriNumarasi}</span>
+                          ))}
+                          {group.serials.length > 50 && (
+                            <span className="text-muted-foreground">+{group.serials.length - 50} daha...</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              />
+            </div>
           )}
 
           <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
