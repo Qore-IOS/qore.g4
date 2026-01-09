@@ -110,6 +110,40 @@ export function useGeofencing(
     pendingActionsCount: 0,
   });
 
+  // ============================================
+  // STALE CLOSURE FIX: useRef ile güncel değerleri tut
+  // watchPosition callback'i başlangıçta yakalandığı için,
+  // değerler değiştiğinde eski closure'daki değerler kullanılıyordu.
+  // useRef ile her zaman güncel değerlere erişiyoruz.
+  // ============================================
+
+  const callbacksRef = useRef(callbacks);
+  const configRef = useRef(mergedConfig);
+  const isAtStopRef = useRef(isAtStop);
+  const stopsRef = useRef(stops);
+  const currentStopIndexRef = useRef(currentStopIndex);
+
+  // Ref'leri her render'da güncelle
+  useEffect(() => {
+    callbacksRef.current = callbacks;
+  }, [callbacks]);
+
+  useEffect(() => {
+    configRef.current = mergedConfig;
+  }, [mergedConfig]);
+
+  useEffect(() => {
+    isAtStopRef.current = isAtStop;
+  }, [isAtStop]);
+
+  useEffect(() => {
+    stopsRef.current = stops;
+  }, [stops]);
+
+  useEffect(() => {
+    currentStopIndexRef.current = currentStopIndex;
+  }, [currentStopIndex]);
+
   const watchIdRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -117,10 +151,9 @@ export function useGeofencing(
   const autoDepartureCooldownRef = useRef<boolean>(false);
 
   // Şoför mevcut durağa hiç yaklaştı mı? (otomatik çıkış için gerekli)
-  // Bu flag, şoförün en az bir kez menzile girdikten sonra çıkış yapmasını sağlar
   const wasInRangeRef = useRef<boolean>(false);
 
-  // Hedef durağı belirle
+  // Hedef durağı belirle (render sırasında)
   const targetStop = stops[currentStopIndex] || null;
 
   // Hedef değiştiğinde mesafeyi yeniden hesapla (son bilinen konumla)
@@ -146,7 +179,7 @@ export function useGeofencing(
     }));
   }, [targetStop?.id, state.userLocation?.lat, state.userLocation?.lng, mergedConfig.arrivalThreshold]);
 
-  // Wake Lock API ile ekranı açık tut (opsiyonel)
+  // Wake Lock API ile ekranı açık tut
   const requestWakeLock = useCallback(async () => {
     if ('wakeLock' in navigator) {
       try {
@@ -179,28 +212,32 @@ export function useGeofencing(
       const status = result.state as 'prompt' | 'granted' | 'denied';
       setState(s => ({ ...s, permissionStatus: status }));
 
-      // İzin durumu değişirse güncelle
       result.addEventListener('change', () => {
         setState(s => ({ ...s, permissionStatus: result.state as any }));
       });
 
       return status;
     } catch {
-      // permissions API desteklenmiyor, doğrudan deneyelim
       return 'prompt';
     }
   }, []);
 
-  // Konum güncellemesi işleyicisi
+  // ============================================
+  // CORE FIX: Konum güncellemesi işleyicisi
+  // Bu fonksiyon watchPosition'a bir kez veriliyor.
+  // İçinde useRef kullanarak her zaman güncel değerlere erişiyoruz.
+  // ============================================
   const handlePositionUpdate = useCallback((position: GeolocationPosition) => {
     const now = Date.now();
-    if (now - lastUpdateRef.current < mergedConfig.minUpdateInterval) return;
+    const currentConfig = configRef.current;
+
+    if (now - lastUpdateRef.current < currentConfig.minUpdateInterval) return;
     lastUpdateRef.current = now;
 
     const { latitude: lat, longitude: lng, accuracy } = position.coords;
 
     // Doğruluk çok kötüyse işlemi atla
-    if (accuracy > mergedConfig.maxAccuracy) {
+    if (accuracy > currentConfig.maxAccuracy) {
       setState(s => ({
         ...s,
         userLocation: { lat, lng, accuracy },
@@ -209,11 +246,14 @@ export function useGeofencing(
       return;
     }
 
-    // Callback çağır
-    callbacks.onLocationUpdate?.(lat, lng, accuracy);
+    // Callback çağır (güncel ref'ten)
+    callbacksRef.current.onLocationUpdate?.(lat, lng, accuracy);
+
+    // Güncel hedef durağı al
+    const currentTargetStop = stopsRef.current[currentStopIndexRef.current] || null;
 
     // Hedef durak yoksa sadece konumu güncelle
-    if (!targetStop) {
+    if (!currentTargetStop) {
       setState(s => ({
         ...s,
         userLocation: { lat, lng, accuracy },
@@ -224,16 +264,16 @@ export function useGeofencing(
     }
 
     // Hedef durağa mesafeyi hesapla
-    const distance = calculateDistance(lat, lng, targetStop.lat, targetStop.lng);
+    const distance = calculateDistance(lat, lng, currentTargetStop.lat, currentTargetStop.lng);
 
     // Yaklaşma ve menzil durumlarını hesapla
     const isApproaching = distance <= APPROACHING_THRESHOLD;
-    const isInRange = distance <= mergedConfig.arrivalThreshold;
+    const isInRange = distance <= currentConfig.arrivalThreshold;
 
     setState(s => ({
       ...s,
       userLocation: { lat, lng, accuracy },
-      targetStop,
+      targetStop: currentTargetStop,
       distanceToTarget: Math.round(distance),
       isApproaching,
       isInRange,
@@ -246,17 +286,31 @@ export function useGeofencing(
       wasInRangeRef.current = true;
     }
 
-    // Otomatik varış kontrolü
+    // Güncel isAtStop değerini al
+    const currentIsAtStop = isAtStopRef.current;
+
+    // ============================================
+    // OTOMATİK VARIŞ KONTROLÜ
+    // ============================================
     if (
-      mergedConfig.enabled &&
-      !isAtStop &&
+      currentConfig.enabled &&
+      !currentIsAtStop &&
       !autoArrivalCooldownRef.current &&
-      distance <= mergedConfig.arrivalThreshold
+      distance <= currentConfig.arrivalThreshold
     ) {
+      console.log('[Geofencing] 🎯 Otomatik varış tetikleniyor!', {
+        stopName: currentTargetStop.name,
+        distance: Math.round(distance),
+        threshold: currentConfig.arrivalThreshold,
+        isAtStop: currentIsAtStop,
+      });
+
       autoArrivalCooldownRef.current = true;
-      wasInRangeRef.current = true; // Varış tetiklendiyse menzile girmiş demektir
+      wasInRangeRef.current = true;
       setState(s => ({ ...s, autoArrivalTriggered: true }));
-      callbacks.onAutoArrival?.(targetStop);
+
+      // GÜNCEL callback'i çağır
+      callbacksRef.current.onAutoArrival?.(currentTargetStop);
 
       // 10 saniye cooldown
       setTimeout(() => {
@@ -265,19 +319,29 @@ export function useGeofencing(
       }, 10000);
     }
 
-    // Otomatik ayrılma kontrolü
-    // SADECE daha önce menzile girmiş olan şoför için çıkış tetiklenir
-    // Bu sayede uzaktaki şoför için yanlışlıkla çıkış tetiklenmez
+    // ============================================
+    // OTOMATİK ÇIKIŞ KONTROLÜ
+    // ============================================
     if (
-      mergedConfig.enabled &&
-      isAtStop &&
-      wasInRangeRef.current && // ÖNEMLİ: En az bir kez menzile girmiş olmalı
+      currentConfig.enabled &&
+      currentIsAtStop &&
+      wasInRangeRef.current &&
       !autoDepartureCooldownRef.current &&
-      distance > mergedConfig.departureThreshold
+      distance > currentConfig.departureThreshold
     ) {
+      console.log('[Geofencing] 🚗 Otomatik çıkış tetikleniyor!', {
+        stopName: currentTargetStop.name,
+        distance: Math.round(distance),
+        threshold: currentConfig.departureThreshold,
+        isAtStop: currentIsAtStop,
+        wasInRange: wasInRangeRef.current,
+      });
+
       autoDepartureCooldownRef.current = true;
       setState(s => ({ ...s, autoDepartureTriggered: true }));
-      callbacks.onAutoDeparture?.(targetStop);
+
+      // GÜNCEL callback'i çağır
+      callbacksRef.current.onAutoDeparture?.(currentTargetStop);
 
       // 10 saniye cooldown
       setTimeout(() => {
@@ -285,7 +349,7 @@ export function useGeofencing(
         setState(s => ({ ...s, autoDepartureTriggered: false }));
       }, 10000);
     }
-  }, [mergedConfig, targetStop, isAtStop, callbacks]);
+  }, []); // BOŞ dependency - ref'ler kullanıldığı için yeniden oluşturulmaya gerek yok
 
   // Konum hatası işleyicisi
   const handlePositionError = useCallback((error: GeolocationPositionError) => {
@@ -303,8 +367,8 @@ export function useGeofencing(
         break;
     }
     setState(s => ({ ...s, error: errorMsg }));
-    callbacks.onError?.(errorMsg);
-  }, [callbacks]);
+    callbacksRef.current.onError?.(errorMsg);
+  }, []);
 
   // Konum takibini başlat
   const startTracking = useCallback(async () => {
@@ -319,7 +383,6 @@ export function useGeofencing(
     }
 
     try {
-      // Wake lock iste
       await requestWakeLock();
 
       watchIdRef.current = navigator.geolocation.watchPosition(
@@ -339,6 +402,7 @@ export function useGeofencing(
         error: null,
       }));
 
+      console.log('[Geofencing] ✅ Konum takibi başlatıldı');
       return true;
     } catch (err) {
       setState(s => ({ ...s, error: 'Konum takibi başlatılamadı' }));
@@ -359,13 +423,13 @@ export function useGeofencing(
       autoArrivalTriggered: false,
       autoDepartureTriggered: false,
     }));
+    console.log('[Geofencing] ⏹️ Konum takibi durduruldu');
   }, [releaseWakeLock]);
 
   // Sayfa görünürlüğü değiştiğinde
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && state.isTracking) {
-        // Sayfa tekrar görünür olduğunda wake lock yenile
         requestWakeLock();
         setState(s => ({ ...s, isBackgroundMode: false }));
       } else if (document.visibilityState === 'hidden') {
@@ -394,6 +458,7 @@ export function useGeofencing(
 
   // currentStopIndex değiştiğinde cooldown'ları ve wasInRange flag'ini sıfırla
   useEffect(() => {
+    console.log('[Geofencing] 🔄 Stop index değişti:', currentStopIndex);
     autoArrivalCooldownRef.current = false;
     autoDepartureCooldownRef.current = false;
     wasInRangeRef.current = false;
