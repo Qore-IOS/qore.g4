@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { chat, chatStream, ChatMessage } from '@/lib/ai/chat';
+import { runAgent, runAgentStream, AgentMessage } from '@/lib/ai/agent';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 60 seconds timeout
@@ -19,15 +20,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { message, history = [], stream = false } = body as {
+    const { message, history = [], stream = false, mode = 'chat' } = body as {
       message: string;
-      history?: ChatMessage[];
+      history?: ChatMessage[] | AgentMessage[];
       stream?: boolean;
+      mode?: 'chat' | 'agent';
     };
 
     console.log('[AI API] Request received:', {
       message: message?.substring(0, 50) + '...',
       stream,
+      mode,
       historyLength: history.length
     });
 
@@ -45,10 +48,72 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Non-streaming response
+    // ============ AGENT MODE ============
+    if (mode === 'agent') {
+      console.log('[AI API] Using AGENT mode');
+
+      if (!stream) {
+        const response = await runAgent(message, history as AgentMessage[]);
+
+        console.log('[AI API] Agent response ready:', {
+          hasMessage: !!response.message,
+          toolsUsed: response.toolsUsed,
+          actionTaken: response.actionTaken,
+          requiresConfirmation: response.requiresConfirmation,
+        });
+
+        return NextResponse.json(response);
+      }
+
+      // Streaming agent response
+      const encoder = new TextEncoder();
+      const customStream = new ReadableStream({
+        async start(controller) {
+          try {
+            const response = await runAgentStream(
+              message,
+              history as AgentMessage[],
+              (chunk) => {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
+              }
+            );
+
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  done: true,
+                  toolsUsed: response.toolsUsed,
+                  actionTaken: response.actionTaken,
+                  requiresConfirmation: response.requiresConfirmation,
+                  planId: response.planId,
+                })}\n\n`
+              )
+            );
+            controller.close();
+          } catch (error) {
+            console.error('[AI API] Agent stream error:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
+            );
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(customStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    // ============ CHAT MODE (Default) ============
     if (!stream) {
-      console.log('[AI API] Using non-streaming mode');
-      const response = await chat(message, history);
+      console.log('[AI API] Using CHAT mode (non-streaming)');
+      const response = await chat(message, history as ChatMessage[]);
 
       console.log('[AI API] Response ready:', {
         hasMessage: !!response.message,
@@ -59,18 +124,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response);
     }
 
-    // Streaming response
-    console.log('[AI API] Using streaming mode');
+    // Streaming chat response
+    console.log('[AI API] Using CHAT mode (streaming)');
     const encoder = new TextEncoder();
 
     const customStream = new ReadableStream({
       async start(controller) {
         try {
-          const response = await chatStream(message, history, (chunk) => {
+          const response = await chatStream(message, history as ChatMessage[], (chunk) => {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
           });
 
-          // Send final response with metadata
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
@@ -85,9 +149,7 @@ export async function POST(request: NextRequest) {
           console.error('[AI API] Stream error:', error);
           const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
           controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ error: errorMessage })}\n\n`
-            )
+            encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
           );
           controller.close();
         }
