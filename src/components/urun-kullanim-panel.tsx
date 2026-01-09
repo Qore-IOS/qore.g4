@@ -86,7 +86,7 @@ export default function UrunKullanimPanel() {
   } = useLightDashboardData();
 
   // Fetch lab pools and devices separately
-  const { data: labPools = [] } = useLabPools();
+  const { data: labPools = [], isLoading: labPoolsLoading } = useLabPools();
   const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
@@ -222,7 +222,10 @@ export default function UrunKullanimPanel() {
 
   // Use TanStack Query for lab stock - much more efficient than full depoStok
   // Now also passes lab names to support legacy records without hedefKurumId
-  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames);
+  // Wait for labPools to load before querying to ensure pool members are included
+  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames, {
+    enabled: !labPoolsLoading && poolMemberIds.length > 0
+  });
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
