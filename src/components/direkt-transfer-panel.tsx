@@ -1111,7 +1111,7 @@ export default function DirektTransferPanel() {
                   visible={showManualInline}
                   onClose={() => setShowManualInline(false)}
                   depotName={depotName}
-                  stockPool={[]} 
+                  stockPool={depotStockData}
                   transferRows={directTransferItems}
                   products={manualProducts}
                   onAddLot={({ code, name, lot, miad, qty }) => {
