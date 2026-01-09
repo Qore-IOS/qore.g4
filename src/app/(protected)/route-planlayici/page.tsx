@@ -250,28 +250,6 @@ export default function RoutePlanlayiciPage() {
     }));
   }, [activeRoute?.stops]);
 
-  // Şu anki hedef durak indeksi (varış için)
-  const currentTargetIndex = useMemo(() => {
-    if (!activeRoute?.stops?.length) return -1;
-
-    // Yolda: bir sonraki durak (currentLegIndex + 1)
-    if (currentLegIndex >= 0) return currentLegIndex + 1;
-
-    // İlk durağa henüz varılmadıysa: ilk durak hedef
-    if (lastArrivedIndex === -1) {
-      const firstStop = activeRoute.stops[0];
-      if (!firstStop?.arrivedAt) return 0;
-    }
-
-    // Bir durağa varılmış ve çıkış bekliyor: bir sonraki durak hedef
-    if (canStartLeg && lastArrivedIndex >= 0) {
-      const nextIdx = lastArrivedIndex + 1;
-      if (nextIdx < activeRoute.stops.length) return nextIdx;
-    }
-
-    return -1;
-  }, [activeRoute?.stops, currentLegIndex, canStartLeg, lastArrivedIndex]);
-
   // Şu an bir durakta mı (varış yapılmış ama ayrılma yapılmamış)
   // İlk durak için özel: arrivedAt olmasa bile "durakta" kabul edilir
   const isCurrentlyAtStop = useMemo(() => {
@@ -289,6 +267,30 @@ export default function RoutePlanlayiciPage() {
     const stop = activeRoute.stops[lastArrivedIndex];
     return !!(stop?.arrivedAt && !stop?.departedAt);
   }, [activeRoute?.stops, lastArrivedIndex]);
+
+  // Şu anki hedef durak indeksi
+  // KRITIK: Duraktayken mevcut durağı hedef al (çıkış kontrolü için)
+  //         Yoldayken sonraki durağı hedef al (varış kontrolü için)
+  const currentTargetIndex = useMemo(() => {
+    if (!activeRoute?.stops?.length) return -1;
+
+    // Duraktaysak: mevcut durak hedef (çıkış kontrolü için mesafe takibi)
+    // Bu sayede duraktan 100m uzaklaşınca çıkış tetiklenebilir
+    if (isCurrentlyAtStop) {
+      // İlk durak için özel durum
+      if (lastArrivedIndex === -1) return 0;
+      // Normal: son varış yapılan durak
+      return lastArrivedIndex;
+    }
+
+    // Yolda: sonraki durağa yaklaşıyoruz (varış kontrolü için)
+    if (currentLegIndex >= 0) return currentLegIndex + 1;
+
+    // İlk durağa henüz varılmadıysa: ilk durak hedef
+    if (lastArrivedIndex === -1) return 0;
+
+    return -1;
+  }, [activeRoute?.stops, currentLegIndex, isCurrentlyAtStop, lastArrivedIndex]);
 
   // Otomatik varış handler
   const handleAutoArrival = useCallback(async (stop: GeofenceStop) => {
