@@ -7,10 +7,13 @@ export const maxDuration = 60; // 60 seconds timeout
 export async function POST(request: NextRequest) {
   try {
     // Check API key first
-    if (!process.env.GEMINI_API_KEY) {
-      console.error('GEMINI_API_KEY is not set');
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.error('[AI API] ANTHROPIC_API_KEY is not set');
       return NextResponse.json(
-        { error: 'API anahtarı ayarlanmamış', message: 'GEMINI_API_KEY environment variable eksik' },
+        {
+          error: 'API anahtarı ayarlanmamış',
+          message: 'ANTHROPIC_API_KEY environment variable eksik. Lütfen .env.local dosyasına ekleyin.'
+        },
         { status: 500 }
       );
     }
@@ -22,26 +25,44 @@ export async function POST(request: NextRequest) {
       stream?: boolean;
     };
 
-    console.log('AI Chat request:', { message, stream, historyLength: history.length });
+    console.log('[AI API] Request received:', {
+      message: message?.substring(0, 50) + '...',
+      stream,
+      historyLength: history.length
+    });
 
     if (!message || typeof message !== 'string') {
       return NextResponse.json(
-        { error: 'Mesaj gerekli' },
+        { error: 'Mesaj gerekli', message: 'message alanı string olmalı' },
+        { status: 400 }
+      );
+    }
+
+    if (message.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'Boş mesaj gönderilemez' },
         { status: 400 }
       );
     }
 
     // Non-streaming response
     if (!stream) {
-      console.log('Using non-streaming mode');
+      console.log('[AI API] Using non-streaming mode');
       const response = await chat(message, history);
-      console.log('Chat response:', { hasMessage: !!response.message, error: response.error });
+
+      console.log('[AI API] Response ready:', {
+        hasMessage: !!response.message,
+        messageLength: response.message?.length,
+        error: response.error
+      });
+
       return NextResponse.json(response);
     }
 
     // Streaming response
-    console.log('Using streaming mode');
+    console.log('[AI API] Using streaming mode');
     const encoder = new TextEncoder();
+
     const customStream = new ReadableStream({
       async start(controller) {
         try {
@@ -61,7 +82,7 @@ export async function POST(request: NextRequest) {
           );
           controller.close();
         } catch (error) {
-          console.error('Stream error:', error);
+          console.error('[AI API] Stream error:', error);
           const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
           controller.enqueue(
             encoder.encode(
@@ -77,14 +98,15 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
+        'Connection': 'keep-alive',
       },
     });
   } catch (error) {
-    console.error('AI Chat API error:', error);
+    console.error('[AI API] Error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
     const errorStack = error instanceof Error ? error.stack : '';
-    console.error('Error stack:', errorStack);
+    console.error('[AI API] Error stack:', errorStack);
+
     return NextResponse.json(
       { error: 'Sunucu hatası', message: errorMessage },
       { status: 500 }
