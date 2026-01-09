@@ -36,7 +36,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { useDepoStokByDepot } from '@/hooks/useFirebaseQueries';
+import { useDepoStokByDepot, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -692,6 +692,10 @@ export default function DirektTransferPanel() {
 
     try {
       await batch.commit();
+
+      // Signal stock change to all listeners (other users/tabs)
+      await touchStockMetadata();
+
       toast({ title: 'Transfer Tamamlandı', description: `${itemsToShip.length} ürün transfer edildi.` });
       setLastTransferCount(itemsToShip.length);
       

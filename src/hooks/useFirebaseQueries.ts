@@ -19,8 +19,13 @@ import {
   where,
   orderBy,
   limit,
-  Timestamp
+  Timestamp,
+  doc,
+  onSnapshot,
+  setDoc,
+  serverTimestamp
 } from 'firebase/firestore';
+import { useEffect, useRef } from 'react';
 import type {
   Hospital,
   Depot,
@@ -184,7 +189,7 @@ export function useUsers() {
 
 /**
  * Depot Stock - Filtered by depot
- * Shorter stale time since this changes more frequently
+ * No polling - invalidated via metadata listener when stock changes
  */
 export function useDepoStokByDepot(depotId: string | null) {
   return useQuery({
@@ -196,15 +201,15 @@ export function useDepoStokByDepot(depotId: string | null) {
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
     enabled: !!depotId,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 10 * 60 * 1000,
-    refetchInterval: 60 * 1000, // Poll every minute
+    staleTime: 5 * 60 * 1000, // 5 minutes - no polling, relies on metadata listener
+    gcTime: 30 * 60 * 1000,
+    // No refetchInterval - cache invalidated by useStockUpdateListener
   });
 }
 
 /**
  * All Depot Stock - For dashboard summaries
- * Uses longer polling interval to reduce reads
+ * No polling - invalidated via metadata listener when stock changes
  */
 export function useAllDepoStok() {
   return useQuery({
@@ -214,8 +219,8 @@ export function useAllDepoStok() {
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000, // Poll every 5 minutes
+    gcTime: 30 * 60 * 1000,
+    // No refetchInterval - cache invalidated by useStockUpdateListener
   });
 }
 
@@ -473,6 +478,65 @@ export function useSubPoints(hospitalId: string | null) {
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   });
+}
+
+// ============================================================================
+// STOCK UPDATE METADATA LISTENER - Event-based cache invalidation
+// ============================================================================
+
+/**
+ * Metadata document path for stock updates
+ * Single document that gets touched whenever stock changes (mal kabul, transfer)
+ */
+const STOCK_METADATA_DOC = 'metadata/stockLastUpdated';
+
+/**
+ * Touch the stock metadata document to signal a stock change
+ * Call this after mal kabul or transfer operations
+ */
+export async function touchStockMetadata() {
+  try {
+    await setDoc(doc(db, STOCK_METADATA_DOC), {
+      lastUpdated: serverTimestamp(),
+      updatedAt: new Date().toISOString(), // Fallback for offline
+    });
+  } catch (error) {
+    console.error('Failed to touch stock metadata:', error);
+  }
+}
+
+/**
+ * Hook that listens to stock metadata changes and invalidates cache
+ * Uses Firestore onSnapshot for real-time updates (single document = very cheap)
+ *
+ * Usage: Call this hook once in a high-level component (e.g., layout or provider)
+ */
+export function useStockUpdateListener() {
+  const queryClient = useQueryClient();
+  const isFirstLoad = useRef(true);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, STOCK_METADATA_DOC),
+      (snapshot) => {
+        // Skip invalidation on first load (initial fetch)
+        if (isFirstLoad.current) {
+          isFirstLoad.current = false;
+          return;
+        }
+
+        // Invalidate all depoStok queries when metadata changes
+        if (snapshot.exists()) {
+          queryClient.invalidateQueries({ queryKey: ['depoStok'] });
+        }
+      },
+      (error) => {
+        console.error('Stock metadata listener error:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [queryClient]);
 }
 
 // ============================================================================

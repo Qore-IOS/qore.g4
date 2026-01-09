@@ -3,6 +3,7 @@
 import React, { useEffect } from 'react';
 import { QueryClient, QueryClientProvider, useIsFetching, useIsMutating } from '@tanstack/react-query';
 import { useLoading } from './loading-context';
+import { useStockUpdateListener } from '@/hooks/useFirebaseQueries';
 
 // Create a stable query client
 const queryClient = new QueryClient({
@@ -26,9 +27,16 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <QueryLoadingObserver />
+      <StockUpdateObserver />
       {children}
     </QueryClientProvider>
   );
+}
+
+// Component to listen for stock metadata changes and invalidate cache
+function StockUpdateObserver() {
+  useStockUpdateListener();
+  return null;
 }
 
 // Component to observe React Query state and control global loading
