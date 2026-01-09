@@ -259,8 +259,32 @@ export default function DirektTransferPanel() {
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
-  
+
+  // Last scanned product tracking for UI feedback
+  const [lastScannedProduct, setLastScannedProduct] = useState<{
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi?: string;
+    miad?: string;
+    seriNumarasi?: string;
+  } | null>(null);
+
   const selectedLabName = useMemo(() => hospitals.find(l => l.id === selectedLabId)?.name || '', [hospitals, selectedLabId]);
+
+  // Computed counts for last scanned product
+  const lotCount = useMemo(() => {
+    if (!lastScannedProduct) return 0;
+    return directTransferItems
+      .filter(item => item.stokKodu === lastScannedProduct.stokKodu && item.lotNumarasi === lastScannedProduct.lotNumarasi)
+      .reduce((n, it) => n + (it.adet ?? 1), 0);
+  }, [directTransferItems, lastScannedProduct]);
+
+  const totalCountForProduct = useMemo(() => {
+    if (!lastScannedProduct) return 0;
+    return directTransferItems
+      .filter(item => item.stokKodu === lastScannedProduct.stokKodu)
+      .reduce((n, it) => n + (it.adet ?? 1), 0);
+  }, [directTransferItems, lastScannedProduct]);
   
   const fetchPrerequisites = useCallback(async () => {
     setPrereqsLoading(true);
@@ -432,6 +456,7 @@ export default function DirektTransferPanel() {
           return;
         }
         addDirectTransferItem(items[0]);
+        setLastScannedProduct({ stokKodu, stokAdi, lotNumarasi: lot, miad, seriNumarasi: seri });
         playFeedback();
         return;
       }
@@ -458,6 +483,7 @@ export default function DirektTransferPanel() {
           { stokKodu, stokAdi, lotNumarasi: lot, miad },
           1
         );
+        setLastScannedProduct({ stokKodu, stokAdi, lotNumarasi: lot, miad });
         playFeedback();
         return;
       }
@@ -478,6 +504,7 @@ export default function DirektTransferPanel() {
         { stokKodu, stokAdi },
         1
       );
+      setLastScannedProduct({ stokKodu, stokAdi });
       playFeedback();
     },
     [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, directTransferItems]
@@ -1051,7 +1078,36 @@ export default function DirektTransferPanel() {
               </Button>
             </div>
           </div>
-          
+
+          {/* Son Okutulan Ürün Bilgi Kartı */}
+          <div className="bg-muted/30 border rounded-lg p-4">
+            {lastScannedProduct ? (
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-lg sm:text-xl font-bold truncate">{lastScannedProduct.stokAdi}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
+                    {lastScannedProduct.lotNumarasi && lastScannedProduct.miad && ' | '}
+                    {lastScannedProduct.miad && `Miad: ${lastScannedProduct.miad}`}
+                    {lastScannedProduct.seriNumarasi && ` | Seri: ${lastScannedProduct.seriNumarasi}`}
+                  </p>
+                </div>
+                <div className="flex gap-4 sm:gap-6 text-center">
+                  <div>
+                    <p className="text-2xl sm:text-3xl font-bold text-primary">{lotCount}</p>
+                    <p className="text-xs text-muted-foreground">Bu Lottan</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl sm:text-3xl font-bold text-primary">{totalCountForProduct}</p>
+                    <p className="text-xs text-muted-foreground">Ürün Toplamı</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-center py-2">Henüz ürün okutulmadı</p>
+            )}
+          </div>
+
           {showManualInline &&
              <div>
                 <ManualInlineAdder
