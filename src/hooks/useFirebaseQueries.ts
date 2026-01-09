@@ -222,8 +222,17 @@ export function useAllDepoStok() {
 /**
  * Shipped stock for a specific lab (or pool of labs)
  * Now also queries by hedefKurum (name) for legacy records that may not have hedefKurumId
+ * @param labIds - Array of lab IDs to query
+ * @param labNames - Array of lab names for legacy record support
+ * @param options - Optional configuration: { enabled?: boolean }
  */
-export function useLabStock(labIds: string[], labNames: string[] = []) {
+export function useLabStock(
+  labIds: string[],
+  labNames: string[] = [],
+  options: { enabled?: boolean } = {}
+) {
+  const { enabled: externalEnabled = true } = options;
+
   return useQuery({
     queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(',')],
     queryFn: async () => {
@@ -264,7 +273,7 @@ export function useLabStock(labIds: string[], labNames: string[] = []) {
 
       return Array.from(resultMap.values());
     },
-    enabled: labIds.length > 0,
+    enabled: externalEnabled && labIds.length > 0,
     staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchInterval: 60 * 1000,
