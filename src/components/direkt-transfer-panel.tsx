@@ -75,6 +75,7 @@ import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tuta
 import { emitFefoOverride } from '@/lib/notifications';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
+import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -183,6 +184,7 @@ export default function DirektTransferPanel() {
   const { currentUser, currentUserProfile } = useAuth();
   const { suppressGlobalLoading } = useLoading();
   const router = useRouter();
+  const { invalidateDepoStok } = useInvalidateQueries();
 
   // Suppress global loading overlay for this panel - it interferes with barcode scanning
   useEffect(() => {
@@ -549,14 +551,26 @@ export default function DirektTransferPanel() {
 
   const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = []) => {
     if (!currentUser || !currentUserProfile) return;
+
+    // Validate target selection before proceeding
+    if (!isBorcMode && !selectedLabId) {
+      toast({
+        title: 'Hedef Seçilmedi',
+        description: 'Lütfen transfer için bir hedef laboratuvar seçin.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setShipmentLoading(true);
     setFefoViolations([]);
 
     const targetLab = isBorcMode ? null : hospitals.find(l => l.id === selectedLabId);
-    const targetName = isBorcMode 
-      ? (borcDepots.find(d => d.id === selectedBorcDepotId)?.name || 'Borç') 
+    const targetName = isBorcMode
+      ? (borcDepots.find(d => d.id === selectedBorcDepotId)?.name || 'Borç')
       : (targetLab?.name || '');
-    
+
+    // Ensure targetId is never null when not in borc mode (prevents legacy records issue)
     const targetId = isBorcMode ? null : selectedLabId;
 
     const transferRef = doc(collection(db, 'transfers'));
@@ -603,7 +617,7 @@ export default function DirektTransferPanel() {
       } else {
         batch.set(stokRef, {
           isShipped: true, sevkTarihi: Timestamp.now(), hedefKurum: targetName,
-          hedefKurumId: targetId || null, transferId: transferRef.id,
+          hedefKurumId: targetId, transferId: transferRef.id,
           sourceDepotId: selectedDepotId, sourceDepotName: depotName,
         }, { merge: true });
       }
@@ -636,7 +650,14 @@ export default function DirektTransferPanel() {
 
     try {
       await batch.commit();
-      toast({ title: 'Transfer Tamamlandı', description: `${itemsToShip.length} ürün transfer edildi.` });
+
+      // Invalidate depoStok cache so other panels (like urun-kullanim-panel) see the updated data immediately
+      invalidateDepoStok();
+
+      toast({
+        title: 'Transfer Tamamlandı',
+        description: `${itemsToShip.length} ürün transfer edildi. Stok verileri güncelleniyor...`
+      });
       setLastTransferCount(itemsToShip.length);
       
       confirmedViolations.forEach(v => {
@@ -714,7 +735,7 @@ export default function DirektTransferPanel() {
     } finally {
       setShipmentLoading(false);
     }
-  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, allocateDocsForGroup, toast, selectedCompany]);
+  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, allocateDocsForGroup, toast, selectedCompany, invalidateDepoStok]);
 
 
   const handleCompleteDirectTransfer = async () => {
