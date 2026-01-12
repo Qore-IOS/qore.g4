@@ -16,7 +16,8 @@ import { exportDataToExcel } from '@/lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult } from '@/actions/searchActions';
+import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult } from '@/services/searchService';
+import { useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
 
 // -----------------------------------------------------
 // Types & Helper Components
@@ -46,6 +47,10 @@ const SortableHeader: React.FC<{
 
 export default function AramaPanel() {
   const { toast } = useToast();
+
+  // Master data from cached hooks (no initial fetch, uses cache)
+  const { data: productCodes = [] } = useProductCodes();
+  const { data: depots = [] } = useDepots();
 
   // Search state
   const [query, setQuery] = useState('');
@@ -90,7 +95,7 @@ export default function AramaPanel() {
     setPage(1);
 
     try {
-      const result: SearchResult = await searchProductLedger(q);
+      const result: SearchResult = await searchProductLedger(q, productCodes, depots);
 
       setResults(result.ledgerRows);
       setStockSummary(result.stockSummary);
@@ -118,7 +123,7 @@ export default function AramaPanel() {
     } finally {
       setIsSearching(false);
     }
-  }, [toast]);
+  }, [toast, productCodes, depots]);
 
   // ---------------------------------------------------
   // Sorting & Filtering
@@ -242,7 +247,7 @@ export default function AramaPanel() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={handleExport} disabled={filteredAndSorted.length === 0}>
-                <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
+                <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel&apos;e Aktar
               </Button>
             </div>
           </CardHeader>
