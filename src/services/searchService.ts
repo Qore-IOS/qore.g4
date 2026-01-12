@@ -6,7 +6,6 @@ import {
   query,
   where,
   getDocs,
-  collectionGroup,
   limit,
 } from 'firebase/firestore';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer } from '@/lib/types';
@@ -57,30 +56,52 @@ const normDate = (d: any): Date => {
   if (d?.toDate) return d.toDate();
   if (d?.seconds) return new Date(d.seconds * 1000);
   if (d instanceof Date) return d;
-  return new Date(d);
+  if (typeof d === 'string') {
+    // Handle "dd.MM.yyyy" format
+    const parts = d.split('.');
+    if (parts.length === 3) {
+      const [day, month, year] = parts;
+      const parsed = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+    // Try ISO format
+    const parsed = new Date(d);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+  if (typeof d === 'number') return new Date(d);
+  return new Date(0);
 };
 
 const formatMiad = (d: any): string => {
+  if (!d) return '-';
+
+  // If already a formatted string like "dd.MM.yyyy", return it
+  if (typeof d === 'string') {
+    // Check if it's already in dd.MM.yyyy format
+    const parts = d.split('.');
+    if (parts.length === 3 && parts[0].length <= 2 && parts[1].length <= 2 && parts[2].length === 4) {
+      return d;
+    }
+    // Try to parse and format
+    const date = normDate(d);
+    if (date.getTime() === 0 || isNaN(date.getTime())) return d; // Return original if can't parse
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}.${month}.${year}`;
+  }
+
   const date = normDate(d);
-  if (date.getTime() === 0) return '-';
+  if (date.getTime() === 0 || isNaN(date.getTime())) return '-';
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
   return `${day}.${month}.${year}`;
 };
 
-type TransferItem = {
-  transferId: string;
-  stokKodu: string;
-  stokAdi: string;
-  lotNumarasi: string;
-  miad: string;
-  seriNumarasi?: string;
-};
-
 /**
  * Client-side search function for the product ledger.
- * Only fetches data when search is performed - no initial data load.
+ * Groups results by session for product/lot searches, shows individual items for serial searches.
  */
 export async function searchProductLedger(
   q: string,
@@ -170,7 +191,6 @@ export async function searchProductLedger(
       getDocs(query(collection(db, 'tuketimKayitlari'), where('stokKodu', 'in', uniqueStockCodes))),
     ]);
   } else {
-    // Too many stock codes, return empty
     return { ledgerRows: [], stockSummary: [], searchType };
   }
 
@@ -200,288 +220,30 @@ export async function searchProductLedger(
     });
   });
 
-  // Get transfer items from transfers
-  const transferItems: TransferItem[] = [];
-  for (const transfer of allTransfers) {
-    if (transfer.items && Array.isArray(transfer.items)) {
-      for (const item of transfer.items) {
-        const shouldInclude =
-          searchType === 'serial'
-            ? (item.seriNumarasi || '').toLowerCase() === needle
-            : searchType === 'lot'
-              ? (item.lotNumarasi || '').toLowerCase() === needle
-              : uniqueStockCodes.includes(item.stokKodu);
-
-        if (shouldInclude) {
-          transferItems.push({
-            transferId: transfer.id,
-            stokKodu: item.stokKodu,
-            stokAdi: item.stokAdi,
-            lotNumarasi: item.lotNumarasi,
-            miad: item.miad,
-            seriNumarasi: item.seriNumarasi,
-          });
-        }
-      }
-    }
-  }
-
-  const transferMap = new Map(allTransfers.map(t => [t.id, t]));
-
-  // --- Calculate postAdet for each event ---
-  interface StockEvent {
-    tarih: Date;
-    stokKodu: string;
-    lotNumarasi?: string;
-    seriNumarasi?: string;
-    islemTipi: string;
-    konum: string;
-    hedefKonum?: string;
-    adet: number;
-    konumTipi: 'depo' | 'lab';
-  }
-
-  const allEvents: StockEvent[] = [];
-
-  // 1. Mal Kabul events from depoStok
-  depoStok.forEach(d => {
-    const tarih = normDate((d as any).eklenmeTarihi);
-    allEvents.push({
-      tarih,
-      stokKodu: d.stokKodu,
-      lotNumarasi: d.lotNumarasi,
-      seriNumarasi: d.seriNumarasi,
-      islemTipi: 'Mal Kabul',
-      konum: d.depotName || 'Depo',
-      adet: 1,
-      konumTipi: 'depo'
-    });
-  });
-
-  // 2. Shipment events
-  filteredShipments.forEach(sh => {
-    const tarih = normDate(sh.timestamp);
-    (sh.items || []).forEach(it => {
-      const shouldInclude = searchType === 'serial'
-        ? serialsOfShipmentItem(it).some(sn => sn.toLowerCase() === needle)
-        : searchType === 'lot'
-          ? (it.lotNumarasi || '').toLowerCase() === needle
-          : uniqueStockCodes.includes(it.stokKodu);
-
-      if (shouldInclude) {
-        const qty = it.quantity || serialsOfShipmentItem(it).length || 1;
-        allEvents.push({
-          tarih,
-          stokKodu: it.stokKodu,
-          lotNumarasi: it.lotNumarasi,
-          islemTipi: 'Karşılanan Sipariş',
-          konum: sh.depotName || 'Depo',
-          hedefKonum: sh.recipientHospital,
-          adet: -qty,
-          konumTipi: 'depo'
-        });
-        allEvents.push({
-          tarih,
-          stokKodu: it.stokKodu,
-          lotNumarasi: it.lotNumarasi,
-          islemTipi: 'Karşılanan Sipariş',
-          konum: sh.recipientHospital,
-          adet: qty,
-          konumTipi: 'lab'
-        });
+  // Filter transfers by stock code/lot/serial
+  const filteredTransfers = allTransfers.filter(tr => {
+    if (!tr.items || tr.items.length === 0) return false;
+    return tr.items.some((it: any) => {
+      if (searchType === 'serial') {
+        return (it.seriNumarasi || '').toLowerCase() === needle;
+      } else if (searchType === 'lot') {
+        return (it.lotNumarasi || '').toLowerCase() === needle;
+      } else {
+        return uniqueStockCodes.includes(it.stokKodu);
       }
     });
   });
 
-  // 3. Transfer events
-  transferItems.forEach(it => {
-    const transfer = transferMap.get(it.transferId);
-    if (!transfer) return;
-    const tarih = normDate(transfer.timestamp);
-
-    allEvents.push({
-      tarih,
-      stokKodu: it.stokKodu,
-      lotNumarasi: it.lotNumarasi,
-      seriNumarasi: it.seriNumarasi,
-      islemTipi: 'Direkt Transfer',
-      konum: transfer.sourceDepotName || 'Depo',
-      hedefKonum: transfer.targetName,
-      adet: -1,
-      konumTipi: 'depo'
-    });
-    allEvents.push({
-      tarih,
-      stokKodu: it.stokKodu,
-      lotNumarasi: it.lotNumarasi,
-      seriNumarasi: it.seriNumarasi,
-      islemTipi: 'Direkt Transfer',
-      konum: transfer.targetName,
-      adet: 1,
-      konumTipi: 'lab'
-    });
-  });
-
-  // 4. Consumption events
-  consumptionRecords.forEach(rec => {
-    const tarih = normDate(rec.consumptionTimestamp);
-    allEvents.push({
-      tarih,
-      stokKodu: rec.stokKodu,
-      lotNumarasi: rec.lotNumarasi,
-      seriNumarasi: rec.seriNumarasi,
-      islemTipi: 'Kullanım',
-      konum: rec.laboratoryName || 'Laboratuvar',
-      adet: -1,
-      konumTipi: 'lab'
-    });
-  });
-
-  // Sort events by date
-  allEvents.sort((a, b) => a.tarih.getTime() - b.tarih.getTime());
-
-  // Calculate running totals
-  const stockByLocationLot: Record<string, number> = {};
-  const getKey = (konum: string, stokKodu: string, lotNumarasi?: string) =>
-    `${konum}|${stokKodu}|${lotNumarasi || ''}`;
-
-  const eventPostAdet: Map<string, { postDepo: number; postHedef: number }> = new Map();
-
-  allEvents.forEach((ev) => {
-    const key = getKey(ev.konum, ev.stokKodu, ev.lotNumarasi);
-    stockByLocationLot[key] = (stockByLocationLot[key] || 0) + ev.adet;
-
-    const eventId = `${ev.islemTipi}|${ev.tarih.getTime()}|${ev.stokKodu}|${ev.lotNumarasi || ''}|${ev.seriNumarasi || ''}|${ev.konum}`;
-    const postDepo = stockByLocationLot[key] || 0;
-    let postHedef = 0;
-
-    if (ev.hedefKonum) {
-      const hedefKey = getKey(ev.hedefKonum, ev.stokKodu, ev.lotNumarasi);
-      postHedef = stockByLocationLot[hedefKey] || 0;
-    }
-
-    eventPostAdet.set(eventId, { postDepo: Math.max(0, postDepo), postHedef: Math.max(0, postHedef) });
-  });
-
-  // --- Build Ledger Rows ---
+  // --- Build Ledger Rows based on search type ---
   const ledgerRows: LedgerRow[] = [];
 
-  // 1. Mal Kabul from depoStok
-  depoStok.forEach(d => {
-    const eventId = `Mal Kabul|${normDate((d as any).eklenmeTarihi).getTime()}|${d.stokKodu}|${d.lotNumarasi || ''}|${d.seriNumarasi || ''}|${d.depotName || 'Depo'}`;
-    const postAdet = eventPostAdet.get(eventId);
-
-    ledgerRows.push({
-      id: `mk_ds_${d.id}`,
-      stokKodu: d.stokKodu,
-      stokAdi: d.stokAdi,
-      lotNumarasi: d.lotNumarasi,
-      miad: formatMiad(d.miad),
-      islemTipi: 'Mal Kabul',
-      actor: (d as any).createdByName || (d as any).userName || (d as any).ekleyenKullanici || '-',
-      tarih: normDate((d as any).eklenmeTarihi),
-      adet: 1,
-      seriNolar: serialsOfDepoStok(d),
-      konum: d.depotName || 'Depo',
-      postAdetDepo: postAdet?.postDepo ?? undefined,
-    });
-  });
-
-  // 2. Shipments
-  filteredShipments.forEach(sh => {
-    (sh.items || []).forEach(it => {
-      const shouldInclude = searchType === 'serial'
-        ? serialsOfShipmentItem(it).some(sn => sn.toLowerCase() === needle)
-        : searchType === 'lot'
-          ? (it.lotNumarasi || '').toLowerCase() === needle
-          : uniqueStockCodes.includes(it.stokKodu);
-
-      if (shouldInclude) {
-        const serials = searchType === 'serial'
-          ? serialsOfShipmentItem(it).filter(sn => sn.toLowerCase() === needle)
-          : serialsOfShipmentItem(it);
-        const qty = searchType === 'serial' ? serials.length : (it.quantity || serialsOfShipmentItem(it).length || 1);
-
-        const eventId = `Karşılanan Sipariş|${normDate(sh.timestamp).getTime()}|${it.stokKodu}|${it.lotNumarasi || ''}||${sh.depotName || 'Depo'}`;
-        const postAdet = eventPostAdet.get(eventId);
-
-        ledgerRows.push({
-          id: `sh_${sh.id}_${it.stokKodu}_${it.lotNumarasi || ''}_${it.miad || ''}`,
-          stokKodu: it.stokKodu,
-          stokAdi: it.stokAdi,
-          lotNumarasi: it.lotNumarasi,
-          miad: formatMiad(it.miad),
-          islemTipi: 'Karşılanan Sipariş',
-          actor: sh.userName || '-',
-          tarih: normDate(sh.timestamp),
-          adet: qty,
-          seriNolar: serials,
-          konum: sh.depotName || 'Depo',
-          hedefKonum: sh.recipientHospital,
-          postAdetDepo: postAdet?.postDepo ?? undefined,
-          postAdetHedef: postAdet?.postHedef ?? undefined,
-        });
-      }
-    });
-  });
-
-  // 3. Transfers
-  const transferGroups = new Map<string, { transfer: Transfer; items: TransferItem[] }>();
-  transferItems.forEach(it => {
-    const transfer = transferMap.get(it.transferId);
-    if (!transfer) return;
-    const key = `${it.transferId}|${it.stokKodu}|${it.lotNumarasi}|${it.miad}`;
-    const group = transferGroups.get(key) || { transfer, items: [] };
-    group.items.push(it);
-    transferGroups.set(key, group);
-  });
-
-  transferGroups.forEach(({ transfer, items }) => {
-    const sample = items[0];
-    const serials = items.map(x => x.seriNumarasi).filter(Boolean) as string[];
-
-    const eventId = `Direkt Transfer|${normDate(transfer.timestamp).getTime()}|${sample.stokKodu}|${sample.lotNumarasi || ''}|${sample.seriNumarasi || ''}|${transfer.sourceDepotName || 'Depo'}`;
-    const postAdet = eventPostAdet.get(eventId);
-
-    ledgerRows.push({
-      id: `tr_${transfer.id}_${sample.stokKodu}_${sample.lotNumarasi}_${sample.miad}`,
-      stokKodu: sample.stokKodu,
-      stokAdi: sample.stokAdi,
-      lotNumarasi: sample.lotNumarasi,
-      miad: formatMiad(sample.miad),
-      islemTipi: 'Direkt Transfer',
-      actor: transfer.userName || '-',
-      tarih: normDate(transfer.timestamp),
-      adet: items.length,
-      seriNolar: serials,
-      konum: transfer.sourceDepotName || 'Depo',
-      hedefKonum: transfer.targetName,
-      postAdetDepo: postAdet?.postDepo ?? undefined,
-      postAdetHedef: postAdet?.postHedef ?? undefined,
-    });
-  });
-
-  // 4. Consumption
-  consumptionRecords.forEach(rec => {
-    const eventId = `Kullanım|${normDate(rec.consumptionTimestamp).getTime()}|${rec.stokKodu}|${rec.lotNumarasi || ''}|${rec.seriNumarasi || ''}|${rec.laboratoryName || 'Laboratuvar'}`;
-    const postAdet = eventPostAdet.get(eventId);
-
-    ledgerRows.push({
-      id: `tk_${rec.id}`,
-      stokKodu: rec.stokKodu,
-      stokAdi: rec.stokAdi,
-      lotNumarasi: rec.lotNumarasi,
-      miad: formatMiad(rec.miad),
-      islemTipi: 'Kullanım',
-      actor: rec.userName || '-',
-      tarih: normDate(rec.consumptionTimestamp),
-      adet: 1,
-      seriNolar: rec.seriNumarasi ? [rec.seriNumarasi] : [],
-      konum: rec.laboratoryName || 'Laboratuvar',
-      postAdetDepo: undefined,
-      postAdetHedef: postAdet?.postDepo ?? undefined,
-    });
-  });
+  if (searchType === 'serial') {
+    // SERIAL SEARCH: Show individual items
+    buildSerialSearchRows(ledgerRows, depoStok, filteredShipments, filteredTransfers, consumptionRecords, needle);
+  } else {
+    // PRODUCT/LOT SEARCH: Group by session
+    buildGroupedSearchRows(ledgerRows, depoStok, filteredShipments, filteredTransfers, consumptionRecords, uniqueStockCodes, searchType, needle);
+  }
 
   // Sort by date descending
   ledgerRows.sort((a, b) => b.tarih.getTime() - a.tarih.getTime());
@@ -490,7 +252,7 @@ export async function searchProductLedger(
   const stockSummary: StockSummary[] = [];
   const stokKodu = uniqueStockCodes[0];
   const product = productCodes.find(p => p.stokKodu === stokKodu);
-  const birim = product?.anaBirim || 'Adet';
+  const birim = product?.anaBirim || 'Kutu';
 
   if (searchType === 'serial') {
     const inStockItem = depoStok.find(s => serialsOfDepoStok(s).some(sn => sn.toLowerCase() === needle));
@@ -522,6 +284,7 @@ export async function searchProductLedger(
       }
     }
   } else {
+    // Calculate current stock by location for product/lot search
     const stockByLocation: Record<string, { adet: number; konumTipi: 'depo' | 'laboratuvar' }> = {};
 
     depoStok.forEach(item => {
@@ -562,4 +325,376 @@ export async function searchProductLedger(
   }
 
   return { ledgerRows, stockSummary, searchType };
+}
+
+/**
+ * Build rows for serial number search - individual items
+ */
+function buildSerialSearchRows(
+  ledgerRows: LedgerRow[],
+  depoStok: DepoStokItem[],
+  shipments: Shipment[],
+  transfers: Transfer[],
+  consumptions: ConsumptionRecord[],
+  needle: string
+) {
+  // Calculate running totals for postAdet
+  const stockByLocationLot: Record<string, number> = {};
+  const getKey = (konum: string, stokKodu: string, lotNumarasi?: string) =>
+    `${konum}|${stokKodu}|${lotNumarasi || ''}`;
+
+  // Collect all events chronologically
+  interface Event {
+    tarih: Date;
+    type: string;
+    data: any;
+  }
+  const events: Event[] = [];
+
+  // Add depoStok events (Mal Kabul)
+  depoStok.forEach(d => {
+    events.push({ tarih: normDate((d as any).eklenmeTarihi), type: 'malKabul', data: d });
+  });
+
+  // Add shipment events
+  shipments.forEach(sh => {
+    (sh.items || []).forEach(it => {
+      if (serialsOfShipmentItem(it).some(sn => sn.toLowerCase() === needle)) {
+        events.push({ tarih: normDate(sh.timestamp), type: 'shipment', data: { shipment: sh, item: it } });
+      }
+    });
+  });
+
+  // Add transfer events
+  transfers.forEach(tr => {
+    (tr.items || []).forEach((it: any) => {
+      if ((it.seriNumarasi || '').toLowerCase() === needle) {
+        events.push({ tarih: normDate(tr.timestamp), type: 'transfer', data: { transfer: tr, item: it } });
+      }
+    });
+  });
+
+  // Add consumption events
+  consumptions.forEach(rec => {
+    events.push({ tarih: normDate(rec.consumptionTimestamp), type: 'consumption', data: rec });
+  });
+
+  // Sort by date
+  events.sort((a, b) => a.tarih.getTime() - b.tarih.getTime());
+
+  // Process events and calculate postAdet
+  events.forEach(ev => {
+    if (ev.type === 'malKabul') {
+      const d = ev.data as DepoStokItem;
+      const key = getKey(d.depotName || 'Depo', d.stokKodu, d.lotNumarasi);
+      stockByLocationLot[key] = (stockByLocationLot[key] || 0) + 1;
+
+      ledgerRows.push({
+        id: `mk_${d.id}`,
+        stokKodu: d.stokKodu,
+        stokAdi: d.stokAdi,
+        lotNumarasi: d.lotNumarasi,
+        miad: formatMiad(d.miad),
+        islemTipi: 'Mal Kabul',
+        actor: (d as any).createdByName || (d as any).userName || (d as any).ekleyenKullanici || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: serialsOfDepoStok(d),
+        konum: d.depotName || 'Depo',
+        postAdetDepo: stockByLocationLot[key],
+      });
+    } else if (ev.type === 'shipment') {
+      const { shipment: sh, item: it } = ev.data;
+      const depoKey = getKey(sh.depotName || 'Depo', it.stokKodu, it.lotNumarasi);
+      const labKey = getKey(sh.recipientHospital, it.stokKodu, it.lotNumarasi);
+
+      stockByLocationLot[depoKey] = (stockByLocationLot[depoKey] || 0) - 1;
+      stockByLocationLot[labKey] = (stockByLocationLot[labKey] || 0) + 1;
+
+      ledgerRows.push({
+        id: `sh_${sh.id}_${it.stokKodu}_${it.lotNumarasi}`,
+        stokKodu: it.stokKodu,
+        stokAdi: it.stokAdi,
+        lotNumarasi: it.lotNumarasi,
+        miad: formatMiad(it.miad),
+        islemTipi: 'Karşılanan Sipariş',
+        actor: sh.userName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: serialsOfShipmentItem(it).filter(sn => sn.toLowerCase() === needle),
+        konum: sh.depotName || 'Depo',
+        hedefKonum: sh.recipientHospital,
+        postAdetDepo: Math.max(0, stockByLocationLot[depoKey] || 0),
+        postAdetHedef: stockByLocationLot[labKey] || 0,
+      });
+    } else if (ev.type === 'transfer') {
+      const { transfer: tr, item: it } = ev.data;
+      const sourceKey = getKey(tr.sourceDepotName || 'Depo', it.stokKodu, it.lotNumarasi);
+      const targetKey = getKey(tr.targetName, it.stokKodu, it.lotNumarasi);
+
+      stockByLocationLot[sourceKey] = (stockByLocationLot[sourceKey] || 0) - 1;
+      stockByLocationLot[targetKey] = (stockByLocationLot[targetKey] || 0) + 1;
+
+      ledgerRows.push({
+        id: `tr_${tr.id}_${it.stokKodu}_${it.lotNumarasi}_${it.seriNumarasi}`,
+        stokKodu: it.stokKodu,
+        stokAdi: it.stokAdi,
+        lotNumarasi: it.lotNumarasi,
+        miad: formatMiad(it.miad),
+        islemTipi: 'Direkt Transfer',
+        actor: tr.userName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: [it.seriNumarasi].filter(Boolean),
+        konum: tr.sourceDepotName || 'Depo',
+        hedefKonum: tr.targetName,
+        postAdetDepo: Math.max(0, stockByLocationLot[sourceKey] || 0),
+        postAdetHedef: stockByLocationLot[targetKey] || 0,
+      });
+    } else if (ev.type === 'consumption') {
+      const rec = ev.data as ConsumptionRecord;
+      const labKey = getKey(rec.laboratoryName || 'Laboratuvar', rec.stokKodu, rec.lotNumarasi);
+      stockByLocationLot[labKey] = (stockByLocationLot[labKey] || 0) - 1;
+
+      ledgerRows.push({
+        id: `tk_${rec.id}`,
+        stokKodu: rec.stokKodu,
+        stokAdi: rec.stokAdi,
+        lotNumarasi: rec.lotNumarasi,
+        miad: formatMiad(rec.miad),
+        islemTipi: 'Kullanım',
+        actor: rec.userName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: rec.seriNumarasi ? [rec.seriNumarasi] : [],
+        konum: rec.laboratoryName || 'Laboratuvar',
+        postAdetHedef: Math.max(0, stockByLocationLot[labKey] || 0),
+      });
+    }
+  });
+}
+
+/**
+ * Build grouped rows for product/lot search - session based grouping
+ */
+function buildGroupedSearchRows(
+  ledgerRows: LedgerRow[],
+  depoStok: DepoStokItem[],
+  shipments: Shipment[],
+  transfers: Transfer[],
+  consumptions: ConsumptionRecord[],
+  stockCodes: string[],
+  searchType: 'product' | 'lot',
+  needle: string
+) {
+  // Filter items based on search type
+  const filterItem = (item: any) => {
+    if (searchType === 'lot') {
+      return (item.lotNumarasi || '').toLowerCase() === needle;
+    }
+    return stockCodes.includes(item.stokKodu);
+  };
+
+  // Calculate running totals
+  const stockByLocationLot: Record<string, number> = {};
+  const getKey = (konum: string, stokKodu: string, lotNumarasi?: string) =>
+    `${konum}|${stokKodu}|${lotNumarasi || ''}`;
+
+  // Collect all events chronologically
+  interface GroupedEvent {
+    tarih: Date;
+    type: string;
+    data: any;
+    groupKey: string;
+  }
+  const events: GroupedEvent[] = [];
+
+  // Group Mal Kabul by session (same timestamp, user, depot, product, lot)
+  const malKabulGroups = new Map<string, DepoStokItem[]>();
+  depoStok.forEach(d => {
+    if (!filterItem(d)) return;
+    const tarih = normDate((d as any).eklenmeTarihi);
+    // Round to minute for grouping
+    const tarihKey = `${Math.floor(tarih.getTime() / 60000)}`;
+    const groupKey = `mk|${tarihKey}|${(d as any).createdByName || (d as any).userName || ''}|${d.depotName || ''}|${d.stokKodu}|${d.lotNumarasi || ''}`;
+
+    if (!malKabulGroups.has(groupKey)) {
+      malKabulGroups.set(groupKey, []);
+    }
+    malKabulGroups.get(groupKey)!.push(d);
+  });
+
+  malKabulGroups.forEach((items, groupKey) => {
+    const first = items[0];
+    events.push({
+      tarih: normDate((first as any).eklenmeTarihi),
+      type: 'malKabul',
+      data: items,
+      groupKey
+    });
+  });
+
+  // Group Shipments by session
+  shipments.forEach(sh => {
+    const relevantItems = (sh.items || []).filter(filterItem);
+    if (relevantItems.length === 0) return;
+
+    // Group by product+lot within the shipment
+    const itemGroups = new Map<string, any[]>();
+    relevantItems.forEach(it => {
+      const key = `${it.stokKodu}|${it.lotNumarasi || ''}`;
+      if (!itemGroups.has(key)) itemGroups.set(key, []);
+      itemGroups.get(key)!.push(it);
+    });
+
+    itemGroups.forEach((items, itemKey) => {
+      events.push({
+        tarih: normDate(sh.timestamp),
+        type: 'shipment',
+        data: { shipment: sh, items },
+        groupKey: `sh|${sh.id}|${itemKey}`
+      });
+    });
+  });
+
+  // Group Transfers by session
+  transfers.forEach(tr => {
+    const relevantItems = (tr.items || []).filter(filterItem);
+    if (relevantItems.length === 0) return;
+
+    // Group by product+lot within the transfer
+    const itemGroups = new Map<string, any[]>();
+    relevantItems.forEach((it: any) => {
+      const key = `${it.stokKodu}|${it.lotNumarasi || ''}`;
+      if (!itemGroups.has(key)) itemGroups.set(key, []);
+      itemGroups.get(key)!.push(it);
+    });
+
+    itemGroups.forEach((items, itemKey) => {
+      events.push({
+        tarih: normDate(tr.timestamp),
+        type: 'transfer',
+        data: { transfer: tr, items },
+        groupKey: `tr|${tr.id}|${itemKey}`
+      });
+    });
+  });
+
+  // Consumptions are always individual (each usage is separate)
+  consumptions.forEach(rec => {
+    if (!filterItem(rec)) return;
+    events.push({
+      tarih: normDate(rec.consumptionTimestamp),
+      type: 'consumption',
+      data: rec,
+      groupKey: `tk|${rec.id}`
+    });
+  });
+
+  // Sort by date
+  events.sort((a, b) => a.tarih.getTime() - b.tarih.getTime());
+
+  // Process events and calculate postAdet
+  events.forEach(ev => {
+    if (ev.type === 'malKabul') {
+      const items = ev.data as DepoStokItem[];
+      const first = items[0];
+      const key = getKey(first.depotName || 'Depo', first.stokKodu, first.lotNumarasi);
+      stockByLocationLot[key] = (stockByLocationLot[key] || 0) + items.length;
+
+      const allSerials = items.flatMap(d => serialsOfDepoStok(d));
+
+      ledgerRows.push({
+        id: `mk_grp_${ev.groupKey}`,
+        stokKodu: first.stokKodu,
+        stokAdi: first.stokAdi,
+        lotNumarasi: first.lotNumarasi,
+        miad: formatMiad(first.miad),
+        islemTipi: 'Mal Kabul',
+        actor: (first as any).createdByName || (first as any).userName || (first as any).ekleyenKullanici || '-',
+        tarih: ev.tarih,
+        adet: items.length,
+        seriNolar: allSerials,
+        konum: first.depotName || 'Depo',
+        postAdetDepo: stockByLocationLot[key],
+      });
+    } else if (ev.type === 'shipment') {
+      const { shipment: sh, items } = ev.data;
+      const first = items[0];
+      const qty = items.reduce((sum: number, it: any) => sum + (it.quantity || serialsOfShipmentItem(it).length || 1), 0);
+
+      const depoKey = getKey(sh.depotName || 'Depo', first.stokKodu, first.lotNumarasi);
+      const labKey = getKey(sh.recipientHospital, first.stokKodu, first.lotNumarasi);
+
+      stockByLocationLot[depoKey] = (stockByLocationLot[depoKey] || 0) - qty;
+      stockByLocationLot[labKey] = (stockByLocationLot[labKey] || 0) + qty;
+
+      const allSerials = items.flatMap((it: any) => serialsOfShipmentItem(it));
+
+      ledgerRows.push({
+        id: `sh_grp_${ev.groupKey}`,
+        stokKodu: first.stokKodu,
+        stokAdi: first.stokAdi,
+        lotNumarasi: first.lotNumarasi,
+        miad: formatMiad(first.miad),
+        islemTipi: 'Karşılanan Sipariş',
+        actor: sh.userName || '-',
+        tarih: ev.tarih,
+        adet: qty,
+        seriNolar: allSerials,
+        konum: sh.depotName || 'Depo',
+        hedefKonum: sh.recipientHospital,
+        postAdetDepo: Math.max(0, stockByLocationLot[depoKey] || 0),
+        postAdetHedef: stockByLocationLot[labKey] || 0,
+      });
+    } else if (ev.type === 'transfer') {
+      const { transfer: tr, items } = ev.data;
+      const first = items[0];
+      const qty = items.length;
+
+      const sourceKey = getKey(tr.sourceDepotName || 'Depo', first.stokKodu, first.lotNumarasi);
+      const targetKey = getKey(tr.targetName, first.stokKodu, first.lotNumarasi);
+
+      stockByLocationLot[sourceKey] = (stockByLocationLot[sourceKey] || 0) - qty;
+      stockByLocationLot[targetKey] = (stockByLocationLot[targetKey] || 0) + qty;
+
+      const allSerials = items.map((it: any) => it.seriNumarasi).filter(Boolean);
+
+      ledgerRows.push({
+        id: `tr_grp_${ev.groupKey}`,
+        stokKodu: first.stokKodu,
+        stokAdi: first.stokAdi,
+        lotNumarasi: first.lotNumarasi,
+        miad: formatMiad(first.miad),
+        islemTipi: 'Direkt Transfer',
+        actor: tr.userName || '-',
+        tarih: ev.tarih,
+        adet: qty,
+        seriNolar: allSerials,
+        konum: tr.sourceDepotName || 'Depo',
+        hedefKonum: tr.targetName,
+        postAdetDepo: Math.max(0, stockByLocationLot[sourceKey] || 0),
+        postAdetHedef: stockByLocationLot[targetKey] || 0,
+      });
+    } else if (ev.type === 'consumption') {
+      const rec = ev.data as ConsumptionRecord;
+      const labKey = getKey(rec.laboratoryName || 'Laboratuvar', rec.stokKodu, rec.lotNumarasi);
+      stockByLocationLot[labKey] = (stockByLocationLot[labKey] || 0) - 1;
+
+      ledgerRows.push({
+        id: `tk_${rec.id}`,
+        stokKodu: rec.stokKodu,
+        stokAdi: rec.stokAdi,
+        lotNumarasi: rec.lotNumarasi,
+        miad: formatMiad(rec.miad),
+        islemTipi: 'Kullanım',
+        actor: rec.userName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: rec.seriNumarasi ? [rec.seriNumarasi] : [],
+        konum: rec.laboratoryName || 'Laboratuvar',
+        postAdetHedef: Math.max(0, stockByLocationLot[labKey] || 0),
+      });
+    }
+  });
 }
