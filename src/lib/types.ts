@@ -735,3 +735,35 @@ export interface LabTransferDates {
   }>;
   updatedAt: TimestampLike;
 }
+
+// Route Request - Laboratuvar ekleme veya yer değişikliği talepleri
+export interface RouteRequest {
+  id: string;
+  type: 'add' | 'reorder'; // 'add': Route'a ekleme, 'reorder': Yer değişikliği
+  labId: string;
+  labName: string;
+  labLat?: number;
+  labLng?: number;
+  routeId: string;
+  routeDate: string; // ISO date string
+  routeDriverName: string;
+  // Ekleme talebi için: hangi duraktan sonra eklenmeli
+  insertAfterStopId?: string | null;
+  insertAfterStopName?: string | null;
+  // Yer değişikliği için: mevcut ve istenen sıra
+  currentOrder?: number;
+  requestedOrder?: number;
+  requestedAfterStopId?: string | null;
+  requestedAfterStopName?: string | null;
+  // Talep bilgileri
+  requestedBy: string; // User ID
+  requestedByName: string;
+  requestedAt: TimestampLike;
+  note?: string;
+  // Durum
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: TimestampLike;
+  rejectionReason?: string;
+}

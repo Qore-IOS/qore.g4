@@ -1,20 +1,26 @@
 // app/(protected)/route-planlayici/izlem/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag, Car, Search, X, Building2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag, Car, Search, X, Building2, Plus, ArrowUpDown, Send, AlertCircle } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, onSnapshot, query, Timestamp, where } from 'firebase/firestore';
-import type { User as AppUser, Hospital } from '@/lib/types';
+import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
+import type { User as AppUser, Hospital, RouteRequest } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/hooks/use-toast';
 
 type Vehicle = {
   id: string;
@@ -74,15 +80,47 @@ type DriverWithRoute = {
 
 const toDayKey = (d: Date) => Number(format(d, 'yyyyMMdd'));
 
+// Laboratuvar route durumu tipi
+type LabRouteStatus = {
+  isInRoute: boolean;
+  routes: Array<{
+    routeId: string;
+    routeDate: string;
+    driverName: string;
+    stopOrder: number;
+    stopName: string;
+    isToday: boolean;
+    isFuture: boolean;
+  }>;
+};
+
 export default function SoforIzlemPage() {
+  const { currentUser, currentUserProfile } = useAuth();
+  const { toast } = useToast();
+
   const [driversWithRoutes, setDriversWithRoutes] = useState<DriverWithRoute[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Tüm rotalar (talep modal'ları için)
+  const [allRoutes, setAllRoutes] = useState<RouteDoc[]>([]);
 
   // Laboratuvar arama state'leri
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null);
   const [hospitalSearchTerm, setHospitalSearchTerm] = useState('');
   const [isHospitalDropdownOpen, setIsHospitalDropdownOpen] = useState(false);
+
+  // Talep modal state'leri
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [requestType, setRequestType] = useState<'add' | 'reorder'>('add');
+  const [selectedLabForRequest, setSelectedLabForRequest] = useState<Hospital | null>(null);
+  const [selectedLabRouteInfo, setSelectedLabRouteInfo] = useState<LabRouteStatus['routes'][0] | null>(null);
+
+  // Request form state'leri
+  const [selectedRouteId, setSelectedRouteId] = useState<string>('');
+  const [insertAfterStopId, setInsertAfterStopId] = useState<string>('');
+  const [requestNote, setRequestNote] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Laboratuvarları getir
   useEffect(() => {
@@ -313,6 +351,134 @@ export default function SoforIzlemPage() {
     return results;
   }, [driversWithRoutes, selectedHospitalId]);
 
+  // Tüm açık rotaları getir (talep modal'ları için)
+  useEffect(() => {
+    const today = toDayKey(new Date());
+    const routesQuery = query(
+      collection(db, 'routes'),
+      where('status', 'in', ['open', 'in_progress'])
+    );
+
+    const unsub = onSnapshot(routesQuery, (snap) => {
+      const routes = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as RouteDoc))
+        .filter(r => r.date >= today) // Bugün ve gelecek
+        .sort((a, b) => a.date - b.date);
+      setAllRoutes(routes);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // Laboratuvarın route durumunu hesapla
+  const getLabRouteStatus = useCallback((labId: string): LabRouteStatus => {
+    const today = toDayKey(new Date());
+    const routes: LabRouteStatus['routes'] = [];
+
+    for (const driverData of driversWithRoutes) {
+      for (const route of driverData.allRoutes) {
+        const stop = route.stops?.find(s => s.hospitalId === labId);
+        if (stop && route.status !== 'completed') {
+          routes.push({
+            routeId: route.id,
+            routeDate: route.dateISO,
+            driverName: route.driverName,
+            stopOrder: stop.order,
+            stopName: stop.name,
+            isToday: route.date === today,
+            isFuture: route.date > today,
+          });
+        }
+      }
+    }
+
+    // Tarihe göre sırala
+    routes.sort((a, b) => new Date(a.routeDate).getTime() - new Date(b.routeDate).getTime());
+
+    return {
+      isInRoute: routes.length > 0,
+      routes,
+    };
+  }, [driversWithRoutes]);
+
+  // Talep modal'ını aç
+  const openRequestModal = useCallback((lab: Hospital, type: 'add' | 'reorder', routeInfo?: LabRouteStatus['routes'][0]) => {
+    setSelectedLabForRequest(lab);
+    setRequestType(type);
+    setSelectedLabRouteInfo(routeInfo || null);
+    setSelectedRouteId(routeInfo?.routeId || '');
+    setInsertAfterStopId('');
+    setRequestNote('');
+    setRequestModalOpen(true);
+  }, []);
+
+  // Talep gönder
+  const handleSubmitRequest = useCallback(async () => {
+    if (!selectedLabForRequest || !currentUser) return;
+
+    if (requestType === 'add' && !selectedRouteId) {
+      toast({ title: 'Hata', description: 'Lütfen bir rota seçin.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const selectedRoute = allRoutes.find(r => r.id === selectedRouteId) ||
+                           (selectedLabRouteInfo ? allRoutes.find(r => r.id === selectedLabRouteInfo.routeId) : null);
+
+      if (!selectedRoute) {
+        toast({ title: 'Hata', description: 'Seçilen rota bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      const insertAfterStop = selectedRoute.stops?.find(s => s.hospitalId === insertAfterStopId);
+
+      const requestId = `${selectedLabForRequest.id}_${selectedRoute.id}_${Date.now()}`;
+      const request: Omit<RouteRequest, 'id'> & { id: string } = {
+        id: requestId,
+        type: requestType,
+        labId: selectedLabForRequest.id!,
+        labName: selectedLabForRequest.name || '',
+        labLat: selectedLabForRequest.lat,
+        labLng: selectedLabForRequest.lng,
+        routeId: selectedRoute.id,
+        routeDate: selectedRoute.dateISO,
+        routeDriverName: selectedRoute.driverName,
+        insertAfterStopId: insertAfterStopId || null,
+        insertAfterStopName: insertAfterStop?.name || null,
+        currentOrder: requestType === 'reorder' ? selectedLabRouteInfo?.stopOrder : undefined,
+        requestedBy: currentUser.uid,
+        requestedByName: (currentUserProfile as any)?.name || (currentUserProfile as any)?.displayName || currentUser.email || 'Bilinmiyor',
+        requestedAt: serverTimestamp(),
+        note: requestNote || undefined,
+        status: 'pending',
+      };
+
+      await setDoc(doc(db, 'routeRequests', requestId), request);
+
+      toast({
+        title: requestType === 'add' ? 'Ekleme Talebi Gönderildi' : 'Yer Değişikliği Talebi Gönderildi',
+        description: `${selectedLabForRequest.name} için talep oluşturuldu.`,
+      });
+
+      setRequestModalOpen(false);
+      setSelectedLabForRequest(null);
+      setSelectedLabRouteInfo(null);
+    } catch (error) {
+      console.error('Talep gönderilirken hata:', error);
+      toast({ title: 'Hata', description: 'Talep gönderilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [selectedLabForRequest, currentUser, currentUserProfile, requestType, selectedRouteId, allRoutes, selectedLabRouteInfo, insertAfterStopId, requestNote, toast]);
+
+  // Seçilen rota'nın durakları
+  const selectedRouteStops = useMemo(() => {
+    const route = allRoutes.find(r => r.id === selectedRouteId);
+    return route?.stops?.sort((a, b) => a.order - b.order) || [];
+  }, [allRoutes, selectedRouteId]);
+
   // Filtre temizle
   const clearHospitalFilter = () => {
     setSelectedHospitalId(null);
@@ -403,24 +569,79 @@ export default function SoforIzlemPage() {
               </div>
               {/* Dropdown */}
               {isHospitalDropdownOpen && !selectedHospitalId && (
-                <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg max-h-80 overflow-y-auto">
                   {filteredHospitals.length === 0 ? (
                     <div className="px-3 py-2 text-sm text-muted-foreground">Laboratuvar bulunamadı</div>
                   ) : (
-                    filteredHospitals.map(hospital => (
-                      <button
-                        key={hospital.id}
-                        className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
-                        onClick={() => {
-                          setSelectedHospitalId(hospital.id!);
-                          setHospitalSearchTerm('');
-                          setIsHospitalDropdownOpen(false);
-                        }}
-                      >
-                        <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                        <span className="truncate">{hospital.name}</span>
-                      </button>
-                    ))
+                    filteredHospitals.map(hospital => {
+                      const routeStatus = getLabRouteStatus(hospital.id!);
+                      const firstRoute = routeStatus.routes[0];
+
+                      return (
+                        <div
+                          key={hospital.id}
+                          className="px-3 py-2 hover:bg-muted transition-colors border-b last:border-0"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            {/* Sol taraf - Lab bilgisi ve filtre butonu */}
+                            <button
+                              className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                              onClick={() => {
+                                setSelectedHospitalId(hospital.id!);
+                                setHospitalSearchTerm('');
+                                setIsHospitalDropdownOpen(false);
+                              }}
+                            >
+                              <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                              <span className="text-sm truncate">{hospital.name}</span>
+                            </button>
+
+                            {/* Sağ taraf - Route durumu ve talep butonu */}
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {routeStatus.isInRoute ? (
+                                <>
+                                  <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-700 border-green-500/30">
+                                    {firstRoute.isToday ? 'Bugün' : format(new Date(firstRoute.routeDate), 'dd MMM', { locale: tr })}
+                                    {' • '}#{firstRoute.stopOrder}
+                                  </Badge>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openRequestModal(hospital, 'reorder', firstRoute);
+                                    }}
+                                  >
+                                    <ArrowUpDown className="h-3 w-3 mr-1" />
+                                    Sıra Değiştir
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 border-amber-500/30">
+                                    <AlertCircle className="h-2.5 w-2.5 mr-1" />
+                                    Rotada yok
+                                  </Badge>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openRequestModal(hospital, 'add');
+                                    }}
+                                  >
+                                    <Plus className="h-3 w-3 mr-1" />
+                                    Rotaya Ekle
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               )}
@@ -474,6 +695,142 @@ export default function SoforIzlemPage() {
           ))}
         </div>
       )}
+
+      {/* Talep Modal'ı */}
+      <Dialog open={requestModalOpen} onOpenChange={setRequestModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {requestType === 'add' ? (
+                <>
+                  <Plus className="h-5 w-5 text-green-600" />
+                  Route'a Ekleme Talebi
+                </>
+              ) : (
+                <>
+                  <ArrowUpDown className="h-5 w-5 text-blue-600" />
+                  Yer Değişikliği Talebi
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Laboratuvar Bilgisi */}
+            <div className="bg-muted/50 rounded-lg p-3">
+              <Label className="text-xs text-muted-foreground">Laboratuvar</Label>
+              <div className="flex items-center gap-2 mt-1">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium">{selectedLabForRequest?.name}</span>
+              </div>
+              {requestType === 'reorder' && selectedLabRouteInfo && (
+                <div className="mt-2 text-xs text-muted-foreground">
+                  Mevcut sıra: <span className="font-medium text-foreground">#{selectedLabRouteInfo.stopOrder}</span>
+                  {' • '}
+                  {selectedLabRouteInfo.isToday ? 'Bugün' : format(new Date(selectedLabRouteInfo.routeDate), 'dd MMMM yyyy', { locale: tr })}
+                  {' • '}
+                  {selectedLabRouteInfo.driverName}
+                </div>
+              )}
+            </div>
+
+            {/* Route Seçimi (sadece ekleme için) */}
+            {requestType === 'add' && (
+              <div className="space-y-2">
+                <Label>Hangi Rotaya Eklensin?</Label>
+                <Select value={selectedRouteId} onValueChange={setSelectedRouteId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Rota seçin..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allRoutes.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">Açık rota bulunamadı</div>
+                    ) : (
+                      allRoutes.map(route => (
+                        <SelectItem key={route.id} value={route.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{format(new Date(route.dateISO), 'dd MMM yyyy', { locale: tr })}</span>
+                            <span className="text-muted-foreground">•</span>
+                            <span>{route.driverName}</span>
+                            <span className="text-muted-foreground">•</span>
+                            <span className="text-xs text-muted-foreground">{route.stops?.length || 0} durak</span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Durak Sırası Seçimi */}
+            {(selectedRouteId || requestType === 'reorder') && (
+              <div className="space-y-2">
+                <Label>Hangi Duraktan Sonra?</Label>
+                <Select value={insertAfterStopId} onValueChange={setInsertAfterStopId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Durak seçin (en başa eklemek için boş bırakın)..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__START__">
+                      <span className="text-muted-foreground italic">En başa ekle (1. durak olarak)</span>
+                    </SelectItem>
+                    {(requestType === 'reorder' && selectedLabRouteInfo
+                      ? allRoutes.find(r => r.id === selectedLabRouteInfo.routeId)?.stops?.sort((a, b) => a.order - b.order) || []
+                      : selectedRouteStops
+                    ).map((stop, idx) => (
+                      <SelectItem key={stop.hospitalId} value={stop.hospitalId}>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="h-5 w-5 p-0 justify-center text-[10px]">
+                            {stop.order}
+                          </Badge>
+                          <span>{stop.name}</span>
+                          {requestType === 'reorder' && stop.hospitalId === selectedLabForRequest?.id && (
+                            <span className="text-xs text-amber-600">(mevcut)</span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Seçtiğiniz duraktan sonra {requestType === 'add' ? 'eklenecek' : 'taşınacak'}
+                </p>
+              </div>
+            )}
+
+            {/* Not */}
+            <div className="space-y-2">
+              <Label>Not (opsiyonel)</Label>
+              <Textarea
+                placeholder="Talep ile ilgili açıklama..."
+                value={requestNote}
+                onChange={(e) => setRequestNote(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRequestModalOpen(false)} disabled={isSubmitting}>
+              İptal
+            </Button>
+            <Button onClick={handleSubmitRequest} disabled={isSubmitting || (requestType === 'add' && !selectedRouteId)}>
+              {isSubmitting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                  Gönderiliyor...
+                </>
+              ) : (
+                <>
+                  <Send className="h-4 w-4 mr-2" />
+                  Talep Gönder
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
