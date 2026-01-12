@@ -22,6 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { useLoading } from '@/contexts/loading-context';
 import { compareAsc, parse as parseDate } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
@@ -66,9 +67,16 @@ const logSerialHistory = async (seriNo: string, type: string, details: Record<st
 
 export default function UrunKullanimPanel() {
   const { currentUser, currentUserProfile } = useAuth();
+  const { suppressGlobalLoading } = useLoading();
   const { toast } = useToast();
   const router = useRouter();
   const params = useParams();
+
+  // Suppress global loading animation on this page for better performance
+  useEffect(() => {
+    const unsuppress = suppressGlobalLoading();
+    return unsuppress;
+  }, [suppressGlobalLoading]);
 
   const slug = params.slug as string[] | undefined;
   const labIdFromUrl = slug?.[0] || '';
