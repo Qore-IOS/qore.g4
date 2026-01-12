@@ -624,7 +624,7 @@ export default function UrunKullanimPanel() {
   };
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="flex flex-col min-h-[calc(100vh-100px)] p-4 gap-4">
       {/* Header with user name and action buttons */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
@@ -745,7 +745,7 @@ export default function UrunKullanimPanel() {
             width={540}
             height={540}
             data-ai-hint="laboratory illustration"
-            className="w-full max-w-[200px] h-auto object-contain"
+            className="w-full max-w-[220px] h-auto object-contain"
             priority
           />
         </div>
@@ -821,15 +821,25 @@ export default function UrunKullanimPanel() {
         </Card>
       </div>
 
-      {/* Device Grid - No background, smaller images */}
+      {/* Device Grid - Dynamically sized, centered at bottom */}
       {selectedLabId && (
-        <div className="pt-2" role="region" aria-label="Laboratuvar cihazları">
+        <div className="flex-1 flex items-end justify-center pt-4" role="region" aria-label="Laboratuvar cihazları">
           {devicesToDisplay.length > 0 ? (
-            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3" role="list" aria-label="Cihaz listesi">
+            <div
+              className="flex flex-wrap justify-center items-end gap-4 w-full px-4"
+              role="list"
+              aria-label="Cihaz listesi"
+              style={{
+                // Dynamic sizing: fewer devices = larger size, more devices = smaller size
+                // Min 80px, Max 180px per device based on count
+                '--device-size': `clamp(80px, calc((100vw - 64px) / ${Math.min(devicesToDisplay.length, 8)}), 180px)`
+              } as React.CSSProperties}
+            >
               {devicesToDisplay.map((c) => (
                 <button
                   key={c.id}
-                  className="group relative w-full outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-transform hover:scale-105"
+                  className="group relative outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-transform hover:scale-105"
+                  style={{ width: 'var(--device-size)', maxWidth: '180px' }}
                   onClick={() => {
                     const event = new CustomEvent('openDeviceFaultModal', { detail: c });
                     window.dispatchEvent(event);
@@ -840,8 +850,8 @@ export default function UrunKullanimPanel() {
                 >
                   {/* Device name and serial above image */}
                   <div className="text-center mb-1">
-                    <div className="text-[10px] font-medium leading-tight truncate">{c.cihazAdi || c.model}</div>
-                    <div className="text-[9px] text-muted-foreground font-mono truncate">{c.seriNumarasi || '-'}</div>
+                    <div className="text-xs font-medium leading-tight truncate">{c.cihazAdi || c.model}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono truncate">{c.seriNumarasi || '-'}</div>
                   </div>
                   {/* No background container */}
                   <div className="relative w-full aspect-square flex items-center justify-center">
@@ -850,7 +860,7 @@ export default function UrunKullanimPanel() {
                       alt={c.cihazAdi || c.model || 'Device'}
                       fill
                       className="object-contain"
-                      sizes="(max-width: 640px) 25vw, (max-width: 768px) 16vw, (max-width: 1024px) 12vw, 10vw"
+                      sizes="180px"
                       priority={false}
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
@@ -861,8 +871,8 @@ export default function UrunKullanimPanel() {
                     {/* Status light at bottom */}
                     <div
                       className={cn(
-                        "absolute bottom-0 w-full h-1 rounded-full",
-                        (c.arizaDurumu !== 'yok') ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]'
+                        "absolute bottom-0 w-full h-1.5 rounded-full",
+                        (c.arizaDurumu !== 'yok') ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.7)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.7)]'
                       )}
                     />
                   </div>
