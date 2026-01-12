@@ -735,22 +735,22 @@ export default function UrunKullanimPanel() {
         </p>
       </div>
 
-      {/* Main content: Image + Cards in a single row */}
+      {/* Main content: Image + Cards in a single row - equal width */}
       <div className="grid grid-cols-12 gap-4" role="region" aria-labelledby="urun-kullanim-title">
-        {/* Small image - 3 cols */}
-        <div className="col-span-12 md:col-span-3 flex items-center justify-center">
+        {/* Lab image - 4 cols (33%) */}
+        <div className="col-span-12 md:col-span-4 flex items-center justify-center">
           <Image
             src="/ChatGPT%20Image%206%20A%C4%9Fu%202025%2009_10_30.png"
             alt="Merkez Laboratuvar dioraması"
             width={540}
             height={540}
             data-ai-hint="laboratory illustration"
-            className="w-full max-w-[220px] h-auto object-contain"
+            className="w-full max-w-[280px] h-auto object-contain"
             priority
           />
         </div>
 
-        {/* Son Okutulan Ürün Card - 4.5 cols */}
+        {/* Son Okutulan Ürün Card - 4 cols (33%) */}
         <Card
           className={cn("col-span-12 md:col-span-4 transition-colors relative overflow-hidden flex flex-col", scanStatus === 'success' && 'border-green-500', scanStatus === 'error' && 'border-destructive')}
           role="status"
@@ -791,8 +791,8 @@ export default function UrunKullanimPanel() {
           </CardContent>
         </Card>
 
-        {/* Son 10 Tüketim Card - 5 cols */}
-        <Card className="col-span-12 md:col-span-5 flex flex-col">
+        {/* Son 10 Tüketim Card - 4 cols (33%) */}
+        <Card className="col-span-12 md:col-span-4 flex flex-col">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <Clock className="w-4 h-4 text-muted-foreground"/>
