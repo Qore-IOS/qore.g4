@@ -624,260 +624,259 @@ export default function UrunKullanimPanel() {
   };
 
   return (
-    <div className="space-y-6">
-       <div className="p-4 sm:p-6 pb-0">
+    <div className="space-y-4 p-4">
+      {/* Header with user name and action buttons */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
           <h2 className="text-2xl font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
           <p className="text-sm text-muted-foreground">{selectedLabName || 'Laboratuvar seçilmedi'}</p>
         </div>
-      <Card className="shadow-lg" role="region" aria-labelledby="urun-kullanim-title">
-        <CardHeader>
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <CardTitle id="urun-kullanim-title" className="text-xl font-headline flex items-center"><PackageMinus className="mr-2 h-6 w-6 text-primary" aria-hidden="true" />Ürün Kullanım Kaydı</CardTitle>
-              <CardDescription>Laboratuvar seçerek kullanılan ürünlerin barkodlarını okutup stoktan düşün.</CardDescription>
-            </div>
+
+        {/* Action buttons row */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Lab selector */}
+          <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={isLabPopoverOpen}
+                className="w-[200px] justify-between font-normal"
+                disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
+              >
+                {selectedLabId
+                  ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
+                  : "Laboratuvar seçin..."}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[200px] p-0">
+              <Command>
+                <CommandInput placeholder="Laboratuvar ara..." />
+                <CommandList>
+                  {isLoading ? <div className="p-4 text-sm text-center">Yükleniyor...</div> :
+                   <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
+                  }
+                  <CommandGroup>
+                    {assignedLaboratories.sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((lab) => (
+                      <CommandItem
+                        key={lab.id}
+                        value={lab.name}
+                        onSelect={() => {
+                          onHospitalSelect(lab.id);
+                          setIsLabPopoverOpen(false);
+                        }}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
+                        {lab.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          <Button
+            onClick={() => setIsCameraScannerOpen(true)}
+            variant="outline"
+            size="icon"
+            className="h-9 w-9"
+            title="Kamera ile Tara"
+            aria-label="Kamera ile barkod tara"
+            disabled={!selectedLabId}
+          >
+            <Camera className="h-4 w-4" aria-hidden="true" />
+          </Button>
+
+          {selectedLab?.manualDeductionEnabled && (
             <Button
               variant="outline"
-              size="sm"
-              onClick={() => router.push(`/cop-kutusu/${selectedLabId}`)}
+              size="icon"
+              className="h-9 w-9"
+              title="Manuel Düşüm"
+              aria-label="Manuel stok düşümü yap"
               disabled={!selectedLabId}
-              className="ml-4"
+              onClick={() => setIsManualDeductionOpen(true)}
             >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Çöp Kutusu
+              <Pencil className="h-4 w-4" aria-hidden="true" />
             </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid md:grid-cols-2 gap-6">
-              <div className="w-full flex items-center justify-center">
-                <Image
-                  src="/ChatGPT%20Image%206%20A%C4%9Fu%202025%2009_10_30.png"
-                  alt="Merkez Laboratuvar dioraması"
-                  width={1080}
-                  height={1080}
-                  data-ai-hint="laboratory illustration"
-                  className="w-full h-auto object-contain"
-                  priority
-                />
-              </div>
+          )}
 
-              <div className="w-full space-y-4">
-                  <div className="flex items-end gap-2">
-                    <div className="flex-grow">
-                      <Label className="block text-sm font-medium mb-1">Laboratuvar Seçin</Label>
-                      <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={isLabPopoverOpen}
-                            className="w-full justify-between font-normal"
-                            disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
-                          >
-                            {selectedLabId
-                              ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
-                              : "Laboratuvar seçin..."}
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                          <Command>
-                            <CommandInput placeholder="Laboratuvar ara..." />
-                            <CommandList>
-                              {isLoading ? <div className="p-4 text-sm text-center">Yükleniyor...</div> : 
-                               <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                              }
-                              <CommandGroup>
-                                {assignedLaboratories.sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((lab) => (
-                                  <CommandItem
-                                    key={lab.id}
-                                    value={lab.name}
-                                    onSelect={() => {
-                                      onHospitalSelect(lab.id);
-                                      setIsLabPopoverOpen(false);
-                                    }}
-                                  >
-                                    <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                                    {lab.name}
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <Button
-                      onClick={() => setIsCameraScannerOpen(true)}
-                      variant="outline"
-                      size="icon"
-                      className="h-10 w-10"
-                      title="Kamera ile Tara"
-                      aria-label="Kamera ile barkod tara"
-                      disabled={!selectedLabId}
-                    >
-                      <Camera className="h-5 w-5" aria-hidden="true" />
-                    </Button>
-                     {selectedLab?.manualDeductionEnabled && (
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-10 w-10"
-                        title="Manuel Düşüm"
-                        aria-label="Manuel stok düşümü yap"
-                        disabled={!selectedLabId}
-                        onClick={() => setIsManualDeductionOpen(true)}
-                      >
-                          <Pencil className="h-5 w-5" aria-hidden="true" />
-                      </Button>
-                    )}
-                  </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push(`/cop-kutusu/${selectedLabId}`)}
+            disabled={!selectedLabId}
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Çöp Kutusu
+          </Button>
 
-                  <p className="text-sm text-muted-foreground text-center">
-                      <Info className="inline h-4 w-4 mr-1 text-primary"/>
-                      Barkod okuyucu bu alanda aktiftir. Okutulan ürünler stoktan düşecektir.
-                  </p>
+          <Button variant="outline" size="sm" onClick={() => router.push('/tuketim-istatistikleri')}>
+            <TrendingUp className="h-4 w-4 mr-1" /> İstatistikler
+          </Button>
 
-                  <Card
-                    className={cn("w-full transition-colors relative overflow-hidden", scanStatus === 'success' && 'border-green-500', scanStatus === 'error' && 'border-destructive')}
-                    role="status"
-                    aria-live="polite"
-                    aria-label="Son okutulan ürün bilgisi"
-                  >
-                      <div className="flex">
-                          <div className="flex-1 p-4">
-                              <CardHeader className="p-0 mb-2">
-                                <div className={cn("flex items-center gap-2", scanStatus === 'success' && 'text-green-500', scanStatus === 'error' && 'text-destructive')}>
-                                  {scanStatus === 'success' ? <CheckCircle className="w-6 w-6" aria-hidden="true" /> : scanStatus === 'error' ? <XCircle className="w-6 w-6" aria-hidden="true" /> : <Barcode className="w-6 w-6" aria-hidden="true" />}
-                                  <span className="font-semibold">Son Okutulan Ürün</span>
-                                </div>
-                              </CardHeader>
-                              <CardContent className="p-0">
-                                {lastScannedProduct ? (
-                                  <div className="space-y-1">
-                                    <p className="text-lg font-semibold">{safeName(lastScannedProduct.stokKodu, lastScannedProduct.stokAdi ?? '')}</p>
-                                    <p className="text-sm text-muted-foreground">Seri No: <span className="font-mono">{lastScannedProduct.seriNumarasi}</span></p>
-                                    <p className="text-sm text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad ?? ''}</p>
-                                    {lastScannedProduct.subPointName ? (
-                                      <p className="text-sm text-muted-foreground">Tüketim Noktası: {lastScannedProduct.subPointName}</p>
-                                    ) : null}
-                                    {scanStatus === 'success' && <p className="text-green-500 text-sm font-medium mt-2">Stoktan Düşüldü!</p>}
-                                  </div>
-                                ) : (
-                                  <p className="text-muted-foreground text-sm">Henüz ürün okutulmadı.</p>
-                                )}
-                              </CardContent>
-                          </div>
-                          {lastScannedDeviceGroupImage && (
-                              <div className="w-2/5 p-2 flex items-center justify-center">
-                                  <Image
-                                      src={`/${lastScannedDeviceGroupImage}`}
-                                      alt="Cihaz Grubu"
-                                      width={150}
-                                      height={150}
-                                      className="object-contain max-h-full"
-                                  />
-                              </div>
-                          )}
-                      </div>
-                  </Card>
+          <Button variant="outline" size="sm" onClick={() => router.push(`/urun-talep`)}>
+            <ClipboardPlus className="h-4 w-4 mr-1" /> Ürün Talep
+          </Button>
+        </div>
+      </div>
 
-                  <Card className="w-full">
-                      <CardHeader>
-                          <CardTitle className="text-base flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-muted-foreground"/>
-                              Son 10 Tüketim
-                          </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                          <ScrollArea className="h-32">
-                              {sessionHistory.length === 0 ? (
-                                  <p className="text-sm text-muted-foreground">Henüz tüketim kaydı yok.</p>
-                              ) : (
-                                  <ul className="text-sm space-y-1">
-                                      {sessionHistory.map((item, index) => (
-                                          <li key={index} className="flex justify-between items-center text-xs p-1 rounded-md hover:bg-muted/50">
-                                              <div className="truncate">
-                                                  <span className="font-semibold">{safeName(item.stokKodu, item.stokAdi ?? '')}</span>
-                                                  <span className="text-muted-foreground ml-2">({item.lotNumarasi})</span>
-                                              </div>
-                                              <span className="font-mono text-muted-foreground flex-shrink-0">{item.seriNumarasi}</span>
-                                          </li>
-                                      ))}
-                                  </ul>
-                              )}
-                          </ScrollArea>
-                      </CardContent>
-                  </Card>
-              </div>
+      {/* Title and info */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <PackageMinus className="h-5 w-5 text-primary" aria-hidden="true" />
+          <h3 className="text-lg font-semibold">Ürün Kullanım Kaydı</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          <Info className="inline h-3 w-3 mr-1 text-primary"/>
+          Barkod okuyucu aktif - Okutulan ürünler stoktan düşecektir.
+        </p>
+      </div>
+
+      {/* Main content: Image + Cards in a single row */}
+      <div className="grid grid-cols-12 gap-4" role="region" aria-labelledby="urun-kullanim-title">
+        {/* Small image - 3 cols */}
+        <div className="col-span-12 md:col-span-3 flex items-center justify-center">
+          <Image
+            src="/ChatGPT%20Image%206%20A%C4%9Fu%202025%2009_10_30.png"
+            alt="Merkez Laboratuvar dioraması"
+            width={540}
+            height={540}
+            data-ai-hint="laboratory illustration"
+            className="w-full max-w-[200px] h-auto object-contain"
+            priority
+          />
+        </div>
+
+        {/* Son Okutulan Ürün Card - 4.5 cols */}
+        <Card
+          className={cn("col-span-12 md:col-span-4 transition-colors relative overflow-hidden flex flex-col", scanStatus === 'success' && 'border-green-500', scanStatus === 'error' && 'border-destructive')}
+          role="status"
+          aria-live="polite"
+          aria-label="Son okutulan ürün bilgisi"
+        >
+          <CardHeader className="pb-2">
+            <div className={cn("flex items-center gap-2", scanStatus === 'success' && 'text-green-500', scanStatus === 'error' && 'text-destructive')}>
+              {scanStatus === 'success' ? <CheckCircle className="w-5 h-5" aria-hidden="true" /> : scanStatus === 'error' ? <XCircle className="w-5 h-5" aria-hidden="true" /> : <Barcode className="w-5 h-5" aria-hidden="true" />}
+              <span className="font-semibold text-sm">Son Okutulan Ürün</span>
             </div>
-        </CardContent>
-        <CardFooter className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t">
-            <Button variant="outline" onClick={() => router.push(`/urun-talep`)} className="w-full sm:w-auto">
-              <ClipboardPlus className="mr-2 h-4 w-4" /> Ürün Talep
-            </Button>
-            <Button variant="outline" onClick={() => router.push('/tuketim-istatistikleri')} className="w-full sm:w-auto">
-                <TrendingUp className="mr-2 h-4 w-4"/> Tüketim İstatistikleri
-            </Button>
-        </CardFooter>
-      </Card>
-      
-      <Card className="bg-gradient-to-br from-slate-900/40 to-black/20 border-white/10" role="region" aria-label="Laboratuvar cihazları">
-        <CardContent className="pt-6">
-          {selectedLabId && (
-            devicesToDisplay.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 w-full" role="list" aria-label="Cihaz listesi">
-                {devicesToDisplay.map((c) => (
-                  <button
-                    key={c.id}
-                    className="group relative w-full outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-transform hover:scale-105"
-                    onClick={() => {
-                      const event = new CustomEvent('openDeviceFaultModal', { detail: c });
-                      window.dispatchEvent(event);
-                    }}
-                    title={`${c.cihazAdi || c.model || ''} • ${c.seriNumarasi || ''}`}
-                    aria-label={`${c.cihazAdi || c.model || 'Cihaz'} - Seri: ${c.seriNumarasi || 'N/A'} - ${(c.arizaDurumu !== 'yok') ? 'Arızalı' : 'Çalışıyor'}`}
-                    role="listitem"
-                  >
-                    <div className="text-center mb-2">
-                      <div className="text-sm font-medium leading-tight truncate px-1">{c.cihazAdi || c.model}</div>
-                      <div className="text-xs text-white/60 font-mono truncate">{c.seriNumarasi || '-'}</div>
-                    </div>
-                    <div className="relative w-full aspect-square bg-white/5 rounded-lg flex items-center justify-center overflow-hidden border border-white/5 group-hover:border-primary/30">
-                      <Image
-                        src={c.imageUrl ? (c.imageUrl.startsWith('/') ? c.imageUrl : `/${c.imageUrl}`) : '/lab_diorama.png'}
-                        alt={c.cihazAdi || c.model || 'Device'}
-                        fill
-                        className="object-contain p-2"
-                        sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 20vw"
-                        priority={false}
-                        onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.srcset = '/lab_diorama.png'; 
-                            target.src = '/lab_diorama.png';
-                        }}
-                      />
-                      <div
-                        className={cn(
-                          "absolute bottom-0 w-full h-1",
-                          (c.arizaDurumu !== 'yok') ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]'
-                        )}
-                      />
-                    </div>
-                  </button>
-                ))}
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-center">
+            {lastScannedProduct ? (
+              <div className="space-y-1">
+                <p className="text-base font-semibold truncate">{safeName(lastScannedProduct.stokKodu, lastScannedProduct.stokAdi ?? '')}</p>
+                <p className="text-xs text-muted-foreground">Seri: <span className="font-mono">{lastScannedProduct.seriNumarasi}</span></p>
+                <p className="text-xs text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad ?? ''}</p>
+                {lastScannedProduct.subPointName && (
+                  <p className="text-xs text-muted-foreground">Nokta: {lastScannedProduct.subPointName}</p>
+                )}
+                {scanStatus === 'success' && <p className="text-green-500 text-xs font-medium mt-1">Stoktan Düşüldü!</p>}
+                {lastScannedDeviceGroupImage && (
+                  <div className="mt-2 flex justify-center">
+                    <Image
+                      src={`/${lastScannedDeviceGroupImage}`}
+                      alt="Cihaz Grubu"
+                      width={80}
+                      height={80}
+                      className="object-contain"
+                    />
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-10 text-white/40 space-y-2">
-                <Info className="w-10 h-10 mb-2 opacity-20" />
-                <p>Bu laboratuvara tanımlı cihaz bulunamadı.</p>
-                <p className="text-xs">Cihaz Yönetimi panelinden cihaz ekleyebilirsiniz.</p>
-              </div>
-            )
+              <p className="text-muted-foreground text-sm">Henüz ürün okutulmadı.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Son 10 Tüketim Card - 5 cols */}
+        <Card className="col-span-12 md:col-span-5 flex flex-col">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Clock className="w-4 h-4 text-muted-foreground"/>
+              Son 10 Tüketim
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1">
+            <ScrollArea className="h-[140px]">
+              {sessionHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Henüz tüketim kaydı yok.</p>
+              ) : (
+                <ul className="text-sm space-y-1">
+                  {sessionHistory.map((item, index) => (
+                    <li key={index} className="flex justify-between items-center text-xs p-1 rounded-md hover:bg-muted/50">
+                      <div className="truncate flex-1">
+                        <span className="font-semibold">{safeName(item.stokKodu, item.stokAdi ?? '')}</span>
+                        <span className="text-muted-foreground ml-1">({item.lotNumarasi})</span>
+                      </div>
+                      <span className="font-mono text-muted-foreground flex-shrink-0 ml-2">{item.seriNumarasi}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Device Grid - No background, smaller images */}
+      {selectedLabId && (
+        <div className="pt-2" role="region" aria-label="Laboratuvar cihazları">
+          {devicesToDisplay.length > 0 ? (
+            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3" role="list" aria-label="Cihaz listesi">
+              {devicesToDisplay.map((c) => (
+                <button
+                  key={c.id}
+                  className="group relative w-full outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-transform hover:scale-105"
+                  onClick={() => {
+                    const event = new CustomEvent('openDeviceFaultModal', { detail: c });
+                    window.dispatchEvent(event);
+                  }}
+                  title={`${c.cihazAdi || c.model || ''} • ${c.seriNumarasi || ''}`}
+                  aria-label={`${c.cihazAdi || c.model || 'Cihaz'} - Seri: ${c.seriNumarasi || 'N/A'} - ${(c.arizaDurumu !== 'yok') ? 'Arızalı' : 'Çalışıyor'}`}
+                  role="listitem"
+                >
+                  {/* Device name and serial above image */}
+                  <div className="text-center mb-1">
+                    <div className="text-[10px] font-medium leading-tight truncate">{c.cihazAdi || c.model}</div>
+                    <div className="text-[9px] text-muted-foreground font-mono truncate">{c.seriNumarasi || '-'}</div>
+                  </div>
+                  {/* No background container */}
+                  <div className="relative w-full aspect-square flex items-center justify-center">
+                    <Image
+                      src={c.imageUrl ? (c.imageUrl.startsWith('/') ? c.imageUrl : `/${c.imageUrl}`) : '/lab_diorama.png'}
+                      alt={c.cihazAdi || c.model || 'Device'}
+                      fill
+                      className="object-contain"
+                      sizes="(max-width: 640px) 25vw, (max-width: 768px) 16vw, (max-width: 1024px) 12vw, 10vw"
+                      priority={false}
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.srcset = '/lab_diorama.png';
+                        target.src = '/lab_diorama.png';
+                      }}
+                    />
+                    {/* Status light at bottom */}
+                    <div
+                      className={cn(
+                        "absolute bottom-0 w-full h-1 rounded-full",
+                        (c.arizaDurumu !== 'yok') ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]'
+                      )}
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6 text-muted-foreground space-y-1">
+              <Info className="w-6 h-6 opacity-40" />
+              <p className="text-sm">Bu laboratuvara tanımlı cihaz bulunamadı.</p>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      )}
       
       <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
         <DialogContent className="max-w-xl p-0">
