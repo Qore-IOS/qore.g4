@@ -123,7 +123,7 @@ export interface MinMaxRule {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | string;
+  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | string;
   name?: string;
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
@@ -135,6 +135,7 @@ export interface User {
   notificationsEnabled?: boolean; // User notification preferences
   notificationPreferences?: string[]; // Array of notification types
   themePreference?: 'light' | 'dark' | 'system'; // User's theme preference stored in Firestore
+  lastSelectedLabId?: string; // Last selected laboratory ID for teknisyen users (persisted in Firestore)
 }
 
 export interface ScannedItem {

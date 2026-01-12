@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { useLoading } from '@/contexts/loading-context';
 import { compareAsc, parse as parseDate } from 'date-fns';
@@ -207,11 +207,36 @@ export default function UrunKullanimPanel() {
     return [];
   }, [currentUserProfile, laboratories]);
 
+  // Auto-select lab: for teknisyen use lastSelectedLabId, otherwise use first assigned lab if only one
   useEffect(() => {
-    if (assignedLaboratories.length === 1 && !selectedLabId) {
+    if (selectedLabId) return; // Already selected
+
+    // For teknisyen users, use lastSelectedLabId from profile
+    if (currentUserProfile?.role === 'teknisyen' && currentUserProfile.lastSelectedLabId) {
+      onHospitalSelect(currentUserProfile.lastSelectedLabId);
+      return;
+    }
+
+    // For other users, auto-select if only one lab assigned
+    if (assignedLaboratories.length === 1) {
       onHospitalSelect(assignedLaboratories[0].id);
     }
-  }, [assignedLaboratories, selectedLabId, onHospitalSelect]);
+  }, [assignedLaboratories, selectedLabId, onHospitalSelect, currentUserProfile]);
+
+  // Save last selected lab to Firestore for teknisyen users
+  useEffect(() => {
+    if (
+      currentUserProfile?.role === 'teknisyen' &&
+      currentUser?.uid &&
+      selectedLabId &&
+      !currentUser.isAnonymous
+    ) {
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      updateDoc(userDocRef, { lastSelectedLabId: selectedLabId }).catch((err) => {
+        urunKullanimLogger.warn('lastSelectedLabId kaydedilemedi', { error: err?.message });
+      });
+    }
+  }, [selectedLabId, currentUserProfile?.role, currentUser]);
 
   const selectedLabName = laboratories.find(h => h.id === selectedLabId)?.name || '';
   const selectedSubPoint = useMemo(
