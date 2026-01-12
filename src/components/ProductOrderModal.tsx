@@ -386,7 +386,7 @@ export default function ProductOrderModal({
             )}
 
             {/* Product list */}
-            <ScrollArea className="flex-1 border rounded-md">
+            <ScrollArea className="h-[400px] border rounded-md">
               <div className="p-2 space-y-1">
                 {filteredProducts.map((product, filteredIdx) => {
                   const actualIndex = getActualIndex(filteredIdx);
