@@ -14,7 +14,7 @@ export interface ProductCode {
   id: string;
   stokKodu: string; // The company's internal stock code
   stokAdi: string;
-  urunGrubu?: 'kit' | 'sarf';
+  urunGrubu?: 'kit' | 'sarf' | 'yedek_parca';
   ambalajDegeri?: number;
   anaBirim?: string;
   cost?: number;
