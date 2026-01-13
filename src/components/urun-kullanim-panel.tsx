@@ -14,7 +14,7 @@ import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2 } from 'lucide-react';
+import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut } from 'lucide-react';
 import { playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -66,7 +66,7 @@ const logSerialHistory = async (seriNo: string, type: string, details: Record<st
 };
 
 export default function UrunKullanimPanel() {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, logout } = useAuth();
   const { suppressGlobalLoading } = useLoading();
   const { toast } = useToast();
   const router = useRouter();
@@ -660,9 +660,22 @@ export default function UrunKullanimPanel() {
     <div className="flex flex-col min-h-[calc(100vh-100px)] p-4 gap-4">
       {/* Header with user name and action buttons */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
-          <p className="text-sm text-muted-foreground">{selectedLabName || 'Laboratuvar seçilmedi'}</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-2xl font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
+            <p className="text-sm text-muted-foreground">{selectedLabName || 'Laboratuvar seçilmedi'}</p>
+          </div>
+          {currentUserProfile?.role === 'teknisyen' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={logout}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4 mr-1" />
+              Çıkış
+            </Button>
+          )}
         </div>
 
         {/* Action buttons row */}
