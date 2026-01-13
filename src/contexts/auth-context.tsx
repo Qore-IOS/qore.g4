@@ -7,7 +7,7 @@ import {
   signInWithPopup, signInAnonymously, signInWithCustomToken
 } from 'firebase/auth';
 import { app, db } from '@/lib/firebase';
-import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs, deleteField } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import type { User, AppView } from '@/lib/types';
@@ -252,11 +252,110 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     try {
       await safeSignOut();
-      router.push('/login'); 
+      router.push('/login');
     } catch (error) {
       console.error("Logout error:", error);
     }
   };
+
+  // Listen for forceLogout flag and auto-logout time from personnel groups
+  useEffect(() => {
+    if (!currentUser || currentUser.isAnonymous) return;
+
+    const userDocRef = doc(db, 'users', currentUser.uid);
+    let lastForceLogoutTime: number | null = null;
+
+    // Listen for forceLogout changes
+    const unsubForceLogout = onSnapshot(userDocRef, async (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+
+      // Check forceLogout field
+      if (data.forceLogout) {
+        const forceLogoutTime = data.forceLogout.toMillis ? data.forceLogout.toMillis() : data.forceLogout;
+
+        // Only logout if this is a new forceLogout (not the one we've already processed)
+        if (lastForceLogoutTime === null || forceLogoutTime > lastForceLogoutTime) {
+          lastForceLogoutTime = forceLogoutTime;
+          console.log('Force logout triggered by admin');
+
+          // Clear the forceLogout flag to prevent re-triggering
+          try {
+            await updateDoc(userDocRef, { forceLogout: deleteField() });
+          } catch (e) {
+            console.error('Failed to clear forceLogout flag:', e);
+          }
+
+          // Perform logout
+          await logout();
+        }
+      }
+    });
+
+    return () => {
+      unsubForceLogout();
+    };
+  }, [currentUser]);
+
+  // Auto-logout based on personnel group's autoLogoutTime
+  useEffect(() => {
+    if (!currentUser || currentUser.isAnonymous) return;
+
+    let intervalId: NodeJS.Timeout | null = null;
+    let currentAutoLogoutTime: string | null = null;
+
+    // Find if user belongs to any personnel group with autoLogoutTime
+    const checkAutoLogoutTime = async () => {
+      try {
+        const groupsQuery = query(
+          collection(db, 'personelGruplari'),
+          where('memberIds', 'array-contains', currentUser.uid)
+        );
+        const groupsSnap = await getDocs(groupsQuery);
+
+        for (const groupDoc of groupsSnap.docs) {
+          const groupData = groupDoc.data();
+          if (groupData.autoLogoutTime) {
+            currentAutoLogoutTime = groupData.autoLogoutTime;
+            break; // Use first group's auto-logout time
+          }
+        }
+      } catch (e) {
+        console.error('Error checking auto-logout time:', e);
+      }
+    };
+
+    // Check time every minute
+    const checkAndLogout = () => {
+      if (!currentAutoLogoutTime) return;
+
+      const now = new Date();
+      const [targetHours, targetMinutes] = currentAutoLogoutTime.split(':').map(Number);
+      const currentHours = now.getHours();
+      const currentMinutes = now.getMinutes();
+
+      // Check if current time matches the auto-logout time (exact match)
+      if (currentHours === targetHours && currentMinutes === targetMinutes) {
+        console.log(`Auto-logout triggered at ${currentAutoLogoutTime}`);
+        logout();
+      }
+    };
+
+    // Initial check
+    checkAutoLogoutTime().then(() => {
+      // Start interval to check every 30 seconds
+      intervalId = setInterval(() => {
+        checkAndLogout();
+      }, 30000); // Check every 30 seconds for more accuracy
+
+      // Also check immediately
+      checkAndLogout();
+    });
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [currentUser]);
 
   const contextValue = {
     currentUser,
