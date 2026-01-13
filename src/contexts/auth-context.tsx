@@ -303,57 +303,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     let intervalId: NodeJS.Timeout | null = null;
     let currentAutoLogoutTime: string | null = null;
+    let hasLoggedOut = false;
 
-    // Find if user belongs to any personnel group with autoLogoutTime
-    const checkAutoLogoutTime = async () => {
-      try {
-        const groupsQuery = query(
-          collection(db, 'personelGruplari'),
-          where('memberIds', 'array-contains', currentUser.uid)
-        );
-        const groupsSnap = await getDocs(groupsQuery);
+    // Listen to user's personnel groups for autoLogoutTime changes (realtime)
+    const groupsQuery = query(
+      collection(db, 'personelGruplari'),
+      where('memberIds', 'array-contains', currentUser.uid)
+    );
 
-        for (const groupDoc of groupsSnap.docs) {
-          const groupData = groupDoc.data();
-          if (groupData.autoLogoutTime) {
-            currentAutoLogoutTime = groupData.autoLogoutTime;
-            break; // Use first group's auto-logout time
-          }
+    const unsubGroups = onSnapshot(groupsQuery, (snap) => {
+      currentAutoLogoutTime = null;
+      for (const groupDoc of snap.docs) {
+        const groupData = groupDoc.data();
+        if (groupData.autoLogoutTime) {
+          currentAutoLogoutTime = groupData.autoLogoutTime;
+          break;
         }
-      } catch (e) {
-        console.error('Error checking auto-logout time:', e);
       }
-    };
+    }, (err) => {
+      console.error('Error listening to personnel groups:', err);
+    });
 
-    // Check time every minute
+    // Check time every minute (lightweight local comparison only)
     const checkAndLogout = () => {
-      if (!currentAutoLogoutTime) return;
+      if (!currentAutoLogoutTime || hasLoggedOut) return;
 
       const now = new Date();
       const [targetHours, targetMinutes] = currentAutoLogoutTime.split(':').map(Number);
       const currentHours = now.getHours();
       const currentMinutes = now.getMinutes();
 
-      // Check if current time matches the auto-logout time (exact match)
       if (currentHours === targetHours && currentMinutes === targetMinutes) {
+        hasLoggedOut = true;
         console.log(`Auto-logout triggered at ${currentAutoLogoutTime}`);
         logout();
       }
     };
 
-    // Initial check
-    checkAutoLogoutTime().then(() => {
-      // Start interval to check every 30 seconds
-      intervalId = setInterval(() => {
-        checkAndLogout();
-      }, 30000); // Check every 30 seconds for more accuracy
-
-      // Also check immediately
-      checkAndLogout();
-    });
+    // Check every minute (60 seconds is sufficient for minute-level precision)
+    intervalId = setInterval(checkAndLogout, 60000);
+    // Also check immediately
+    checkAndLogout();
 
     return () => {
       if (intervalId) clearInterval(intervalId);
+      unsubGroups();
     };
   }, [currentUser]);
 
