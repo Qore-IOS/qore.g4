@@ -238,6 +238,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
                 <SelectContent>
                     <SelectItem value="kit">Kit</SelectItem>
                     <SelectItem value="sarf">Sarf Malzeme</SelectItem>
+                    <SelectItem value="yedek_parca">Yedek Parça</SelectItem>
                 </SelectContent>
             </Select>
           </div>

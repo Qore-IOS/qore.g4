@@ -18,22 +18,19 @@ export default function AutoRedirectOnLogin() {
         return;
     }
 
-    // Skip if already on urun-kullanim page
-    if (pathname.startsWith('/urun-kullanim')) {
-        return;
-    }
+    // Check for specific role-based redirects first
+    const userRole = currentUserProfile?.role;
 
-    // Redirect teknisyen users to urun-kullanim panel
-    if (currentUserProfile?.role === 'teknisyen') {
-      const targetPath = currentUserProfile.lastSelectedLabId
-        ? `/urun-kullanim/${currentUserProfile.lastSelectedLabId}`
-        : '/urun-kullanim';
-      router.replace(targetPath);
+    // Redirect teknik_servis and aplikasyon users to /cihaz-yonetimi-ana
+    if ((userRole === 'teknik_servis' || userRole === 'aplikasyon') && pathname === '/dashboard') {
+      router.replace('/cihaz-yonetimi-ana');
       return;
     }
 
-    if (hasOnlyProductUsagePermission(currentUserProfile?.accessibleViews)) {
+    // Redirect users with only product usage permission
+    if (pathname !== '/urun-kullanim' && hasOnlyProductUsagePermission(currentUserProfile?.accessibleViews)) {
       router.replace('/urun-kullanim');
+      return;
     }
   }, [currentUser, isLoadingAuth, currentUserProfile, router, pathname]);
 

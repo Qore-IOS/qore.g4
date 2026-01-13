@@ -1,9 +1,9 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where } from 'firebase/firestore';
-import type { Device, Hospital } from '@/lib/types';
+import type { Device, Hospital, ProductCode, User } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { format } from 'date-fns';
@@ -22,9 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
-
-// Part change types (Parça Değişimi)
-type PartChangeType = 'lamba_degisimi' | 'kuvet_degisimi' | 'reaktif_degisimi' | '';
+import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -38,12 +37,18 @@ type OperationType =
   | 'cv_calismasi'
   | 'diger';
 
+// Cihaz Durumu
+type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
+
 type ActionItem = {
   id: string;
   type: 'part_change' | 'operation';
-  action: PartChangeType | OperationType | '';
+  action: string;
+  stokKodu?: string;
+  stokAdi?: string;
   quantity: number;
   description?: string;
+  isManualEntry?: boolean;
 };
 
 type ActionFormRecord = {
@@ -51,15 +56,19 @@ type ActionFormRecord = {
     createdAt: { toDate: () => Date };
     createdByName: string;
     actions: ActionItem[];
+    cihazDurumu?: CihazDurumu;
+    cihazDurumuAciklama?: string;
+    eslikEdenPersonel?: { uid: string; name: string; role: string }[];
     personnelSignature?: string;
     technicianSignature?: string;
 };
 
-const PART_CHANGE_LABELS: Record<PartChangeType, string> = {
-  '': 'Parça Seçin',
-  lamba_degisimi: 'Lamba Değişimi',
-  kuvet_degisimi: 'Küvet Değişimi',
-  reaktif_degisimi: 'Reaktif Değişimi',
+const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {
+  '': 'Seçiniz',
+  calisiyor: 'Çalışıyor',
+  arizali: 'Arızalı',
+  denemede: 'Denemede',
+  diger: 'Diğer',
 };
 
 const OPERATION_LABELS: Record<OperationType, string> = {
@@ -104,15 +113,32 @@ export default function AplikasyonIslemFormuPage() {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
-  const [signatureStep, setSignatureStep] = useState<'personnel' | 'technician'>('personnel');
+  const [signatureStep, setSignatureStep] = useState<'pre_questions' | 'personnel' | 'technician'>('pre_questions');
   const personnelSignatureRef = useRef<SignaturePadRef>(null);
   const technicianSignatureRef = useRef<SignaturePadRef>(null);
   const [signatures, setSignatures] = useState<{ personnel?: string; technician?: string }>({});
+
+  // Pre-signature questions
+  const [cihazDurumu, setCihazDurumu] = useState<CihazDurumu>('');
+  const [cihazDurumuAciklama, setCihazDurumuAciklama] = useState('');
+  const [eslikEdenPersonel, setEslikEdenPersonel] = useState<{ uid: string; name: string; role: string }[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [personelSearchQuery, setPersonelSearchQuery] = useState('');
 
   // Operation selection modal
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
   const [selectedOperations, setSelectedOperations] = useState<OperationType[]>([]);
   const [digerAciklama, setDigerAciklama] = useState('');
+
+  // Part selection modal
+  const [isPartModalOpen, setIsPartModalOpen] = useState(false);
+  const [spareParts, setSpareParts] = useState<ProductCode[]>([]);
+  const [partSearchQuery, setPartSearchQuery] = useState('');
+  const [selectedPart, setSelectedPart] = useState<ProductCode | null>(null);
+  const [manualPartCode, setManualPartCode] = useState('');
+  const [manualPartName, setManualPartName] = useState('');
+  const [partQuantity, setPartQuantity] = useState(1);
+  const [showManualEntry, setShowManualEntry] = useState(false);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -143,8 +169,119 @@ export default function AplikasyonIslemFormuPage() {
     })();
   }, [deviceId, router, toast]);
 
-  const addPartChangeRow = () => {
-    setActions(prev => [...prev, { id: crypto.randomUUID(), type: 'part_change', action: '', quantity: 1, description: '' }]);
+  // Fetch spare parts
+  useEffect(() => {
+    (async () => {
+      try {
+        const q = query(collection(db, 'productCodes'), where('urunGrubu', '==', 'yedek_parca'));
+        const snap = await getDocs(q);
+        setSpareParts(snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode));
+      } catch (err) {
+        console.error("Error fetching spare parts:", err);
+      }
+    })();
+  }, []);
+
+  // Fetch users for accompanying personnel
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
+        setAllUsers(users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
+      } catch (err) {
+        console.error("Error fetching users:", err);
+      }
+    })();
+  }, []);
+
+  // Sorted users based on current user's role
+  const sortedUsers = useMemo(() => {
+    const currentRole = currentUserProfile?.role;
+    return [...allUsers].sort((a, b) => {
+      // Current user's role type first
+      if (currentRole === 'aplikasyon') {
+        if (a.role === 'aplikasyon' && b.role !== 'aplikasyon') return -1;
+        if (a.role !== 'aplikasyon' && b.role === 'aplikasyon') return 1;
+      } else {
+        if (a.role === 'teknik_servis' && b.role !== 'teknik_servis') return -1;
+        if (a.role !== 'teknik_servis' && b.role === 'teknik_servis') return 1;
+      }
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [allUsers, currentUserProfile?.role]);
+
+  // Filtered users for search
+  const filteredUsers = useMemo(() => {
+    if (!personelSearchQuery) return sortedUsers;
+    const q = personelSearchQuery.toLowerCase();
+    return sortedUsers.filter(u =>
+      (u.name || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q)
+    );
+  }, [sortedUsers, personelSearchQuery]);
+
+  // Filtered spare parts
+  const filteredParts = useMemo(() => {
+    if (!partSearchQuery) return spareParts;
+    const q = partSearchQuery.toLowerCase();
+    return spareParts.filter(p =>
+      p.stokKodu.toLowerCase().includes(q) ||
+      p.stokAdi.toLowerCase().includes(q)
+    );
+  }, [spareParts, partSearchQuery]);
+
+  const openPartModal = () => {
+    setPartSearchQuery('');
+    setSelectedPart(null);
+    setManualPartCode('');
+    setManualPartName('');
+    setPartQuantity(1);
+    setShowManualEntry(false);
+    setIsPartModalOpen(true);
+  };
+
+  const addSelectedPart = () => {
+    if (showManualEntry) {
+      if (!manualPartCode.trim() || !manualPartName.trim()) {
+        toast({ title: 'Eksik Bilgi', description: 'Lütfen parça kodu ve adını girin.', variant: 'destructive' });
+        return;
+      }
+      const newItem: ActionItem = {
+        id: crypto.randomUUID(),
+        type: 'part_change',
+        action: 'manual_part',
+        stokKodu: manualPartCode.trim(),
+        stokAdi: manualPartName.trim(),
+        quantity: partQuantity,
+        isManualEntry: true,
+      };
+      setActions(prev => [newItem, ...prev]);
+    } else if (selectedPart) {
+      const newItem: ActionItem = {
+        id: crypto.randomUUID(),
+        type: 'part_change',
+        action: selectedPart.id,
+        stokKodu: selectedPart.stokKodu,
+        stokAdi: selectedPart.stokAdi,
+        quantity: partQuantity,
+      };
+      setActions(prev => [newItem, ...prev]);
+    } else {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen bir parça seçin.', variant: 'destructive' });
+      return;
+    }
+    setIsPartModalOpen(false);
+  };
+
+  const toggleEslikEdenPersonel = (user: User) => {
+    setEslikEdenPersonel(prev => {
+      const exists = prev.find(p => p.uid === user.uid);
+      if (exists) {
+        return prev.filter(p => p.uid !== user.uid);
+      }
+      return [...prev, { uid: user.uid, name: user.name || user.email || '', role: user.role }];
+    });
   };
 
   const openOperationModal = () => {
@@ -189,10 +326,10 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const startSaveProcess = () => {
-    // Validate part changes have selection
-    const invalidPartChange = actions.find(a => a.type === 'part_change' && (!a.action || a.quantity <= 0));
-    if (invalidPartChange) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm parça değişimi satırlarında bir parça seçin ve geçerli bir adet girin.', variant: 'destructive' });
+    // Validate part changes have quantity
+    const invalidPart = actions.find(a => a.type === 'part_change' && a.quantity <= 0);
+    if (invalidPart) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm parça değişimlerinde geçerli bir adet girin.', variant: 'destructive' });
       return;
     }
 
@@ -203,9 +340,27 @@ export default function AplikasyonIslemFormuPage() {
       return;
     }
 
+    // Reset pre-signature state
+    setCihazDurumu('');
+    setCihazDurumuAciklama('');
+    setEslikEdenPersonel([]);
+    setPersonelSearchQuery('');
     setSignatures({});
-    setSignatureStep('personnel');
+    setSignatureStep('pre_questions');
     setIsSignatureModalOpen(true);
+  };
+
+  const proceedToSignature = () => {
+    // Validate cihaz durumu
+    if (!cihazDurumu) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen cihaz durumunu seçin.', variant: 'destructive' });
+      return;
+    }
+    if (cihazDurumu === 'diger' && !cihazDurumuAciklama.trim()) {
+      toast({ title: 'Eksik Bilgi', description: '"Diğer" seçeneği için açıklama zorunludur.', variant: 'destructive' });
+      return;
+    }
+    setSignatureStep('personnel');
   };
 
   const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }) => {
@@ -220,6 +375,9 @@ export default function AplikasyonIslemFormuPage() {
             hospitalId: device?.hospitalId,
             labName: hospital?.name,
             actions,
+            cihazDurumu,
+            cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
+            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
             personnelSignature: finalSignatures.personnel || null,
             technicianSignature: finalSignatures.technician || null,
             createdAt: serverTimestamp(),
@@ -260,9 +418,13 @@ export default function AplikasyonIslemFormuPage() {
 
   const getActionLabel = (item: ActionItem): string => {
     if (item.type === 'part_change') {
-      return PART_CHANGE_LABELS[item.action as PartChangeType] || item.action;
+      return item.stokAdi || item.action;
     }
     return OPERATION_LABELS[item.action as OperationType] || item.action;
+  };
+
+  const updateActionQuantity = (id: string, quantity: number) => {
+    setActions(prev => prev.map(a => a.id === id ? { ...a, quantity } : a));
   };
 
   if (loading) {
@@ -301,7 +463,7 @@ export default function AplikasyonIslemFormuPage() {
           </CardHeader>
           <CardContent>
             <div className="mb-4 flex flex-wrap gap-2">
-              <Button onClick={addPartChangeRow} variant="outline">
+              <Button onClick={openPartModal} variant="outline">
                 <Wrench className="mr-2 h-4 w-4" /> Değişen Parça Ekle
               </Button>
               <Button onClick={openOperationModal} variant="outline">
@@ -314,8 +476,8 @@ export default function AplikasyonIslemFormuPage() {
                   <TableRow>
                     <TableHead className="w-24">Tür</TableHead>
                     <TableHead>İşlem/Parça</TableHead>
+                    <TableHead className="w-32">Kod</TableHead>
                     <TableHead className="w-24">Adet</TableHead>
-                    <TableHead className="w-48">Açıklama</TableHead>
                     <TableHead className="w-16"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -326,39 +488,29 @@ export default function AplikasyonIslemFormuPage() {
                     actions.map(item => (
                       <TableRow key={item.id}>
                         <TableCell>
-                          <span className={`text-xs font-medium px-2 py-1 rounded ${item.type === 'part_change' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                          <span className={`text-xs font-medium px-2 py-1 rounded ${item.type === 'part_change' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'}`}>
                             {item.type === 'part_change' ? 'Parça' : 'İşlem'}
                           </span>
                         </TableCell>
                         <TableCell>
-                          {item.type === 'part_change' ? (
-                            <Select value={item.action} onValueChange={(v) => updateAction(item.id, 'action', v)}>
-                              <SelectTrigger><SelectValue placeholder="Parça seçin..."/></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="lamba_degisimi">Lamba Değişimi</SelectItem>
-                                <SelectItem value="kuvet_degisimi">Küvet Değişimi</SelectItem>
-                                <SelectItem value="reaktif_degisimi">Reaktif Değişimi</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <span className="font-medium">{OPERATION_LABELS[item.action as OperationType] || item.action}</span>
-                          )}
+                          <span className="font-medium">{getActionLabel(item)}</span>
+                          {item.isManualEntry && <span className="ml-2 text-xs text-muted-foreground">(Manuel)</span>}
                         </TableCell>
                         <TableCell>
                           {item.type === 'part_change' ? (
-                            <Input type="number" value={item.quantity} onChange={(e) => updateAction(item.id, 'quantity', Number(e.target.value))} min="1"/>
+                            <span className="font-mono text-xs">{item.stokKodu || '-'}</span>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
                         <TableCell>
-                          {item.action === 'diger' || item.type === 'part_change' ? (
+                          {item.type === 'part_change' ? (
                             <Input
-                              type="text"
-                              value={item.description || ''}
-                              onChange={(e) => updateAction(item.id, 'description', e.target.value)}
-                              placeholder={item.action === 'diger' ? 'Açıklama (zorunlu)' : 'Açıklama...'}
-                              className={item.action === 'diger' && !item.description ? 'border-destructive' : ''}
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => updateActionQuantity(item.id, Number(e.target.value))}
+                              min="1"
+                              className="w-20"
                             />
                           ) : (
                             <span className="text-muted-foreground">-</span>
@@ -422,9 +574,108 @@ export default function AplikasyonIslemFormuPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Part Selection Modal */}
+      <Dialog open={isPartModalOpen} onOpenChange={setIsPartModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Değişen Parça Ekle</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            {!showManualEntry ? (
+              <>
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Parça kodu veya adı ile arayın..."
+                    value={partSearchQuery}
+                    onChange={(e) => setPartSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <ScrollArea className="h-48 border rounded-md">
+                  {filteredParts.length === 0 ? (
+                    <div className="p-4 text-center text-muted-foreground">
+                      {spareParts.length === 0 ? 'Yedek parça tanımlı değil.' : 'Sonuç bulunamadı.'}
+                    </div>
+                  ) : (
+                    <div className="p-2 space-y-1">
+                      {filteredParts.map(part => (
+                        <button
+                          key={part.id}
+                          onClick={() => setSelectedPart(part)}
+                          className={`w-full text-left p-2 rounded-md transition-colors ${
+                            selectedPart?.id === part.id
+                              ? 'bg-primary/10 border-primary border'
+                              : 'hover:bg-muted'
+                          }`}
+                        >
+                          <p className="font-medium">{part.stokAdi}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{part.stokKodu}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowManualEntry(true)}
+                  className="w-full"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Listede yok, manuel ekle
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Parça Kodu <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="Parça kodunu girin..."
+                    value={manualPartCode}
+                    onChange={(e) => setManualPartCode(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Parça Adı <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="Parça adını girin..."
+                    value={manualPartName}
+                    onChange={(e) => setManualPartName(e.target.value)}
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowManualEntry(false)}
+                >
+                  Listeden seç
+                </Button>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Adet</Label>
+              <Input
+                type="number"
+                value={partQuantity}
+                onChange={(e) => setPartQuantity(Number(e.target.value))}
+                min="1"
+                className="w-24"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
+            <Button onClick={addSelectedPart}>
+              Ekle
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* History Modal */}
       <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-4xl">
             <DialogHeader>
                 <DialogTitle>Aplikasyon İşlem Geçmişi: {device.cihazAdi}</DialogTitle>
             </DialogHeader>
@@ -433,7 +684,15 @@ export default function AplikasyonIslemFormuPage() {
                  history.length === 0 ? <p className="text-center text-muted-foreground p-8">Bu cihaz için geçmiş aplikasyon işlem formu bulunmuyor.</p> :
                  (
                     <Table>
-                        <TableHeader><TableRow><TableHead>Tarih</TableHead><TableHead>Kullanıcı</TableHead><TableHead>İşlemler</TableHead></TableRow></TableHeader>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Tarih</TableHead>
+                            <TableHead>Kullanıcı</TableHead>
+                            <TableHead>İşlemler</TableHead>
+                            <TableHead>Durum</TableHead>
+                            <TableHead className="text-right">Tutanak</TableHead>
+                          </TableRow>
+                        </TableHeader>
                         <TableBody>
                             {history.map(rec => (
                                 <TableRow key={rec.id}>
@@ -447,13 +706,23 @@ export default function AplikasyonIslemFormuPage() {
                                                     {act.type === 'part_change' ? 'Parça' : 'İşlem'}
                                                   </span>
                                                   {act.type === 'part_change'
-                                                    ? `${PART_CHANGE_LABELS[act.action as PartChangeType] || act.action}: ${act.quantity} adet`
+                                                    ? `${act.stokAdi || act.action}: ${act.quantity} adet`
                                                     : OPERATION_LABELS[act.action as OperationType] || act.action
                                                   }
                                                   {act.description && <span className="text-muted-foreground ml-1">({act.description})</span>}
                                                 </li>
                                             ))}
                                         </ul>
+                                    </TableCell>
+                                    <TableCell className="text-xs">
+                                      {rec.cihazDurumu && CIHAZ_DURUMU_LABELS[rec.cihazDurumu]}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <AplikasyonTutanakPDFButton
+                                            device={device}
+                                            hospital={hospital}
+                                            actionRecord={rec}
+                                        />
                                     </TableCell>
                                 </TableRow>
                             ))}
@@ -469,14 +738,106 @@ export default function AplikasyonIslemFormuPage() {
       <Dialog open={isSignatureModalOpen} onOpenChange={setIsSignatureModalOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>İmza</DialogTitle>
+            <DialogTitle>
+              {signatureStep === 'pre_questions' ? 'Cihaz Durumu ve Eşlik Eden Personel' : 'İmza'}
+            </DialogTitle>
           </DialogHeader>
+
+          {/* Pre-questions step */}
+          {signatureStep === 'pre_questions' && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Cihaz Durumu <span className="text-destructive">*</span></Label>
+                <RadioGroup
+                  value={cihazDurumu}
+                  onValueChange={(val) => setCihazDurumu(val as CihazDurumu)}
+                  className="grid grid-cols-2 gap-2"
+                >
+                  {(Object.keys(CIHAZ_DURUMU_LABELS) as CihazDurumu[])
+                    .filter(k => k !== '')
+                    .map(key => (
+                      <div key={key} className="flex items-center space-x-2">
+                        <RadioGroupItem value={key} id={`durumu-${key}`} />
+                        <Label htmlFor={`durumu-${key}`} className="cursor-pointer">
+                          {CIHAZ_DURUMU_LABELS[key]}
+                        </Label>
+                      </div>
+                    ))}
+                </RadioGroup>
+                {cihazDurumu === 'diger' && (
+                  <Input
+                    placeholder="Diğer durumu açıklayın..."
+                    value={cihazDurumuAciklama}
+                    onChange={(e) => setCihazDurumuAciklama(e.target.value)}
+                    className="mt-2"
+                  />
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Eşlik Eden Personel (Opsiyonel)</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Personel ara..."
+                    value={personelSearchQuery}
+                    onChange={(e) => setPersonelSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <ScrollArea className="h-32 border rounded-md">
+                  <div className="p-2 space-y-1">
+                    {filteredUsers
+                      .filter(u => u.uid !== currentUserProfile?.uid)
+                      .map(user => (
+                        <button
+                          key={user.uid}
+                          onClick={() => toggleEslikEdenPersonel(user)}
+                          className={`w-full text-left p-2 rounded-md transition-colors flex justify-between items-center ${
+                            eslikEdenPersonel.find(p => p.uid === user.uid)
+                              ? 'bg-primary/10 border-primary border'
+                              : 'hover:bg-muted'
+                          }`}
+                        >
+                          <div>
+                            <p className="font-medium">{user.name || user.email}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {user.role === 'aplikasyon' ? 'Aplikasyon' : 'Teknik Servis'}
+                            </p>
+                          </div>
+                          {eslikEdenPersonel.find(p => p.uid === user.uid) && (
+                            <span className="text-primary text-sm">Seçildi</span>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                </ScrollArea>
+                {eslikEdenPersonel.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {eslikEdenPersonel.map(p => (
+                      <span key={p.uid} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
+                        {p.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter className="mt-4 gap-2">
+                <Button variant="outline" onClick={() => setIsSignatureModalOpen(false)}>İptal</Button>
+                <Button onClick={proceedToSignature}>Devam Et</Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {/* Personnel signature step */}
           {signatureStep === 'personnel' && (
             <div>
               <p className="mb-2 text-sm text-muted-foreground">İşlemi Yapan Personel</p>
               <SignaturePad ref={personnelSignatureRef} />
               <DialogFooter className="mt-4 gap-2">
                 <Button variant="outline" onClick={() => { personnelSignatureRef.current?.clear(); }}>Temizle</Button>
+                <Button variant="secondary" onClick={() => setSignatureStep('pre_questions')}>Geri</Button>
                 <Button onClick={() => handleSaveSignaturesAndFinish({})}>Atla</Button>
                 <Button onClick={() => {
                   const sig = personnelSignatureRef.current?.getSignature();
@@ -492,6 +853,8 @@ export default function AplikasyonIslemFormuPage() {
               </DialogFooter>
             </div>
           )}
+
+          {/* Technician signature step */}
           {signatureStep === 'technician' && (
             <div>
               <p className="mb-2 text-sm text-muted-foreground">Aplikasyon Uzmanı</p>
