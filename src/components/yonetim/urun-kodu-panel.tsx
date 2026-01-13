@@ -473,7 +473,8 @@ export default function UrunKoduPanel() {
           }
   
           const stokAdi = String(row['stokadi'] || row['stokadı'] || '').trim();
-          const urunGrubu: 'kit' | 'sarf' = String(row['urungrubu'] || row['ürüngrubu'] || 'kit').toLowerCase().includes('sarf') ? 'sarf' : 'kit';
+          const urunGrubuRaw = String(row['urungrubu'] || row['ürüngrubu'] || 'kit').toLowerCase();
+          const urunGrubu: 'kit' | 'sarf' | 'yedek_parca' = urunGrubuRaw.includes('yedek') || urunGrubuRaw.includes('parca') ? 'yedek_parca' : (urunGrubuRaw.includes('sarf') ? 'sarf' : 'kit');
           const ambalajDegeri = parseNum(row['ambalajdegeri'] ?? row['ambalajdeğeri']);
           
           if (urunGrubu === 'kit' && mode === 'add' && (!ambalajDegeri || ambalajDegeri <= 0)) {
@@ -537,7 +538,7 @@ export default function UrunKoduPanel() {
 
   const availableFilterGroups = useMemo(() => {
     const markaSet = new Set<string>();
-    const urunGrubuSet = new Set<'kit' | 'sarf'>();
+    const urunGrubuSet = new Set<'kit' | 'sarf' | 'yedek_parca'>();
     productCodes.forEach(p => {
         if(p.marka) markaSet.add(p.marka);
         if(p.urunGrubu) urunGrubuSet.add(p.urunGrubu);

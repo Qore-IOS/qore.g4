@@ -32,6 +32,7 @@ export default function LoginPage() {
     // This will only run on the client side
     setHostname(window.location.hostname);
     if (!isLoadingAuth && currentUser) {
+      // Default redirect - will be updated by AutoRedirectOnLogin based on user role
       router.replace('/dashboard');
     }
   }, [isLoadingAuth, currentUser, router]);
