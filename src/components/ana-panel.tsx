@@ -23,10 +23,11 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 // Hooks
 import { useToast } from "@/hooks/use-toast";
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
+import { useLoading } from '@/contexts/loading-context';
 
 // UI Components
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,7 @@ import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kab
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
 import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
+import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // =============================================================================
 // DYNAMIC IMPORTS
@@ -348,6 +350,13 @@ export default function AnaPanel(props: AnaPanelProps) {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser, currentUserProfile } = useAuth();
+  const { suppressGlobalLoading } = useLoading();
+
+  // Suppress global loading overlay for this panel - it interferes with barcode scanning
+  useEffect(() => {
+    const unsuppress = suppressGlobalLoading();
+    return unsuppress;
+  }, [suppressGlobalLoading]);
 
   // Use TanStack Query for static data - shared cache, 1 hour stale time
   const { data: depots = [], isLoading: depotsLoading } = useDepots();
@@ -839,31 +848,46 @@ export default function AnaPanel(props: AnaPanelProps) {
     setCommitInfo(null);
     const processedIds = new Set<string>();
     const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
-  
+
     const queue = new BatchQueue({
       chunkSize: 450,
       onProgress: (info) => setCommitInfo(info),
     });
-  
+
     try {
+      // OPTIMIZED: Parallel serial verification with Promise.all
       const serialsToVerify = itemsToProcess.map(i => i.seriNumarasi).filter(Boolean) as string[];
       const existingSerialsInDb = new Set<string>();
 
       if (serialsToVerify.length > 0) {
+        // Create chunks and query them in parallel (max 5 concurrent queries to avoid rate limiting)
+        const chunks: string[][] = [];
         for (let i = 0; i < serialsToVerify.length; i += 30) {
-            const chunk = serialsToVerify.slice(i, i + 30);
-            const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
-            const snap = await getDocs(q);
-            snap.forEach(doc => existingSerialsInDb.add(doc.data().seriNumarasi));
+          chunks.push(serialsToVerify.slice(i, i + 30));
+        }
+
+        // Process chunks in parallel batches of 5
+        for (let i = 0; i < chunks.length; i += 5) {
+          const batchChunks = chunks.slice(i, i + 5);
+          const results = await Promise.all(
+            batchChunks.map(async (chunk) => {
+              const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
+              const snap = await getDocs(q);
+              return snap.docs.map(doc => doc.data().seriNumarasi as string);
+            })
+          );
+          results.flat().forEach(serial => existingSerialsInDb.add(serial));
         }
       }
+
+      // Pre-compute all doc data to batch them efficiently
+      const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
 
       for (const item of itemsToProcess) {
         // Mükerrer kontrolü: aynı stokKodu için aynı seri numarası kontrol edilir
         const depotProductSerials = item.stokKodu ? existingDepotSerials.get(item.stokKodu) : undefined;
         if(item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
-            // Already checked on scan, this is a double-check.
-            continue;
+          continue;
         }
 
         const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
@@ -883,32 +907,49 @@ export default function AnaPanel(props: AnaPanelProps) {
           createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
           createdByUid: currentUser?.uid || null,
         });
-  
+
         if (item.isGroup && serialsToProcess.length === 0) {
           const adet = Math.max(1, item.adet ?? 1);
           for (let i = 0; i < adet; i++) {
-            const stokRef = doc(collection(db, 'depoStok'));
-            await queue.set(stokRef, createDocData());
+            docsToCreate.push({
+              ref: doc(collection(db, 'depoStok')),
+              data: createDocData(),
+              item,
+            });
           }
         } else {
           for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
-            const stokRef = doc(collection(db, 'depoStok'));
-            await queue.set(stokRef, createDocData(serial));
-            
-            await enqueueSerialHistory(queue, serial, 'intake', {
-              stokKodu: item.stokKodu || '',
-              stokAdi: item.stokAdi || '',
-              depotId: selectedDepotId,
-              depotName,
-              rafAdresi: item.rafAdresi || '',
-              irsaliyeNumarasi: item.irsaliyeNumarasi || '',
+            docsToCreate.push({
+              ref: doc(collection(db, 'depoStok')),
+              data: createDocData(serial),
+              serial,
+              item,
             });
           }
         }
         if (item.id) processedIds.add(item.id);
       }
-  
+
+      // OPTIMIZED: Batch all writes together
+      for (const docInfo of docsToCreate) {
+        await queue.set(docInfo.ref, docInfo.data);
+
+        if (docInfo.serial) {
+          await enqueueSerialHistory(queue, docInfo.serial, 'intake', {
+            stokKodu: docInfo.item.stokKodu || '',
+            stokAdi: docInfo.item.stokAdi || '',
+            depotId: selectedDepotId,
+            depotName,
+            rafAdresi: docInfo.item.rafAdresi || '',
+            irsaliyeNumarasi: docInfo.item.irsaliyeNumarasi || '',
+          });
+        }
+      }
+
       await queue.flush();
+
+      // Signal stock change to all listeners (other users/tabs)
+      await touchStockMetadata();
 
       // Invalidate depoStok cache so it refetches fresh data
       invalidateDepoStok();
@@ -923,7 +964,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           </Button>
         ),
       });
-  
+
       setScannedItems(prev => prev.filter(i => i.id && !processedIds.has(i.id)));
       // Map'i temizle ve kalan öğeleri yeniden ekle
       scannedSerialsRef.current.clear();
@@ -935,7 +976,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
         }
       });
-  
+
     } catch (error: any) {
       console.error("Mal kabul hatası:", error);
       toast({ title: "Veritabanı Hatası", description: safeStr(error?.message) || 'Ürünler stoğa eklenirken bir hata oluştu.', variant: "destructive" });
@@ -1186,66 +1227,71 @@ export default function AnaPanel(props: AnaPanelProps) {
           </div>
         </CardHeader>
         <CardContent className="flex-1 p-0">
-          <ScrollArea className="h-[40vh]">
-            {scannedItems.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground p-4">
-                <Search className="mr-2 h-6 w-6" /> Okutulmuş ürün bulunmuyor.
-              </div>
-            ) : (
-              <Accordion type="multiple" className="w-full">
-                {groupedScannedItems.map((group, groupIndex) => {
-                  const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
-                  const hasSerials = trackingMode === 'serial';
-                  return (
-                    <AccordionItem value={`group-${groupIndex}`} key={group.key}>
-                      <AccordionTrigger className="flex items-center p-2 cursor-pointer hover:bg-muted/50 w-full text-left">
-                           <div className="px-2">
-                             <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} onClick={e => e.stopPropagation()} />
-                           </div>
-                           <div className="flex-1">
-                             {group.stokAdi}<span className="block text-xs text-muted-foreground">{group.stokKodu}</span>
-                           </div>
-                           <div className="flex-1">{group.lotNumarasi || '-'}</div>
-                           <div className="flex-1">{group.miad || '-'}</div>
-                           <div className="flex-1">{group.rafAdresi || '-'}</div>
-                           <div className="flex-1">{group.irsaliyeNumarasi || '-'}</div>
-                           <div className="font-bold text-lg text-right w-24">
-                           {hasSerials ? (
-                               <span>{group.adet} ADET</span>
-                           ) : (
-                               <Input
-                                   type="number"
-                                   value={group.adet}
-                                   onChange={(e) => handleAdetChange(group.key, e.target.value)}
-                                   onClick={(e) => e.stopPropagation()}
-                                   className="h-8 w-20 text-center font-bold text-lg"
-                                   min="1"
-                               />
-                           )}
-                           </div>
-                           <div className="w-20 text-right">
-                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); deleteGroup(group.key); }}>
-                                   <Trash2 className="h-4 w-4 text-destructive" />
-                               </Button>
-                           </div>
-                      </AccordionTrigger>
-                        {hasSerials && (
-                        <AccordionContent>
-                            <div className="px-6 py-2 bg-muted/50 max-h-40 overflow-y-auto">
-                                <ul className="list-disc pl-5 text-xs font-mono grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1">
-                                    {group.items?.map(item => (
-                                        <li key={item.id}>{item.seriNumarasi}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        </AccordionContent>
+          {scannedItems.length === 0 ? (
+            <div className="flex items-center justify-center h-[40vh] text-muted-foreground p-4">
+              <Search className="mr-2 h-6 w-6" /> Okutulmuş ürün bulunmuyor.
+            </div>
+          ) : (
+            <VirtualizedList
+              items={groupedScannedItems}
+              height="40vh"
+              estimateSize={60}
+              overscan={10}
+              getItemKey={(item) => item.key || item.id}
+              className="p-2"
+              renderItem={(group, groupIndex) => {
+                const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
+                const hasSerials = trackingMode === 'serial';
+                return (
+                  <div className="border-b last:border-b-0 py-1">
+                    <div className="flex items-center p-2 cursor-pointer hover:bg-muted/50 w-full text-left gap-2">
+                      <div className="px-2">
+                        <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium truncate block">{group.stokAdi}</span>
+                        <span className="text-xs text-muted-foreground">{group.stokKodu}</span>
+                      </div>
+                      <div className="flex-1 text-sm hidden sm:block">{group.lotNumarasi || '-'}</div>
+                      <div className="flex-1 text-sm hidden sm:block">{group.miad || '-'}</div>
+                      <div className="flex-1 text-sm hidden md:block">{group.rafAdresi || '-'}</div>
+                      <div className="flex-1 text-sm hidden md:block">{group.irsaliyeNumarasi || '-'}</div>
+                      <div className="font-bold text-lg text-right w-24">
+                        {hasSerials ? (
+                          <span>{group.adet} ADET</span>
+                        ) : (
+                          <Input
+                            type="number"
+                            value={group.adet}
+                            onChange={(e) => handleAdetChange(group.key, e.target.value)}
+                            className="h-8 w-20 text-center font-bold text-lg"
+                            min="1"
+                          />
                         )}
-                      </AccordionItem>
-                  );
-                })}
-              </Accordion>
-            )}
-          </ScrollArea>
+                      </div>
+                      <div className="w-12 text-right">
+                        <Button variant="ghost" size="icon" onClick={() => deleteGroup(group.key)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                    {hasSerials && group.items && group.items.length > 0 && (
+                      <div className="px-6 py-2 bg-muted/50 max-h-32 overflow-y-auto">
+                        <div className="text-xs font-mono grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1">
+                          {group.items.slice(0, 100).map(item => (
+                            <span key={item.id} className="truncate">{item.seriNumarasi}</span>
+                          ))}
+                          {group.items.length > 100 && (
+                            <span className="text-muted-foreground">+{group.items.length - 100} daha...</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }}
+            />
+          )}
         </CardContent>
       </Card>
       

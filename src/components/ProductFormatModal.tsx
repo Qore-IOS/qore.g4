@@ -135,6 +135,10 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       barcodeFormatIds: multiFormatMode ? ((product as any).barcodeFormatIds || []) : null,
       ambalajDegeri: product.ambalajDegeri || null,
       trackingMode: product.trackingMode || resolveDefaultTrackingMode(product as any),
+      // Ürün boyutları (cm cinsinden)
+      genislik: product.genislik || null,
+      yukseklik: product.yukseklik || null,
+      derinlik: product.derinlik || null,
     };
 
     try {
@@ -328,6 +332,54 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
                   setProduct(p => ({...p, cost: newCost, currency: newCurrency}));
                 }}
               />
+          </div>
+
+          {/* Ürün Boyutları */}
+          <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+            <div className="flex items-center gap-2">
+              <Label className="text-sm font-semibold">Ürün Boyutları (cm)</Label>
+              <span className="text-xs text-muted-foreground">- Araç doluluk oranı hesaplaması için</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label className="text-xs">Genişlik</Label>
+                <Input
+                  type="number"
+                  placeholder="cm"
+                  value={product.genislik || ''}
+                  onChange={(e) => setProduct(s => ({ ...s, genislik: e.target.value ? Number(e.target.value) : undefined }))}
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Yükseklik</Label>
+                <Input
+                  type="number"
+                  placeholder="cm"
+                  value={product.yukseklik || ''}
+                  onChange={(e) => setProduct(s => ({ ...s, yukseklik: e.target.value ? Number(e.target.value) : undefined }))}
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Derinlik</Label>
+                <Input
+                  type="number"
+                  placeholder="cm"
+                  value={product.derinlik || ''}
+                  onChange={(e) => setProduct(s => ({ ...s, derinlik: e.target.value ? Number(e.target.value) : undefined }))}
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+            </div>
+            {product.genislik && product.yukseklik && product.derinlik && (
+              <div className="text-xs text-muted-foreground">
+                Hesaplanan hacim: <span className="font-mono font-semibold">{((product.genislik * product.yukseklik * product.derinlik) / 1000).toFixed(2)} L</span>
+              </div>
+            )}
           </div>
         </div>
         <DialogFooter>

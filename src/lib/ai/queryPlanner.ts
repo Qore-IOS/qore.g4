@@ -1,4 +1,4 @@
-import { ai, GEMINI_MODEL } from './config';
+import { anthropic, CLAUDE_MODEL } from './config';
 
 // Data query types that can be requested
 export type QueryType =
@@ -23,60 +23,130 @@ export interface QueryPlan {
 
 const QUERY_PLANNER_PROMPT = `Sen bir sorgu planlayıcısısın. Kullanıcının sorusunu analiz edip hangi verilerin çekilmesi gerektiğini belirle.
 
-Kullanılabilir sorgu türleri:
-- stock_by_product: Belirli bir ürünün stok durumu (params: stokKodu veya stokAdi)
-- stock_by_hospital: Belirli bir hastanenin tüm stokları (params: hospitalName veya hospitalId)
-- stock_by_depot: Belirli bir deponun tüm stokları (params: depotName veya depotId)
-- all_hospitals_stock: Tüm hastanelerdeki belirli ürünün stoğu - transfer önerileri için (params: stokKodu)
-- consumption_history: Tüketim geçmişi (params: stokKodu?, hospitalId?, days?)
-- device_faults: Cihaz arızaları (params: hospitalId?, brand?, status?)
-- efficiency_data: Verimlilik verileri (params: hospitalId?, year?, month?)
-- expiring_stock: Miyadı yaklaşan stoklar (params: days?, hospitalId?)
-- low_stock: Düşük stoklar (params: hospitalId?)
-- product_info: Ürün bilgisi (params: stokKodu veya stokAdi)
+## Kullanılabilir Sorgu Türleri
 
-Önemli:
-- Sadece soruyu cevaplamak için gerekli minimum veriyi iste
-- Transfer önerisi için all_hospitals_stock kullan
-- Arıza analizi için device_faults kullan
-- Verimlilik için efficiency_data kullan
+| Sorgu Türü | Açıklama | Parametreler |
+|------------|----------|--------------|
+| stock_by_product | Belirli bir ürünün stok durumu | stokKodu, stokAdi |
+| stock_by_hospital | Belirli bir hastanenin tüm stokları | hospitalName, hospitalId |
+| stock_by_depot | Belirli bir deponun tüm stokları | depotName, depotId |
+| all_hospitals_stock | Tüm hastanelerdeki belirli ürünün stoğu | stokKodu (transfer önerileri için) |
+| consumption_history | Tüketim geçmişi | stokKodu?, hospitalId?, days? |
+| device_faults | Cihaz arızaları | hospitalId?, brand?, status? |
+| efficiency_data | Verimlilik verileri | hospitalId?, year?, month? |
+| expiring_stock | Miyadı yaklaşan stoklar | days?, hospitalId? |
+| low_stock | Düşük stoklar | hospitalId? |
+| product_info | Ürün bilgisi | stokKodu, stokAdi |
 
-JSON formatında cevap ver:
+## Kurallar
+
+1. Sadece soruyu cevaplamak için gerekli minimum veriyi iste
+2. Transfer önerisi için mutlaka all_hospitals_stock kullan
+3. Arıza analizi için device_faults kullan
+4. Verimlilik için efficiency_data kullan
+5. Miad sorguları için expiring_stock kullan
+6. Birden fazla sorgu gerekebilir - hepsini listele
+
+## Çıktı Formatı
+
+SADECE aşağıdaki JSON formatında cevap ver, başka hiçbir açıklama ekleme:
+
 {
   "queries": [
-    { "type": "query_type", "params": { "key": "value" } }
+    { "type": "sorgu_tipi", "params": { "parametre": "deger" } }
   ],
   "reasoning": "Neden bu sorguları seçtiğinin kısa açıklaması"
 }`;
 
 export async function planQueries(userQuestion: string): Promise<QueryPlan> {
-  const { text } = await ai.generate({
-    model: GEMINI_MODEL,
-    prompt: `${QUERY_PLANNER_PROMPT}
-
-Kullanıcı sorusu: "${userQuestion}"
-
-JSON yanıtı:`,
-    config: {
-      temperature: 0.1, // Deterministik sonuç için düşük sıcaklık
-    },
-  });
-
   try {
-    // JSON'u parse et
+    const response = await anthropic.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 1024,
+      temperature: 0, // Deterministik sonuç için
+      messages: [
+        {
+          role: 'user',
+          content: `${QUERY_PLANNER_PROMPT}
+
+Kullanıcı sorusu: "${userQuestion}"`,
+        },
+      ],
+    });
+
+    // Extract text from response
+    const textContent = response.content.find((block) => block.type === 'text');
+    if (!textContent || textContent.type !== 'text') {
+      throw new Error('No text response from Claude');
+    }
+
+    const text = textContent.text;
+
+    // Parse JSON - Claude genellikle temiz JSON döner
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
+      console.error('Query planner: JSON not found in response:', text);
       throw new Error('JSON bulunamadı');
     }
 
     const plan = JSON.parse(jsonMatch[0]) as QueryPlan;
+
+    // Validate the plan
+    if (!plan.queries || !Array.isArray(plan.queries) || plan.queries.length === 0) {
+      throw new Error('Invalid query plan: no queries');
+    }
+
+    // Validate each query type
+    const validTypes: QueryType[] = [
+      'stock_by_product',
+      'stock_by_hospital',
+      'stock_by_depot',
+      'all_hospitals_stock',
+      'consumption_history',
+      'device_faults',
+      'efficiency_data',
+      'expiring_stock',
+      'low_stock',
+      'product_info',
+    ];
+
+    for (const query of plan.queries) {
+      if (!validTypes.includes(query.type)) {
+        console.warn(`Invalid query type: ${query.type}, defaulting to product_info`);
+        query.type = 'product_info';
+      }
+    }
+
+    console.log('Query plan created:', plan);
     return plan;
   } catch (error) {
-    console.error('Query plan parse error:', error);
-    // Fallback: genel bir sorgu planı döndür
+    console.error('Query plan error:', error);
+
+    // Intelligent fallback based on keywords in the question
+    const question = userQuestion.toLowerCase();
+    const fallbackQueries: QueryPlan['queries'] = [];
+
+    if (question.includes('arıza') || question.includes('cihaz') || question.includes('servis')) {
+      fallbackQueries.push({ type: 'device_faults', params: { status: 'open' } });
+    } else if (question.includes('transfer') || question.includes('dağıt')) {
+      fallbackQueries.push({ type: 'all_hospitals_stock', params: {} });
+    } else if (question.includes('verimlilik') || question.includes('performans')) {
+      fallbackQueries.push({ type: 'efficiency_data', params: {} });
+    } else if (question.includes('miad') || question.includes('son kullanma') || question.includes('expire')) {
+      fallbackQueries.push({ type: 'expiring_stock', params: { days: 90 } });
+    } else if (question.includes('tüketim') || question.includes('kullanım')) {
+      fallbackQueries.push({ type: 'consumption_history', params: { days: 30 } });
+    } else if (question.includes('hastane') || question.includes('hospital')) {
+      fallbackQueries.push({ type: 'stock_by_hospital', params: {} });
+    } else if (question.includes('stok') || question.includes('ürün') || question.includes('kit')) {
+      fallbackQueries.push({ type: 'stock_by_product', params: {} });
+    } else {
+      fallbackQueries.push({ type: 'product_info', params: {} });
+    }
+
     return {
-      queries: [{ type: 'product_info', params: {} }],
-      reasoning: 'Soru anlaşılamadı, genel bilgi sorgusu yapılıyor',
+      queries: fallbackQueries,
+      reasoning: 'Sorgu planlaması başarısız oldu, anahtar kelime bazlı fallback kullanıldı',
     };
   }
 }

@@ -1,10 +1,6 @@
-
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { collection, collectionGroup, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer, EventRow } from '@/lib/types';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import MainSearch from '@/components/MainSearch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,30 +10,20 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Input } from '@/components/ui/input';
-import { Loader2, ChevronDown, ChevronRight, FileSpreadsheet, Package, ChevronUp } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, ChevronDown, ChevronRight, FileSpreadsheet, Package, ChevronUp, Warehouse, Building2, Search, ArrowRight } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { toDateSafe, formatMiad } from '@/lib/date';
 import { cn } from '@/lib/utils';
-import { useSyncedLoading } from '@/hooks/useSyncedLoading';
-
+import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult } from '@/services/searchService';
+import { useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
 
 // -----------------------------------------------------
 // Types & Helper Components
 // -----------------------------------------------------
 
-type SearchType = 'product' | 'lot' | 'serial';
-type SortKey = keyof EventRow | 'hedefKonum';
-
-type TransferItem = {
-  transferId: string;
-  stokKodu: string;
-  stokAdi: string;
-  lotNumarasi: string;
-  miad: string;
-  seriNumarasi?: string;
-};
+type SortKey = keyof LedgerRow | 'hedefKonum';
 
 const SortableHeader: React.FC<{
   label: string;
@@ -47,7 +33,7 @@ const SortableHeader: React.FC<{
   onClick: (key: SortKey) => void;
   className?: string;
 }> = ({ label, sortKey, currentSort, isAsc, onClick, className }) => (
-  <TableHead onClick={() => onClick(sortKey)} className={cn("cursor-pointer", className)}>
+  <TableHead onClick={() => onClick(sortKey)} className={cn("cursor-pointer select-none", className)}>
     <div className="flex items-center gap-1">
       {label}
       {currentSort === sortKey && (isAsc ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
@@ -62,24 +48,19 @@ const SortableHeader: React.FC<{
 export default function AramaPanel() {
   const { toast } = useToast();
 
-  const [isLoading, setIsLoading] = useState(true);
+  // Master data from cached hooks (no initial fetch, uses cache)
+  const { data: productCodes = [] } = useProductCodes();
+  const { data: depots = [] } = useDepots();
 
-  // Sync local loading with global loader - automatically shows/hides global loading animation
-  useSyncedLoading(isLoading);
-
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [shipments, setShipments] = useState<Shipment[]>([]);
-  const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [transferItems, setTransferItems] = useState<TransferItem[]>([]);
-  const [usersMap, setUsersMap] = useState<Record<string, { name?: string }>>({});
-  const [verificationReports, setVerificationReports] = useState<any[]>([]);
-
+  // Search state
   const [query, setQuery] = useState('');
-  const [searchType, setSearchType] = useState<SearchType>('product');
-  const [results, setResults] = useState<(EventRow & { hedefKonum?: string })[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchType, setSearchType] = useState<'product' | 'lot' | 'serial'>('product');
+
+  // Results
+  const [results, setResults] = useState<LedgerRow[]>([]);
+  const [stockSummary, setStockSummary] = useState<StockSummary[]>([]);
 
   // Sort & Filter State
   const [sortKey, setSortKey] = useState<SortKey>('tarih');
@@ -90,281 +71,85 @@ export default function AramaPanel() {
   // Pagination
   const [pageSize, setPageSize] = useState<number>(20);
   const [page, setPage] = useState<number>(1);
-  
 
   // UI row expand
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggleRow = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
-  // Serial helpers (varying field names)
-  const serialsOfDepoStok = (d: any): string[] => Array.from(new Set([d?.seriNumarasi, d?.seriNo, d?.serialNumber, d?.serialNo].filter(Boolean) as string[]));
-  const serialsOfShipmentItem = (it: any): string[] => Array.from(new Set((it?.serialNumbers || it?.seriNolar || it?.seriNoList || []) as string[]));
-  const serialOfConsumption = (rec: any): string | null => rec?.seriNumarasi || rec?.seriNo || rec?.serialNumber || null;
+  // ---------------------------------------------------
+  // Search Handler - Only fetches data when search is performed
+  // ---------------------------------------------------
+  const handleSearch = useCallback(async (q: string) => {
+    if (!q || q.trim().length < 2) {
+      toast({
+        title: 'Arama Çok Kısa',
+        description: 'En az 2 karakter girmeniz gerekiyor.',
+        variant: 'default'
+      });
+      return;
+    }
 
-  // ---------------------------------------------------
-  // Data load
-  // ---------------------------------------------------
-  useEffect(() => {
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        const [
-            depotsSnap, pcSnap, stokSnap, shipSnap, consSnap,
-            transfersSnap, transferItemsSnap, reportsSnap, usersSnap
-        ] = await Promise.all([
-            getDocs(collection(db, 'depots')),
-            getDocs(collection(db, 'productCodes')),
-            getDocs(collection(db, 'depoStok')),
-            getDocs(collection(db, 'shipments')),
-            getDocs(collection(db, 'tuketimKayitlari')),
-            getDocs(collection(db, 'transfers')),
-            getDocs(collectionGroup(db, 'items')),
-            getDocs(collection(db, 'verificationReports')),
-            getDocs(collection(db, 'users')),
-        ]);
-        setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Depot[]);
-        setProductCodes(pcSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as ProductCode[]);
-        setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as DepoStokItem[]);
-        setShipments(shipSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Shipment[]);
-        setTuketimKayitlari(consSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as ConsumptionRecord[]);
-        setTransfers(transfersSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as Transfer)));
-        setTransferItems(transferItemsSnap.docs.map(d => ({ transferId: d.ref.parent.parent!.id, ...(d.data() as any) })) as TransferItem[]);
-        setVerificationReports(reportsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
-        setUsersMap(Object.fromEntries(usersSnap.docs.map(d => [d.id, { name: (d.data() as any).name || (d.data() as any).displayName }])));
-      } catch (e) {
-        console.error(e);
-        toast({ title: 'Veri Yükleme Hatası', description: 'Arama paneli için veriler alınamadı.', variant: 'destructive' });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    load();
-  }, [toast]);
-
-  // ---------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------
-  const normDate = (d: any): Date => toDateSafe(d) ?? new Date(0);
-  const productOf = (stokKodu?: string) => productCodes.find(p => p.stokKodu === stokKodu);
-
-  const detectType = useCallback((q: string): SearchType => {
-    const s = q.trim().toLowerCase();
-    if (!s) return 'product';
-    const serialHit =
-      depoStok.some(i => serialsOfDepoStok(i).some(sn => sn.toLowerCase() === s)) ||
-      tuketimKayitlari.some(i => (serialOfConsumption(i) || '').toLowerCase() === s) ||
-      shipments.some(sh => (sh.items || []).some(it => serialsOfShipmentItem(it).some(sn => sn.toLowerCase() === s))) ||
-      transferItems.some(i => (i.seriNumarasi || '').toLowerCase() === s) ||
-      verificationReports.some(r => r.raporTipi === 'mal_kabul' && (r.seriNumarasi || '').toLowerCase() === s);
-    if (serialHit) return 'serial';
-    const lotHit =
-      depoStok.some(i => (i.lotNumarasi || '').toLowerCase() === s) ||
-      shipments.some(sh => (sh.items || []).some(it => (it.lotNumarasi || '').toLowerCase() === s)) ||
-      transferItems.some(i => (i.lotNumarasi || '').toLowerCase() === s);
-    if (lotHit) return 'lot';
-    return 'product';
-  }, [depoStok, tuketimKayitlari, shipments, transferItems, verificationReports]);
-
-
-  // ---------------------------------------------------
-  // Search
-  // ---------------------------------------------------
-  const handleSearch = useCallback((q: string) => {
     setQuery(q);
-    const type = detectType(q);
-    setSearchType(type);
-
-    const needle = q.trim().toLowerCase();
-    const matchProduct = (x: { stokKodu?: string; stokAdi?: string; lotNumarasi?: string; }) => {
-      if (type === 'serial') return true;
-      if (type === 'lot') return (x.lotNumarasi || '').toLowerCase() === needle;
-      if (type === 'product') {
-        return (x.stokKodu || '').toLowerCase().includes(needle) || (x.stokAdi || '').toLowerCase().includes(needle);
-      }
-      return true;
-    };
-    
-    // 1) Mal Kabul (depoStok & verificationReports)
-    const malKabulFromDepoStok: EventRow[] = depoStok
-      .filter(d => matchProduct(d) || (type === 'serial' && serialsOfDepoStok(d).some(sn => sn.toLowerCase() === needle)))
-      .map(d => ({
-        id: `mk_ds_${d.id ?? crypto.randomUUID()}`,
-        stokKodu: d.stokKodu ?? '',
-        stokAdi: d.stokAdi ?? '',
-        lotNumarasi: d.lotNumarasi ?? undefined,
-        miad: formatMiad(d.miad),
-        islemTipi: 'Mal Kabul',
-        actor: (d as any).createdByName || (d as any).userName || (d as any).ekleyenKullanici || usersMap[(d as any).createdByUid]?.name || '-',
-        tarih: normDate((d as any).eklenmeTarihi),
-        adet: 1,
-        seriNolar: serialsOfDepoStok(d) ?? [],
-        konum: d.depotName || 'Depo',
-      }));
-
-    const malKabulFromReports: EventRow[] = verificationReports
-      .filter(r => r.raporTipi === 'mal_kabul' && (type !== 'serial' ? matchProduct(r) : (r.seriNumarasi || '').toLowerCase() === needle))
-      .map(r => ({
-        id: `mk_vr_${r.id}`,
-        stokKodu: r.stokKodu || '',
-        stokAdi: r.stokAdi || '',
-        lotNumarasi: r.lotNumarasi || undefined,
-        miad: formatMiad(r.miad),
-        islemTipi: 'Mal Kabul',
-        actor: r.createdByName || r.userName || (r.createdByUid && usersMap[r.createdByUid]?.name) || '-',
-        tarih: normDate(r.islemTarihi),
-        adet: 1,
-        seriNolar: r.seriNumarasi ? [r.seriNumarasi] : [],
-        konum: r.depotName || 'Depo',
-      }));
-
-    const mkMap = new Map<string, EventRow>();
-    [...malKabulFromDepoStok, ...malKabulFromReports].forEach(ev => {
-      const key = `MK|${ev.stokKodu}|${ev.lotNumarasi || ''}|${ev.miad}|${ev.tarih.toISOString()}|${ev.konum}|${ev.seriNolar.join(',')}`;
-      if (!mkMap.has(key)) mkMap.set(key, ev);
-    });
-    const malKabulEvents = Array.from(mkMap.values());
-
-    // 2) Sevkiyat
-    const shipmentEvents: EventRow[] = (shipments || []).flatMap(sh =>
-      (sh.items || []).filter(it => matchProduct(it) || (type === 'serial' && serialsOfShipmentItem(it).some(sn => sn.toLowerCase() === needle)))
-        .map(it => ({
-          id: `sh_${sh.id}_${it.stokKodu || ''}_${it.lotNumarasi || ''}_${it.miad || ''}`,
-          stokKodu: it.stokKodu || '',
-          stokAdi: it.stokAdi || '',
-          lotNumarasi: it.lotNumarasi || undefined,
-          miad: formatMiad(it.miad),
-          islemTipi: 'Karşılanan Sipariş',
-          actor: (sh as any).userName || '-',
-          tarih: normDate((sh as any).timestamp),
-          adet: it.quantity || (serialsOfShipmentItem(it).length || 0),
-          seriNolar: serialsOfShipmentItem(it),
-          konum: (sh as any).depotName || 'Depo',
-        }))
-    );
-    
-    // 3) Direkt Transfer
-    const transferMeta = new Map(transfers.map(t => [t.id, t]));
-    const filteredTItems = transferItems.filter(it => matchProduct(it) || (type === 'serial' && (it.seriNumarasi || '').toLowerCase() === needle));
-    const transferGroups = new Map<string, { t: Transfer; items: TransferItem[] }>();
-    for (const it of filteredTItems) {
-      const t = transferMeta.get(it.transferId);
-      if (!t) continue;
-      const key = `${it.transferId}|${it.stokKodu}|${it.lotNumarasi}|${it.miad}`;
-      const g = transferGroups.get(key) || { t, items: [] };
-      g.items.push(it);
-      transferGroups.set(key, g);
-    }
-    const transferEvents = Array.from(transferGroups.values()).map(g => {
-      const sample = g.items[0];
-      const sourceName = g.t.sourceDepotName || depots.find(d => d.id === g.t.sourceDepotId)?.name || 'Depo';
-      return {
-        id: `tr_${g.t.id}_${sample.stokKodu}_${sample.lotNumarasi}_${sample.miad}`,
-        stokKodu: sample.stokKodu,
-        stokAdi: sample.stokAdi,
-        lotNumarasi: sample.lotNumarasi,
-        miad: formatMiad(sample.miad),
-        islemTipi: 'Direkt Transfer' as const,
-        actor: g.t.userName || '-',
-        tarih: normDate(g.t.timestamp),
-        adet: g.items.length,
-        seriNolar: g.items.map(x => x.seriNumarasi).filter(Boolean) as string[],
-        konum: sourceName,
-        hedefKonum: g.t.targetName // NEW FIELD
-      };
-    });
-
-    // 4) Kullanım
-    const kullanims: EventRow[] = (tuketimKayitlari || [])
-      .filter(rec => matchProduct(rec) || (type === 'serial' && (serialOfConsumption(rec) || '').toLowerCase() === needle))
-      .map(rec => ({
-        id: `tk_${(rec as any).id}`,
-        stokKodu: (rec as any).stokKodu || '',
-        stokAdi: (rec as any).stokAdi || '',
-        lotNumarasi: (rec as any).lotNumarasi || undefined,
-        miad: formatMiad((rec as any).miad),
-        islemTipi: 'Kullanım',
-        actor: (rec as any).userName || '-',
-        tarih: normDate((rec as any).consumptionTimestamp || (rec as any).sevkTarihi),
-        adet: 1,
-        seriNolar: serialOfConsumption(rec) ? [serialOfConsumption(rec)!] : [],
-        konum: (rec as any).laboratoryName || (rec as any).hedefKurum || 'Laboratuvar',
-      }));
-
-    let all: EventRow[] = [...malKabulEvents, ...shipmentEvents, ...transferEvents, ...kullanims];
-    if (type === 'serial') all = all.filter(e => e.seriNolar.map(s => s.toLowerCase()).includes(needle));
-
+    setIsSearching(true);
+    setHasSearched(true);
     setPage(1);
-    setResults(all as any);
-    if (all.length === 0) toast({ title: 'Sonuç bulunamadı', description: 'Arama kriterlerine uygun hareket yok.', variant: 'default' });
-  }, [detectType, depoStok, shipments, tuketimKayitlari, transfers, transferItems, depots, productCodes, verificationReports, usersMap, toast]);
 
-  const stockSummary = useMemo(() => {
-    if (!query) return [];
-    const type = searchType;
-    const needle = query.trim().toLowerCase();
+    try {
+      const result: SearchResult = await searchProductLedger(q, productCodes, depots);
 
-    if (type === 'serial') {
-      const inStock = depoStok.find(s => serialsOfDepoStok(s).some(sn => sn.toLowerCase() === needle));
-      if (inStock) {
-        const product = productOf(inStock.stokKodu);
-        const location = inStock.isShipped ? inStock.hedefKurum : inStock.depotName;
-        return [{ label: location || 'Bilinmeyen Konum', adet: 1, birim: product?.anaBirim || 'Adet' }];
+      setResults(result.ledgerRows);
+      setStockSummary(result.stockSummary);
+      setSearchType(result.searchType);
+
+      if (result.ledgerRows.length === 0) {
+        toast({
+          title: 'Sonuç Bulunamadı',
+          description: 'Arama kriterlerine uygun kayıt bulunamadı.',
+          variant: 'default'
+        });
+      } else {
+        toast({
+          title: 'Arama Tamamlandı',
+          description: `${result.ledgerRows.length} işlem kaydı bulundu.`,
+        });
       }
-      const consumed = tuketimKayitlari.find(t => (serialOfConsumption(t) || '').toLowerCase() === needle);
-      if (consumed) return [{ label: 'Tüketildi', adet: 0, birim: 'Adet' }];
-      return [];
+    } catch (error) {
+      console.error('Search error:', error);
+      toast({
+        title: 'Arama Hatası',
+        description: 'Arama sırasında bir hata oluştu. Lütfen tekrar deneyin.',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsSearching(false);
     }
+  }, [toast, productCodes, depots]);
 
-    let stokKodu: string | undefined;
-    let lot: string | undefined;
-    if (type === 'lot') {
-      const d = depoStok.find(x => (x.lotNumarasi || '').toLowerCase() === needle) || transferItems.find(x => (x.lotNumarasi || '').toLowerCase() === needle);
-      stokKodu = d?.stokKodu; lot = (d as any)?.lotNumarasi || needle;
-    } else {
-      stokKodu = productCodes.find(p => p.stokKodu?.toLowerCase() === needle)?.stokKodu ?? productCodes.find(p => p.stokAdi?.toLowerCase().includes(needle))?.stokKodu;
-    }
-    if (!stokKodu) return [];
-
-    const matchLot = (x: DepoStokItem) => !lot || x.lotNumarasi?.toLowerCase() === lot;
-    const anaBirim = productOf(stokKodu)?.anaBirim || 'Adet';
-    const byDepot: Record<string, number> = {};
-    const byHospital: Record<string, number> = {};
-    depoStok.forEach(x => {
-      if (x.stokKodu !== stokKodu || !matchLot(x)) return;
-      if (!x.isShipped) byDepot[x.depotName || 'Depo'] = (byDepot[x.depotName || 'Depo'] || 0) + 1;
-      else if (x.hedefKurum) byHospital[x.hedefKurum] = (byHospital[x.hedefKurum] || 0) + 1;
-    });
-    return [
-      ...Object.entries(byDepot).map(([k, v]) => ({ label: k, adet: v, birim: anaBirim })),
-      ...Object.entries(byHospital).map(([k, v]) => ({ label: k, adet: v, birim: anaBirim })),
-    ];
-  }, [query, searchType, depoStok, productCodes, tuketimKayitlari, transferItems, serialsOfDepoStok, serialOfConsumption]);
-
-  const handleExport = () => {
-    const data = filteredAndSorted.map(ev => ({
-      'Stok Kodu': ev.stokKodu, 'Stok Adı': ev.stokAdi, 'Lot': ev.lotNumarasi, 'Miad': ev.miad,
-      'İşlem Tipi': ev.islemTipi, 'İşlemi Yapan': ev.actor, 'Tarih/Saat': format(ev.tarih, 'dd.MM.yyyy HH:mm', { locale: tr }),
-      'İşlem Adedi': ev.adet, 'Kaynak Konum': ev.konum,
-      'Hedef Konum': (ev as any).hedefKonum || '-', // NEW
-      'Seri Numaraları': ev.seriNolar.join(', '),
-    }));
-    exportDataToExcel(data, `Arama_Ekstre_${query.replace(/\s+/g, '_')}`, 'Ekstre', toast);
-  };
-  
+  // ---------------------------------------------------
+  // Sorting & Filtering
+  // ---------------------------------------------------
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortAsc(asc => !asc);
     } else {
       setSortKey(key);
-      setSortAsc(key === 'tarih' ? false : true); // Default to descending for date
+      setSortAsc(key === 'tarih' ? false : true);
     }
   };
 
-  const uniqueIslemTipleri = useMemo(() => Array.from(new Set(results.map(r => r.islemTipi).filter(Boolean))) as string[], [results]);
-  const uniqueKonumlar = useMemo(() => Array.from(new Set(results.map(r => r.konum).filter(Boolean))) as string[], [results]);
+  const uniqueIslemTipleri = useMemo(() =>
+    Array.from(new Set(results.map(r => r.islemTipi).filter(Boolean))) as string[],
+    [results]
+  );
+
+  const uniqueKonumlar = useMemo(() =>
+    Array.from(new Set(results.map(r => r.konum).filter(Boolean))) as string[],
+    [results]
+  );
 
   const filteredAndSorted = useMemo(() => {
     let items = [...results];
+
     // Filter
     if (filterIslemTipi !== 'all') {
       items = items.filter(r => r.islemTipi === filterIslemTipi);
@@ -372,10 +157,11 @@ export default function AramaPanel() {
     if (filterKonum !== 'all') {
       items = items.filter(r => r.konum === filterKonum);
     }
+
     // Sort
     items.sort((a, b) => {
-      const valA = a[sortKey as keyof EventRow];
-      const valB = b[sortKey as keyof EventRow];
+      const valA = a[sortKey as keyof LedgerRow];
+      const valB = b[sortKey as keyof LedgerRow];
       if (valA instanceof Date && valB instanceof Date) {
         return sortAsc ? valA.getTime() - valB.getTime() : valB.getTime() - valA.getTime();
       }
@@ -390,16 +176,51 @@ export default function AramaPanel() {
   }, [results, sortKey, sortAsc, filterIslemTipi, filterKonum]);
 
   const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / pageSize));
+
   const paged = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filteredAndSorted.slice(start, start + pageSize);
   }, [filteredAndSorted, page, pageSize]);
 
-  useEffect(() => {
+  // ---------------------------------------------------
+  // Export Handler
+  // ---------------------------------------------------
+  const handleExport = () => {
+    if (filteredAndSorted.length === 0) {
+      toast({
+        title: 'Veri Yok',
+        description: 'Dışa aktarılacak veri bulunmuyor.',
+        variant: 'default'
+      });
+      return;
+    }
+
+    const data = filteredAndSorted.map(ev => ({
+      'Stok Kodu': ev.stokKodu,
+      'Stok Adı': ev.stokAdi,
+      'Lot': ev.lotNumarasi || '-',
+      'Miad': ev.miad || '-',
+      'İşlem Tipi': ev.islemTipi,
+      'İşlemi Yapan': ev.actor || '-',
+      'Tarih/Saat': format(ev.tarih, 'dd.MM.yyyy HH:mm', { locale: tr }),
+      'İşlem Adedi': ev.adet,
+      'Kaynak Konum': ev.konum,
+      'Hedef Konum': ev.hedefKonum || '-',
+      'Sonrası Depo': ev.postAdetDepo ?? '-',
+      'Sonrası Hedef': ev.postAdetHedef ?? '-',
+      'Seri Numaraları': ev.seriNolar.join(', ') || '-',
+    }));
+    exportDataToExcel(data, `Arama_Ekstre_${query.replace(/\s+/g, '_')}`, 'Ekstre', toast);
+  };
+
+  // Reset page when filters change
+  React.useEffect(() => {
     setPage(1);
   }, [filterIslemTipi, filterKonum, sortKey, sortAsc, pageSize]);
 
-
+  // ---------------------------------------------------
+  // Render
+  // ---------------------------------------------------
   return (
     <div className="min-h-[80vh]">
       <MainSearch onSearch={handleSearch} />
@@ -407,50 +228,118 @@ export default function AramaPanel() {
         <Card className="glass-card border border-white/10 backdrop-blur">
           <CardHeader className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
             <div>
-              <CardTitle className="text-lg md:text-xl">Qore Search</CardTitle>
-              <CardDescription>Stok kodu, stok adı, lot veya seri numarası ile arayın. Liste en yeni işlemlerden başlar.</CardDescription>
+              <CardTitle className="text-lg md:text-xl flex items-center gap-2">
+                <Search className="h-5 w-5" />
+                Qore Search
+              </CardTitle>
+              <CardDescription>
+                Stok kodu, stok adı, lot veya seri numarası ile arayın.
+                {hasSearched && searchType === 'serial' && (
+                  <Badge variant="secondary" className="ml-2">Seri No Araması</Badge>
+                )}
+                {hasSearched && searchType === 'lot' && (
+                  <Badge variant="secondary" className="ml-2">Lot Araması</Badge>
+                )}
+                {hasSearched && searchType === 'product' && (
+                  <Badge variant="secondary" className="ml-2">Ürün Araması</Badge>
+                )}
+              </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={handleExport} disabled={filteredAndSorted.length === 0}>
-                <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
+                <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel&apos;e Aktar
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mr-2"/>Yükleniyor…</div>
-            ) : (
+            {/* Initial state - no search yet */}
+            {!hasSearched && !isSearching && (
+              <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
+                <Search className="h-16 w-16 mb-4 opacity-30" />
+                <h3 className="text-lg font-medium mb-2">Aramaya Başlayın</h3>
+                <p className="text-sm max-w-md">
+                  Yukarıdaki arama çubuğuna stok kodu, stok adı, lot numarası veya seri numarası girerek arama yapabilirsiniz.
+                </p>
+              </div>
+            )}
+
+            {/* Loading state */}
+            {isSearching && (
+              <div className="flex items-center justify-center py-16 text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                Aranıyor...
+              </div>
+            )}
+
+            {/* Results */}
+            {hasSearched && !isSearching && (
               <>
+                {/* Stock Summary */}
                 {stockSummary.length > 0 && (
-                  <div className="mb-4 p-3 rounded-lg border bg-background/50">
-                    <div className="flex items-center gap-2 mb-2 text-sm font-medium"><Package size={16}/> Aranan ürün stok dağılımı</div>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="mb-4 p-4 rounded-lg border bg-background/50">
+                    <div className="flex items-center gap-2 mb-3 text-sm font-medium">
+                      <Package size={18} />
+                      Güncel Stok Dağılımı
+                    </div>
+                    <div className="flex flex-wrap gap-3">
                       {stockSummary.map((s, i) => (
-                        <div key={i} className="px-3 py-1 rounded-full text-xs bg-gradient-to-r from-primary to-accent text-white shadow">{s.label}: {s.adet} {s.birim}</div>
+                        <div
+                          key={i}
+                          className={cn(
+                            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shadow-sm",
+                            s.konumTipi === 'depo'
+                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20"
+                              : "bg-green-500/10 text-green-700 dark:text-green-400 border border-green-500/20"
+                          )}
+                        >
+                          {s.konumTipi === 'depo' ? (
+                            <Warehouse className="h-4 w-4" />
+                          ) : (
+                            <Building2 className="h-4 w-4" />
+                          )}
+                          <span>{s.konum}:</span>
+                          <span className="font-bold">{s.adet}</span>
+                          <span className="text-xs opacity-75">{s.birim}</span>
+                        </div>
                       ))}
                     </div>
                   </div>
                 )}
-                
+
+                {/* Results info and pagination controls */}
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
-                  <div className="text-sm text-muted-foreground">Toplam <strong>{filteredAndSorted.length}</strong> işlem • Sayfa {page} / {totalPages}</div>
+                  <div className="text-sm text-muted-foreground">
+                    Toplam <strong>{filteredAndSorted.length}</strong> işlem
+                    {query && <span className="ml-1">(&quot;{query}&quot; için)</span>}
+                    {' '}• Sayfa {page} / {totalPages}
+                  </div>
                   <div className="flex items-center gap-2">
                     <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
                       <SelectTrigger className="h-8 w-[160px]"><SelectValue placeholder="Sayfa başına" /></SelectTrigger>
                       <SelectContent>
-                        {[10,20,50,100].map(n => (<SelectItem key={n} value={String(n)}>{n} / sayfa</SelectItem>))}
+                        {[10, 20, 50, 100].map(n => (<SelectItem key={n} value={String(n)}>{n} / sayfa</SelectItem>))}
                       </SelectContent>
                     </Select>
                     <div className="flex items-center gap-1">
-                      <Button size="sm" variant="outline" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page===1}>Önceki</Button>
-                      <Input value={page} onChange={(e)=>{
-                        const val = Number(e.target.value)||1; setPage(Math.min(Math.max(1,val), totalPages));
-                      }} className="w-16 h-8 text-center" />
-                      <Button size="sm" variant="outline" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page===totalPages}>Sonraki</Button>
+                      <Button size="sm" variant="outline" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                        Önceki
+                      </Button>
+                      <Input
+                        value={page}
+                        onChange={(e) => {
+                          const val = Number(e.target.value) || 1;
+                          setPage(Math.min(Math.max(1, val), totalPages));
+                        }}
+                        className="w-16 h-8 text-center"
+                      />
+                      <Button size="sm" variant="outline" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                        Sonraki
+                      </Button>
                     </div>
                   </div>
                 </div>
 
+                {/* Results Table */}
                 <ScrollArea className="h-[60vh] border rounded-md">
                   <Table>
                     <TableHeader>
@@ -461,60 +350,105 @@ export default function AramaPanel() {
                         <SortableHeader label="Lot" sortKey="lotNumarasi" currentSort={sortKey} isAsc={sortAsc} onClick={handleSort} />
                         <SortableHeader label="Miad" sortKey="miad" currentSort={sortKey} isAsc={sortAsc} onClick={handleSort} />
                         <TableHead>
-                           <Select value={filterIslemTipi} onValueChange={setFilterIslemTipi}>
-                              <SelectTrigger className="border-none p-0 h-auto font-semibold bg-transparent focus:ring-0 focus:ring-offset-0 [&>span]:line-clamp-1">
-                                <SelectValue/>
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">İşlem Tipi (Tümü)</SelectItem>
-                                {uniqueIslemTipleri.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                              </SelectContent>
-                           </Select>
+                          <Select value={filterIslemTipi} onValueChange={setFilterIslemTipi}>
+                            <SelectTrigger className="border-none p-0 h-auto font-semibold bg-transparent focus:ring-0 focus:ring-offset-0 [&>span]:line-clamp-1">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">İşlem Tipi (Tümü)</SelectItem>
+                              {uniqueIslemTipleri.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
                         </TableHead>
                         <SortableHeader label="İşlemi Yapan" sortKey="actor" currentSort={sortKey} isAsc={sortAsc} onClick={handleSort} />
                         <SortableHeader label="Tarih / Saat" sortKey="tarih" currentSort={sortKey} isAsc={sortAsc} onClick={handleSort} />
-                        <SortableHeader label="İşlem Adedi" sortKey="adet" currentSort={sortKey} isAsc={sortAsc} onClick={handleSort} />
+                        <SortableHeader label="Adet" sortKey="adet" currentSort={sortKey} isAsc={sortAsc} onClick={handleSort} />
                         <TableHead>
                           <Select value={filterKonum} onValueChange={setFilterKonum}>
-                              <SelectTrigger className="border-none p-0 h-auto font-semibold bg-transparent focus:ring-0 focus:ring-offset-0 [&>span]:line-clamp-1">
-                                <SelectValue/>
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">Konum (Tümü)</SelectItem>
-                                {uniqueKonumlar.map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
-                              </SelectContent>
-                           </Select>
+                            <SelectTrigger className="border-none p-0 h-auto font-semibold bg-transparent focus:ring-0 focus:ring-offset-0 [&>span]:line-clamp-1">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">Kaynak (Tümü)</SelectItem>
+                              {uniqueKonumlar.map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
                         </TableHead>
-                        <SortableHeader label="Hedef Konum" sortKey="hedefKonum" currentSort={sortKey} isAsc={sortAsc} onClick={handleSort} />
+                        <TableHead>Hedef</TableHead>
+                        <TableHead className="text-center">Sonrası</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {paged.length === 0 ? (
-                        <TableRow><TableCell colSpan={11} className="text-center py-10 text-muted-foreground">Liste boş.</TableCell></TableRow>
+                        <TableRow>
+                          <TableCell colSpan={12} className="text-center py-10 text-muted-foreground">
+                            Liste boş.
+                          </TableCell>
+                        </TableRow>
                       ) : (
                         paged.map(ev => {
                           const isOpen = !!expanded[ev.id];
                           return (
                             <React.Fragment key={ev.id}>
                               <TableRow className="hover:bg-muted/50 cursor-pointer" onClick={() => toggleRow(ev.id)}>
-                                <TableCell className="w-8">{isOpen ? <ChevronDown className="h-4 w-4"/> : <ChevronRight className="h-4 w-4"/>}</TableCell>
+                                <TableCell className="w-8">
+                                  {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                </TableCell>
                                 <TableCell className="font-mono text-xs">{ev.stokKodu}</TableCell>
-                                <TableCell className="truncate">{ev.stokAdi}</TableCell>
-                                <TableCell className="font-mono text-xs">{ev.lotNumarasi}</TableCell>
-                                <TableCell>{ev.miad}</TableCell>
-                                <TableCell>{ev.islemTipi}</TableCell>
-                                <TableCell>{ev.actor}</TableCell>
-                                <TableCell>{format(ev.tarih, 'dd.MM.yyyy HH:mm', { locale: tr })}</TableCell>
+                                <TableCell className="truncate max-w-[150px]">{ev.stokAdi}</TableCell>
+                                <TableCell className="font-mono text-xs">{ev.lotNumarasi || '-'}</TableCell>
+                                <TableCell>{ev.miad || '-'}</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant={
+                                      ev.islemTipi === 'Mal Kabul' ? 'default' :
+                                        ev.islemTipi === 'Kullanım' ? 'destructive' :
+                                          'secondary'
+                                    }
+                                    className="text-xs"
+                                  >
+                                    {ev.islemTipi}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-sm">{ev.actor || '-'}</TableCell>
+                                <TableCell className="text-sm whitespace-nowrap">
+                                  {format(ev.tarih, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                                </TableCell>
                                 <TableCell className="text-right font-semibold">{ev.adet}</TableCell>
-                                <TableCell>{ev.konum}</TableCell>
-                                <TableCell>{(ev as any).hedefKonum || '-'}</TableCell>
+                                <TableCell className="text-sm">{ev.konum}</TableCell>
+                                <TableCell className="text-sm">
+                                  {ev.hedefKonum ? (
+                                    <span className="flex items-center gap-1">
+                                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                      {ev.hedefKonum}
+                                    </span>
+                                  ) : '-'}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  {(ev.postAdetDepo !== undefined || ev.postAdetHedef !== undefined) ? (
+                                    <div className="flex flex-col items-center text-xs">
+                                      {ev.postAdetDepo !== undefined && (
+                                        <span className="text-blue-600 dark:text-blue-400">
+                                          D: {ev.postAdetDepo}
+                                        </span>
+                                      )}
+                                      {ev.postAdetHedef !== undefined && (
+                                        <span className="text-green-600 dark:text-green-400">
+                                          L: {ev.postAdetHedef}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : '-'}
+                                </TableCell>
                               </TableRow>
                               {isOpen && (
                                 <TableRow className="bg-background/50">
-                                  <TableCell colSpan={11} className="p-0">
+                                  <TableCell colSpan={12} className="p-0">
                                     <Accordion type="single" collapsible defaultValue={`row-${ev.id}`}>
                                       <AccordionItem value={`row-${ev.id}`} className="border-b-0">
-                                        <AccordionTrigger className="px-4 py-2 text-sm">İşlemdeki Seri Numaraları ({ev.seriNolar.length})</AccordionTrigger>
+                                        <AccordionTrigger className="px-4 py-2 text-sm">
+                                          İşlemdeki Seri Numaraları ({ev.seriNolar.length})
+                                        </AccordionTrigger>
                                         <AccordionContent className="px-4 pb-4">
                                           {ev.seriNolar.length === 0 ? (
                                             <div className="text-xs text-muted-foreground">Seri numarası yok.</div>
@@ -522,6 +456,32 @@ export default function AramaPanel() {
                                             <ul className="text-xs font-mono columns-1 sm:columns-2 md:columns-3 gap-2 list-disc pl-5">
                                               {ev.seriNolar.map((s, i) => (<li key={i}>{s}</li>))}
                                             </ul>
+                                          )}
+                                          {/* Post-operation summary for expanded row */}
+                                          {(ev.postAdetDepo !== undefined || ev.postAdetHedef !== undefined) && (
+                                            <div className="mt-3 pt-3 border-t text-xs">
+                                              <p className="font-medium mb-1">İşlem Sonrası Stok:</p>
+                                              <div className="flex flex-wrap gap-3">
+                                                {ev.postAdetDepo !== undefined && (
+                                                  <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                                    <Warehouse className="h-3 w-3" />
+                                                    {ev.konum}: {ev.postAdetDepo} adet
+                                                  </span>
+                                                )}
+                                                {ev.postAdetHedef !== undefined && ev.hedefKonum && (
+                                                  <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                                                    <Building2 className="h-3 w-3" />
+                                                    {ev.hedefKonum}: {ev.postAdetHedef} adet
+                                                  </span>
+                                                )}
+                                                {ev.postAdetHedef !== undefined && !ev.hedefKonum && ev.islemTipi === 'Kullanım' && (
+                                                  <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                                                    <Building2 className="h-3 w-3" />
+                                                    {ev.konum}: {ev.postAdetHedef} adet kaldı
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
                                           )}
                                         </AccordionContent>
                                       </AccordionItem>
@@ -544,5 +504,3 @@ export default function AramaPanel() {
     </div>
   );
 }
-
-    

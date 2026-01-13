@@ -186,6 +186,9 @@ export default function TotalVerimlilikPanel({
   // Sütun 22 - Kutu Kayıp Görünüm Modu
   const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
 
+  // Sütun 23-25 Maliyet Sütunları Göster/Gizle (default: kapalı)
+  const [showCostColumns, setShowCostColumns] = useState(false);
+
   // Sütun 23 - Maliyet Hesabı için Para Birimi ve Döviz Kurları
   const [costCurrency, setCostCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
@@ -1427,6 +1430,76 @@ export default function TotalVerimlilikPanel({
     return total;
   }, [rows, calculateKar]);
 
+  // Sütun 26: Zarar Maliyeti hesaplama yardımcı fonksiyonu
+  // Zarar Maliyeti = Stok Doğruluk Fark (20) × (Ürün Maliyeti / Ambalaj)
+  const calculateZararMaliyeti = useCallback((row: TableRow): { zarar: number; hasData: boolean } => {
+    if (!exchangeRates) return { zarar: 0, hasData: false };
+
+    // Stok doğruluk farkı (pozitif değer = fire/kayıp, negatif değer = tasarruf)
+    const farkTest = row.stokDogrulukFark;
+
+    // Eğer fark 0 veya negatifse zarar yok
+    if (farkTest <= 0) {
+      return { zarar: 0, hasData: true };
+    }
+
+    // Ürün maliyetini bul (önce checkpoint, sonra ürün bilgisinden)
+    let productCost: number | undefined;
+    let productCurrency: 'EUR' | 'USD' | 'TRY' = 'EUR';
+
+    if (costCheckpointData && costCheckpointData[row.stokKodu]) {
+      productCost = costCheckpointData[row.stokKodu].cost;
+      productCurrency = costCheckpointData[row.stokKodu].currency;
+    } else {
+      const product = productCodes.find(p => p.stokKodu === row.stokKodu);
+      if (product && product.cost && product.cost > 0) {
+        productCost = product.cost;
+        productCurrency = product.currency || 'EUR';
+      }
+    }
+
+    if (!productCost || productCost <= 0) {
+      return { zarar: 0, hasData: false };
+    }
+
+    // Ambalaj değeri (0 veya tanımsız ise 1 varsay)
+    const ambalaj = row.ambalajDegeri > 0 ? row.ambalajDegeri : 1;
+
+    // Ürün maliyetini EUR'a çevir
+    let productCostInEur = productCost;
+    if (productCurrency === 'USD') {
+      productCostInEur = productCost / exchangeRates.USD;
+    } else if (productCurrency === 'TRY') {
+      productCostInEur = productCost / exchangeRates.TRY;
+    }
+
+    // Test başına maliyet (EUR)
+    const costPerTestInEur = productCostInEur / ambalaj;
+
+    // Toplam zarar maliyeti (EUR)
+    const totalZararInEur = farkTest * costPerTestInEur;
+
+    // Seçilen para birimine çevir
+    let finalZarar = totalZararInEur;
+    if (costCurrency === 'USD') {
+      finalZarar = totalZararInEur * exchangeRates.USD;
+    } else if (costCurrency === 'TRY') {
+      finalZarar = totalZararInEur * exchangeRates.TRY;
+    }
+
+    return { zarar: finalZarar, hasData: true };
+  }, [productCodes, exchangeRates, costCurrency, costCheckpointData]);
+
+  // Toplam zarar maliyeti hesapla
+  const totalZararMaliyeti = useMemo(() => {
+    let total = 0;
+    rows.forEach(row => {
+      const { zarar } = calculateZararMaliyeti(row);
+      total += zarar;
+    });
+    return total;
+  }, [rows, calculateZararMaliyeti]);
+
   // Merkez laboratuvar bilgisi
   const selectedPool = useMemo(() => {
     return efficiencyPools.find(p => p.id === selectedPoolId);
@@ -1960,6 +2033,22 @@ export default function TotalVerimlilikPanel({
                   </div>
                 </div>
               )}
+
+              {/* KPI Card 4: Toplam Zarar Maliyeti (Sütun 26 renkleriyle uyumlu - rose/pembe) */}
+              {rows.length > 0 && totalZararMaliyeti > 0 && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-rose-50 dark:bg-rose-950/50 rounded-lg border border-rose-200 dark:border-rose-800">
+                  <div className="w-10 h-10 rounded-full bg-rose-100 dark:bg-rose-900 flex items-center justify-center">
+                    <span className="text-rose-600 dark:text-rose-400 text-lg font-bold">!</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-semibold text-rose-800 dark:text-rose-200">Toplam Zarar</span>
+                    <span className="text-base font-bold text-rose-600 dark:text-rose-400">
+                      {costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
+                      {totalZararMaliyeti.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -2419,7 +2508,28 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        {/* Maliyet Sütunları Toggle Butonu */}
+                        <TableHead className={`${showCostColumns ? 'min-w-[60px]' : 'min-w-[140px]'} bg-gradient-to-r from-emerald-50 via-amber-50 to-sky-50 dark:from-emerald-950 dark:via-amber-950 dark:to-sky-950 text-center`}>
+                          <button
+                            onClick={() => setShowCostColumns(!showCostColumns)}
+                            className="flex flex-col items-center justify-center gap-1 w-full py-2 hover:bg-white/50 dark:hover:bg-black/20 rounded transition-colors"
+                          >
+                            {showCostColumns ? (
+                              <>
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">Gizle</span>
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="h-4 w-4 text-emerald-600" />
+                                <span className="text-xs font-medium">Maliyet</span>
+                                <span className="text-[10px] text-muted-foreground">23-24-25</span>
+                              </>
+                            )}
+                          </button>
+                        </TableHead>
                         {/* Sütun 23: Dönem İçi Sarfiyat Maliyeti */}
+                        {showCostColumns && (
                         <TableHead className="min-w-[180px] bg-emerald-50 dark:bg-emerald-950 text-center p-0">
                           <div className="flex flex-col">
                             <div className="flex">
@@ -2462,7 +2572,9 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        )}
                         {/* Sütun 24: Hak Ediş Karşılığı */}
+                        {showCostColumns && (
                         <TableHead className="min-w-[180px] bg-amber-50 dark:bg-amber-950 text-center p-0">
                           <div className="flex flex-col">
                             <div className="flex">
@@ -2505,7 +2617,9 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
+                        )}
                         {/* Sütun 25: Kâr */}
+                        {showCostColumns && (
                         <TableHead className="min-w-[180px] bg-sky-50 dark:bg-sky-950 text-center p-0">
                           <div className="flex flex-col">
                             <div className="flex">
@@ -2548,13 +2662,23 @@ export default function TotalVerimlilikPanel({
                             </div>
                           </div>
                         </TableHead>
-                        {/* Sütun 26: Merkeze Gönderilen Test */}
+                        )}
+                        {/* Sütun 26: Zarar Maliyeti */}
+                        <TableHead className="min-w-[180px] bg-rose-50 dark:bg-rose-950 text-center">
+                          <div className="flex flex-col gap-1">
+                            <span>26. Zarar Maliyeti</span>
+                            <div className="text-xs font-normal text-muted-foreground">
+                              Fark(20) × (Maliyet/Amb)
+                            </div>
+                          </div>
+                        </TableHead>
+                        {/* Sütun 27: Merkeze Gönderilen Test */}
                         {centerHakEdisMode && (
                           <TableHead className="min-w-[160px] bg-orange-50 dark:bg-orange-950 text-center">
                             <div className="flex flex-col gap-1">
                               <div className="flex items-center justify-center gap-1">
                                 <Building2 className="h-3.5 w-3.5 text-orange-600" />
-                                <span>26. Merkeze Gönderilen</span>
+                                <span>27. Merkeze Gönderilen</span>
                               </div>
                               <div className="text-xs font-normal text-muted-foreground">
                                 Test Sayısı
@@ -2751,13 +2875,13 @@ export default function TotalVerimlilikPanel({
                             <TableCell className="bg-red-50/50 dark:bg-red-950/50 text-center">
                               <div className="flex flex-col items-center gap-0.5">
                                 <span className={`font-semibold ${row.stokDogrulukFark !== 0 ? (row.stokDogrulukFark > 0 ? 'text-red-600' : 'text-green-600') : ''}`}>
-                                  Fark {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} test
+                                  Fark {row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '')}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} test
                                 </span>
                                 <span className={`text-xs ${row.stokDogrulukYuzde !== 0 ? (row.stokDogrulukYuzde > 0 ? 'text-red-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  {Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
+                                  {row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '')}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{row.stokDogrulukYuzde > 0 ? '-' : (row.stokDogrulukYuzde < 0 ? '+' : '')}{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">
-                                  S({(row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest).toLocaleString('tr-TR')}) - K({row.kumulatifTotal.toLocaleString('tr-TR')}) = {row.stokDogrulukFark.toLocaleString('tr-TR')}
+                                  S({(row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest).toLocaleString('tr-TR')}) - K({row.kumulatifTotal.toLocaleString('tr-TR')}) = {row.stokDogrulukFark > 0 ? '-' : ''}{row.stokDogrulukFark.toLocaleString('tr-TR')}
                                 </span>
                               </div>
                             </TableCell>
@@ -2765,13 +2889,13 @@ export default function TotalVerimlilikPanel({
                             <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
                               <div className="flex flex-col items-center gap-0.5">
                                 <span className={`font-semibold ${row.kitVerimlilikFark !== 0 ? (row.kitVerimlilikFark > 0 ? 'text-orange-600' : 'text-green-600') : ''}`}>
-                                  Fark {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} test
+                                  Fark {row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} test
                                 </span>
                                 <span className={`text-xs ${row.kitVerimlilikYuzde !== 0 ? (row.kitVerimlilikYuzde > 0 ? 'text-orange-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
+                                  {row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{row.kitVerimlilikYuzde > 0 ? '-' : (row.kitVerimlilikYuzde < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">
-                                  K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark.toLocaleString('tr-TR')}
+                                  K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark > 0 ? '-' : ''}{row.kitVerimlilikFark.toLocaleString('tr-TR')}
                                 </span>
                               </div>
                             </TableCell>
@@ -2819,7 +2943,14 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
+                            {/* Maliyet Sütunları Toggle Hücre */}
+                            <TableCell className="bg-gradient-to-r from-emerald-50/50 via-amber-50/50 to-sky-50/50 dark:from-emerald-950/30 dark:via-amber-950/30 dark:to-sky-950/30 text-center">
+                              {!showCostColumns && (
+                                <span className="text-xs text-muted-foreground">...</span>
+                              )}
+                            </TableCell>
                             {/* Sütun 23: Sarfiyat Maliyeti */}
+                            {showCostColumns && (
                             <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
                               {(() => {
                                 const { cost, hasData } = calculateRowCost(row);
@@ -2859,7 +2990,9 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
+                            )}
                             {/* Sütun 24: Hak Ediş Karşılığı */}
+                            {showCostColumns && (
                             <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-amber-200/50 dark:bg-amber-900/50' : 'bg-amber-50/50 dark:bg-amber-950/50'} text-center`}>
                               {(() => {
                                 // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
@@ -2905,7 +3038,9 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
+                            )}
                             {/* Sütun 25: Kâr */}
+                            {showCostColumns && (
                             <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-sky-200/50 dark:bg-sky-900/50' : 'bg-sky-50/50 dark:bg-sky-950/50'} text-center`}>
                               {(() => {
                                 // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
@@ -2947,7 +3082,41 @@ export default function TotalVerimlilikPanel({
                                 );
                               })()}
                             </TableCell>
-                            {/* Sütun 26: Merkeze Gönderilen Test */}
+                            )}
+                            {/* Sütun 26: Zarar Maliyeti */}
+                            <TableCell className="bg-rose-50/50 dark:bg-rose-950/50 text-center">
+                              {(() => {
+                                const { zarar, hasData } = calculateZararMaliyeti(row);
+
+                                if (!hasData) {
+                                  return (
+                                    <span className="text-muted-foreground text-xs">
+                                      Maliyet yok
+                                    </span>
+                                  );
+                                }
+
+                                if (zarar === 0) {
+                                  return (
+                                    <span className="text-muted-foreground">-</span>
+                                  );
+                                }
+
+                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
+
+                                return (
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="font-semibold text-rose-600 dark:text-rose-400">
+                                      {currencySymbol}{zarar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      -{row.stokDogrulukFark.toLocaleString('tr-TR')} test × maliyet
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                            </TableCell>
+                            {/* Sütun 27: Merkeze Gönderilen Test */}
                             {centerHakEdisMode && (
                               <TableCell className="bg-orange-50/50 dark:bg-orange-950/50 text-center">
                                 {(() => {

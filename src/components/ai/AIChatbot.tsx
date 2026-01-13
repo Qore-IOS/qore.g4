@@ -17,6 +17,27 @@ interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
+  toolsUsed?: string[];
+  requiresConfirmation?: boolean;
+}
+
+// Keywords that trigger agent mode
+const AGENT_KEYWORDS = [
+  // Aksiyon kelimeleri
+  'oluştur', 'olustur', 'yap', 'hazırla', 'başlat', 'baslat',
+  'sipariş', 'siparis', 'transfer', 'sevk', 'gönder', 'gonder',
+  'planla', 'düzenle', 'ekle', 'sil', 'güncelle', 'guncelle',
+  // Analiz kelimeleri
+  'analiz', 'kontrol', 'incele', 'bul', 'listele',
+  'düşük stok', 'dusuk stok', 'eksik', 'kritik', 'altında', 'altinda',
+  // Sorgu kelimeleri
+  'hangi lab', 'hangi hastane', 'stok durumu', 'doluluk',
+  'min max', 'minimum', 'maksimum', 'ihtiyaç', 'ihtiyac',
+];
+
+function shouldUseAgentMode(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  return AGENT_KEYWORDS.some(keyword => lowerMessage.includes(keyword));
 }
 
 export function AIChatbot() {
@@ -28,7 +49,13 @@ export function AIChatbot() {
     {
       id: '1',
       role: 'assistant',
-      content: 'Merhaba! Ben Qore AI asistanıyım. Size stok yönetimi, transfer önerileri, cihaz arızaları ve verimlilik konularında yardımcı olabilirim.',
+      content: `Merhaba! Ben Qore AI asistanıyım. Size yardımcı olabileceğim konular:
+
+📊 **Sorgulama**: Stok durumu, tüketim analizi, cihaz arızaları
+🔄 **Aksiyon**: Sipariş oluşturma, transfer önerileri
+📈 **Analiz**: Düşük stoklar, miad takibi, verimlilik
+
+Örnek: "Stok doluluk oranı %50 altındaki lablar için sipariş oluştur"`,
       timestamp: new Date(),
     },
   ]);
@@ -82,6 +109,10 @@ export function AIChatbot() {
         .filter((m) => m.id !== '1')
         .map((m) => ({ role: m.role, content: m.content }));
 
+      // Automatically detect if agent mode should be used
+      const useAgent = shouldUseAgentMode(userMessage.content);
+      console.log(`[AIChatbot] Mode: ${useAgent ? 'AGENT' : 'CHAT'}`);
+
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,6 +120,7 @@ export function AIChatbot() {
           message: userMessage.content,
           history,
           stream: true,
+          mode: useAgent ? 'agent' : 'chat',
         }),
       });
 
@@ -134,7 +166,12 @@ export function AIChatbot() {
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantMessageId
-                      ? { ...m, isStreaming: false }
+                      ? {
+                          ...m,
+                          isStreaming: false,
+                          toolsUsed: data.toolsUsed,
+                          requiresConfirmation: data.requiresConfirmation,
+                        }
                       : m
                   )
                 );

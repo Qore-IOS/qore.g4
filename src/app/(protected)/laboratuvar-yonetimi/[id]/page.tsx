@@ -1,13 +1,13 @@
 
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Trash2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, getDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import type { DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
@@ -15,9 +15,11 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 import { formatMiad } from "@/lib/date";
 import TimestampText from '@/components/TimestampText';
+import { AlertTriangle } from 'lucide-react';
 
 export default function LabStockDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const firstId = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const { toast } = useToast();
   const { currentUserProfile } = useAuth();
@@ -26,6 +28,7 @@ export default function LabStockDetailPage() {
   const [parentItem, setParentItem] = useState<DepoStokItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [orphanedId, setOrphanedId] = useState<string | null>(null); // For items not found in DB
 
   const fetchItems = useCallback(async () => {
     if (!firstId) {
@@ -36,7 +39,9 @@ export default function LabStockDetailPage() {
     try {
         const firstItemSnap = await getDoc(doc(db, 'depoStok', firstId));
         if (!firstItemSnap.exists()) {
-            toast({ title: 'Hata', description: 'Ana ürün bilgisi bulunamadı.', variant: 'destructive'});
+            // CRITICAL FIX: Item not found in DB but might still have reference
+            // Set orphanedId to allow user to force delete
+            setOrphanedId(firstId);
             setLoading(false);
             return;
         }
@@ -76,6 +81,13 @@ export default function LabStockDetailPage() {
             });
         }
 
+        // CRITICAL FIX: Always include the parent item in the list if it's not already there
+        // This ensures orphaned items (with inconsistent data) can still be deleted
+        const parentInList = fetchedItems.some(item => item.id === parent.id);
+        if (!parentInList) {
+            fetchedItems.unshift(parent); // Add parent at the beginning
+        }
+
         setItems(fetchedItems);
 
     } catch (err) {
@@ -90,13 +102,40 @@ export default function LabStockDetailPage() {
     fetchItems();
   }, [fetchItems]);
 
+  // Force delete an orphaned item that doesn't exist in DB but has a stale reference
+  const handleForceDeleteOrphan = async () => {
+    if (!orphanedId || !currentUserProfile) return;
+
+    if (!confirm('Bu kayıt veritabanında bulunamadı. Referansı temizlemek ve bu sayfadan çıkmak ister misiniz?')) {
+      return;
+    }
+
+    setIsDeleting(orphanedId);
+    try {
+      // Try to delete even if it doesn't exist - Firebase won't error
+      await deleteDoc(doc(db, 'depoStok', orphanedId));
+      toast({ title: 'Başarılı', description: 'Kayıt temizlendi. Sayfa yenileniyor...' });
+      // Use replace + refresh to force the list page to re-fetch data
+      router.replace('/laboratuvar-yonetimi');
+      router.refresh();
+    } catch (err) {
+      console.error("Error force deleting orphan:", err);
+      toast({ title: 'Hata', description: 'Kayıt temizlenemedi.', variant: 'destructive' });
+      setIsDeleting(null);
+    }
+  };
+
   const handleDeductFromStock = async (itemToDeduct: DepoStokItem) => {
     if (!currentUserProfile) {
         toast({ title: 'Hata', description: 'Bu işlemi yapmak için giriş yapmalısınız.', variant: 'destructive'});
         return;
     }
     
-    if (!confirm(`${itemToDeduct.seriNumarasi} seri numaralı ürünü stoktan düşmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
+    const itemIdentifier = itemToDeduct.seriNumarasi
+      ? `${itemToDeduct.seriNumarasi} seri numaralı`
+      : `${itemToDeduct.lotNumarasi || 'Lot bilgisi yok'} lotlu`;
+
+    if (!confirm(`${itemIdentifier} ürünü stoktan düşmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
       return;
     }
 
@@ -150,10 +189,68 @@ export default function LabStockDetailPage() {
     return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div>;
   }
   
+  // Show special UI for orphaned items (exist in reference but not in DB)
+  if (orphanedId) {
+    return (
+        <div className="p-4 space-y-4">
+          <BackButton fallback="/laboratuvar-yonetimi" />
+          <Card className="border-destructive">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+                Hatalı Kayıt Tespit Edildi
+              </CardTitle>
+              <CardDescription>
+                Kayıt ID: <code className="bg-muted px-1 rounded">{orphanedId}</code>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-muted-foreground">
+                Bu kayıt veritabanında bulunamadı ancak sistemde referansı hala mevcut.
+                Bu durum genellikle veri tutarsızlığından kaynaklanır.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="destructive"
+                  onClick={handleForceDeleteOrphan}
+                  disabled={isDeleting === orphanedId}
+                >
+                  {isDeleting === orphanedId ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Siliniyor...</>
+                  ) : (
+                    <><Trash2 className="h-4 w-4 mr-2" /> Kaydı Zorla Sil</>
+                  )}
+                </Button>
+                <Button onClick={() => { router.replace('/laboratuvar-yonetimi'); router.refresh(); }} variant="outline">
+                  Geri Dön
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+    );
+  }
+
   if (!parentItem) {
     return (
-        <div className="flex h-full items-center justify-center text-destructive">
-            Ürün bilgisi yüklenemedi veya bulunamadı.
+        <div className="p-4 space-y-4">
+          <BackButton fallback="/laboratuvar-yonetimi" />
+          <Card>
+            <CardContent className="py-8">
+              <div className="flex flex-col items-center justify-center text-center space-y-4">
+                <div className="text-destructive text-lg font-medium">
+                  Ürün bilgisi yüklenemedi veya bulunamadı.
+                </div>
+                <p className="text-muted-foreground text-sm max-w-md">
+                  Bu ürün silinmiş veya stoktan düşürülmüş olabilir.
+                  Sayfa yenilenmediği için eski veriler görüntüleniyor olabilir.
+                </p>
+                <Button onClick={() => { router.replace('/laboratuvar-yonetimi'); router.refresh(); }} variant="outline">
+                  Laboratuvar Yönetimine Dön
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
     );
   }
@@ -185,15 +282,18 @@ export default function LabStockDetailPage() {
                 <TableBody>
                   {items.map(item => (
                     <TableRow key={item.id}>
-                      <TableCell className="font-mono text-xs">{item.seriNumarasi}</TableCell>
-                      <TableCell>{item.rafAdresi}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {item.seriNumarasi || <span className="text-muted-foreground italic">(Seri no yok)</span>}
+                      </TableCell>
+                      <TableCell>{item.rafAdresi || '-'}</TableCell>
                       <TableCell><TimestampText value={item.sevkTarihi} /></TableCell>
                       <TableCell className="text-right">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleDeductFromStock(item)}
                           disabled={isDeleting === item.id}
+                          title="Stoktan Düş"
                         >
                           {isDeleting === item.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
                         </Button>

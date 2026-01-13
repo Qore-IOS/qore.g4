@@ -28,6 +28,10 @@ export interface ProductCode {
   barcodeFormatIds?: string[]; // Çoklu barkod formatları (yeni sistem)
   barcodeNumber?: string; // The unique identifier part of the barcode for this product (UDI)
   trackingMode?: TrackingMode;
+  // Ürün boyutları (cm cinsinden) - araç doluluk oranı hesaplaması için
+  genislik?: number; // Genişlik (cm)
+  yukseklik?: number; // Yükseklik (cm)
+  derinlik?: number; // Derinlik/Uzunluk (cm)
   [k: string]: any;
 }
 
@@ -102,6 +106,10 @@ export interface Depot {
   name: string;
   mapDefinition?: GridDefinition;
   companies?: string[]; // Added for Borç Depo
+  // Konum bilgileri - rota planlama için
+  lat?: number;
+  lng?: number;
+  address?: string;
   [k: string]: any;
 }
 
@@ -115,7 +123,7 @@ export interface MinMaxRule {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | string;
+  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | string;
   name?: string;
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
@@ -127,6 +135,7 @@ export interface User {
   notificationsEnabled?: boolean; // User notification preferences
   notificationPreferences?: string[]; // Array of notification types
   themePreference?: 'light' | 'dark' | 'system'; // User's theme preference stored in Firestore
+  lastSelectedLabId?: string; // Last selected laboratory ID for teknisyen users (persisted in Firestore)
 }
 
 export interface ScannedItem {
@@ -726,4 +735,36 @@ export interface LabTransferDates {
     lastTransferBy?: string;
   }>;
   updatedAt: TimestampLike;
+}
+
+// Route Request - Laboratuvar ekleme veya yer değişikliği talepleri
+export interface RouteRequest {
+  id: string;
+  type: 'add' | 'reorder'; // 'add': Route'a ekleme, 'reorder': Yer değişikliği
+  labId: string;
+  labName: string;
+  labLat?: number;
+  labLng?: number;
+  routeId: string;
+  routeDate: string; // ISO date string
+  routeDriverName: string;
+  // Ekleme talebi için: hangi duraktan sonra eklenmeli
+  insertAfterStopId?: string | null;
+  insertAfterStopName?: string | null;
+  // Yer değişikliği için: mevcut ve istenen sıra
+  currentOrder?: number;
+  requestedOrder?: number;
+  requestedAfterStopId?: string | null;
+  requestedAfterStopName?: string | null;
+  // Talep bilgileri
+  requestedBy: string; // User ID
+  requestedByName: string;
+  requestedAt: TimestampLike;
+  note?: string;
+  // Durum
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: TimestampLike;
+  rejectionReason?: string;
 }

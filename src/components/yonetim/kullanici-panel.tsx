@@ -248,10 +248,12 @@ export default function KullaniciPanel() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="lojistik_sorumlusu">Lojistik Sorumlusu</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                       <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
-                      <SelectItem value="driver">Driver</SelectItem>
+                      <SelectItem value="driver">Driver (Şoför)</SelectItem>
+                      <SelectItem value="teknisyen">Teknisyen</SelectItem>
                     </SelectContent>
                 </Select>
                 <Input
@@ -260,11 +262,11 @@ export default function KullaniciPanel() {
                   onChange={handleNfcIdChange}
                   maxLength={8}
                 />
-                {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon') && (
-                  <Input 
-                    placeholder="Telefon Numarası (örn: +905xxxxxxxxx)" 
-                    value={currentUser.phoneNumber || ''} 
-                    onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })} 
+                {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon' || currentUser.role === 'teknisyen') && (
+                  <Input
+                    placeholder="Telefon Numarası (örn: +905xxxxxxxxx)"
+                    value={currentUser.phoneNumber || ''}
+                    onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })}
                   />
                 )}
                  <ScrollArea className="h-40 border rounded-md p-2">

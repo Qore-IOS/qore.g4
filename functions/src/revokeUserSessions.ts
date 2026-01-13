@@ -50,17 +50,29 @@ export const revokeUserSessions = WITH_REGION.https.onCall(
         );
       }
 
-      // 4) Do work
+      // 4) Do work - revoke tokens AND set forceLogout flag
       const failed: string[] = [];
+      const db = admin.firestore();
+      const batch = db.batch();
+
       await Promise.all(
         (uids as string[]).map(async (id) => {
           try {
+            // Revoke refresh tokens
             await admin.auth().revokeRefreshTokens(id);
+            // Set forceLogout flag in Firestore for immediate client-side logout
+            const userRef = db.doc(`users/${id}`);
+            batch.update(userRef, {
+              forceLogout: admin.firestore.FieldValue.serverTimestamp()
+            });
           } catch (e) {
             failed.push(id);
           }
         })
       );
+
+      // Commit all forceLogout updates
+      await batch.commit();
 
       return {
         success: failed.length === 0,

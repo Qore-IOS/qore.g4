@@ -6,23 +6,24 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 // REFACTOR: Light mode uses 'neu-btn-universal' + text colors.
-// Dark mode uses strict 'dark:' prefixes to keep the Liquid Glass look.
+// Dark mode uses Liquid Glass styling via CSS (globals.css)
 // Mobile-optimized: responsive sizing and touch-friendly targets
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 neu-btn-universal touch-target",
   {
     variants: {
       variant: {
+        // Dark mode styles handled by .dark .neu-btn-universal in globals.css
         default:
-          "neu-text-primary dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90",
+          "neu-text-primary dark:text-primary-foreground",
         destructive:
-          "neu-text-destructive dark:bg-destructive dark:text-destructive-foreground dark:hover:bg-destructive/90",
+          "neu-text-destructive dark:text-destructive-foreground",
         outline:
-          "dark:border dark:border-input dark:bg-background dark:hover:bg-accent dark:hover:text-accent-foreground",
+          "dark:text-foreground",
         secondary:
-          "dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-secondary/80",
-        ghost: "dark:hover:bg-accent dark:hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+          "dark:text-secondary-foreground",
+        ghost: "dark:text-foreground dark:hover:bg-white/5",
+        link: "text-primary underline-offset-4 hover:underline dark:text-primary",
       },
       size: {
         // Responsive sizes: mobile-first approach

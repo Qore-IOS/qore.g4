@@ -1,7 +1,7 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { getAnalytics, type Analytics, isSupported } from "firebase/analytics"; 
+import { getFirestore, enableIndexedDbPersistence, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { getAnalytics, type Analytics, isSupported } from "firebase/analytics";
 import { getFunctions } from "firebase/functions";
 
 // Config using environment variables
@@ -24,7 +24,27 @@ if (!getApps().length) {
   app = getApps()[0];
 }
 
-const db = getFirestore(app);
+// Firestore'u offline persistence ile başlat
+// Bu sayede internet kesildiğinde yazma işlemleri yerel olarak saklanır
+// ve bağlantı geldiğinde otomatik senkronize edilir
+let db;
+if (typeof window !== 'undefined') {
+  // Client-side: offline persistence aktif
+  try {
+    db = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    });
+  } catch {
+    // Zaten başlatılmışsa normal getFirestore kullan
+    db = getFirestore(app);
+  }
+} else {
+  // Server-side: normal Firestore
+  db = getFirestore(app);
+}
+
 const functions = getFunctions(app, "europe-west1");
 
 let analytics: Analytics | null = null;

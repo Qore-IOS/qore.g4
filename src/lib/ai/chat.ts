@@ -1,6 +1,7 @@
-import { ai, GEMINI_MODEL, SYSTEM_PROMPT } from './config';
+import { anthropic, CLAUDE_MODEL, SYSTEM_PROMPT, MAX_TOKENS, ERROR_MESSAGES } from './config';
 import { planQueries, QueryPlan } from './queryPlanner';
 import { fetchDataForQueries, FetchedData } from './dataFetcher';
+import Anthropic from '@anthropic-ai/sdk';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -26,7 +27,7 @@ function formatDataAsContext(data: FetchedData): string {
       parts.push(`| ${item.stokKodu} | ${item.stokAdi} | ${item.lotNumarasi || '-'} | ${item.miad || '-'} | ${item.miktar} | ${item.lokasyon} |`);
     }
     if (data.stocks.length > 50) {
-      parts.push(`... ve ${data.stocks.length - 50} kayıt daha`);
+      parts.push(`\n*... ve ${data.stocks.length - 50} kayıt daha*`);
     }
   }
 
@@ -58,7 +59,8 @@ function formatDataAsContext(data: FetchedData): string {
     parts.push('| Hastane | Model | Seri No | Arıza Tipi | Açıklama | Durum | Tarih |');
     parts.push('|---------|-------|---------|------------|----------|-------|-------|');
     for (const fault of data.deviceFaults.slice(0, 20)) {
-      parts.push(`| ${fault.hospital} | ${fault.model} | ${fault.seriNumarasi} | ${fault.faultType} | ${fault.description.slice(0, 50)}... | ${fault.status} | ${fault.openedAt} |`);
+      const desc = fault.description?.length > 50 ? fault.description.slice(0, 50) + '...' : fault.description || '-';
+      parts.push(`| ${fault.hospital} | ${fault.model} | ${fault.seriNumarasi} | ${fault.faultType} | ${desc} | ${fault.status} | ${fault.openedAt} |`);
     }
   }
 
@@ -67,10 +69,16 @@ function formatDataAsContext(data: FetchedData): string {
     for (const eff of data.efficiencyData.slice(0, 10)) {
       parts.push(`\n### ${eff.hospitalName} - ${eff.year}/${eff.month}`);
       if (Object.keys(eff.verimlilikSonuclari).length > 0) {
-        parts.push('Verimlilik Sonuçları: ' + JSON.stringify(eff.verimlilikSonuclari, null, 2));
+        parts.push('**Verimlilik Sonuçları:**');
+        parts.push('```json');
+        parts.push(JSON.stringify(eff.verimlilikSonuclari, null, 2));
+        parts.push('```');
       }
       if (Object.keys(eff.hesaplananTestBazliTuketim).length > 0) {
-        parts.push('Test Bazlı Tüketim: ' + JSON.stringify(eff.hesaplananTestBazliTuketim, null, 2));
+        parts.push('**Test Bazlı Tüketim:**');
+        parts.push('```json');
+        parts.push(JSON.stringify(eff.hesaplananTestBazliTuketim, null, 2));
+        parts.push('```');
       }
     }
   }
@@ -91,65 +99,104 @@ function formatDataAsContext(data: FetchedData): string {
   return parts.join('\n');
 }
 
-// Main chat function
+// Convert our ChatMessage to Anthropic format
+function toAnthropicMessages(
+  history: ChatMessage[]
+): Anthropic.Messages.MessageParam[] {
+  return history.map((msg) => ({
+    role: msg.role,
+    content: msg.content,
+  }));
+}
+
+// Classify error type for better user feedback
+function classifyError(error: unknown): string {
+  if (error instanceof Anthropic.APIError) {
+    if (error.status === 401) {
+      return ERROR_MESSAGES.API_KEY_MISSING;
+    }
+    if (error.status === 429) {
+      return ERROR_MESSAGES.RATE_LIMIT;
+    }
+    if (error.status === 400) {
+      return ERROR_MESSAGES.INVALID_REQUEST;
+    }
+    if (error.status >= 500) {
+      return 'Claude API geçici olarak kullanılamıyor. Lütfen tekrar deneyin.';
+    }
+  }
+
+  if (error instanceof Error) {
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      return ERROR_MESSAGES.NETWORK_ERROR;
+    }
+  }
+
+  return ERROR_MESSAGES.UNKNOWN_ERROR;
+}
+
+// Main chat function (non-streaming)
 export async function chat(
   userMessage: string,
   conversationHistory: ChatMessage[] = []
 ): Promise<ChatResponse> {
   try {
     // Step 1: Plan queries based on user message
-    console.log('Planning queries for:', userMessage);
+    console.log('[Claude] Planning queries for:', userMessage);
     const queryPlan = await planQueries(userMessage);
-    console.log('Query plan:', queryPlan);
+    console.log('[Claude] Query plan:', JSON.stringify(queryPlan, null, 2));
 
     // Step 2: Fetch data based on query plan
-    console.log('Fetching data...');
+    console.log('[Claude] Fetching data...');
     const fetchedData = await fetchDataForQueries(queryPlan.queries);
-    console.log('Fetched data summary:', fetchedData.summary);
+    console.log('[Claude] Fetched data summary:', fetchedData.summary);
 
     // Step 3: Format data as context
     const dataContext = formatDataAsContext(fetchedData);
 
-    // Step 4: Build conversation for AI
-    const messages = [
-      ...conversationHistory.map(msg => ({
-        role: msg.role as 'user' | 'model',
-        content: [{ text: msg.content }],
-      })),
-    ];
-
-    // Step 5: Generate response with context
-    const prompt = `${SYSTEM_PROMPT}
-
----
-# Sistemden Çekilen Güncel Veriler
+    // Step 4: Build the prompt with context
+    const contextualPrompt = `# Sistemden Çekilen Güncel Veriler
 
 ${dataContext}
 
 ---
 
-Kullanıcı Sorusu: ${userMessage}
+**Kullanıcı Sorusu:** ${userMessage}
 
 Yukarıdaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri uydurma.`;
 
-    const { text } = await ai.generate({
-      model: GEMINI_MODEL,
-      prompt,
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-      },
+    // Step 5: Build message history
+    const messages: Anthropic.Messages.MessageParam[] = [
+      ...toAnthropicMessages(conversationHistory),
+      { role: 'user', content: contextualPrompt },
+    ];
+
+    // Step 6: Generate response
+    console.log('[Claude] Generating response...');
+    const response = await anthropic.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages,
     });
 
+    // Extract text from response
+    const textContent = response.content.find((block) => block.type === 'text');
+    const responseText = textContent?.type === 'text' ? textContent.text : '';
+
+    console.log('[Claude] Response generated successfully');
+
     return {
-      message: text,
+      message: responseText,
       queryPlan,
       fetchedData,
     };
   } catch (error) {
-    console.error('Chat error:', error);
+    console.error('[Claude] Chat error:', error);
+    const errorMessage = classifyError(error);
+
     return {
-      message: 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.',
+      message: errorMessage,
       error: error instanceof Error ? error.message : 'Bilinmeyen hata',
     };
   }
@@ -163,45 +210,55 @@ export async function chatStream(
 ): Promise<ChatResponse> {
   try {
     // Step 1: Plan queries
+    console.log('[Claude Stream] Planning queries for:', userMessage);
     const queryPlan = await planQueries(userMessage);
+    console.log('[Claude Stream] Query plan:', JSON.stringify(queryPlan, null, 2));
 
     // Step 2: Fetch data
+    console.log('[Claude Stream] Fetching data...');
     const fetchedData = await fetchDataForQueries(queryPlan.queries);
+    console.log('[Claude Stream] Fetched data summary:', fetchedData.summary);
 
     // Step 3: Format context
     const dataContext = formatDataAsContext(fetchedData);
 
-    // Step 4: Generate response with streaming
-    const prompt = `${SYSTEM_PROMPT}
-
----
-# Sistemden Çekilen Güncel Veriler
+    // Step 4: Build the prompt
+    const contextualPrompt = `# Sistemden Çekilen Güncel Veriler
 
 ${dataContext}
 
 ---
 
-Kullanıcı Sorusu: ${userMessage}
+**Kullanıcı Sorusu:** ${userMessage}
 
 Yukarıdaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri uydurma.`;
 
-    const { stream } = await ai.generateStream({
-      model: GEMINI_MODEL,
-      prompt,
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-      },
+    // Step 5: Build messages
+    const messages: Anthropic.Messages.MessageParam[] = [
+      ...toAnthropicMessages(conversationHistory),
+      { role: 'user', content: contextualPrompt },
+    ];
+
+    // Step 6: Stream response
+    console.log('[Claude Stream] Starting stream...');
+    const stream = await anthropic.messages.stream({
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages,
     });
 
     let fullMessage = '';
-    for await (const chunk of stream) {
-      const text = chunk.text;
-      if (text) {
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        const text = event.delta.text;
         fullMessage += text;
         onChunk(text);
       }
     }
+
+    console.log('[Claude Stream] Stream completed');
 
     return {
       message: fullMessage,
@@ -209,9 +266,10 @@ Yukarıdaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri uydu
       fetchedData,
     };
   } catch (error) {
-    console.error('Chat stream error:', error);
-    const errorMessage = 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.';
+    console.error('[Claude Stream] Error:', error);
+    const errorMessage = classifyError(error);
     onChunk(errorMessage);
+
     return {
       message: errorMessage,
       error: error instanceof Error ? error.message : 'Bilinmeyen hata',
