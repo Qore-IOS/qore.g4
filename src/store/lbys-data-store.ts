@@ -6,6 +6,30 @@ import { collection, getDocs, writeBatch, doc, query, setDoc, where, getDoc } fr
 import { db } from '@/lib/firebase';
 import { nanoid } from 'nanoid';
 import { format } from 'date-fns';
+import {
+  type DailySummary,
+  type MonthlySummary,
+  type FilterOptions,
+  type DashboardData,
+  type SummaryQueryParams,
+  type StageSummaryStats,
+  emptyStageSummaryStats,
+  mergeStageSummaryStats,
+  getMonthId
+} from '@/lib/analysis-summary-types';
+import {
+  COLLECTIONS,
+  loadDailySummaries,
+  loadMonthlySummaries,
+  loadFilterOptions,
+  saveFilterOptions,
+  generateSummariesFromRecords,
+  generateMonthlySummariesFromDaily,
+  saveSummariesBatch,
+  updateFilterOptionsFromSummary,
+  generateDashboardDataFromSummaries,
+  createEmptyFilterOptions
+} from '@/lib/analysis-summary-utils';
 
 // --- EXCEL SÜTUN HARİTALAMASI ---
 // A sütunu (index 0): Sıra numarası (başlık yok)
@@ -65,9 +89,37 @@ export interface FilterState {
   showAll: boolean;
 }
 
+// --- DASHBOARD DATA STATE ---
+interface DashboardState {
+  kpis: {
+    totalTests: number;
+    uniquePatients: number;
+    rejectionRate: number;
+    avgTatMinutes: number;
+    repeatRate: number;
+    emergencyRate: number;
+  };
+  hospitalDistribution: Array<{ name: string; value: number; emergencyCount?: number; normalCount?: number }>;
+  serviceDistribution: Array<{ name: string; value: number }>;
+  topTests: Array<{ name: string; value: number }>;
+  asmDistribution: Array<{ name: string; value: number }>;
+  rejectionReasons: Array<{ name: string; value: number }>;
+  dailyTrend: Array<{ name: string; value: number }>;
+}
+
 interface LbysStore {
+  // Legacy data (geriye uyumluluk için)
   aggregatedData: AggregatedRecord[];
   filteredData: AggregatedRecord[];
+
+  // Yeni summary tabanlı data
+  dailySummaries: DailySummary[];
+  monthlySummaries: MonthlySummary[];
+  dashboardData: DashboardState | null;
+
+  // Filter options (master listeler)
+  filterOptions: FilterOptions;
+
   filters: FilterState;
   viewMode: ViewMode;
   isLoading: boolean;
@@ -75,9 +127,17 @@ interface LbysStore {
   hospitalDefinitions: Record<string, string>;
   error: string | null;
 
+  // Yeni flag: summary mode aktif mi
+  useSummaryMode: boolean;
+
   setViewMode: (mode: ViewMode) => void;
   loadDataFromFirestore: (dateRange: { from: Date; to: Date }) => Promise<void>;
   loadAllDataFromFirestore: () => Promise<void>;
+
+  // Yeni summary tabanlı yükleme
+  loadSummaryData: (dateRange: { from: Date; to: Date }) => Promise<void>;
+  loadFilterOptionsFromFirestore: () => Promise<void>;
+
   processAndUploadExcel: (excelData: any[]) => Promise<void>;
   setFilters: (newFilters: Partial<FilterState>) => void;
   applyFilters: () => void;
@@ -86,6 +146,12 @@ interface LbysStore {
   loadHospitalDefinitions: () => Promise<void>;
   saveHospitalDefinition: (code: string, name: string) => Promise<void>;
   resetAnalysisData: () => Promise<void>;
+
+  // Migration utility
+  migrateToSummaries: () => Promise<{ success: boolean; message: string }>;
+
+  // Summary mode toggle
+  setUseSummaryMode: (enabled: boolean) => void;
 }
 
 // --- HELPERS ---
@@ -112,16 +178,38 @@ const emptyStageStats = (): StageStats => ({
   rejectionReasons: {}
 });
 
+const emptyDashboardState = (): DashboardState => ({
+  kpis: {
+    totalTests: 0,
+    uniquePatients: 0,
+    rejectionRate: 0,
+    avgTatMinutes: 0,
+    repeatRate: 0,
+    emergencyRate: 0
+  },
+  hospitalDistribution: [],
+  serviceDistribution: [],
+  topTests: [],
+  asmDistribution: [],
+  rejectionReasons: [],
+  dailyTrend: []
+});
+
 // --- ZUSTAND STORE ---
 export const useLbysDataStore = create<LbysStore>()(
   devtools(
     (set, get) => ({
       aggregatedData: [],
       filteredData: [],
+      dailySummaries: [],
+      monthlySummaries: [],
+      dashboardData: null,
+      filterOptions: createEmptyFilterOptions(),
       isLoading: false,
       processingProgress: { current: 0, total: 0, status: '' },
       error: null,
       viewMode: 'approved', // Default: Onaylanmış testler
+      useSummaryMode: true, // Yeni mimari varsayılan olarak aktif
       filters: {
         dateRange: { from: new Date(new Date().setDate(new Date().getDate() - 7)), to: new Date() },
         selectedHospitals: [],
@@ -133,9 +221,42 @@ export const useLbysDataStore = create<LbysStore>()(
       },
       hospitalDefinitions: {},
 
+      setUseSummaryMode: (enabled) => {
+        set({ useSummaryMode: enabled });
+      },
+
       setViewMode: (mode) => {
         set({ viewMode: mode });
-        get().applyFilters();
+        const { useSummaryMode, dailySummaries, filters } = get();
+
+        if (useSummaryMode && dailySummaries.length > 0) {
+          // Summary mode: dashboard verisini yeniden hesapla
+          const queryParams: SummaryQueryParams = {
+            startDate: filters.dateRange.from ? format(filters.dateRange.from, 'yyyy-MM-dd') : '',
+            endDate: filters.dateRange.to ? format(filters.dateRange.to, 'yyyy-MM-dd') : '',
+            hospitals: filters.selectedHospitals.length > 0 ? filters.selectedHospitals : undefined,
+            asms: filters.selectedAsms.length > 0 ? filters.selectedAsms : undefined,
+            services: filters.selectedServices.length > 0 ? filters.selectedServices : undefined,
+            tests: filters.selectedTests.length > 0 ? filters.selectedTests : undefined,
+            branches: filters.selectedBranches.length > 0 ? filters.selectedBranches : undefined
+          };
+
+          const data = generateDashboardDataFromSummaries(dailySummaries, mode, queryParams);
+          set({
+            dashboardData: {
+              kpis: data.kpis,
+              hospitalDistribution: data.hospitalDistribution,
+              serviceDistribution: data.serviceDistribution,
+              topTests: data.topTests,
+              asmDistribution: data.asmDistribution,
+              rejectionReasons: data.rejectionReasons,
+              dailyTrend: data.dailyTrend || []
+            }
+          });
+        } else {
+          // Legacy mode
+          get().applyFilters();
+        }
       },
 
       loadHospitalDefinitions: async () => {
@@ -161,7 +282,82 @@ export const useLbysDataStore = create<LbysStore>()(
          } catch(e) { console.error(e); }
       },
 
+      // Yeni: Filter options'ı Firestore'dan yükle
+      loadFilterOptionsFromFirestore: async () => {
+        try {
+          const options = await loadFilterOptions();
+          set({ filterOptions: options });
+        } catch (e) {
+          console.error("Filter options yükleme hatası:", e);
+        }
+      },
+
+      // Yeni: Summary tabanlı veri yükleme
+      loadSummaryData: async (dateRange) => {
+        if (!dateRange.from || !dateRange.to) return;
+
+        set({
+          isLoading: true,
+          processingProgress: { current: 0, total: 3, status: 'Summary veriler yükleniyor...' }
+        });
+
+        try {
+          const startDate = format(dateRange.from, 'yyyy-MM-dd');
+          const endDate = format(dateRange.to, 'yyyy-MM-dd');
+
+          // 1. Günlük summary'leri yükle
+          set({ processingProgress: { current: 1, total: 3, status: 'Günlük summary yükleniyor...' } });
+          const dailySummaries = await loadDailySummaries(startDate, endDate);
+
+          // 2. Dashboard verisini hesapla
+          set({ processingProgress: { current: 2, total: 3, status: 'Dashboard verisi hesaplanıyor...' } });
+          const { viewMode, filters } = get();
+
+          const queryParams: SummaryQueryParams = {
+            startDate,
+            endDate,
+            hospitals: filters.selectedHospitals.length > 0 ? filters.selectedHospitals : undefined,
+            asms: filters.selectedAsms.length > 0 ? filters.selectedAsms : undefined,
+            services: filters.selectedServices.length > 0 ? filters.selectedServices : undefined,
+            tests: filters.selectedTests.length > 0 ? filters.selectedTests : undefined,
+            branches: filters.selectedBranches.length > 0 ? filters.selectedBranches : undefined
+          };
+
+          const data = generateDashboardDataFromSummaries(dailySummaries, viewMode, queryParams);
+
+          set({
+            dailySummaries,
+            dashboardData: {
+              kpis: data.kpis,
+              hospitalDistribution: data.hospitalDistribution,
+              serviceDistribution: data.serviceDistribution,
+              topTests: data.topTests,
+              asmDistribution: data.asmDistribution,
+              rejectionReasons: data.rejectionReasons,
+              dailyTrend: data.dailyTrend || []
+            },
+            processingProgress: { current: 3, total: 3, status: 'Tamamlandı' }
+          });
+
+          console.log(`Qore Analyse: ${dailySummaries.length} günlük summary yüklendi (${startDate} - ${endDate}).`);
+        } catch (error: any) {
+          set({ error: "Summary veri yükleme hatası: " + error.message });
+          console.error("Summary load failed:", error);
+        } finally {
+          set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
+        }
+      },
+
+      // Legacy: Firestore'dan raw veri yükleme (geriye uyumluluk)
       loadDataFromFirestore: async (dateRange) => {
+        const { useSummaryMode } = get();
+
+        // Summary mode aktifse, summary'lerden yükle
+        if (useSummaryMode) {
+          return get().loadSummaryData(dateRange);
+        }
+
+        // Legacy mode
         if (!dateRange.from || !dateRange.to) return;
         set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Veriler Buluttan İndiriliyor...' } });
         try {
@@ -193,6 +389,17 @@ export const useLbysDataStore = create<LbysStore>()(
       },
 
       loadAllDataFromFirestore: async () => {
+        const { useSummaryMode } = get();
+
+        if (useSummaryMode) {
+          // Summary mode: son 90 günü yükle
+          const today = new Date();
+          const ninetyDaysAgo = new Date();
+          ninetyDaysAgo.setDate(today.getDate() - 90);
+          return get().loadSummaryData({ from: ninetyDaysAgo, to: today });
+        }
+
+        // Legacy mode
         set({ isLoading: true, processingProgress: { current: 0, total: 0, status: 'Tüm Veriler Yükleniyor...' } });
         try {
             const ninetyDaysAgo = new Date();
@@ -400,10 +607,46 @@ export const useLbysDataStore = create<LbysStore>()(
 
             console.log(`Qore Analyse: Lab Kabul: ${labAcceptedCount}, Çalışılmış: ${workedCount}, Onaylanmış: ${approvedCount}, Atlanan: ${skippedCount}`);
 
-            // Firestore'a yaz
-            const totalDocs = newRecords.length;
-            set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
+            // =====================================================
+            // YENİ: Summary tabloları oluştur ve yaz
+            // =====================================================
+            set({ processingProgress: { current: 0, total: 100, status: 'Summary tabloları oluşturuluyor...' } });
 
+            // Günlük summary'ler oluştur
+            const dailySummaries = generateSummariesFromRecords(newRecords);
+            set({ processingProgress: { current: 30, total: 100, status: `${dailySummaries.size} günlük summary oluşturuldu` } });
+
+            // Aylık summary'ler oluştur
+            const monthlySummaries = generateMonthlySummariesFromDaily(dailySummaries);
+            set({ processingProgress: { current: 50, total: 100, status: `${monthlySummaries.size} aylık summary oluşturuldu` } });
+
+            // Filter options güncelle
+            let filterOptions = get().filterOptions;
+            for (const summary of dailySummaries.values()) {
+              filterOptions = updateFilterOptionsFromSummary(summary, filterOptions);
+            }
+
+            // Hospital code map'i güncelle
+            for (const record of newRecords) {
+              if (!record.isAsm && record.hospitalId) {
+                filterOptions.hospitalCodeMap[record.hospitalId] = record.hospitalName;
+              }
+            }
+
+            set({ processingProgress: { current: 60, total: 100, status: 'Summary tabloları Firestore\'a yazılıyor...' } });
+
+            // Summary'leri Firestore'a yaz
+            await saveSummariesBatch(dailySummaries, monthlySummaries, filterOptions, (current, total, status) => {
+              const progress = 60 + Math.round((current / total) * 20);
+              set({ processingProgress: { current: progress, total: 100, status } });
+            });
+
+            // =====================================================
+            // Legacy: Raw verileri de yaz (geriye uyumluluk için)
+            // =====================================================
+            set({ processingProgress: { current: 80, total: 100, status: 'Raw veriler yazılıyor...' } });
+
+            const totalDocs = newRecords.length;
             const CHUNK_SIZE = 450;
             let writtenCount = 0;
 
@@ -418,10 +661,11 @@ export const useLbysDataStore = create<LbysStore>()(
 
                 await batch.commit();
                 writtenCount += chunk.length;
-                set({ processingProgress: { current: writtenCount, total: totalDocs, status: 'Buluta Yazılıyor...' } });
+                const progress = 80 + Math.round((writtenCount / totalDocs) * 20);
+                set({ processingProgress: { current: progress, total: 100, status: 'Raw veriler yazılıyor...' } });
             }
 
-            console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi.`);
+            console.log(`Qore Analyse: ${totalDocs} raw kayıt + ${dailySummaries.size} günlük + ${monthlySummaries.size} aylık summary buluta yüklendi.`);
 
             // Local state güncelle
             const currentData = get().aggregatedData;
@@ -438,7 +682,11 @@ export const useLbysDataStore = create<LbysStore>()(
 
             newDataMap.forEach(newRec => updatedData.push(newRec));
 
-            set({ aggregatedData: updatedData });
+            set({
+              aggregatedData: updatedData,
+              dailySummaries: Array.from(dailySummaries.values()),
+              filterOptions
+            });
             get().applyFilters();
 
         } catch (error: any) {
@@ -450,8 +698,36 @@ export const useLbysDataStore = create<LbysStore>()(
       },
 
       applyFilters: () => {
-        const { aggregatedData, filters, viewMode } = get();
+        const { useSummaryMode, dailySummaries, aggregatedData, filters, viewMode } = get();
 
+        if (useSummaryMode && dailySummaries.length > 0) {
+          // Summary mode: dashboard verisini yeniden hesapla
+          const queryParams: SummaryQueryParams = {
+            startDate: filters.dateRange.from ? format(filters.dateRange.from, 'yyyy-MM-dd') : '',
+            endDate: filters.dateRange.to ? format(filters.dateRange.to, 'yyyy-MM-dd') : '',
+            hospitals: filters.selectedHospitals.length > 0 ? filters.selectedHospitals : undefined,
+            asms: filters.selectedAsms.length > 0 ? filters.selectedAsms : undefined,
+            services: filters.selectedServices.length > 0 ? filters.selectedServices : undefined,
+            tests: filters.selectedTests.length > 0 ? filters.selectedTests : undefined,
+            branches: filters.selectedBranches.length > 0 ? filters.selectedBranches : undefined
+          };
+
+          const data = generateDashboardDataFromSummaries(dailySummaries, viewMode, queryParams);
+          set({
+            dashboardData: {
+              kpis: data.kpis,
+              hospitalDistribution: data.hospitalDistribution,
+              serviceDistribution: data.serviceDistribution,
+              topTests: data.topTests,
+              asmDistribution: data.asmDistribution,
+              rejectionReasons: data.rejectionReasons,
+              dailyTrend: data.dailyTrend || []
+            }
+          });
+          return;
+        }
+
+        // Legacy mode
         const filtered = aggregatedData.filter((item) => {
             // viewMode'a göre bu kayıtta veri var mı kontrol et
             const stageData = item[viewMode];
@@ -503,33 +779,53 @@ export const useLbysDataStore = create<LbysStore>()(
         set({ isLoading: true, error: null, processingProgress: { current: 0, total: 0, status: 'Veriler Sayılıyor...' } });
         try {
           console.log('Qore Analyse: Tüm veriler siliniyor...');
-          const snapshot = await getDocs(collection(db, 'analysis_results'));
-          const total = snapshot.size;
 
-          if (total === 0) {
-            console.log('Qore Analyse: Silinecek veri yok.');
-            set({ aggregatedData: [], filteredData: [] });
-            return;
+          // Summary koleksiyonlarını da sil
+          const collections = [
+            COLLECTIONS.RAW_RESULTS,
+            COLLECTIONS.DAILY_SUMMARY,
+            COLLECTIONS.MONTHLY_SUMMARY,
+            COLLECTIONS.YEARLY_SUMMARY
+          ];
+
+          let totalDeleted = 0;
+
+          for (const collName of collections) {
+            const snapshot = await getDocs(collection(db, collName));
+            const total = snapshot.size;
+
+            if (total === 0) continue;
+
+            console.log(`Qore Analyse: ${collName} - ${total} kayıt silinecek.`);
+            set({ processingProgress: { current: 0, total, status: `${collName} siliniyor...` } });
+
+            const CHUNK_SIZE = 450;
+            let deletedCount = 0;
+
+            for (let i = 0; i < total; i += CHUNK_SIZE) {
+              const batch = writeBatch(db);
+              const chunk = snapshot.docs.slice(i, i + CHUNK_SIZE);
+              chunk.forEach(docSnap => batch.delete(docSnap.ref));
+              await batch.commit();
+              deletedCount += chunk.length;
+              totalDeleted += chunk.length;
+              set({ processingProgress: { current: deletedCount, total, status: `${collName}: ${deletedCount}/${total}` } });
+              await new Promise(r => setTimeout(r, 10));
+            }
           }
 
-          console.log(`Qore Analyse: ${total} kayıt silinecek.`);
-          set({ processingProgress: { current: 0, total, status: `${total} Kayıt Siliniyor...` } });
+          // Filter options'ı sıfırla
+          await saveFilterOptions(createEmptyFilterOptions());
 
-          const CHUNK_SIZE = 450;
-          let deletedCount = 0;
-
-          for (let i = 0; i < total; i += CHUNK_SIZE) {
-            const batch = writeBatch(db);
-            const chunk = snapshot.docs.slice(i, i + CHUNK_SIZE);
-            chunk.forEach(docSnap => batch.delete(docSnap.ref));
-            await batch.commit();
-            deletedCount += chunk.length;
-            set({ processingProgress: { current: deletedCount, total, status: `${deletedCount}/${total} Kayıt Silindi` } });
-            await new Promise(r => setTimeout(r, 10));
-          }
-
-          console.log(`Qore Analyse: ${deletedCount} kayıt başarıyla silindi.`);
-          set({ aggregatedData: [], filteredData: [] });
+          console.log(`Qore Analyse: Toplam ${totalDeleted} kayıt başarıyla silindi.`);
+          set({
+            aggregatedData: [],
+            filteredData: [],
+            dailySummaries: [],
+            monthlySummaries: [],
+            dashboardData: null,
+            filterOptions: createEmptyFilterOptions()
+          });
         } catch (error: any) {
           console.error('Qore Analyse: Silme hatası:', error);
           set({ error: "Veri sıfırlama hatası: " + error.message });
@@ -537,6 +833,79 @@ export const useLbysDataStore = create<LbysStore>()(
           set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
         }
       },
+
+      // Migration utility: Mevcut raw verilerden summary oluşturur
+      migrateToSummaries: async () => {
+        set({
+          isLoading: true,
+          error: null,
+          processingProgress: { current: 0, total: 100, status: 'Mevcut veriler okunuyor...' }
+        });
+
+        try {
+          // Tüm raw verileri oku
+          const snapshot = await getDocs(collection(db, COLLECTIONS.RAW_RESULTS));
+          const records: AggregatedRecord[] = [];
+
+          snapshot.forEach((doc) => {
+            records.push(doc.data() as AggregatedRecord);
+          });
+
+          if (records.length === 0) {
+            set({ isLoading: false });
+            return { success: true, message: 'Migration için veri bulunamadı.' };
+          }
+
+          set({ processingProgress: { current: 20, total: 100, status: `${records.length} kayıt bulundu, summary oluşturuluyor...` } });
+
+          // Günlük summary'ler oluştur
+          const dailySummaries = generateSummariesFromRecords(records);
+          set({ processingProgress: { current: 40, total: 100, status: `${dailySummaries.size} günlük summary oluşturuldu` } });
+
+          // Aylık summary'ler oluştur
+          const monthlySummaries = generateMonthlySummariesFromDaily(dailySummaries);
+          set({ processingProgress: { current: 50, total: 100, status: `${monthlySummaries.size} aylık summary oluşturuldu` } });
+
+          // Filter options oluştur
+          let filterOptions = createEmptyFilterOptions();
+          for (const summary of dailySummaries.values()) {
+            filterOptions = updateFilterOptionsFromSummary(summary, filterOptions);
+          }
+
+          // Hospital code map'i oluştur
+          for (const record of records) {
+            if (!record.isAsm && record.hospitalId) {
+              filterOptions.hospitalCodeMap[record.hospitalId] = record.hospitalName;
+            }
+          }
+
+          set({ processingProgress: { current: 60, total: 100, status: 'Summary veriler Firestore\'a yazılıyor...' } });
+
+          // Firestore'a yaz
+          await saveSummariesBatch(dailySummaries, monthlySummaries, filterOptions, (current, total, status) => {
+            const progress = 60 + Math.round((current / total) * 40);
+            set({ processingProgress: { current: progress, total: 100, status } });
+          });
+
+          // Local state güncelle
+          set({
+            dailySummaries: Array.from(dailySummaries.values()),
+            monthlySummaries: Array.from(monthlySummaries.values()),
+            filterOptions
+          });
+
+          const message = `Migration tamamlandı: ${dailySummaries.size} günlük, ${monthlySummaries.size} aylık summary oluşturuldu.`;
+          console.log('Qore Analyse:', message);
+
+          return { success: true, message };
+        } catch (error: any) {
+          console.error('Migration error:', error);
+          set({ error: "Migration hatası: " + error.message });
+          return { success: false, message: error.message };
+        } finally {
+          set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
+        }
+      }
     })
   )
 );
