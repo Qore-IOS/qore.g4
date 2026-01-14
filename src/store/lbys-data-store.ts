@@ -209,7 +209,7 @@ export const useLbysDataStore = create<LbysStore>()(
       processingProgress: { current: 0, total: 0, status: '' },
       error: null,
       viewMode: 'approved', // Default: Onaylanmış testler
-      useSummaryMode: true, // Yeni mimari varsayılan olarak aktif
+      useSummaryMode: false, // Summary mode: migration sonrası aktive edilebilir
       filters: {
         dateRange: { from: new Date(new Date().setDate(new Date().getDate() - 7)), to: new Date() },
         selectedHospitals: [],
@@ -608,45 +608,10 @@ export const useLbysDataStore = create<LbysStore>()(
             console.log(`Qore Analyse: Lab Kabul: ${labAcceptedCount}, Çalışılmış: ${workedCount}, Onaylanmış: ${approvedCount}, Atlanan: ${skippedCount}`);
 
             // =====================================================
-            // YENİ: Summary tabloları oluştur ve yaz
+            // Firestore'a yaz (sadece raw veriler - summary ayrı migration ile)
             // =====================================================
-            set({ processingProgress: { current: 0, total: 100, status: 'Summary tabloları oluşturuluyor...' } });
-
-            // Günlük summary'ler oluştur
-            const dailySummaries = generateSummariesFromRecords(newRecords);
-            set({ processingProgress: { current: 30, total: 100, status: `${dailySummaries.size} günlük summary oluşturuldu` } });
-
-            // Aylık summary'ler oluştur
-            const monthlySummaries = generateMonthlySummariesFromDaily(dailySummaries);
-            set({ processingProgress: { current: 50, total: 100, status: `${monthlySummaries.size} aylık summary oluşturuldu` } });
-
-            // Filter options güncelle
-            let filterOptions = get().filterOptions;
-            for (const summary of dailySummaries.values()) {
-              filterOptions = updateFilterOptionsFromSummary(summary, filterOptions);
-            }
-
-            // Hospital code map'i güncelle
-            for (const record of newRecords) {
-              if (!record.isAsm && record.hospitalId) {
-                filterOptions.hospitalCodeMap[record.hospitalId] = record.hospitalName;
-              }
-            }
-
-            set({ processingProgress: { current: 60, total: 100, status: 'Summary tabloları Firestore\'a yazılıyor...' } });
-
-            // Summary'leri Firestore'a yaz
-            await saveSummariesBatch(dailySummaries, monthlySummaries, filterOptions, (current, total, status) => {
-              const progress = 60 + Math.round((current / total) * 20);
-              set({ processingProgress: { current: progress, total: 100, status } });
-            });
-
-            // =====================================================
-            // Legacy: Raw verileri de yaz (geriye uyumluluk için)
-            // =====================================================
-            set({ processingProgress: { current: 80, total: 100, status: 'Raw veriler yazılıyor...' } });
-
             const totalDocs = newRecords.length;
+            set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta Yazılıyor...' } });
             const CHUNK_SIZE = 450;
             let writtenCount = 0;
 
@@ -661,11 +626,12 @@ export const useLbysDataStore = create<LbysStore>()(
 
                 await batch.commit();
                 writtenCount += chunk.length;
-                const progress = 80 + Math.round((writtenCount / totalDocs) * 20);
-                set({ processingProgress: { current: progress, total: 100, status: 'Raw veriler yazılıyor...' } });
+                set({ processingProgress: { current: writtenCount, total: totalDocs, status: 'Buluta Yazılıyor...' } });
+                // UI'ın nefes almasını sağla
+                await new Promise(r => setTimeout(r, 0));
             }
 
-            console.log(`Qore Analyse: ${totalDocs} raw kayıt + ${dailySummaries.size} günlük + ${monthlySummaries.size} aylık summary buluta yüklendi.`);
+            console.log(`Qore Analyse: ${totalDocs} raw kayıt buluta yüklendi.`);
 
             // Local state güncelle
             const currentData = get().aggregatedData;
@@ -682,11 +648,7 @@ export const useLbysDataStore = create<LbysStore>()(
 
             newDataMap.forEach(newRec => updatedData.push(newRec));
 
-            set({
-              aggregatedData: updatedData,
-              dailySummaries: Array.from(dailySummaries.values()),
-              filterOptions
-            });
+            set({ aggregatedData: updatedData });
             get().applyFilters();
 
         } catch (error: any) {
