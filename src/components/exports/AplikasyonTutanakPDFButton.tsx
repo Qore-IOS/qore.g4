@@ -9,45 +9,6 @@ import QRCode from 'qrcode';
 import { format } from 'date-fns';
 import type { Device, Hospital } from '@/lib/types';
 
-// Turkish font support - load Roboto font which supports Turkish characters
-let turkishFontBase64: string | null = null;
-
-async function loadTurkishFont(): Promise<string | null> {
-  if (turkishFontBase64) return turkishFontBase64;
-
-  try {
-    // Fetch Roboto Regular from Google Fonts CDN (supports Turkish)
-    const fontUrl = 'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Me5Q.ttf';
-    const response = await fetch(fontUrl);
-    if (!response.ok) return null;
-
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        turkishFontBase64 = (reader.result as string).split(',')[1]; // Get base64 part only
-        resolve(turkishFontBase64);
-      };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch (e) {
-    console.error('Could not load Turkish font:', e);
-    return null;
-  }
-}
-
-function setupTurkishFont(doc: jsPDF, fontBase64: string): boolean {
-  try {
-    doc.addFileToVFS('Roboto-Regular.ttf', fontBase64);
-    doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
-    return true;
-  } catch (e) {
-    console.error('Could not setup Turkish font:', e);
-    return false;
-  }
-}
-
 // Operation types
 type OperationType =
   | 'aplikasyon_kontrol'
@@ -86,24 +47,25 @@ type ActionFormRecord = {
     technicianSignature?: string;
 };
 
+// Labels with ASCII-safe Turkish characters (jsPDF helvetica font doesn't support İ, ı, ş, ğ)
 const OPERATION_LABELS: Record<OperationType, string> = {
   aplikasyon_kontrol: 'Aplikasyon Kontrol',
   kalibrasyon_kontrol: 'Kalibrasyon Kontrol',
   qc_materyal_kontrol: 'QC Materyal Kontrol',
-  ornek_sonucu_karsilastirma: 'Örnek Sonucu Karşılaştırma',
+  ornek_sonucu_karsilastirma: 'Ornek Sonucu Karsilastirma',
   reaktif_yenileme: 'Reaktif Yenileme',
-  kalibrator_yenileme: 'Kalibratör Yenileme',
+  kalibrator_yenileme: 'Kalibrator Yenileme',
   qc_yenileme: 'QC Yenileme',
-  cv_calismasi: 'CV Çalışması',
-  diger: 'Diğer',
+  cv_calismasi: 'CV Calismasi',
+  diger: 'Diger',
 };
 
 const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {
   '': '-',
-  calisiyor: 'Çalışıyor',
-  arizali: 'Arızalı',
+  calisiyor: 'Calisiyor',
+  arizali: 'Arizali',
   denemede: 'Denemede',
-  diger: 'Diğer',
+  diger: 'Diger',
 };
 
 export type AplikasyonTutanakPDFButtonProps = {
@@ -113,9 +75,10 @@ export type AplikasyonTutanakPDFButtonProps = {
   className?: string;
 };
 
-const FALLBACK_FONT = 'helvetica';
+const FONT_FAMILY = 'helvetica';
 
-function sanitizeForPdfFont(str: string | null | undefined): string {
+// Sanitize Turkish characters to ASCII equivalents for PDF font compatibility
+function sanitize(str: string | null | undefined): string {
     if (!str) return '';
     return str
         .replace(/İ/g, 'I').replace(/ı/g, 'i')
@@ -124,12 +87,6 @@ function sanitizeForPdfFont(str: string | null | undefined): string {
         .replace(/Ü/g, 'U').replace(/ü/g, 'u')
         .replace(/Ö/g, 'O').replace(/ö/g, 'o')
         .replace(/Ç/g, 'C').replace(/ç/g, 'c');
-}
-
-// Returns text as-is if Turkish font is available, otherwise sanitizes
-function processText(str: string | null | undefined, useTurkishFont: boolean): string {
-    if (!str) return '';
-    return useTurkishFont ? str : sanitizeForPdfFont(str);
 }
 
 // Helper to get proper operation label
@@ -152,11 +109,6 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       const pageH = doc.internal.pageSize.getHeight();
       const padX = 40;
 
-      // Try to load and setup Turkish font
-      const fontBase64 = await loadTurkishFont();
-      const useTurkishFont = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
-      const FONT_FAMILY = useTurkishFont ? 'Roboto' : FALLBACK_FONT;
-
       doc.setFont(FONT_FAMILY);
 
       const ORANGE = { r: 199, g: 137, b: 65 };
@@ -171,7 +123,7 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(14);
       doc.setFont(FONT_FAMILY, 'bold');
-      doc.text(processText('Aplikasyon Formu', useTurkishFont), padX, headerY + 20);
+      doc.text('Aplikasyon Formu', padX, headerY + 20);
 
       // Logo in center - try to load invitrolab logo
       try {
@@ -210,7 +162,7 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       doc.roundedRect(qrX - 5, qrY - 5, qrSize + 10, qrSize + 10, 5, 5, 'FD');
       doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize, undefined, 'FAST');
 
-      // System logo below QR - maintain proper aspect ratio
+      // System logo below QR - square aspect ratio (4-pointed star logo)
       try {
         const sysLogoResponse = await fetch('/newlogoblk.png');
         if (sysLogoResponse.ok) {
@@ -220,11 +172,10 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
           await new Promise<void>(resolve => {
             sysLogoReader.onloadend = () => {
               const sysLogoData = sysLogoReader.result as string;
-              // Use wider aspect ratio to prevent vertical stretching
-              const sysLogoWidth = 50;
-              const sysLogoHeight = 12;
-              const sysLogoX = qrX + (qrSize / 2) - (sysLogoWidth / 2);
-              doc.addImage(sysLogoData, 'PNG', sysLogoX, qrY + qrSize + 8, sysLogoWidth, sysLogoHeight, undefined, 'FAST');
+              // Square dimensions for 4-pointed star logo
+              const sysLogoSize = 28;
+              const sysLogoX = qrX + (qrSize / 2) - (sysLogoSize / 2);
+              doc.addImage(sysLogoData, 'PNG', sysLogoX, qrY + qrSize + 5, sysLogoSize, sysLogoSize, undefined, 'FAST');
               resolve();
             };
           });
@@ -239,17 +190,17 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       let currentY = 100;
 
       // Build personnel string with accompanying personnel
-      let personnelStr = processText(actionRecord.createdByName, useTurkishFont);
+      let personnelStr = sanitize(actionRecord.createdByName);
       if (actionRecord.eslikEdenPersonel && actionRecord.eslikEdenPersonel.length > 0) {
-        const eslikNames = actionRecord.eslikEdenPersonel.map(p => processText(p.name, useTurkishFont)).join(', ');
-        personnelStr += ` (${processText('Eşlik Eden', useTurkishFont)}: ${eslikNames})`;
+        const eslikNames = actionRecord.eslikEdenPersonel.map(p => sanitize(p.name)).join(', ');
+        personnelStr += ` (Eslik Eden: ${eslikNames})`;
       }
 
       const info = [
           ['Form No:', actionRecord.id],
-          [processText('Laboratuvar:', useTurkishFont), processText(hospital?.name, useTurkishFont)],
-          ['Cihaz:', processText(`${device.cihazAdi} (SN: ${device.seriNumarasi})`, useTurkishFont)],
-          [processText('İşlemi Yapan:', useTurkishFont), personnelStr],
+          ['Laboratuvar:', sanitize(hospital?.name)],
+          ['Cihaz:', sanitize(`${device.cihazAdi} (SN: ${device.seriNumarasi})`)],
+          ['Islemi Yapan:', personnelStr],
           ['Tarih / Saat:', format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy HH:mm')]
       ];
 
@@ -269,14 +220,14 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
         doc.setFont(FONT_FAMILY, 'bold');
         doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
         doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(processText('Yapılan İşlemler', useTurkishFont), padX, currentY + 12);
+        doc.text('Yapilan Islemler', padX, currentY + 12);
         currentY += 18;
 
         autoTable(doc, {
-          head: [[processText('İşlem', useTurkishFont), processText('Açıklama', useTurkishFont)]],
+          head: [['Islem', 'Aciklama']],
           body: operations.map(act => [
-              processText(getOperationLabel(act.action), useTurkishFont),
-              processText(act.description || '-', useTurkishFont)
+              getOperationLabel(act.action),
+              sanitize(act.description || '-')
           ]),
           startY: currentY,
           theme: 'grid',
@@ -294,11 +245,11 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
         doc.setFont(FONT_FAMILY, 'bold');
         doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
         doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(processText('Değişen Parçalar', useTurkishFont), padX, currentY + 12);
+        doc.text('Degisen Parcalar', padX, currentY + 12);
         currentY += 18;
 
         autoTable(doc, {
-          head: [[processText('Parça', useTurkishFont), 'Kod', 'Adet']],
+          head: [['Parca', 'Kod', 'Adet']],
           body: parts.map(act => {
             let partName = act.stokAdi || act.action;
             // If it's a manual entry, show code - name format
@@ -306,8 +257,8 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
               partName = `${act.stokKodu} - ${act.stokAdi}`;
             }
             return [
-              processText(partName, useTurkishFont),
-              processText(act.stokKodu || '-', useTurkishFont),
+              sanitize(partName),
+              sanitize(act.stokKodu || '-'),
               String(act.quantity)
             ];
           }),
@@ -325,12 +276,12 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       doc.setFont(FONT_FAMILY, 'bold');
       doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
       doc.line(padX, currentY, pageW - padX, currentY);
-      doc.text(processText('Cihaz Durumu', useTurkishFont), padX, currentY + 12);
+      doc.text('Cihaz Durumu', padX, currentY + 12);
       currentY += 18;
 
-      let cihazDurumuStr = processText(CIHAZ_DURUMU_LABELS[actionRecord.cihazDurumu || ''], useTurkishFont);
+      let cihazDurumuStr = CIHAZ_DURUMU_LABELS[actionRecord.cihazDurumu || ''];
       if (actionRecord.cihazDurumu === 'diger' && actionRecord.cihazDurumuAciklama) {
-        cihazDurumuStr += ` (${processText(actionRecord.cihazDurumuAciklama, useTurkishFont)})`;
+        cihazDurumuStr += ` (${sanitize(actionRecord.cihazDurumuAciklama)})`;
       }
 
       autoTable(doc, {
@@ -352,18 +303,18 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
           doc.setFont(FONT_FAMILY, 'bold');
           doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
           doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
-          doc.text(processText('İmzalar', useTurkishFont), padX, signatureY - 3);
+          doc.text('Imzalar', padX, signatureY - 3);
 
           doc.setFont(FONT_FAMILY, 'normal');
           doc.setFontSize(10);
 
-          doc.text(processText('İşlemi Yapan Personel', useTurkishFont), padX, signatureY + 15);
+          doc.text('Islemi Yapan Personel', padX, signatureY + 15);
           doc.line(padX, signatureY + 20, padX + 150, signatureY + 20);
           if (actionRecord.personnelSignature) {
             doc.addImage(actionRecord.personnelSignature, 'PNG', padX, signatureY + 25, 150, 40, undefined, 'FAST');
           }
 
-          doc.text(processText('Aplikasyon Uzmanı', useTurkishFont), pageW / 2 + 20, signatureY + 15);
+          doc.text('Aplikasyon Uzmani', pageW / 2 + 20, signatureY + 15);
           doc.line(pageW / 2 + 20, signatureY + 20, pageW / 2 + 170, signatureY + 20);
           if (actionRecord.technicianSignature) {
             doc.addImage(actionRecord.technicianSignature, 'PNG', pageW / 2 + 20, signatureY + 25, 150, 40, undefined, 'FAST');
