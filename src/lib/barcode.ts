@@ -167,11 +167,22 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   const candidates = Array.from(new Set([raw, sanitizeGS1?.(raw) || raw]));
   const compiled = (formats || []).map(compileFormat);
 
-  const results: ParsedGeneric[] = [];
-  
-  const score = (p: ParsedGeneric | null): number => {
+  const results: Array<ParsedGeneric & { formatPriority?: number }> = [];
+
+  const score = (p: ParsedGeneric & { formatPriority?: number } | null): number => {
     if (!p) return -1;
     let s = 0;
+
+    // Priority bonus: Lower priority number = Higher score bonus
+    // Priority 0 gets +1100, Priority 1 gets +1000, Priority 2 gets +900, etc.
+    // This ensures user-defined priority always wins over field completeness
+    // Note: Using typeof check because 0 is a valid priority (falsy in JS)
+    // If priority is undefined, treat it as lowest priority (10)
+    const effectivePriority = typeof p.formatPriority === 'number' ? p.formatPriority : 10;
+    const priorityBonus = Math.max(0, 1100 - (effectivePriority * 100));
+    s += priorityBonus;
+
+    // Field completeness scoring (secondary to priority)
     if (p.stokKodu || p.barcodeNumber) s += 20;
     if (p.lotNumarasi) s += 20;
     if (p.seriNumarasi) s += 25;
@@ -184,7 +195,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   for (const candidate of candidates) {
     for (const c of compiled) {
       try {
-        let parsed: ParsedGeneric | null = null;
+        let parsed: (ParsedGeneric & { formatPriority?: number }) | null = null;
         if (c.strategy === 'legacy_roche') {
           if (/^\d{61}$/.test(candidate)) {
             const out = legacyRocheParser(candidate);
@@ -195,6 +206,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
                 lotNumarasi: out.lotNumarasi,
                 miadFormatted: out.miadFormatted,
                 seriNumarasi: out.seriNumarasi,
+                formatPriority: c.f.priority,
               };
             }
           }
@@ -208,12 +220,12 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
             const lot = c.f.trackLot !== false && c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
             const expRaw = c.f.trackLot !== false && c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
             const miad = expRaw ? normalizeExpiry(expRaw, c.expiryPattern) : undefined;
-            
+
             let seriNumarasi: string | undefined;
 
             if (c.f.trackSerial === true) {
                 const serialFromRegex = c.fields.serial ? (m[c.fields.serial] || '').trim() : undefined;
-                
+
                 if (serialFromRegex) {
                     seriNumarasi = serialFromRegex;
                 } else {
@@ -224,7 +236,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
             }
 
             const udi = c.fields.barcodeNumber ? (m[c.fields.barcodeNumber] || '').trim() : undefined;
-            
+
             parsed = {
               matchedFormatId: c.f.id,
               stokKodu: c.f.parseTarget === 'barcodeNumber' ? undefined : (ref || undefined),
@@ -232,6 +244,7 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
               lotNumarasi: lot || undefined,
               miadFormatted: miad,
               seriNumarasi: seriNumarasi || undefined,
+              formatPriority: c.f.priority,
             };
           }
         }
@@ -242,9 +255,132 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
     }
   }
   
-  if (results.length === 0) return null;
+  if (results.length === 0) {
+    return null;
+  }
 
-  return results.sort((a,b) => score(b) - score(a))[0];
+  // Sort by score and get the best match
+  const sortedResults = results.sort((a,b) => score(b) - score(a));
+  const bestMatch = sortedResults[0];
+
+  // Debug: log all candidates with their scores
+  if (sortedResults.length > 1) {
+    console.log('[parseAnyBarcode] All candidates:', sortedResults.map(r => ({
+      formatId: r.matchedFormatId,
+      stokKodu: r.stokKodu,
+      lotNumarasi: r.lotNumarasi,
+      priority: r.formatPriority,
+      score: score(r)
+    })));
+  }
+
+  console.log('[parseAnyBarcode] Best match:', {
+    formatId: bestMatch.matchedFormatId,
+    stokKodu: bestMatch.stokKodu,
+    lotNumarasi: bestMatch.lotNumarasi,
+    seriNumarasi: bestMatch.seriNumarasi,
+    priority: bestMatch.formatPriority,
+    score: score(bestMatch)
+  });
+
+  // Remove formatPriority from the result as it's only used for scoring
+  const { formatPriority, ...result } = bestMatch;
+  return result;
+}
+
+/**
+ * Parses a barcode against all formats and returns ALL matching results, sorted by score.
+ * This is useful when you need to try multiple formats and pick the one that matches a product.
+ */
+export function parseAllBarcodes(rawInput: string, formats: AnyFormat[]): ParsedGeneric[] {
+  const raw = (rawInput || '').trim();
+  if (!raw) return [];
+
+  const candidates = Array.from(new Set([raw, sanitizeGS1?.(raw) || raw]));
+  const compiled = (formats || []).map(compileFormat);
+
+  const results: Array<ParsedGeneric & { formatPriority?: number }> = [];
+
+  const score = (p: ParsedGeneric & { formatPriority?: number } | null): number => {
+    if (!p) return -1;
+    let s = 0;
+    const effectivePriority = typeof p.formatPriority === 'number' ? p.formatPriority : 10;
+    const priorityBonus = Math.max(0, 1100 - (effectivePriority * 100));
+    s += priorityBonus;
+    if (p.stokKodu || p.barcodeNumber) s += 20;
+    if (p.lotNumarasi) s += 20;
+    if (p.seriNumarasi) s += 25;
+    if (p.miadFormatted) s += 15;
+    if (!p.remainder || p.remainder.length === 0) s += 10;
+    if (p.lotNumarasi && p.seriNumarasi) s += 5;
+    return s;
+  };
+
+  for (const candidate of candidates) {
+    for (const c of compiled) {
+      try {
+        let parsed: (ParsedGeneric & { formatPriority?: number }) | null = null;
+        if (c.strategy === 'legacy_roche') {
+          if (/^\d{61}$/.test(candidate)) {
+            const out = legacyRocheParser(candidate);
+            if (out) {
+              parsed = {
+                matchedFormatId: c.f.id,
+                stokKodu: out.refNo,
+                lotNumarasi: out.lotNumarasi,
+                miadFormatted: out.miadFormatted,
+                seriNumarasi: out.seriNumarasi,
+                formatPriority: c.f.priority,
+              };
+            }
+          }
+        } else if (c.re) {
+          if (c.strategy === 'positional' && c.f.totalLength && candidate.length !== c.f.totalLength) {
+            continue;
+          }
+          const m = candidate.match(c.re);
+          if (m) {
+            const ref = c.fields.reference ? (m[c.fields.reference] || '').trim() : undefined;
+            const lot = c.f.trackLot !== false && c.fields.lot ? (m[c.fields.lot] || '').trim() : undefined;
+            const expRaw = c.f.trackLot !== false && c.fields.expiry ? (m[c.fields.expiry] || '').trim() : undefined;
+            const miad = expRaw ? normalizeExpiry(expRaw, c.expiryPattern) : undefined;
+
+            let seriNumarasi: string | undefined;
+            if (c.f.trackSerial === true) {
+              const serialFromRegex = c.fields.serial ? (m[c.fields.serial] || '').trim() : undefined;
+              if (serialFromRegex) {
+                seriNumarasi = serialFromRegex;
+              } else {
+                const takenParts = [c.f.reference, c.f.lot, c.f.expiry, c.f.serial].filter(Boolean) as PositionDef[];
+                const inferredSerial = inferSerialFromRemainder(candidate, takenParts);
+                seriNumarasi = inferredSerial;
+              }
+            }
+
+            const udi = c.fields.barcodeNumber ? (m[c.fields.barcodeNumber] || '').trim() : undefined;
+
+            parsed = {
+              matchedFormatId: c.f.id,
+              stokKodu: c.f.parseTarget === 'barcodeNumber' ? undefined : (ref || undefined),
+              barcodeNumber: c.f.parseTarget === 'barcodeNumber' ? (udi || ref || undefined) : (udi || undefined),
+              lotNumarasi: lot || undefined,
+              miadFormatted: miad,
+              seriNumarasi: seriNumarasi || undefined,
+              formatPriority: c.f.priority,
+            };
+          }
+        }
+        if (parsed) results.push(parsed);
+      } catch (e) {
+        console.warn(`Format error for "${c.f.name}":`, e);
+      }
+    }
+  }
+
+  // Sort by score and return all results (without formatPriority)
+  return results
+    .sort((a, b) => score(b) - score(a))
+    .map(({ formatPriority, ...rest }) => rest);
 }
 
 export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: ProductCode[]) {
@@ -253,9 +389,21 @@ export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: Pr
     (parsed.barcodeNumber ? productCodes.find(p => (p as any).barcodeNumber === parsed.barcodeNumber) : undefined);
 
   if (!product && parsed.matchedFormatId) {
-    product = productCodes.find(p => (p as any).barcodeFormatId === parsed.matchedFormatId);
+    // Önce çoklu format desteğini kontrol et (yeni sistem)
+    product = productCodes.find(p => {
+      const formatIds = (p as any).barcodeFormatIds;
+      const singleFormatId = (p as any).barcodeFormatId;
+
+      if (Array.isArray(formatIds) && formatIds.includes(parsed.matchedFormatId)) {
+        return true;
+      }
+      // Geriye uyumluluk için tek format kontrolü (eski sistem)
+      return singleFormatId === parsed.matchedFormatId;
+    });
   }
-  return { ...parsed, stokKodu: product?.stokKodu ?? parsed.stokKodu, product };
+
+  const result = { ...parsed, stokKodu: product?.stokKodu ?? parsed.stokKodu, product };
+  return result;
 }
 
 export type BarcodeFormat = AnyFormat;

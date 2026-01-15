@@ -1,3 +1,10 @@
+/**
+ * @fileoverview Manual Inline Adder Component for Direct Transfer
+ * @description Allows users to manually add products to a transfer list
+ * either from depot stock or via manual entry.
+ * @module components/direkt-transfer/ManualInlineAdder
+ * @version 2.0.0
+ */
 
 'use client';
 import { useMemo, useState, useEffect } from 'react';
@@ -14,6 +21,7 @@ import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DepoStokItem } from '@/lib/types';
+import { direktTransferLogger } from '@/lib/logger';
 
 type LotPayload = { code: string; name: string; lot: string; miad: string; qty: number };
 type QtyPayload = { code: string; name: string; qty: number };
@@ -99,30 +107,47 @@ export default function ManualInlineAdder({
     setIsProductPopoverOpen(false);
   };
   
+  /**
+   * Handles adding a product to the transfer list
+   */
   const handleAdd = () => {
     if (!chosenProduct) return;
     const qtyNum = Number(quantity) || 1;
     const name = chosenProduct.name || chosenProduct.code;
 
     if (activeTab === 'manual') {
-        onAddLot({
+        const payload = {
             code: chosenProduct.code,
             name,
             lot: lot.trim(),
             miad: normalizeMiad(miad),
             qty: qtyNum,
+        };
+        onAddLot(payload);
+        direktTransferLogger.debug('Manuel ürün eklendi', {
+          mode: 'manual',
+          stokKodu: payload.code,
+          lot: payload.lot,
+          qty: payload.qty,
         });
     } else { // from_stock
         const [lotNum, miadVal] = selectedLotKey.split('|');
-        onAddLot({
+        const payload = {
             code: chosenProduct.code,
             name,
             lot: lotNum,
             miad: miadVal,
             qty: qtyNum
+        };
+        onAddLot(payload);
+        direktTransferLogger.debug('Stoktan ürün eklendi', {
+          mode: 'from_stock',
+          stokKodu: payload.code,
+          lot: payload.lot,
+          qty: payload.qty,
         });
     }
-    
+
     resetLocalState();
     onDone?.();
   };

@@ -1,88 +1,131 @@
+/**
+ * @fileoverview Mal Kabul (Goods Receiving) Main Panel Component
+ * @description Enterprise-grade goods receiving panel with barcode scanning,
+ * OCR support, batch processing, and comprehensive inventory management.
+ * @module components/ana-panel
+ * @version 2.0.0
+ */
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense, ChangeEvent, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+
+// Type imports
 import type {
   ScannedItem,
   ProductCode,
-  AddressDefinition,
-  DepoStokItem,
-  VerificationReportItem,
-  Shipment,
-  Depot,
-  MinMaxRule,
-  User as AppUser,
   DepotStockCountSession
 } from '@/lib/types';
+import type { IrsaliyeParseResult } from '@/lib/mal-kabul/types';
+import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
+
+// Hooks
 import { useToast } from "@/hooks/use-toast";
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
+import useHidScanner from '@/hooks/useHidScanner';
+import { useAuth } from '@/contexts/auth-context';
+import { useLoading } from '@/contexts/loading-context';
+
+// UI Components
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Barcode, Trash2, CheckSquare, PlusCircle, AlertTriangle, Loader2, Search, CheckCircle, XCircle, History, Upload, Download, FileText, Warehouse, Building, Camera, Users, Play, LogOut, ChevronDown, ScanLine } from 'lucide-react';
-import { Switch } from "@/components/ui/switch";
-import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, orderBy, limit, getDoc, addDoc, onSnapshot, updateDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
-import { cn, generateId, readExcelData, exportDataToExcel, playFeedback, sanitizeGS1 } from '@/lib/utils';
-import { format as formatDate, differenceInDays, parse as parseDate, getMonth, getYear, isValid, subMonths } from 'date-fns';
-import { tr } from 'date-fns/locale';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { motion } from 'framer-motion';
-import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
-import useHidScanner from '@/hooks/useHidScanner';
-import BarcodeFormatPicker from '@/components/BarcodeFormatPicker';
+
+// Icons
+import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine } from 'lucide-react';
+
+// Firebase
+import { db } from '@/lib/firebase';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
+
+// Utilities
+import { cn, generateId, playFeedback } from '@/lib/utils';
 import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
-import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
-import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';
-import { useAuth } from '@/contexts/auth-context';
+
+// Logging & Validation
+import { malKabulLogger, createCorrelationId } from '@/lib/logger';
+import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
+
+// Child Components
+import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
 import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
+import { VirtualizedList } from '@/components/ui/virtualized-list';
 
-// IrsaliyeOcrModal'dan dönen sonuç tipi
-interface IrsaliyeParseResult {
-  stokKodu: string;
-  lot?: string;
-  miad?: string;
-  quantity: number;
-}
+// =============================================================================
+// DYNAMIC IMPORTS
+// =============================================================================
 
-const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
-  ssr: false,
-  loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>,
-});
+/**
+ * Dynamic camera barcode scanner component
+ * @description Loaded dynamically to reduce initial bundle size
+ */
+const DynamicCameraBarcodeScanner = dynamic(
+  () => import('@/components/camera-barcode-scanner'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center p-8" role="status" aria-label="Kamera yükleniyor">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+        <p className="ml-2">Kamera Yükleniyor...</p>
+      </div>
+    ),
+  }
+);
 
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
 
+/**
+ * Extended scanned item with grouping support
+ * @description Represents a single scanned item or a group of items with the same lot
+ */
 type ScanRow = ScannedItem & {
+  /** Quantity of items (for grouped/lot items) */
   adet?: number;
+  /** Whether this row represents a grouped item */
   isGroup?: boolean;
+  /** Expected quantity (for verification) */
   expectedAdet?: number;
+  /** List of scanned serial numbers in this group */
   scannedSerials?: string[];
-  key?: string; // Add a key for grouped items
-  items?: ScannedItem[]; // For grouped rows
+  /** Unique key for grouping (stokKodu-lot-miad) */
+  key?: string;
+  /** Child items for grouped rows */
+  items?: ScannedItem[];
 };
 
-// URL-safe base64 decode
-function fromB64Url(b64url: string): string {
-    const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
-    const bin = typeof window !== 'undefined' ? atob(b64) : Buffer.from(b64, 'base64').toString('binary');
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
-}
+/**
+ * QR transfer item structure
+ */
+type QrItem = {
+  /** Product stock code */
+  k: string;
+  /** Product name */
+  a: string;
+  /** Lot number */
+  l?: string;
+  /** Expiry date */
+  m?: string;
+  /** Serial number */
+  s?: string;
+  /** Quantity */
+  q: number;
+};
 
-type QrItem = { k: string; a: string; l?: string; m?: string; s?: string; q: number };
+/**
+ * QR transfer payload structure
+ */
 type QrPayload = {
   t: 'transfer';
   v: number;
@@ -94,29 +137,9 @@ type QrPayload = {
   items: QrItem[];
 };
 
-
-const toFsTimestamp = (d?: any): Timestamp => {
-  try {
-    if (d instanceof Date && !isNaN(d.getTime())) return Timestamp.fromDate(d);
-  } catch {}
-  return Timestamp.now();
-};
-const safeStr = (v: any): string => (v === undefined || v === null ? '' : String(v));
-const safeNullable = <T,>(v: T | undefined): T | null => (v === undefined ? null : v);
-
-const stripUndefined = (val: any): any => {
-  if (Array.isArray(val)) return val.map(stripUndefined).filter(v => v !== undefined);
-  if (val && typeof val === 'object') {
-    const out: any = {};
-    Object.keys(val).forEach(k => {
-      const v = stripUndefined((val as any)[k]);
-      if (v !== undefined) out[k] = v;
-    });
-    return out;
-  }
-  return val === undefined ? undefined : val;
-};
-
+/**
+ * Mal Kabul transaction line item
+ */
 type MalKabulLine = {
   stokKodu: string;
   stokAdi: string;
@@ -126,6 +149,9 @@ type MalKabulLine = {
   serials: string[];
 };
 
+/**
+ * Mal Kabul transaction header
+ */
 type MalKabulHeader = {
   transactionId: string;
   depotId: string;
@@ -138,6 +164,82 @@ type MalKabulHeader = {
   mode: 'verified' | 'unverified';
 };
 
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Decode URL-safe base64 string
+ * @param b64url - URL-safe base64 encoded string
+ * @returns Decoded string
+ */
+function fromB64Url(b64url: string): string {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = typeof window !== 'undefined' ? atob(b64) : Buffer.from(b64, 'base64').toString('binary');
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Convert a Date or unknown value to Firestore Timestamp
+ * @param d - Date value or undefined
+ * @returns Firestore Timestamp
+ */
+const toFsTimestamp = (d?: Date | unknown): Timestamp => {
+  try {
+    if (d instanceof Date && !isNaN(d.getTime())) return Timestamp.fromDate(d);
+  } catch {
+    malKabulLogger.warn('Failed to convert date to Timestamp', { date: String(d) });
+  }
+  return Timestamp.now();
+};
+
+/**
+ * Convert value to string safely
+ * @param v - Any value
+ * @returns String representation or empty string
+ */
+const safeStr = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
+
+/**
+ * Convert undefined to null for Firestore compatibility
+ * @param v - Value that might be undefined
+ * @returns Value or null
+ */
+const safeNullable = <T,>(v: T | undefined): T | null => (v === undefined ? null : v);
+
+/**
+ * Remove undefined values from object recursively
+ * @description Firestore doesn't accept undefined values, this strips them
+ * @param val - Object or array to clean
+ * @returns Cleaned object without undefined values
+ */
+const stripUndefined = (val: unknown): unknown => {
+  if (Array.isArray(val)) return val.map(stripUndefined).filter(v => v !== undefined);
+  if (val && typeof val === 'object') {
+    const out: Record<string, unknown> = {};
+    Object.keys(val).forEach(k => {
+      const v = stripUndefined((val as Record<string, unknown>)[k]);
+      if (v !== undefined) out[k] = v;
+    });
+    return out;
+  }
+  return val === undefined ? undefined : val;
+};
+
+// =============================================================================
+// GROUPED ROW MANAGEMENT
+// =============================================================================
+
+/**
+ * Upsert a grouped row in the scanned items list
+ * @description If a matching row exists, increments its quantity. Otherwise creates a new row.
+ * @param setScannedItems - State setter for scanned items
+ * @param base - Base product information
+ * @param match - Function to match existing rows
+ * @param delta - Quantity to add (default: 1)
+ */
 function upsertGroupedRow(
   setScannedItems: React.Dispatch<React.SetStateAction<ScanRow[]>>,
   base: { stokKodu: string; stokAdi: string; lot?: string; miad?: string; barkod?: string },
@@ -248,6 +350,13 @@ export default function AnaPanel(props: AnaPanelProps) {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser, currentUserProfile } = useAuth();
+  const { suppressGlobalLoading } = useLoading();
+
+  // Suppress global loading overlay for this panel - it interferes with barcode scanning
+  useEffect(() => {
+    const unsuppress = suppressGlobalLoading();
+    return unsuppress;
+  }, [suppressGlobalLoading]);
 
   // Use TanStack Query for static data - shared cache, 1 hour stale time
   const { data: depots = [], isLoading: depotsLoading } = useDepots();
@@ -398,7 +507,12 @@ export default function AnaPanel(props: AnaPanelProps) {
         if (!stokKodu) throw new Error('Stok kodu bulunamadı.');
 
         const matchedProduct = resolved.product;
-        const mode = resolveDefaultTrackingMode(matchedProduct as any);
+
+        // Determine tracking mode based on what the barcode contains
+        const matchedFormat = parsed.matchedFormatId
+          ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+          : undefined;
+        const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, matchedProduct as any);
 
         const isLotOnlyBarcode = (mode === 'serial') && !!lotNumarasi && !seriNumarasi;
 
@@ -734,31 +848,46 @@ export default function AnaPanel(props: AnaPanelProps) {
     setCommitInfo(null);
     const processedIds = new Set<string>();
     const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
-  
+
     const queue = new BatchQueue({
       chunkSize: 450,
       onProgress: (info) => setCommitInfo(info),
     });
-  
+
     try {
+      // OPTIMIZED: Parallel serial verification with Promise.all
       const serialsToVerify = itemsToProcess.map(i => i.seriNumarasi).filter(Boolean) as string[];
       const existingSerialsInDb = new Set<string>();
 
       if (serialsToVerify.length > 0) {
+        // Create chunks and query them in parallel (max 5 concurrent queries to avoid rate limiting)
+        const chunks: string[][] = [];
         for (let i = 0; i < serialsToVerify.length; i += 30) {
-            const chunk = serialsToVerify.slice(i, i + 30);
-            const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
-            const snap = await getDocs(q);
-            snap.forEach(doc => existingSerialsInDb.add(doc.data().seriNumarasi));
+          chunks.push(serialsToVerify.slice(i, i + 30));
+        }
+
+        // Process chunks in parallel batches of 5
+        for (let i = 0; i < chunks.length; i += 5) {
+          const batchChunks = chunks.slice(i, i + 5);
+          const results = await Promise.all(
+            batchChunks.map(async (chunk) => {
+              const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
+              const snap = await getDocs(q);
+              return snap.docs.map(doc => doc.data().seriNumarasi as string);
+            })
+          );
+          results.flat().forEach(serial => existingSerialsInDb.add(serial));
         }
       }
+
+      // Pre-compute all doc data to batch them efficiently
+      const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
 
       for (const item of itemsToProcess) {
         // Mükerrer kontrolü: aynı stokKodu için aynı seri numarası kontrol edilir
         const depotProductSerials = item.stokKodu ? existingDepotSerials.get(item.stokKodu) : undefined;
         if(item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
-            // Already checked on scan, this is a double-check.
-            continue;
+          continue;
         }
 
         const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
@@ -778,32 +907,49 @@ export default function AnaPanel(props: AnaPanelProps) {
           createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
           createdByUid: currentUser?.uid || null,
         });
-  
+
         if (item.isGroup && serialsToProcess.length === 0) {
           const adet = Math.max(1, item.adet ?? 1);
           for (let i = 0; i < adet; i++) {
-            const stokRef = doc(collection(db, 'depoStok'));
-            await queue.set(stokRef, createDocData());
+            docsToCreate.push({
+              ref: doc(collection(db, 'depoStok')),
+              data: createDocData(),
+              item,
+            });
           }
         } else {
           for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
-            const stokRef = doc(collection(db, 'depoStok'));
-            await queue.set(stokRef, createDocData(serial));
-            
-            await enqueueSerialHistory(queue, serial, 'intake', {
-              stokKodu: item.stokKodu || '',
-              stokAdi: item.stokAdi || '',
-              depotId: selectedDepotId,
-              depotName,
-              rafAdresi: item.rafAdresi || '',
-              irsaliyeNumarasi: item.irsaliyeNumarasi || '',
+            docsToCreate.push({
+              ref: doc(collection(db, 'depoStok')),
+              data: createDocData(serial),
+              serial,
+              item,
             });
           }
         }
         if (item.id) processedIds.add(item.id);
       }
-  
+
+      // OPTIMIZED: Batch all writes together
+      for (const docInfo of docsToCreate) {
+        await queue.set(docInfo.ref, docInfo.data);
+
+        if (docInfo.serial) {
+          await enqueueSerialHistory(queue, docInfo.serial, 'intake', {
+            stokKodu: docInfo.item.stokKodu || '',
+            stokAdi: docInfo.item.stokAdi || '',
+            depotId: selectedDepotId,
+            depotName,
+            rafAdresi: docInfo.item.rafAdresi || '',
+            irsaliyeNumarasi: docInfo.item.irsaliyeNumarasi || '',
+          });
+        }
+      }
+
       await queue.flush();
+
+      // Signal stock change to all listeners (other users/tabs)
+      await touchStockMetadata();
 
       // Invalidate depoStok cache so it refetches fresh data
       invalidateDepoStok();
@@ -818,7 +964,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           </Button>
         ),
       });
-  
+
       setScannedItems(prev => prev.filter(i => i.id && !processedIds.has(i.id)));
       // Map'i temizle ve kalan öğeleri yeniden ekle
       scannedSerialsRef.current.clear();
@@ -830,7 +976,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
         }
       });
-  
+
     } catch (error: any) {
       console.error("Mal kabul hatası:", error);
       toast({ title: "Veritabanı Hatası", description: safeStr(error?.message) || 'Ürünler stoğa eklenirken bir hata oluştu.', variant: "destructive" });
@@ -884,10 +1030,11 @@ export default function AnaPanel(props: AnaPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="flex-1 max-w-sm">
-            <Label className="text-sm font-medium">Çalışma Deposu</Label>
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4">
+      {/* Header Section - Mobile Responsive */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+        <div className="flex-1 w-full sm:max-w-sm">
+            <Label className="text-xs sm:text-sm font-medium">Çalışma Deposu</Label>
             <Select value={selectedDepotId} onValueChange={(v: string) => setSelectedDepotId(v)}>
               <SelectTrigger className="w-full mt-1">
                 <SelectValue placeholder="Çalışma Deposu seçin" />
@@ -899,12 +1046,13 @@ export default function AnaPanel(props: AnaPanelProps) {
               </SelectContent>
             </Select>
         </div>
-        <Button onClick={() => router.push('/mal-kabul/gecmis')} variant="outline" className="self-end">
-            <History className="mr-2 h-4 w-4" /> Geçmiş
+        <Button onClick={() => router.push('/mal-kabul/gecmis')} variant="outline" className="self-stretch sm:self-end">
+            <History className="h-4 w-4" /> <span className="ml-2">Geçmiş</span>
         </Button>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6">
+      {/* KPI Cards Grid - Mobile Responsive */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
         <Card>
             <CardHeader>
                 <CardTitle>Son Okutulan Ürün</CardTitle>
@@ -935,17 +1083,47 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         <Card>
             <CardHeader><CardTitle>İşlemler</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-                <div className="flex gap-2">
-                    <Button onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} variant="outline" size="sm" className="flex-1"><Camera className="mr-2 h-4 w-4"/>Tekli Tara</Button>
-                    <Button onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} className="flex-1 bg-teal-600 hover:bg-teal-700 text-white" size="sm"><Camera className="mr-2 h-4 w-4"/>Seri Tarama</Button>
-                </div>
-                <div className="flex gap-2">
-                    <Button onClick={() => setShowManualInline(v => !v)} variant="outline" size="sm" className="flex-1">
-                        <PlusCircle className="mr-2 h-4 w-4"/> Manuel Ürün
+            <CardContent className="space-y-2 sm:space-y-3">
+                {/* Button Grid - 2x2 on mobile, row layout on larger screens */}
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 mal-kabul-actions">
+                    <Button
+                      onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
+                    >
+                      <Camera className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">Tekli Tara</span>
+                      <span className="xs:hidden sm:hidden">Tekli</span>
                     </Button>
-                    <Button onClick={() => setIsOcrModalOpen(true)} variant="outline" size="sm" className="flex-1">
-                        <ScanLine className="mr-2 h-4 w-4" /> İrsaliye Tara (OCR)
+                    <Button
+                      onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm"
+                      size="sm"
+                    >
+                      <Camera className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">Seri Tarama</span>
+                      <span className="xs:hidden sm:hidden">Seri</span>
+                    </Button>
+                    <Button
+                      onClick={() => setShowManualInline(v => !v)}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
+                    >
+                      <PlusCircle className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">Manuel Ürün</span>
+                      <span className="xs:hidden sm:hidden">Manuel</span>
+                    </Button>
+                    <Button
+                      onClick={() => setIsOcrModalOpen(true)}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
+                    >
+                      <ScanLine className="h-4 w-4 flex-shrink-0"/>
+                      <span className="hidden xs:inline sm:inline">İrsaliye (OCR)</span>
+                      <span className="xs:hidden sm:hidden">OCR</span>
                     </Button>
                 </div>
             </CardContent>
@@ -978,92 +1156,142 @@ export default function AnaPanel(props: AnaPanelProps) {
       )}
 
       <Card className="flex-1 flex flex-col">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle className="text-lg font-headline">Okutulan Ürünler ({scannedItems.length})</CardTitle>
-               <CardDescription>Stoğa eklenecek ürünlerin listesi.</CardDescription>
+        <CardHeader className="space-y-3 sm:space-y-4">
+          {/* Title and Actions - Mobile Responsive */}
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+            <div className="flex-shrink-0">
+              <CardTitle className="text-base sm:text-lg font-headline">Okutulan Ürünler ({scannedItems.length})</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">Stoğa eklenecek ürünlerin listesi.</CardDescription>
             </div>
-            <div className="flex items-center space-x-4">
-              <Button onClick={handleOpenAddressModal} variant="outline" disabled={malKabulIsLoading || selectedItemsCount === 0}>Adres Ata ({selectedItemsCount})</Button>
-              <Button onClick={handleOpenIrsaliyeModal} variant="outline" disabled={malKabulIsLoading || selectedItemsCount === 0}>İrsaliye No Ata ({selectedItemsCount})</Button>
-              <Button onClick={() => {
+            {/* Action Buttons - Grid on mobile, flex on larger screens */}
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3 sm:justify-end">
+              <Button
+                onClick={handleOpenAddressModal}
+                variant="outline"
+                size="sm"
+                disabled={malKabulIsLoading || selectedItemsCount === 0}
+                className="text-xs sm:text-sm"
+              >
+                <span className="hidden sm:inline">Adres Ata</span>
+                <span className="sm:hidden">Adres</span>
+                <span className="ml-1">({selectedItemsCount})</span>
+              </Button>
+              <Button
+                onClick={handleOpenIrsaliyeModal}
+                variant="outline"
+                size="sm"
+                disabled={malKabulIsLoading || selectedItemsCount === 0}
+                className="text-xs sm:text-sm"
+              >
+                <span className="hidden sm:inline">İrsaliye No Ata</span>
+                <span className="sm:hidden">İrsaliye</span>
+                <span className="ml-1">({selectedItemsCount})</span>
+              </Button>
+              <Button
+                onClick={() => {
                   const anySelected = scannedItems.some(i => !i.isProcessed && i.isSelected);
                   setScannedItems(prev => prev.map(item => (!item.isProcessed ? { ...item, isSelected: !anySelected } : item)));
-              }} variant="outline" disabled={malKabulIsLoading || unprocessedScannedItems === 0}>
-                  {scannedItems.some(i => !i.isProcessed && i.isSelected) ? 'Tüm Seçimi Kaldır' : `İşlenmemişleri Seç (${unprocessedScannedItems})`}
+                }}
+                variant="outline"
+                size="sm"
+                disabled={malKabulIsLoading || unprocessedScannedItems === 0}
+                className="text-xs sm:text-sm"
+              >
+                <CheckSquare className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">
+                  {scannedItems.some(i => !i.isProcessed && i.isSelected) ? 'Seçimi Kaldır' : `Seç (${unprocessedScannedItems})`}
+                </span>
+                <span className="sm:hidden ml-1">({unprocessedScannedItems})</span>
               </Button>
-              <Button onClick={clearAllScannedItems} variant="destructive" disabled={malKabulIsLoading || scannedItems.length === 0}>
-                  <Trash2 className="mr-2 h-4 w-4" /> Tüm Listeyi Temizle
+              <Button
+                onClick={clearAllScannedItems}
+                variant="destructive"
+                size="sm"
+                disabled={malKabulIsLoading || scannedItems.length === 0}
+                className="text-xs sm:text-sm"
+              >
+                <Trash2 className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Temizle</span>
               </Button>
-              <Button onClick={handlePreCheckAndDogrulamasizMalKabul} className="bg-green-600 hover:bg-green-700 text-white" disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0}>
-                  {(malKabulIsLoading || isLoading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Kabul Et ve Stoğa Ekle
+              <Button
+                onClick={handlePreCheckAndDogrulamasizMalKabul}
+                className="col-span-2 sm:col-span-1 bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm"
+                size="sm"
+                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0}
+              >
+                {(malKabulIsLoading || isLoading) && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                <span className="hidden sm:inline">Kabul Et ve Stoğa Ekle</span>
+                <span className="sm:hidden">Kabul Et</span>
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent className="flex-1 p-0">
-          <ScrollArea className="h-[40vh]">
-            {scannedItems.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground p-4">
-                <Search className="mr-2 h-6 w-6" /> Okutulmuş ürün bulunmuyor.
-              </div>
-            ) : (
-              <Accordion type="multiple" className="w-full">
-                {groupedScannedItems.map((group, groupIndex) => {
-                  const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
-                  const hasSerials = trackingMode === 'serial';
-                  return (
-                    <AccordionItem value={`group-${groupIndex}`} key={group.key}>
-                      <AccordionTrigger className="flex items-center p-2 cursor-pointer hover:bg-muted/50 w-full text-left">
-                           <div className="px-2">
-                             <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} onClick={e => e.stopPropagation()} />
-                           </div>
-                           <div className="flex-1">
-                             {group.stokAdi}<span className="block text-xs text-muted-foreground">{group.stokKodu}</span>
-                           </div>
-                           <div className="flex-1">{group.lotNumarasi || '-'}</div>
-                           <div className="flex-1">{group.miad || '-'}</div>
-                           <div className="flex-1">{group.rafAdresi || '-'}</div>
-                           <div className="flex-1">{group.irsaliyeNumarasi || '-'}</div>
-                           <div className="font-bold text-lg text-right w-24">
-                           {hasSerials ? (
-                               <span>{group.adet} ADET</span>
-                           ) : (
-                               <Input
-                                   type="number"
-                                   value={group.adet}
-                                   onChange={(e) => handleAdetChange(group.key, e.target.value)}
-                                   onClick={(e) => e.stopPropagation()}
-                                   className="h-8 w-20 text-center font-bold text-lg"
-                                   min="1"
-                               />
-                           )}
-                           </div>
-                           <div className="w-20 text-right">
-                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); deleteGroup(group.key); }}>
-                                   <Trash2 className="h-4 w-4 text-destructive" />
-                               </Button>
-                           </div>
-                      </AccordionTrigger>
-                        {hasSerials && (
-                        <AccordionContent>
-                            <div className="px-6 py-2 bg-muted/50 max-h-40 overflow-y-auto">
-                                <ul className="list-disc pl-5 text-xs font-mono grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1">
-                                    {group.items?.map(item => (
-                                        <li key={item.id}>{item.seriNumarasi}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        </AccordionContent>
+          {scannedItems.length === 0 ? (
+            <div className="flex items-center justify-center h-[40vh] text-muted-foreground p-4">
+              <Search className="mr-2 h-6 w-6" /> Okutulmuş ürün bulunmuyor.
+            </div>
+          ) : (
+            <VirtualizedList
+              items={groupedScannedItems}
+              height="40vh"
+              estimateSize={60}
+              overscan={10}
+              getItemKey={(item) => item.key || item.id}
+              className="p-2"
+              renderItem={(group, groupIndex) => {
+                const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
+                const hasSerials = trackingMode === 'serial';
+                return (
+                  <div className="border-b last:border-b-0 py-1">
+                    <div className="flex items-center p-2 cursor-pointer hover:bg-muted/50 w-full text-left gap-2">
+                      <div className="px-2">
+                        <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium truncate block">{group.stokAdi}</span>
+                        <span className="text-xs text-muted-foreground">{group.stokKodu}</span>
+                      </div>
+                      <div className="flex-1 text-sm hidden sm:block">{group.lotNumarasi || '-'}</div>
+                      <div className="flex-1 text-sm hidden sm:block">{group.miad || '-'}</div>
+                      <div className="flex-1 text-sm hidden md:block">{group.rafAdresi || '-'}</div>
+                      <div className="flex-1 text-sm hidden md:block">{group.irsaliyeNumarasi || '-'}</div>
+                      <div className="font-bold text-lg text-right w-24">
+                        {hasSerials ? (
+                          <span>{group.adet} ADET</span>
+                        ) : (
+                          <Input
+                            type="number"
+                            value={group.adet}
+                            onChange={(e) => handleAdetChange(group.key, e.target.value)}
+                            className="h-8 w-20 text-center font-bold text-lg"
+                            min="1"
+                          />
                         )}
-                      </AccordionItem>
-                  );
-                })}
-              </Accordion>
-            )}
-          </ScrollArea>
+                      </div>
+                      <div className="w-12 text-right">
+                        <Button variant="ghost" size="icon" onClick={() => deleteGroup(group.key)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                    {hasSerials && group.items && group.items.length > 0 && (
+                      <div className="px-6 py-2 bg-muted/50 max-h-32 overflow-y-auto">
+                        <div className="text-xs font-mono grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1">
+                          {group.items.slice(0, 100).map(item => (
+                            <span key={item.id} className="truncate">{item.seriNumarasi}</span>
+                          ))}
+                          {group.items.length > 100 && (
+                            <span className="text-muted-foreground">+{group.items.length - 100} daha...</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }}
+            />
+          )}
         </CardContent>
       </Card>
       

@@ -15,6 +15,7 @@ import { useLoading } from "@/contexts/loading-context";
 import PersistentNotificationToast from "./notifications/PersistentNotificationToast";
 import PageShell from "./responsive/PageShell";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
+import { ThemeToggleDock } from "./ui/theme-toggle-dock";
 import {
   SidebarProvider,
   Sidebar,
@@ -24,8 +25,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuSub,
-  SidebarMenuSubContent,
-  SidebarMenuSubTrigger,
   SidebarFooter,
   SidebarTrigger,
 } from "./ui/sidebar";
@@ -59,12 +58,16 @@ const PushNotificationsClient = dynamic(
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const {
     currentUser,
+    currentUserProfile,
     isLoadingAuth,
     navMode,
     isOrbAnimationEnabled,
     toggleOrbAnimation,
     toggleNavMode,
   } = useAuth();
+
+  // Check if user is a teknisyen - hide dock for them
+  const isTeknisyen = currentUserProfile?.role === 'teknisyen';
   const { setTheme } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
@@ -98,7 +101,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  if (navMode === "sidebar") {
+  if (navMode === "sidebar" && !isTeknisyen) {
     const notificationItem = dockItems.find(
       (item) => item.key === "notifications"
     );
@@ -192,8 +195,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <PersistentNotificationToast />
         <PageShell className="w-full flex-1">{children}</PageShell>
 
-        {!isMobile && (
-          <div 
+        {!isMobile && !isTeknisyen && (
+          <div
              className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50"
              onMouseEnter={handleMouseEnter}
              onMouseLeave={handleMouseLeave}
@@ -207,7 +210,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <MobileDock items={dockItems} />
+        {!isTeknisyen && <MobileDock items={dockItems} />}
 
         <VerimlilikSwitch
           open={isVerimlilikSwitchOpen}

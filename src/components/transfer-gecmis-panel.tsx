@@ -1,3 +1,9 @@
+/**
+ * @fileoverview Transfer History Panel Component
+ * @description Displays historical transfer records with filtering and pagination.
+ * @module components/transfer-gecmis-panel
+ * @version 2.0.0
+ */
 
 'use client';
 
@@ -16,6 +22,7 @@ import { tr } from 'date-fns/locale';
 import type { Transfer, Depot } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
+import { transferGecmisLogger } from '@/lib/logger';
 import {
   Select,
   SelectTrigger,
@@ -75,7 +82,9 @@ export default function TransferGecmisPanel() {
       setAllTransfers(data);
       setLoading(false);
     }, (error) => {
-      console.error("Error fetching transfer history:", error);
+      transferGecmisLogger.error('Transfer geçmişi yüklenemedi', error, {
+        operation: 'fetchTransferHistory',
+      });
       toast({ title: 'Hata', description: 'Transfer geçmişi yüklenirken bir hata oluştu.', variant: 'destructive' });
       setLoading(false);
     });
@@ -106,28 +115,45 @@ export default function TransferGecmisPanel() {
   }, [filteredTransfers, page, rowsPerPage]);
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
-      <BackButton fallback="/direkt-transfer" />
+    <div
+      className="p-4 md:p-6 space-y-6"
+      role="main"
+      aria-label="Transfer geçmişi sayfası"
+    >
+      <BackButton fallback="/direkt-transfer" aria-label="Geri dön" />
       <Card>
         <CardHeader>
-          <CardTitle>Transfer Geçmişi</CardTitle>
+          <CardTitle id="transfer-history-title">Transfer Geçmişi</CardTitle>
           <CardDescription>Depodan yapılan tüm direkt transfer işlemlerini görüntüleyin.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent aria-labelledby="transfer-history-title">
           <div className="max-w-md mb-4">
-            <label className="text-sm font-medium">Depo</label>
+            <label htmlFor="depot-filter-select" className="text-sm font-medium">Depo</label>
             <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                id="depot-filter-select"
+                className="w-full"
+                aria-label="Depo filtresi"
+              >
                 <SelectValue placeholder="Depo Seçin..." />
               </SelectTrigger>
               <SelectContent>
-                {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name || d.id}</SelectItem>)}
+                {depots.map(d => (
+                  <SelectItem key={d.id} value={d.id}>{d.name || d.id}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           
           {loading ? (
-             <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin" /></div>
+             <div
+               className="flex items-center justify-center h-64"
+               role="status"
+               aria-label="Transfer geçmişi yükleniyor"
+             >
+               <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+               <span className="sr-only">Yükleniyor...</span>
+             </div>
           ) : (
              <Accordion type="single" collapsible className="w-full">
                 {paginatedTransfers.length === 0 ? (

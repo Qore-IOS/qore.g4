@@ -2,8 +2,9 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, ChangeEvent } from 'react';
+import type { DateRange } from 'react-day-picker';
 import {
-    Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X, ChevronDown, ChevronUp, Trash2
+    Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X, ChevronDown, ChevronUp, Trash2, Database, Zap
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -22,11 +23,12 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import MultiSelectFilter from '@/components/lbys/MultiSelectFilter';
 import { useLbysDataStore, ViewMode } from '@/store/lbys-data-store';
 import { FileUploader } from '@/components/lbys/FileUploader';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, LineChart, Line, Area, AreaChart } from 'recharts';
 import { AnimatePresence, motion } from 'framer-motion';
 
 // --- TYPES ---
@@ -35,7 +37,7 @@ interface FilterOption {
     value: string;
 }
 
-function KpiCard({ title, value, icon: Icon, color, bg, onClick }: any) {
+function KpiCard({ title, value, icon: Icon, color, bg, onClick, subtitle }: any) {
     const isClickable = !!onClick;
     return (
         <Card className={`border-none shadow-sm transition-shadow ${isClickable && "cursor-pointer hover:shadow-md"}`} onClick={onClick}>
@@ -43,6 +45,7 @@ function KpiCard({ title, value, icon: Icon, color, bg, onClick }: any) {
                 <div>
                     <p className="text-sm font-medium text-slate-500">{title}</p>
                     <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
+                    {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
                 </div>
                 <div className={`p-3 rounded-full ${bg}`}>
                     <Icon className={`w-6 h-6 ${color}`} />
@@ -65,10 +68,10 @@ function FilterGroup({ title, options, selected, onChange }: { title: string, op
     return (
         <div className="flex flex-col gap-1.5 flex-grow min-w-[180px]">
              <Label className="text-xs font-semibold text-slate-500 uppercase">{title}</Label>
-             <MultiSelectFilter 
-                options={options} 
-                selectedValues={selected} 
-                onChange={handleSelectionChange} 
+             <MultiSelectFilter
+                options={options}
+                selectedValues={selected}
+                onChange={handleSelectionChange}
                 placeholder={`${title} Seç...`}
                 title={title}
              />
@@ -77,10 +80,11 @@ function FilterGroup({ title, options, selected, onChange }: { title: string, op
 }
 
 function HospitalSettingsModal({ open, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
-    const { hospitalDefinitions, saveHospitalDefinition, loadHospitalDefinitions } = useLbysDataStore();
+    const { hospitalDefinitions, saveHospitalDefinition, loadHospitalDefinitions, migrateToSummaries, useSummaryMode, setUseSummaryMode } = useLbysDataStore();
     const { toast } = useToast();
     const [newCode, setNewCode] = useState("");
     const [newName, setNewName] = useState("");
+    const [isMigrating, setIsMigrating] = useState(false);
 
     useEffect(() => {
         if(open) {
@@ -99,14 +103,66 @@ function HospitalSettingsModal({ open, onOpenChange }: { open: boolean, onOpenCh
         toast({ title: 'Başarılı', description: "Tanım kaydedildi" });
     };
 
+    const handleMigration = async () => {
+        setIsMigrating(true);
+        try {
+            const result = await migrateToSummaries();
+            toast({
+                title: result.success ? 'Başarılı' : 'Hata',
+                description: result.message,
+                variant: result.success ? 'default' : 'destructive'
+            });
+        } finally {
+            setIsMigrating(false);
+        }
+    };
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-xl">
                 <DialogHeader>
-                    <DialogTitle>Hastane Kod Tanımları</DialogTitle>
+                    <DialogTitle>Hastane Kod Tanımları & Ayarlar</DialogTitle>
                     <DialogDescription>Excel'den gelen HASTANE_ID kodlarının hangi hastane ismine karşılık geldiğini buradan tanımlayın.</DialogDescription>
                 </DialogHeader>
-                
+
+                {/* Performance Mode Toggle */}
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-full ${useSummaryMode ? 'bg-green-100' : 'bg-slate-200'}`}>
+                            <Zap className={`w-5 h-5 ${useSummaryMode ? 'text-green-600' : 'text-slate-500'}`} />
+                        </div>
+                        <div>
+                            <p className="font-medium text-sm">Yüksek Performans Modu</p>
+                            <p className="text-xs text-slate-500">Summary tablolardan okuma (önerilen)</p>
+                        </div>
+                    </div>
+                    <Switch
+                        checked={useSummaryMode}
+                        onCheckedChange={setUseSummaryMode}
+                    />
+                </div>
+
+                {/* Migration Button */}
+                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-full bg-blue-100">
+                            <Database className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                            <p className="font-medium text-sm">Veri Migration</p>
+                            <p className="text-xs text-slate-500">Mevcut verilerden summary oluştur</p>
+                        </div>
+                    </div>
+                    <Button
+                        onClick={handleMigration}
+                        disabled={isMigrating}
+                        variant="outline"
+                        size="sm"
+                    >
+                        {isMigrating ? 'İşleniyor...' : 'Migration Başlat'}
+                    </Button>
+                </div>
+
                 <div className="grid grid-cols-3 gap-2 items-end mb-4">
                     <div className="space-y-1">
                         <Label>Hastane Kodu</Label>
@@ -151,7 +207,9 @@ export default function IsAnaliziPage() {
     const {
         isLoading, error, aggregatedData, filteredData, filters,
         setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore, resetAnalysisData,
-        showAllData, loadAllDataFromFirestore, processingProgress, viewMode, setViewMode
+        showAllData, loadAllDataFromFirestore, processingProgress, viewMode, setViewMode,
+        // Yeni summary-based state
+        useSummaryMode, dashboardData, filterOptions: storeFilterOptions, loadFilterOptionsFromFirestore
     } = useLbysDataStore();
     const { toast } = useToast();
 
@@ -164,11 +222,12 @@ export default function IsAnaliziPage() {
 
     useEffect(() => {
         loadHospitalDefinitions();
+        loadFilterOptionsFromFirestore();
         // Load initial data based on default date range
         if (filters.dateRange.from && filters.dateRange.to) {
             loadDataFromFirestore({ from: filters.dateRange.from, to: filters.dateRange.to });
         }
-    }, [loadHospitalDefinitions, loadDataFromFirestore]);
+    }, [loadHospitalDefinitions, loadFilterOptionsFromFirestore, loadDataFromFirestore]);
 
     // This effect triggers a re-fetch whenever the date range filter changes.
     useEffect(() => {
@@ -178,14 +237,30 @@ export default function IsAnaliziPage() {
         }
     }, [filters.dateRange, filters.showAll, loadDataFromFirestore]);
 
-    const handleDateChange = (dateRange: { from: Date | undefined; to: Date | undefined }) => {
+    const handleDateChange = (dateRange: DateRange | undefined) => {
         // Tarih seçildiğinde showAll'ı kapat
-        setFilters({ dateRange, showAll: false });
+        if (dateRange) {
+            setFilters({
+                dateRange: { from: dateRange.from, to: dateRange.to ?? undefined },
+                showAll: false
+            });
+        }
         // The useEffect above will handle the refetch
     };
 
-
+    // Filter options: Summary modunda store'dan, legacy modunda aggregatedData'dan
     const filterOptions = useMemo(() => {
+        if (useSummaryMode && storeFilterOptions.hospitals.length > 0) {
+            return {
+                hospitals: storeFilterOptions.hospitals.map(v => ({ label: v, value: v })),
+                services: storeFilterOptions.services.map(v => ({ label: v, value: v })),
+                tests: storeFilterOptions.tests.map(v => ({ label: v, value: v })),
+                asms: storeFilterOptions.asms.map(v => ({ label: v, value: v })),
+                branches: storeFilterOptions.branches.map(v => ({ label: v, value: v })),
+            };
+        }
+
+        // Legacy mode: aggregatedData'dan türet
         const hospitals = new Set<string>();
         const services = new Set<string>();
         const tests = new Set<string>();
@@ -207,10 +282,27 @@ export default function IsAnaliziPage() {
             asms: Array.from(asms).sort().map(v => ({ label: v, value: v })),
             branches: Array.from(branches).sort().map(v => ({ label: v, value: v })),
         };
-    }, [aggregatedData]);
+    }, [useSummaryMode, storeFilterOptions, aggregatedData]);
 
+    // KPI Data: Summary modunda dashboardData'dan, legacy modunda filteredData'dan
     const kpiData = useMemo(() => {
-        let totalTests = 0, totalRejected = 0, totalRepeat = 0, totalTat = 0, tatCount = 0;
+        if (useSummaryMode && dashboardData) {
+            return {
+                totalTests: dashboardData.kpis.totalTests,
+                totalSamples: dashboardData.kpis.uniquePatients,
+                rejectionRate: dashboardData.kpis.rejectionRate,
+                avgTat: Math.round(dashboardData.kpis.avgTatMinutes),
+                repeatRate: dashboardData.kpis.repeatRate,
+                emergencyRate: dashboardData.kpis.emergencyRate,
+                rejectionReasons: dashboardData.rejectionReasons.reduce((acc, item) => {
+                    acc[item.name] = item.value;
+                    return acc;
+                }, {} as Record<string, number>)
+            };
+        }
+
+        // Legacy mode
+        let totalTests = 0, totalRejected = 0, totalRepeat = 0, totalTat = 0, tatCount = 0, totalEmergency = 0;
         const patientIdSet = new Set<string>();
 
         filteredData.forEach(d => {
@@ -221,6 +313,7 @@ export default function IsAnaliziPage() {
             totalRepeat += stage.repeatCount;
             totalTat += stage.totalTatMinutes;
             tatCount += stage.tatCount;
+            totalEmergency += stage.emergencyCount;
             stage.patientIds.forEach(pid => patientIdSet.add(pid));
         });
 
@@ -230,6 +323,7 @@ export default function IsAnaliziPage() {
             rejectionRate: totalTests > 0 ? (totalRejected / totalTests) * 100 : 0,
             avgTat: tatCount > 0 ? Math.round(totalTat / tatCount) : 0,
             repeatRate: totalTests > 0 ? (totalRepeat / totalTests) * 100 : 0,
+            emergencyRate: totalTests > 0 ? (totalEmergency / totalTests) * 100 : 0,
             rejectionReasons: filteredData.reduce((acc, curr) => {
                 const stage = curr[viewMode];
                 if (!stage) return acc;
@@ -239,9 +333,21 @@ export default function IsAnaliziPage() {
                 return acc;
             }, {} as Record<string, number>)
         };
-    }, [filteredData, viewMode]);
+    }, [useSummaryMode, dashboardData, filteredData, viewMode]);
 
+    // Hospital chart data
     const hospitalsChartData = useMemo(() => {
+        if (useSummaryMode && dashboardData) {
+            return dashboardData.hospitalDistribution.map(d => ({
+                name: d.name,
+                tests: d.value,
+                emergency: d.emergencyCount || 0,
+                normal: d.normalCount || (d.value - (d.emergencyCount || 0)),
+                emergencyRate: d.value > 0 ? ((d.emergencyCount || 0) / d.value) * 100 : 0
+            }));
+        }
+
+        // Legacy mode
         const map = new Map<string, { name: string, tests: number, emergency: number }>();
         filteredData.filter(d => !d.isAsm).forEach(d => {
             const stage = d[viewMode];
@@ -258,9 +364,15 @@ export default function IsAnaliziPage() {
                 emergencyRate: d.tests > 0 ? ((d.emergency / d.tests) * 100) : 0
             }))
             .sort((a, b) => b.tests - a.tests);
-    }, [filteredData, viewMode]);
-    
+    }, [useSummaryMode, dashboardData, filteredData, viewMode]);
+
+    // ASM chart data
     const asmData = useMemo(() => {
+        if (useSummaryMode && dashboardData) {
+            return dashboardData.asmDistribution;
+        }
+
+        // Legacy mode
         const map = new Map<string, number>();
         filteredData.filter(d => d.isAsm).forEach(d => {
             const stage = d[viewMode];
@@ -268,9 +380,15 @@ export default function IsAnaliziPage() {
             map.set(d.hospitalName, (map.get(d.hospitalName) || 0) + stage.totalTests);
         });
         return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-    }, [filteredData, viewMode]);
-    
+    }, [useSummaryMode, dashboardData, filteredData, viewMode]);
+
+    // Services chart data
     const servicesChartData = useMemo(() => {
+        if (useSummaryMode && dashboardData) {
+            return dashboardData.serviceDistribution;
+        }
+
+        // Legacy mode
         const map = new Map<string, number>();
         filteredData.forEach(d => {
             const stage = d[viewMode];
@@ -278,9 +396,15 @@ export default function IsAnaliziPage() {
             map.set(d.service, (map.get(d.service) || 0) + stage.totalTests);
         });
         return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-    }, [filteredData, viewMode]);
+    }, [useSummaryMode, dashboardData, filteredData, viewMode]);
 
+    // Top tests chart data
     const topTestsData = useMemo(() => {
+        if (useSummaryMode && dashboardData) {
+            return dashboardData.topTests;
+        }
+
+        // Legacy mode
         const map = new Map<string, number>();
         filteredData.forEach(d => {
             const stage = d[viewMode];
@@ -288,7 +412,18 @@ export default function IsAnaliziPage() {
             map.set(d.testName, (map.get(d.testName) || 0) + stage.totalTests);
         });
         return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-    }, [filteredData, viewMode]);
+    }, [useSummaryMode, dashboardData, filteredData, viewMode]);
+
+    // Daily trend chart data (yeni - sadece summary mode'da)
+    const dailyTrendData = useMemo(() => {
+        if (useSummaryMode && dashboardData && dashboardData.dailyTrend) {
+            return dashboardData.dailyTrend.map(d => ({
+                ...d,
+                date: d.name.substring(5) // "YYYY-MM-DD" -> "MM-DD"
+            }));
+        }
+        return [];
+    }, [useSummaryMode, dashboardData]);
 
     const handleRejectionClick = () => {
         setRejectionData({ title: "Tüm Red Nedenleri", reasons: kpiData.rejectionReasons });
@@ -296,6 +431,15 @@ export default function IsAnaliziPage() {
     };
 
     const handleHospitalClick = (hospitalName: string) => {
+        // Summary modunda detay için raw data'ya ihtiyaç var - şimdilik basit gösterim
+        if (useSummaryMode) {
+            toast({
+                title: "Detay Görünümü",
+                description: "Detaylı servis kırılımı için BigQuery entegrasyonu gerekiyor.",
+            });
+            return;
+        }
+
         const hospitalServices = filteredData
             .filter(d => d.hospitalName === hospitalName)
             .reduce((acc, curr) => {
@@ -307,7 +451,7 @@ export default function IsAnaliziPage() {
         setDetailModalData({ title: `${hospitalName} - Servis Dağılımı`, data: hospitalServices, type: 'service' });
         setDetailModalOpen(true);
     };
-    
+
     const handleResetDataConfirm = async () => {
         if (confirm("Bu işlem geri alınamaz! Analiz veritabanındaki tüm kayıtları kalıcı olarak silmek istediğinizden emin misiniz?")) {
             await resetAnalysisData();
@@ -359,7 +503,14 @@ export default function IsAnaliziPage() {
                                 <BackButton />
                                 <div>
                                     <h1 className="text-xl font-bold tracking-tight text-gray-800">Qore Analiz</h1>
-                                    <p className="text-sm text-slate-500">Laboratuvar performans ve iş yükü analizi</p>
+                                    <p className="text-sm text-slate-500">
+                                        Laboratuvar performans ve iş yükü analizi
+                                        {useSummaryMode && (
+                                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                                <Zap className="w-3 h-3 mr-1" /> Yüksek Performans
+                                            </span>
+                                        )}
+                                    </p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -453,10 +604,68 @@ export default function IsAnaliziPage() {
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <KpiCard title="Toplam Test" value={kpiData.totalTests.toLocaleString()} icon={Microscope} color="text-blue-600" bg="bg-blue-50" />
                 <KpiCard title="Benzersiz Numune" value={kpiData.totalSamples.toLocaleString()} icon={Users} color="text-purple-600" bg="bg-purple-50" />
-                <KpiCard title="Red Oranı" value={`${kpiData.rejectionRate.toFixed(2)}%`} icon={AlertCircle} color="text-red-600" bg="bg-red-50" onClick={handleRejectionClick} />
+                <KpiCard
+                    title="Red Oranı"
+                    value={`${kpiData.rejectionRate.toFixed(2)}%`}
+                    icon={AlertCircle}
+                    color="text-red-600"
+                    bg="bg-red-50"
+                    onClick={handleRejectionClick}
+                />
                 <KpiCard title="Ort. TAT (Dk)" value={kpiData.avgTat.toString()} icon={Clock} color="text-amber-600" bg="bg-amber-50" />
-                <KpiCard title="Tekrar Oranı" value={`${kpiData.repeatRate.toFixed(2)}%`} icon={RefreshCcw} color="text-cyan-600" bg="bg-cyan-50" />
+                <KpiCard
+                    title="Tekrar Oranı"
+                    value={`${kpiData.repeatRate.toFixed(2)}%`}
+                    icon={RefreshCcw}
+                    color="text-cyan-600"
+                    bg="bg-cyan-50"
+                    subtitle={`Acil: ${kpiData.emergencyRate.toFixed(1)}%`}
+                />
             </div>
+
+            {/* Daily Trend Chart - Sadece summary modunda ve veri varsa göster */}
+            {useSummaryMode && dailyTrendData.length > 1 && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="text-base">Günlük Test Trendi</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-[200px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={dailyTrendData} margin={{ left: 0, right: 10 }}>
+                                <defs>
+                                    <linearGradient id="colorTests" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="date" tick={{fontSize: 10}} />
+                                <YAxis tick={{fontSize: 10}} width={50} />
+                                <RechartsTooltip
+                                    content={({ active, payload }) => {
+                                        if (active && payload && payload.length) {
+                                            return (
+                                                <div className="bg-white p-2 border rounded shadow text-xs">
+                                                    <p className="font-medium">{payload[0].payload.name}</p>
+                                                    <p className="text-blue-600">Test: {payload[0].value?.toLocaleString()}</p>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    }}
+                                />
+                                <Area
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke="#3b82f6"
+                                    fillOpacity={1}
+                                    fill="url(#colorTests)"
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </CardContent>
+                </Card>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card>
@@ -495,7 +704,8 @@ export default function IsAnaliziPage() {
                                 />
                                 <Bar dataKey="normal" stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} onClick={(d) => handleHospitalClick(d.name)} cursor="pointer" name="Normal" />
                                 <Bar dataKey="emergency" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} onClick={(d) => handleHospitalClick(d.name)} cursor="pointer" name="Acil"
-                                    label={({ x, y, width, height, value, payload }: any) => {
+                                    label={(props: any) => {
+                                        const { x, y, width, height, payload } = props;
                                         if (payload?.emergencyRate > 0) {
                                             return (
                                                 <text x={x + width + 5} y={y + height / 2} fill="#ef4444" fontSize={10} dominantBaseline="middle">
@@ -503,7 +713,7 @@ export default function IsAnaliziPage() {
                                                 </text>
                                             );
                                         }
-                                        return null;
+                                        return <text />;
                                     }}
                                 />
                             </BarChart>
@@ -563,5 +773,5 @@ export default function IsAnaliziPage() {
         </div>
     );
 
-    
+
 }

@@ -1,7 +1,17 @@
+/**
+ * @fileoverview Mal Kabul Transaction History Page
+ * @description Displays historical goods receiving transactions with pagination,
+ * filtering, and detailed view capabilities.
+ * @module app/(protected)/mal-kabul/gecmis/page
+ * @version 2.0.0
+ */
+
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+
+// Firebase
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -14,6 +24,8 @@ import {
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+
+// UI Components
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
 } from '@/components/ui/card';
@@ -22,25 +34,42 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, History, ChevronLeft, ChevronRight, RotateCw, FileSpreadsheet } from 'lucide-react';
+
+// Icons
+import { Loader2, History, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
+
+// Hooks & Utils
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { toDateFromAny, formatTimestamp } from '@/lib/time';
 import { useRowFocus } from '@/hooks/useRowFocus';
 
+// Logging
+import { malKabulLogger } from '@/lib/logger';
+
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
+
+/**
+ * Mal Kabul transaction header (from Firestore)
+ */
 type MalKabulHeader = {
   transactionId: string;
   depotId: string;
   depotName: string;
   userId: string;
   userName: string;
-  timestamp?: any;
+  timestamp?: Date | { seconds: number; nanoseconds: number } | null;
   itemCount: number;
   brands?: string[];
   mode: 'verified' | 'unverified';
 };
 
+/**
+ * Mal Kabul transaction line item
+ */
 type MalKabulLine = {
   stokKodu: string;
   stokAdi: string;
@@ -50,14 +79,26 @@ type MalKabulLine = {
   serials?: string[];
 };
 
-const PAGE_SIZE_OPTIONS = [50, 100, 200];
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/** Available page size options */
+const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
+
+/** Firestore collection name */
 const COLLECTION_NAME = 'malKabulTransactions';
+
+/** Field to order by */
 const ORDER_FIELD = 'timestamp';
+
+/** Maximum records to fetch */
+const MAX_RECORDS = 1000;
 
 export default function MalKabulGecmisPage() {
   const { toast } = useToast();
   const sp = useSearchParams();
-  const openId = sp.get('open');
+  const openId = sp?.get('open') ?? null;
 
   const [pageSize, setPageSize] = useState<number>(50);
   const [isLoading, setIsLoading] = useState(true);
@@ -70,35 +111,65 @@ export default function MalKabulGecmisPage() {
   const [linesLoading, setLinesLoading] = useState(false);
   const [lines, setLines] = useState<MalKabulLine[]>([]);
 
-  // Real-time listener
+  // Real-time listener for transaction history
   useEffect(() => {
     setIsLoading(true);
+    malKabulLogger.debug('Initializing transaction history listener');
+
     const q = query(
       collection(db, COLLECTION_NAME),
       orderBy(ORDER_FIELD, 'desc'),
-      limit(1000) // Limit to a reasonable number for performance
+      limit(MAX_RECORDS)
     );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...(d.data() as MalKabulHeader) }));
-      // Client-side sort to guarantee order, as onSnapshot can deliver out-of-order updates initially
-      data.sort((a,b) => toDateFromAny(b.timestamp)!.getTime() - toDateFromAny(a.timestamp)!.getTime());
-      setAllRows(data);
-      setIsLoading(false);
-    }, (error) => {
-      console.error('Error listening to mal kabul history:', error);
-      toast({ title: 'Hata', description: 'Geçmiş verileri dinlenirken bir hata oluştu.', variant: 'destructive' });
-      setIsLoading(false);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snap: { docs: QueryDocumentSnapshot<DocumentData>[] }) => {
+        const data = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
+          id: d.id,
+          ...(d.data() as MalKabulHeader)
+        }));
 
-    return () => unsubscribe();
+        // Client-side sort to guarantee order
+        data.sort((a, b) => {
+          const aTime = toDateFromAny(a.timestamp as Parameters<typeof toDateFromAny>[0])?.getTime() ?? 0;
+          const bTime = toDateFromAny(b.timestamp as Parameters<typeof toDateFromAny>[0])?.getTime() ?? 0;
+          return bTime - aTime;
+        });
+
+        setAllRows(data);
+        setIsLoading(false);
+        malKabulLogger.info('Transaction history loaded', { count: data.length });
+      },
+      (error: Error) => {
+        malKabulLogger.error('Failed to listen to transaction history', error);
+        toast({
+          title: 'Hata',
+          description: 'Geçmiş verileri dinlenirken bir hata oluştu.',
+          variant: 'destructive'
+        });
+        setIsLoading(false);
+      }
+    );
+
+    return () => {
+      malKabulLogger.debug('Cleaning up transaction history listener');
+      unsubscribe();
+    };
   }, [toast]);
-  
+
+  /**
+   * Open transaction details modal
+   * @param txId - Transaction ID to open
+   */
   const openTransaction = useCallback(async (txId: string) => {
     setLines([]);
     setLinesLoading(true);
-    const txHeader = allRows.find(r => r.id === txId);
+    malKabulLogger.debug('Opening transaction details', { transactionId: txId });
+
+    const txHeader = allRows.find((r) => r.id === txId);
     if (!txHeader) {
+      malKabulLogger.warn('Transaction not found', { transactionId: txId });
       toast({ title: 'Bulunamadı', description: 'İşlem mevcut değil veya silinmiş.' });
       return;
     }
@@ -106,11 +177,19 @@ export default function MalKabulGecmisPage() {
 
     try {
       const txRef = doc(db, COLLECTION_NAME, txId);
-      const linesSnap = await getDocsFromServer(query(collection(txRef, 'lines'), orderBy('stokKodu')));
-      setLines(linesSnap.docs.map(d => d.data() as MalKabulLine));
-    } catch (e: any) {
-      console.error('Satır detayları alınamadı:', e);
-      toast({ title: 'Hata', description: e?.message ?? 'Detaylar yüklenemedi', variant: 'destructive' });
+      const linesSnap = await getDocsFromServer(
+        query(collection(txRef, 'lines'), orderBy('stokKodu'))
+      );
+      const lineData = linesSnap.docs.map((d) => d.data() as MalKabulLine);
+      setLines(lineData);
+      malKabulLogger.info('Transaction details loaded', {
+        transactionId: txId,
+        lineCount: lineData.length
+      });
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      malKabulLogger.error('Failed to load transaction details', error, { transactionId: txId });
+      toast({ title: 'Hata', description: error.message || 'Detaylar yüklenemedi', variant: 'destructive' });
     } finally {
       setLinesLoading(false);
     }
@@ -134,7 +213,7 @@ export default function MalKabulGecmisPage() {
   }, [currentPage, totalPages]);
 
   const exportCurrentPage = () => {
-    const rowsForExcel = paginatedRows.map(r => {
+    const rowsForExcel = paginatedRows.map((r: MalKabulHeader & { id: string }) => {
       return {
         'İşlem No': r.transactionId || r.id,
         'Depo': r.depotName,
@@ -152,15 +231,15 @@ export default function MalKabulGecmisPage() {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak detay bulunamadı.' });
       return;
     }
-    const summaryData = lines.map(l => ({
+    const summaryData = lines.map((l: MalKabulLine) => ({
       'Stok Kodu': l.stokKodu,
       'Stok Adı': l.stokAdi,
       'Lot': l.lotNumarasi,
       'Miad': l.miad,
       'Adet': l.adet,
     }));
-    const serialsData = lines.flatMap(l =>
-      (l.serials || []).map(s => ({
+    const serialsData = lines.flatMap((l: MalKabulLine) =>
+      (l.serials || []).map((s: string) => ({
         'Stok Kodu': l.stokKodu,
         'Stok Adı': l.stokAdi,
         'Lot': l.lotNumarasi,
@@ -193,7 +272,7 @@ export default function MalKabulGecmisPage() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-3">
-              <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(1); }}>
+              <Select value={String(pageSize)} onValueChange={(v: string) => { setPageSize(Number(v)); setCurrentPage(1); }}>
                 <SelectTrigger className="w-32"><SelectValue placeholder="Sayfa boyutu" /></SelectTrigger>
                 <SelectContent>
                   {PAGE_SIZE_OPTIONS.map(s => <SelectItem key={s} value={String(s)}>{s} / sayfa</SelectItem>)}
@@ -238,7 +317,7 @@ export default function MalKabulGecmisPage() {
                     <TableCell colSpan={7} className="text-center py-10">Kayıt bulunamadı.</TableCell>
                   </TableRow>
                 ) : (
-                  paginatedRows.map((r) => (
+                  paginatedRows.map((r: MalKabulHeader & { id: string }) => (
                       <TableRow key={r.id} data-row-id={r.id} ref={r.id === openId ? focusRef : null} className="hover:bg-muted/40" >
                         <TableCell className="font-medium">{r.transactionId || r.id}</TableCell>
                         <TableCell>{r.depotName || '-'}</TableCell>
@@ -258,17 +337,17 @@ export default function MalKabulGecmisPage() {
         </CardContent>
 
         <CardFooter className="flex items-center justify-between">
-          <Button variant="outline" disabled={currentPage <= 1 || isLoading} onClick={() => setCurrentPage(p => p - 1)}>
+          <Button variant="outline" disabled={currentPage <= 1 || isLoading} onClick={() => setCurrentPage((p: number) => p - 1)}>
             <ChevronLeft className="h-4 w-4 mr-2" /> Önceki
           </Button>
           <span>Sayfa {currentPage} / {totalPages}</span>
-          <Button variant="outline" disabled={currentPage >= totalPages || isLoading} onClick={() => setCurrentPage(p => p + 1)}>
+          <Button variant="outline" disabled={currentPage >= totalPages || isLoading} onClick={() => setCurrentPage((p: number) => p + 1)}>
             Sonraki <ChevronRight className="h-4 w-4 ml-2" />
           </Button>
         </CardFooter>
       </Card>
 
-      <Dialog open={!!selectedTx} onOpenChange={(o) => !o && setSelectedTx(null)}>
+      <Dialog open={!!selectedTx} onOpenChange={(o: boolean) => !o && setSelectedTx(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
              <div className="flex justify-between items-start">
@@ -306,7 +385,7 @@ export default function MalKabulGecmisPage() {
                   ) : lines.length === 0 ? (
                     <TableRow><TableCell colSpan={5} className="text-center py-10">Detay yok.</TableCell></TableRow>
                   ) : (
-                    lines.map((l, idx) => (
+                    lines.map((l: MalKabulLine, idx: number) => (
                       <TableRow key={idx}>
                         <TableCell className="font-medium">{l.stokKodu}</TableCell>
                         <TableCell>{l.stokAdi}</TableCell>

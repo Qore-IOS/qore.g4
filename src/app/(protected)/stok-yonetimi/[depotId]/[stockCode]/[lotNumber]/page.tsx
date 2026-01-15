@@ -15,7 +15,8 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMiad } from "@/lib/date";
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
-import { cn, playFeedback, generateId } from '@/lib/utils';
+import { cn, playFeedback } from '@/lib/utils';
+import { nanoid } from 'nanoid';
 import { parseBarcode as parseRocheBarcode } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -110,8 +111,8 @@ export default function StockDetailPage() {
       if (!groups[key]) {
         groups[key] = {
           id: key,
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
+          stokKodu: item.stokKodu || '',
+          stokAdi: item.stokAdi || '',
           lotNumarasi: item.lotNumarasi || '',
           miad: formatMiad(item.miad),
           rafAdresi: item.rafAdresi || '',
@@ -212,7 +213,7 @@ export default function StockDetailPage() {
   };
   
   const handleStartEditing = (group: (typeof sortedAndGroupedStock)[0]) => {
-    setEditingRowKey(group.key);
+    setEditingRowKey(group.id);
     setEditingQuantity(group.items.length);
   };
   
@@ -235,7 +236,7 @@ export default function StockDetailPage() {
       handleCancelEditing();
       return;
     }
-    setIsLoading(true);
+    setLoading(true);
     const batch = writeBatch(db);
     try {
       if (diff > 0) { // Add items
@@ -253,12 +254,12 @@ export default function StockDetailPage() {
         };
         for (let i = 0; i < diff; i++) {
           const newDocRef = doc(collection(db, 'depoStok'));
-          batch.set(newDocRef, { ...newItemTemplate, seriNumarasi: `MANUEL-${generateId(6)}` });
+          batch.set(newDocRef, { ...newItemTemplate, seriNumarasi: `MANUEL-${nanoid(6)}` });
         }
       } else { // Remove items
         const itemsToRemove = group.items.slice(0, Math.abs(diff));
-        itemsToRemove.forEach(item => {
-          batch.delete(doc(db, 'depoStok', item.id));
+        itemsToRemove.filter(item => item.id).forEach(item => {
+          batch.delete(doc(db, 'depoStok', item.id!));
         });
       }
       await batch.commit();
@@ -272,7 +273,7 @@ export default function StockDetailPage() {
       toast({ title: "Hata", description: "Adet güncellenirken hata oluştu.", variant: "destructive" });
       console.error(error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
       handleCancelEditing();
     }
   };
@@ -299,21 +300,21 @@ export default function StockDetailPage() {
     
     const itemsToDeduct = items.filter(item => unscannedSerials.includes(normalizeSerial(item.seriNumarasi)));
 
-    itemsToDeduct.forEach(item => {
+    itemsToDeduct.filter(item => item.id).forEach(item => {
         const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-            stokKodu: item.stokKodu,
-            stokAdi: item.stokAdi,
+            stokKodu: item.stokKodu || '',
+            stokAdi: item.stokAdi || '',
             lotNumarasi: item.lotNumarasi ?? '',
             miad: formatMiad(item.miad),
             seriNumarasi: item.seriNumarasi ?? '',
             consumptionTimestamp: new Date(),
             consumptionType: 'sayimdan_dusum',
-            userId: currentUserProfile.uid,
-            userName: currentUserProfile.name || 'Bilinmeyen Kullanıcı',
-            laboratoryName: depotName, 
+            userId: currentUserProfile?.uid || '',
+            userName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            laboratoryName: depotName,
             laboratoryId: depotId,
         };
-        batch.delete(doc(db, 'depoStok', item.id));
+        batch.delete(doc(db, 'depoStok', item.id!));
         batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
     });
 

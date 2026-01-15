@@ -33,8 +33,10 @@ export function useSafeBarcodeFormats(): State {
         );
         const snap = await getDocs(q);
         const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
+        // Sort by priority (ascending - lower priority number = higher precedence)
+        const sorted = items.sort((a, b) => (a.priority ?? 10) - (b.priority ?? 10));
         if (!canceled) {
-          setState({ formats: withLegacy(items), loading: false });
+          setState({ formats: withLegacy(sorted), loading: false });
         }
       } catch (err: any) {
         // Fallback: fetch full collection, filter/sort locally
@@ -42,9 +44,11 @@ export function useSafeBarcodeFormats(): State {
           const snapAll = await getDocs(collection(db, 'barcodeFormats'));
           const all = snapAll.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
           const activeOnly = all.filter((f: any) => f.active !== false);
-          
+          // Sort by priority (ascending - lower priority number = higher precedence)
+          const sorted = activeOnly.sort((a, b) => (a.priority ?? 10) - (b.priority ?? 10));
+
           if (!canceled) {
-            setState({ formats: withLegacy(activeOnly), loading: false, error: err?.message });
+            setState({ formats: withLegacy(sorted), loading: false, error: err?.message });
           }
         } catch (err2: any) {
           if (!canceled) {

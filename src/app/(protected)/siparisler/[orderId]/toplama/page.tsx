@@ -1,3 +1,25 @@
+/**
+ * @fileoverview Order Picking Page
+ * @description Handles the barcode scanning and product picking process for orders.
+ * Supports serial and lot-based tracking, FEFO validation, and shipment creation.
+ * @module app/siparisler/[orderId]/toplama
+ * @version 2.0.0
+ *
+ * @features
+ * - HID barcode scanner integration
+ * - FEFO (First Expired First Out) validation with override option
+ * - Serial number and lot-based tracking
+ * - Real-time picking progress display
+ * - Automatic shipment creation on completion
+ * - Lab transfer date tracking
+ * - Custom product order support per hospital
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Screen reader announcements for scan results
+ * - Keyboard accessible controls
+ * - Visual feedback for picking progress
+ */
 
 'use client';
 
@@ -5,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import type { Order, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, updateDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, addDoc, limit, orderBy } from 'firebase/firestore';
+import { collection, doc, getDoc, updateDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, addDoc, limit, orderBy, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -27,7 +49,7 @@ import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 import type { ParsedGeneric } from '@/lib/barcode';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { updateHospitalLastTransferDates } from '@/actions/stokActions';
+import { siparisToplamaLogger } from '@/lib/logger';
 
 
 function LastTransferLine({
@@ -41,15 +63,35 @@ function LastTransferLine({
 
   if (!jsDate) {
     return (
-      <div className={cn("text-xs text-muted-foreground italic", className)}>
+      <div className={cn("text-xs text-orange-500 font-medium", className)}>
         Son transfer bilgisi yok
       </div>
     );
   }
 
+  // Calculate days ago
+  const now = new Date();
+  const diffMs = now.getTime() - jsDate.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  let displayText: string;
+  if (diffDays === 0) {
+    displayText = "Son transfer: bugün";
+  } else if (diffDays === 1) {
+    displayText = "Son transfer: dün";
+  } else if (diffDays < 30) {
+    displayText = `Son transfer: ${diffDays} gün önce`;
+  } else if (diffDays < 365) {
+    const months = Math.floor(diffDays / 30);
+    displayText = `Son transfer: ${months} ay önce`;
+  } else {
+    const years = Math.floor(diffDays / 365);
+    displayText = `Son transfer: ${years} yıl önce`;
+  }
+
   return (
     <div className={cn("text-xs text-blue-600 font-medium", className)}>
-      Son transfer: {format(jsDate, 'dd.MM.yyyy HH:mm', { locale: tr })}
+      {displayText}
     </div>
   );
 }
@@ -78,7 +120,7 @@ const SimpleProductThumb: React.FC<{ src?: string | null; alt: string; size?: nu
 
 export default function ToplamaPage() {
   const params = useParams();
-  const orderId = params.orderId as string;
+  const orderId = (params?.orderId as string) ?? '';
   const router = useRouter();
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
@@ -91,7 +133,9 @@ export default function ToplamaPage() {
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [currentDepot, setCurrentDepot] = useState<Depot | null>(null);
-  
+  // Last transfer dates per stokKodu to the target hospital (from labTransferDates collection)
+  const [lastTransferDates, setLastTransferDates] = useState<Record<string, Date>>({});
+
   const [scannedSerials, setScannedSerials] = useState<Record<string, string[]>>({});
   const [fefoWarning, setFefoWarning] = useState<{ scannedItem: DepoStokItem, suggestedLot: string, onConfirm: () => void } | null>(null);
   
@@ -138,11 +182,67 @@ export default function ToplamaPage() {
         const depoStokData = depoStokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
         const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
         const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
-        
+
+        // Determine effective labId - try order.labId first, then find by kurumAdi
+        let effectiveLabId = orderData.labId;
+        siparisToplamaLogger.debug('Sipariş verileri yüklendi', {
+          labId: orderData.labId,
+          kurumAdi: orderData.kurumAdi,
+          depotId: orderData.depotId,
+        });
+
+        if (!effectiveLabId && orderData.kurumAdi) {
+          const matchedHospital = hospitalsData.find(
+            h => h.name === orderData.kurumAdi || h.ad === orderData.kurumAdi
+          );
+          siparisToplamaLogger.debug('Hastane eşleştirmesi yapıldı', {
+            matchedHospitalId: matchedHospital?.id,
+            matchedHospitalName: matchedHospital?.name,
+          });
+          effectiveLabId = matchedHospital?.id;
+        }
+        siparisToplamaLogger.debug('Efektif laboratuvar ID belirlendi', { effectiveLabId });
+
+        // Fetch labTransferDates for this lab-depot combination
+        const transferDates: Record<string, Date> = {};
+        if (effectiveLabId && orderData.depotId) {
+          const labTransferDocId = `${effectiveLabId}_${orderData.depotId}`;
+          siparisToplamaLogger.debug('Transfer tarihleri yükleniyor', { labTransferDocId });
+          const labTransferSnap = await getDoc(doc(db, 'labTransferDates', labTransferDocId));
+          siparisToplamaLogger.debug('Transfer tarihleri sorgusu tamamlandı', {
+            exists: labTransferSnap.exists(),
+          });
+
+          if (labTransferSnap.exists()) {
+            const labTransferData = labTransferSnap.data();
+            siparisToplamaLogger.debug('Transfer verileri alındı', {
+              transferCount: Object.keys(labTransferData?.transfers || {}).length,
+            });
+            const transfers = labTransferData?.transfers as Record<string, { lastTransferDate: any }> | undefined;
+            if (transfers) {
+              Object.entries(transfers).forEach(([stokKodu, info]) => {
+                const parsedDate = toDateFromAny(info.lastTransferDate);
+                if (parsedDate) {
+                  transferDates[stokKodu] = parsedDate;
+                }
+              });
+            }
+          }
+        } else {
+          siparisToplamaLogger.debug('Transfer tarihleri yüklenemiyor - eksik veri', {
+            effectiveLabId,
+            depotId: orderData.depotId,
+          });
+        }
+        siparisToplamaLogger.debug('Transfer tarihleri hazırlandı', {
+          transferDatesCount: Object.keys(transferDates).length,
+        });
+        setLastTransferDates(transferDates);
+
         if (depotSnap && depotSnap.exists()) {
             setCurrentDepot({ id: depotSnap.id, ...depotSnap.data() } as Depot);
         } else {
-            console.warn(`Depot with ID ${orderData.depotId} not found.`);
+            siparisToplamaLogger.warn('Depo bulunamadı', { depotId: orderData.depotId });
         }
 
         setProductCodes(productsData);
@@ -154,9 +254,9 @@ export default function ToplamaPage() {
         const pickingListItems: PickingListItemType[] = [];
         const availableWarehouseStock = depoStokData;
 
-        for (const orderItem of orderData.items) {
+        for (const orderItem of (orderData.items || [])) {
           const productInfo = productsData.find(p => p.stokKodu === orderItem.stokKodu);
-          let neededForThisOrderItem = orderItem.adet;
+          let neededForThisOrderItem = orderItem.adet ?? 0;
           const availableItemsForProduct = availableWarehouseStock
             .filter(ds => ds.stokKodu === orderItem.stokKodu)
             .sort((a,b) => {
@@ -166,8 +266,9 @@ export default function ToplamaPage() {
             });
           
           if (availableItemsForProduct.length === 0) {
+            const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
             pickingListItems.push({
-              id: generateId(), orderId: orderData.id, stokKodu: orderItem.stokKodu, stokAdi: orderItem.stokAdi, lotNumarasi: 'STOK YOK', miad: '-', rafAdresiOnerilen: '-', adetIstenen: orderItem.adet, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu)?.imageUrl,
+              id: generateId(), orderId: orderData.id, stokKodu: orderItem.stokKodu || '', stokAdi: orderItem.stokAdi || '', lotNumarasi: 'STOK YOK', miad: '-', rafAdresiOnerilen: '-', adetIstenen: orderItem.adet ?? 0, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
             } as any);
             continue;
           }
@@ -188,33 +289,62 @@ export default function ToplamaPage() {
           });
             
           for (const groupKey of sortedGroupKeys) {
-            if (neededForThisOrderItem <= 0) break;
+            if ((neededForThisOrderItem ?? 0) <= 0) break;
             const itemsInGroup = stockGroups[groupKey];
-            const itemsToTakeCount = Math.min(neededForThisOrderItem, itemsInGroup.length);
-                
+            const itemsToTakeCount = Math.min(neededForThisOrderItem ?? 0, itemsInGroup.length);
+
             if (itemsToTakeCount > 0) {
               const firstItem = itemsInGroup[0];
+              const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
               pickingListItems.push({
-                id: generateId(), orderId: orderData.id, stokKodu: firstItem.stokKodu, stokAdi: productInfo?.stokAdi || firstItem.stokAdi, lotNumarasi: firstItem.lotNumarasi, miad: firstItem.miad as string, rafAdresiOnerilen: firstItem.rafAdresi, adetIstenen: itemsToTakeCount, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu)?.imageUrl,
+                id: generateId(), orderId: orderData.id, stokKodu: firstItem.stokKodu || '', stokAdi: productInfo?.stokAdi || firstItem.stokAdi || '', lotNumarasi: firstItem.lotNumarasi || '', miad: (firstItem.miad as string) || '', rafAdresiOnerilen: firstItem.rafAdresi || '', adetIstenen: itemsToTakeCount, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
               } as any);
-              neededForThisOrderItem -= itemsToTakeCount;
+              neededForThisOrderItem = (neededForThisOrderItem ?? 0) - itemsToTakeCount;
             }
           }
         }
         
-        pickingListItems.sort((a, b) => {
+        // Get target hospital for custom sorting
+        const targetHospitalForSort = orderData.labId
+          ? hospitalsData.find(h => h.id === orderData.labId)
+          : hospitalsData.find(h => h.name === orderData.kurumAdi || h.ad === orderData.kurumAdi);
+
+        // Check if hospital has custom product order
+        const customOrder = (targetHospitalForSort as any)?.customProductOrder as string[] | undefined;
+
+        if (customOrder && customOrder.length > 0) {
+          // Use custom product order
+          const orderMap = new Map<string, number>();
+          customOrder.forEach((code: string, idx: number) => {
+            orderMap.set(code, idx);
+          });
+
+          pickingListItems.sort((a, b) => {
+            const orderA = orderMap.has(a.stokKodu || '') ? orderMap.get(a.stokKodu || '')! : 99999;
+            const orderB = orderMap.has(b.stokKodu || '') ? orderMap.get(b.stokKodu || '')! : 99999;
+            if (orderA !== orderB) return orderA - orderB;
+            // Fallback to device group + name sort for items not in custom order
+            const groupA = (a as any).cihazGrubu || 'zzz';
+            const groupB = (b as any).cihazGrubu || 'zzz';
+            if (groupA !== groupB) return groupA.localeCompare(groupB);
+            return (a.stokAdi || '').localeCompare(b.stokAdi || '');
+          });
+        } else {
+          // Default sorting: cihazGrubu then stokAdi alphabetically
+          pickingListItems.sort((a, b) => {
             const groupA = (a as any).cihazGrubu || 'zzz';
             const groupB = (b as any).cihazGrubu || 'zzz';
             if (groupA !== groupB) {
-                return groupA.localeCompare(groupB);
+              return groupA.localeCompare(groupB);
             }
-            return a.stokAdi.localeCompare(b.stokAdi);
-        });
+            return (a.stokAdi || '').localeCompare(b.stokAdi || '');
+          });
+        }
 
         setPickingList(pickingListItems);
 
       } catch (error) {
-        console.error("Error fetching data for picking page:", error);
+        siparisToplamaLogger.error('Toplama sayfası verileri yüklenirken hata oluştu', error, { orderId });
         toast({ title: 'Hata', description: 'Veriler yüklenirken bir hata oluştu.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
@@ -248,7 +378,7 @@ export default function ToplamaPage() {
                  toast({ title: 'Hata', description: `Bu ürün (${stockItem.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
                  return;
             }
-            addScannedSerial(stockItem.stokKodu, code);
+            addScannedSerial(stockItem.stokKodu || '', code);
         } else {
             toast({ title: 'Hata', description: 'Barkod formatı geçersiz veya tanınmıyor.', variant: 'destructive' });
         }
@@ -271,7 +401,7 @@ export default function ToplamaPage() {
   
     const mode = resolveDefaultTrackingMode(product as any);
   
-    if (mode === 'serial' || mode === 'serial_and_lot') {
+    if (mode === 'serial' || (mode as string) === 'serial_and_lot') {
       if (!seriNumarasi) {
         toast({ title: 'Hata', description: 'Seri no takipli ürün için barkod seri no içermiyor.', variant: 'destructive' });
         return;
@@ -287,7 +417,7 @@ export default function ToplamaPage() {
         toast({ title: 'Uyarı', description: 'Bu seri numarası zaten okutulmuş.', variant: 'default' });
         return;
       }
-      const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + item.adetIstenen, 0);
+      const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + (item.adetIstenen ?? 0), 0);
       const currentScannedForProduct = scannedSerials[stokKodu] || [];
       if (currentScannedForProduct.length >= totalNeededForProduct) {
         toast({ title: 'Uyarı', description: `Bu ürün için istenen adete ulaşıldı.`, variant: 'default' });
@@ -307,7 +437,7 @@ export default function ToplamaPage() {
     } else { // Lot/Quantity logic
         const groupToIncrement = pickingList.find(pl => 
             pl.stokKodu === stokKodu &&
-            (scannedSerials[stokKodu] || []).filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < pl.adetIstenen
+            (scannedSerials[stokKodu] || []).filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < (pl.adetIstenen ?? 0)
         );
 
         if (!groupToIncrement) {
@@ -380,8 +510,8 @@ export default function ToplamaPage() {
       const shipmentItems: ShipmentItem[] = [];
       const shippedQuantities: Record<string, number> = {};
   
-      itemsToShip.forEach(item => {
-          const key = item.stokKodu;
+      itemsToShip.filter(item => item.stokKodu).forEach(item => {
+          const key = item.stokKodu!;
           shippedQuantities[key] = (shippedQuantities[key] || 0) + 1;
       });
   
@@ -412,8 +542,8 @@ export default function ToplamaPage() {
       };
       batch.set(shipmentDocRef, { ...newShipment, timestamp: Timestamp.fromDate(newShipment.timestamp as Date) });
     
-      itemsToShip.forEach(item => {
-          const stokRef = doc(db, 'depoStok', item.id);
+      itemsToShip.filter(item => item.id).forEach(item => {
+          const stokRef = doc(db, 'depoStok', item.id!);
           batch.update(stokRef, {
               isShipped: true,
               hedefKurum: order.kurumAdi,
@@ -422,22 +552,22 @@ export default function ToplamaPage() {
           });
       });
     
-      const remainingItems = order.items.map(item => {
-          const shippedCount = shippedQuantities[item.stokKodu] || 0;
+      const remainingItems = (order.items || []).map(item => {
+          const shippedCount = item.stokKodu ? (shippedQuantities[item.stokKodu] || 0) : 0;
           return {
               ...item,
-              adet: item.adet - shippedCount,
+              adet: (item.adet ?? 0) - shippedCount,
           };
       }).filter(item => item.adet > 0);
   
-      if (remainingItems.length === 0) {
+      if (remainingItems.length === 0 && order.id) {
           batch.update(doc(db, 'orders', order.id), {
               status: 'completed',
               transferredAt: serverTimestamp(),
               transferredById: currentUser?.uid,
               transferredBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı'
           });
-      } else {
+      } else if (order.id) {
           batch.update(doc(db, 'orders', order.id), {
               items: remainingItems,
               status: 'toplaniyor'
@@ -447,16 +577,58 @@ export default function ToplamaPage() {
       await batch.commit();
       itemsShippedCount = itemsToShip.length;
       success = true;
-      
-      const targetHospital = hospitals.find(h => h.id === order.labId);
+
+      // Find target hospital - try by labId first, then by kurumAdi
+      const targetHospital = order.labId
+        ? hospitals.find(h => h.id === order.labId)
+        : hospitals.find(h => h.name === order.kurumAdi || h.ad === order.kurumAdi);
+
       await maybeAutoPrintTutanak(db, targetHospital, shipmentDocRef.id, currentUserProfile?.name || currentUser?.email || '');
-      
-      if (order.labId && shipmentItems.length > 0) {
-        await updateHospitalLastTransferDates(order.labId, shipmentItems);
+
+      // Update labTransferDates collection with last transfer dates (direct client-side write)
+      const effectiveLabId = order.labId || targetHospital?.id;
+      if (effectiveLabId && order.depotId && shipmentItems.length > 0) {
+        try {
+          const labTransferDocId = `${effectiveLabId}_${order.depotId}`;
+          const labTransferRef = doc(db, 'labTransferDates', labTransferDocId);
+          const now = new Date();
+          const userName = currentUserProfile?.name || currentUser?.email || '';
+
+          // Build transfers map
+          const transfersUpdate: Record<string, any> = {};
+          shipmentItems.forEach((item) => {
+            if (item.stokKodu) {
+              transfersUpdate[item.stokKodu] = {
+                lastTransferDate: Timestamp.fromDate(now),
+                lastTransferBy: userName,
+              };
+            }
+          });
+
+          // Use setDoc with merge to create or update
+          await setDoc(labTransferRef, {
+            labId: effectiveLabId,
+            depotId: order.depotId,
+            labName: order.kurumAdi,
+            depotName: currentDepot?.name || '',
+            transfers: transfersUpdate,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+
+          siparisToplamaLogger.info('Transfer tarihleri güncellendi', {
+            labTransferDocId,
+            updatedProductsCount: Object.keys(transfersUpdate).length,
+          });
+        } catch (transferError) {
+          siparisToplamaLogger.error('Transfer tarihleri güncellenirken hata oluştu', transferError);
+        }
       }
 
     } catch (e) {
-      console.error("Transfer error:", e);
+      siparisToplamaLogger.error('Transfer işlemi sırasında hata oluştu', e, {
+        orderId: order?.id,
+        itemsCount: Object.values(scannedSerials).flat().length,
+      });
       toast({ title: 'Hata', description: 'Transfer sırasında bir veritabanı hatası oluştu.', variant: 'destructive' });
     } finally {
       setIsProcessing(false);
@@ -536,7 +708,7 @@ export default function ToplamaPage() {
                                   <p className="text-xs text-muted-foreground font-mono">{(item as any).stokKodu}</p>
                                   <div className="mt-1">
                                     <LastTransferLine
-                                      date={targetHospital?.lastProductTransfers?.[(item as any).stokKodu]}
+                                      date={lastTransferDates[(item as any).stokKodu]}
                                     />
                                   </div>
                               </div>

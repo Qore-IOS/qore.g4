@@ -1,9 +1,11 @@
 'use client';
 
-import React from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import React, { useEffect } from 'react';
+import { QueryClient, QueryClientProvider, useIsFetching, useIsMutating } from '@tanstack/react-query';
+import { useLoading } from './loading-context';
+import { useStockUpdateListener } from '@/hooks/useFirebaseQueries';
 
-// Create a stable query client instance
+// Create a stable query client
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -24,9 +26,45 @@ const queryClient = new QueryClient({
 export function QueryProvider({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
+      <QueryLoadingObserver />
+      <StockUpdateObserver />
       {children}
     </QueryClientProvider>
   );
 }
 
-export { queryClient };
+// Component to listen for stock metadata changes and invalidate cache
+function StockUpdateObserver() {
+  useStockUpdateListener();
+  return null;
+}
+
+// Component to observe React Query state and control global loading
+function QueryLoadingObserver() {
+  const isFetching = useIsFetching();
+  const isMutating = useIsMutating();
+  const { setGlobalLoading } = useLoading();
+
+  useEffect(() => {
+    // Show loading if there are any fetches or mutations in progress
+    const isLoading = isFetching > 0 || isMutating > 0;
+    setGlobalLoading(isLoading);
+  }, [isFetching, isMutating, setGlobalLoading]);
+
+  return null;
+}
+
+export const getQueryClient = () => {
+  // For backwards compatibility, but note: this won't have loading hooks
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 5 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
+        refetchOnWindowFocus: false,
+        retry: 2,
+        refetchOnMount: false,
+      },
+    },
+  });
+};

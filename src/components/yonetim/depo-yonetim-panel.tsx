@@ -8,11 +8,17 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, MapPin } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import MapDefinitionModal from '@/components/MapDefinitionModal';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
+import dynamic from 'next/dynamic';
+
+const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center h-full bg-muted rounded-md"><Loader2 className="h-6 w-6 animate-spin" /></div>,
+});
 
 export default function DepoYonetimPanel() {
   const { toast } = useToast();
@@ -56,10 +62,21 @@ export default function DepoYonetimPanel() {
     setCurrentDepot({});
     setIsDepotModalOpen(true);
   };
-  
+
   const openEditDepotModal = (depot: Depot) => {
     setCurrentDepot(depot);
     setIsDepotModalOpen(true);
+  };
+
+  const handleAddressInputChange = (value: string) => {
+    const coordsMatch = value.match(/^([-]?\d{1,2}\.\d+),\s*([-]?\d{1,3}\.\d+)$/);
+    if (coordsMatch) {
+      const lat = parseFloat(coordsMatch[1]);
+      const lng = parseFloat(coordsMatch[2]);
+      setCurrentDepot(prev => ({ ...prev, address: value, lat, lng }));
+    } else {
+      setCurrentDepot(prev => ({ ...prev, address: value }));
+    }
   };
 
   const handleSaveDepot = async () => {
@@ -69,10 +86,17 @@ export default function DepoYonetimPanel() {
     }
     setIsLoading(true);
     try {
+      const dataToSave: Partial<Depot> = {
+        name: currentDepot.name.trim(),
+        address: currentDepot.address || '',
+        lat: currentDepot.lat ?? null,
+        lng: currentDepot.lng ?? null,
+      };
+
       if (currentDepot.id) {
-        await setDoc(doc(db, 'depots', currentDepot.id), { name: currentDepot.name }, { merge: true });
+        await setDoc(doc(db, 'depots', currentDepot.id), dataToSave, { merge: true });
       } else {
-        await addDoc(collection(db, 'depots'), { name: currentDepot.name });
+        await addDoc(collection(db, 'depots'), dataToSave);
       }
       toast({ title: 'Başarılı', description: 'Depo kaydedildi.' });
       fetchData();
@@ -128,6 +152,8 @@ export default function DepoYonetimPanel() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Depo Adı</TableHead>
+                    <TableHead>Adres</TableHead>
+                    <TableHead>Konum</TableHead>
                     <TableHead className="text-right">İşlemler</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -135,6 +161,17 @@ export default function DepoYonetimPanel() {
                   {depots.map(d => (
                     <TableRow key={d.id}>
                       <TableCell className="font-medium">{d.name}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{d.address || '-'}</TableCell>
+                      <TableCell>
+                        {d.lat && d.lng ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-green-600">
+                            <MapPin className="h-3 w-3" />
+                            Tanımlı
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right space-x-1">
                         <Button variant="ghost" size="icon" onClick={() => { setMinMaxTarget(d); setIsMinMaxPanelOpen(true); }}><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
                         <Button variant="ghost" size="icon" onClick={() => { setMapEditorTarget(d); setIsMapEditorOpen(true);}}><Map className="h-4 w-4 text-indigo-500" /></Button>
@@ -151,14 +188,50 @@ export default function DepoYonetimPanel() {
       </Card>
 
       <Dialog open={isDepotModalOpen} onOpenChange={setIsDepotModalOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-3xl">
           <DialogHeader><DialogTitle>{currentDepot.id ? 'Depo Düzenle' : 'Yeni Depo'}</DialogTitle></DialogHeader>
-          <div className="py-4">
-            <Input
-              placeholder="Depo Adı"
-              value={currentDepot.name || ''}
-              onChange={(e) => setCurrentDepot({ ...currentDepot, name: e.target.value })}
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-muted-foreground">Depo Adı</label>
+                <Input
+                  placeholder="Örn. Ana Depo"
+                  value={currentDepot.name || ''}
+                  onChange={(e) => setCurrentDepot({ ...currentDepot, name: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">Adres / Koordinat</label>
+                <Input
+                  placeholder="Adres veya 41.0082, 28.9784 formatında koordinat"
+                  value={currentDepot.address || ''}
+                  onChange={(e) => handleAddressInputChange(e.target.value)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Koordinat girmek için &quot;41.0082, 28.9784&quot; formatını kullanın veya haritadan seçin.
+                </p>
+              </div>
+              {currentDepot.lat && currentDepot.lng && (
+                <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30">
+                  <div className="flex items-center gap-2 text-green-600">
+                    <MapPin className="h-4 w-4" />
+                    <span className="text-sm font-medium">Konum Tanımlı</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {currentDepot.lat.toFixed(6)}, {currentDepot.lng.toFixed(6)}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="h-80 rounded-md overflow-hidden border">
+              <LocationPicker
+                initialPosition={[currentDepot.lat || 41.015137, currentDepot.lng || 28.979530]}
+                markerPosition={currentDepot.lat ? [currentDepot.lat, currentDepot.lng!] : undefined}
+                onSelect={(lat, lng) => setCurrentDepot(prev => ({ ...prev, lat, lng }))}
+              />
+            </div>
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>

@@ -81,7 +81,7 @@ export default function TeknikServisPage() {
     hospitalDeviceAssignments,
     toast,
     setSubView: () => {}, // No subviews in this dedicated page
-    fetchAllApplicationData: () => fetchAllApplicationData().then(c => c), // Provide a compatible function
+    fetchAllApplicationData: async () => { await fetchAllApplicationData(); }, // Provide a compatible function
   };
 
   return <TeknikServisPanel {...commonProps} />;

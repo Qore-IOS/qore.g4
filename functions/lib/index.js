@@ -100,12 +100,10 @@ exports.sendFaultReportEmail = functions
     // 2. ALICI LİSTELERİ (YENİ)
     let recipients = [];
     const teknikServisListesi = [
-        'scaglar@nukleus.com.tr',
         'ysahan@nukleus.com.tr',
         'dkilic@nukleus.com.tr',
-        'tdonmez@nukleus.com.tr',
         'bbasar@nukleus.com.tr',
-        'vturunca@nukleus.com.tr'
+        'aturhan@nukleus.com.tr'
     ];
     const aplikasyonListesi = [
         'bkahraman@nukleus.com.tr',
@@ -113,7 +111,7 @@ exports.sendFaultReportEmail = functions
         'ehoscanli@nukleus.com.tr',
         'helkoca@nukleus.com.tr',
         'bbasar@nukleus.com.tr',
-        'vturunca@nukleus.com.tr'
+        'aturhan@nukleus.com.tr'
     ];
     // Kucuk harf kontrolu ile eslestirme yapalim
     const type = (faultType || '').toLowerCase();
@@ -125,13 +123,14 @@ exports.sendFaultReportEmail = functions
     }
     else {
         // Eger tip tanimsizsa veya baska bir seyse Adminlere gonder
-        recipients = ['bbasar@nukleus.com.tr', 'btubasar@gmail.com'];
+        recipients = ['bbasar@nukleus.com.tr',
+            'aturhan@nukleus.com.tr', 'btubasar@gmail.com'];
     }
     // 3. İÇERİK VE LİNK (YENİ)
     const reportLink = `https://qorengine.com/ariza-yonetimi/${docId}`;
     const htmlContent = `
           <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; color: #333; max-width: 600px;">
-            <h2 style="color: #d32f2f; margin-top: 0;">🔥 Yeni Arıza Kaydı (#${docId.substring(0, 5)})</h2>
+            <h2 style="color: #d32f2f; margin-top: 0;">🔧 Yeni Arıza Kaydı (#${docId.substring(0, 5)})</h2>
             
             <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                 <tr style="background-color: #f9f9f9;">

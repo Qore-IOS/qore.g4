@@ -1,8 +1,32 @@
+/**
+ * @fileoverview Verimlilik Hesaplama (Efficiency Calculation) Panel
+ * @description Provides comprehensive efficiency calculation functionality for
+ * medical laboratory kit usage analysis. Calculates device efficiency, kit efficiency,
+ * known/unknown losses, and enables historical data tracking.
+ * @module components/verimlilik-hesaplama-panel
+ * @version 1.0.0
+ *
+ * @features
+ * - Laboratory selection with lab pool support
+ * - Period-based consumption calculation
+ * - Device on-hand data import (carry-over and end-of-month)
+ * - Cumulative data integration from reports
+ * - Real-time efficiency calculations
+ * - Excel export functionality
+ * - Historical data saving
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Keyboard navigable table inputs
+ * - Screen reader compatible data display
+ * - Semantic HTML structure
+ */
 
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import type { Hospital, ProductCode, ConsumptionRecord, EfficiencyData, KumulatifDataInput, VerimlilikAnalizi, LabPool, MinMaxRule } from '@/lib/types';
+import { verimlilikHesaplamaLogger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -195,7 +219,9 @@ export default function VerimlilikHesaplamaPanel({
         setRows(initialRows);
 
       } catch (err) {
-        console.error('Error initializing efficiency rows:', err);
+        verimlilikHesaplamaLogger.error('Verimlilik satırları başlatılırken hata oluştu', err, {
+          hospitalId: selectedHospitalId,
+        });
         const base = productCodes.filter(p => (p as any).urunGrubu === 'kit');
         setRows((base.length ? base : productCodes).map(toRow).sort((a, b) =>
           a.productName.localeCompare(b.productName, 'tr')
@@ -235,7 +261,10 @@ export default function VerimlilikHesaplamaPanel({
       }
       return map;
     } catch (error) {
-      console.error('Error fetching device on-hand data:', error);
+      verimlilikHesaplamaLogger.error('Cihaz üstü verileri çekilirken hata oluştu', error, {
+        hospitalId: selectedHospitalId,
+        periodKey,
+      });
       return null;
     }
   }, [selectedHospitalId]);
@@ -299,7 +328,11 @@ export default function VerimlilikHesaplamaPanel({
         toast({ title: "Kümülatif Veri Bulunamadı", description: "Seçili dönem için kümülatif veri bulunamadı.", variant: 'default' });
       }
     } catch (error) {
-      console.error('Error importing system data:', error);
+      verimlilikHesaplamaLogger.error('Sistem verileri aktarılırken hata oluştu', error, {
+        hospitalId: selectedHospitalId,
+        year: selectedYear,
+        month: selectedMonth,
+      });
       toast({ title: 'Hata', description: 'Sistem verileri aktarılırken bir hata oluştu.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
@@ -343,7 +376,11 @@ export default function VerimlilikHesaplamaPanel({
         await setDoc(doc(db, "efficiencyHistory", periodId), dataToSave, { merge: true });
         toast({ title: 'Kaydedildi', description: 'Verimlilik analizi geçmişe kaydedildi.' });
     } catch (error) {
-        console.error("Failed to save efficiency history:", error);
+        verimlilikHesaplamaLogger.error('Verimlilik geçmişi kaydedilemedi', error, {
+          hospitalId: selectedHospitalId,
+          year: selectedYear,
+          month: selectedMonth,
+        });
         toast({ title: 'Hata', description: 'Kayıt sırasında bir sorun oluştu.', variant: 'destructive' });
     } finally {
         setIsLoading(false);
@@ -453,7 +490,11 @@ export default function VerimlilikHesaplamaPanel({
         description: `${filtered.length} kayıt işlendi (Toplam: ${fetchedConsumption.length}). Aralık: ${format(from, 'dd.MM.yyyy HH:mm')} – ${format(to, 'dd.MM.yyyy HH:mm')}`
       });
     } catch (error) {
-      console.error('Error fetching consumption data:', error);
+      verimlilikHesaplamaLogger.error('Tüketim verileri çekilirken hata oluştu', error, {
+        hospitalId: selectedHospitalId,
+        dateFrom: tempFromStr,
+        dateTo: tempToStr,
+      });
       toast({
         title: "Hata",
         description: "Tüketim verileri çekilirken bir hata oluştu.",
@@ -465,54 +506,60 @@ export default function VerimlilikHesaplamaPanel({
   };
   
   return (
-    <div className="p-4 space-y-6">
-      <Card>
+    <div className="p-4 space-y-6" role="main" aria-label="Verimlilik hesaplama paneli">
+      <Card role="region" aria-label="Dönem ve laboratuvar seçimi">
         <CardHeader className="flex flex-row items-start justify-between">
           <div>
-            <CardTitle className="text-xl">Verimlilik Analizi (Sistem Verisi)</CardTitle>
-            <CardDescription>Sistemdeki verileri kullanarak verimlilik hesaplaması yapın.</CardDescription>
+            <CardTitle className="text-xl" id="efficiency-title">Verimlilik Analizi (Sistem Verisi)</CardTitle>
+            <CardDescription id="efficiency-description">Sistemdeki verileri kullanarak verimlilik hesaplaması yapın.</CardDescription>
           </div>
-          <Button variant="outline" onClick={() => router.push('/verimlilik-istatistikleri')} className="bg-accent text-accent-foreground hover:bg-accent/90">
-            <BarChart3 className="mr-2 h-4 w-4" />
+          <Button
+            variant="outline"
+            onClick={() => router.push('/verimlilik-istatistikleri')}
+            className="bg-accent text-accent-foreground hover:bg-accent/90"
+            aria-label="Verimlilik istatistikleri sayfasına git"
+          >
+            <BarChart3 className="mr-2 h-4 w-4" aria-hidden="true" />
             Verimlilik İstatistikleri
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <fieldset className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <legend className="sr-only">Dönem ve laboratuvar seçimi</legend>
             <Select value={selectedHospitalId} onValueChange={setSelectedHospitalId}>
-              <SelectTrigger><SelectValue placeholder="Laboratuvar Seçin..." /></SelectTrigger>
-              <SelectContent>{hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}</SelectContent>
+              <SelectTrigger aria-label="Laboratuvar seçin"><SelectValue placeholder="Laboratuvar Seçin..." /></SelectTrigger>
+              <SelectContent role="listbox">{hospitals.map(h => <SelectItem key={h.id} value={h.id} role="option">{h.name}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={String(selectedMonth)} onValueChange={v => setSelectedMonth(Number(v))}>
-                <SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{MONTHS.map((m,i) => <SelectItem key={i} value={String(i)}>{m.label}</SelectItem>)}</SelectContent>
+                <SelectTrigger aria-label="Ay seçin"><SelectValue/></SelectTrigger>
+                <SelectContent role="listbox">{MONTHS.map((m,i) => <SelectItem key={i} value={String(i)} role="option">{m.label}</SelectItem>)}</SelectContent>
             </Select>
              <Select value={String(selectedYear)} onValueChange={v => setSelectedYear(Number(v))}>
-                <SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                <SelectTrigger aria-label="Yıl seçin"><SelectValue/></SelectTrigger>
+                <SelectContent role="listbox">{YEARS.map(y => <SelectItem key={y} value={String(y)} role="option">{y}</SelectItem>)}</SelectContent>
             </Select>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-            <Button onClick={openTuketimModal} disabled={!selectedHospitalId || isLoading}><CalendarRange className="w-4 h-4 mr-2"/>Tüketim Hesapla</Button>
-            <Button onClick={handleImportSystemData} disabled={!selectedHospitalId || isLoading}><RefreshCw className="w-4 h-4 mr-2"/>Sistemden Aktar</Button>
-            <Button onClick={handleImportEOM} disabled={!selectedHospitalId || isLoading}><UploadCloud className="w-4 h-4 mr-2"/>Ay Sonu Aktar</Button>
+          </fieldset>
+          <nav className="flex flex-wrap items-center gap-2 border-t pt-4" aria-label="Verimlilik işlemleri">
+            <Button onClick={openTuketimModal} disabled={!selectedHospitalId || isLoading} aria-label="Tüketim hesaplama modalını aç"><CalendarRange className="w-4 h-4 mr-2" aria-hidden="true"/>Tüketim Hesapla</Button>
+            <Button onClick={handleImportSystemData} disabled={!selectedHospitalId || isLoading} aria-label="Sistemden veri aktar"><RefreshCw className="w-4 h-4 mr-2" aria-hidden="true"/>Sistemden Aktar</Button>
+            <Button onClick={handleImportEOM} disabled={!selectedHospitalId || isLoading} aria-label="Ay sonu cihaz üstü verilerini aktar"><UploadCloud className="w-4 h-4 mr-2" aria-hidden="true"/>Ay Sonu Aktar</Button>
             <div className="ml-auto flex gap-2">
-                <Button variant="secondary" onClick={() => router.push('/verimlilik-hesaplama/gecmis')}><History className="w-4 h-4 mr-2"/>Geçmiş</Button>
-                <Button onClick={handleSaveHistory} disabled={rows.length === 0 || isLoading}><Save className="w-4 h-4 mr-2"/>Geçmişe Kaydet</Button>
-                <Button onClick={handleExportExcel} disabled={rows.length === 0 || isLoading} variant="outline"><FileSpreadsheet className="w-4 h-4 mr-2"/>Excel'e Aktar</Button>
+                <Button variant="secondary" onClick={() => router.push('/verimlilik-hesaplama/gecmis')} aria-label="Verimlilik geçmişi sayfasına git"><History className="w-4 h-4 mr-2" aria-hidden="true"/>Geçmiş</Button>
+                <Button onClick={handleSaveHistory} disabled={rows.length === 0 || isLoading} aria-label="Verimlilik analizini geçmişe kaydet"><Save className="w-4 h-4 mr-2" aria-hidden="true"/>Geçmişe Kaydet</Button>
+                <Button onClick={handleExportExcel} disabled={rows.length === 0 || isLoading} variant="outline" aria-label="Verileri Excel dosyasına aktar"><FileSpreadsheet className="w-4 h-4 mr-2" aria-hidden="true"/>Excel'e Aktar</Button>
             </div>
-          </div>
+          </nav>
         </CardContent>
       </Card>
       
       {selectedHospitalId && (
-        <Card>
+        <Card role="region" aria-label="Verimlilik hesaplama tablosu">
             <CardHeader>
-                <CardTitle>Hesaplama Tablosu</CardTitle>
+                <CardTitle id="calculation-table-title">Hesaplama Tablosu</CardTitle>
             </CardHeader>
             <CardContent>
-                <ScrollArea className="h-[60vh] w-full">
-                <Table>
+                <ScrollArea className="h-[60vh] w-full" aria-label="Verimlilik verileri kaydırma alanı">
+                <Table aria-labelledby="calculation-table-title" role="grid">
                     <TableHeader>
                     <TableRow>
                         <TableHead className="min-w-[200px]">Ürün</TableHead>

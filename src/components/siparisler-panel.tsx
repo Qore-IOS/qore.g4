@@ -1,3 +1,24 @@
+/**
+ * @fileoverview Orders Panel Component
+ * @description Main orders management panel for creating, viewing, and managing
+ * orders in the medical supply chain system. Supports manual order creation,
+ * Min/Max based automatic ordering, and bulk order Excel generation.
+ * @module components/siparisler-panel
+ * @version 2.0.0
+ *
+ * @features
+ * - Order creation with laboratory selection
+ * - Min/Max rule-based automatic order calculation
+ * - Bulk order Excel generation for multiple depots/labs
+ * - Real-time order status updates via Firestore listeners
+ * - Order picking process initiation
+ * - Order deletion with confirmation
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Keyboard navigation support
+ * - Screen reader announcements for status changes
+ */
 
 'use client';
 
@@ -58,9 +79,16 @@ import { cn } from '@/lib/utils';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { siparislerLogger } from '@/lib/logger';
 
 
-export default function SiparislerPanel() {
+/**
+ * Orders Panel Component
+ * @description Main panel for order management including creation, viewing,
+ * and processing of orders in the medical supply chain system
+ * @returns {JSX.Element} The rendered orders panel
+ */
+export default function SiparislerPanel(): JSX.Element {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser, currentUserProfile } = useAuth();
@@ -124,14 +152,20 @@ export default function SiparislerPanel() {
           q1,
           (snapshot) => mapSnapshot(snapshot),
           (error) => {
-            console.warn('orders listener fallback (no index):', error);
+            siparislerLogger.warn('Sipariş dinleyici index olmadan fallback yapıyor', {
+              depotId: selectedDepotId,
+              errorMessage: error instanceof Error ? error.message : String(error),
+            });
             if (unsubscribe) unsubscribe();
             const q2 = query(collection(db, 'orders'), where('depotId', '==', selectedDepotId));
             unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
           }
         );
       } catch (e) {
-        console.warn('orders listener error:', e);
+        siparislerLogger.warn('Sipariş dinleyici başlatma hatası', {
+          depotId: selectedDepotId,
+          error: e instanceof Error ? e.message : String(e),
+        });
         const q2 = query(collection(db, 'orders'), where('depotId', '==', selectedDepotId));
         unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
       }
@@ -395,13 +429,19 @@ export default function SiparislerPanel() {
     }
   };
   
-  const handleDeleteOrder = async (orderId: string) => {
+  /**
+   * Handles order deletion with confirmation
+   * @param orderId - ID of the order to delete
+   */
+  const handleDeleteOrder = async (orderId: string): Promise<void> => {
     if (window.confirm('Bu siparişi silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.')) {
       try {
+        siparislerLogger.info('Sipariş silme işlemi başlatıldı', { orderId });
         await deleteDoc(doc(db, 'orders', orderId));
+        siparislerLogger.info('Sipariş başarıyla silindi', { orderId });
         toast({ title: 'Başarılı', description: 'Sipariş silindi.' });
       } catch (error) {
-        console.error('Error deleting order:', error);
+        siparislerLogger.error('Sipariş silme hatası', error, { orderId });
         toast({ title: 'Hata', description: 'Sipariş silinirken bir hata oluştu.', variant: 'destructive' });
       }
     }
@@ -409,69 +449,98 @@ export default function SiparislerPanel() {
 
   return (
     <>
-      <div className="p-4 space-y-4">
-        <Card>
+      <div className="p-4 space-y-4" role="main" aria-label="Sipariş yönetimi paneli">
+        <Card role="region" aria-label="Depo seçimi ve hızlı işlemler">
             <CardHeader className="p-4 flex flex-row items-center gap-4">
                  <div className="flex-1">
-                    <Label className="block text-sm font-medium mb-1">Çalışma Deposu</Label>
+                    <Label htmlFor="depot-select" className="block text-sm font-medium mb-1">Çalışma Deposu</Label>
                     <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
-                        <SelectTrigger><SelectValue placeholder="Depo seçin..." /></SelectTrigger>
+                        <SelectTrigger id="depot-select" aria-label="Depo seçin">
+                          <SelectValue placeholder="Depo seçin..." />
+                        </SelectTrigger>
                         <SelectContent>
                         {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
-                <div className="flex items-end gap-2">
-                    <Button onClick={() => router.push(`/siparis-gecmis?depotId=${selectedDepotId}`)} variant="outline" disabled={!selectedDepotId}>
-                        <History className="mr-2 h-4 w-4"/> Geçmiş
+                <nav className="flex items-end gap-2" aria-label="Hızlı işlemler">
+                    <Button
+                      onClick={() => router.push(`/siparis-gecmis?depotId=${selectedDepotId}`)}
+                      variant="outline"
+                      disabled={!selectedDepotId}
+                      aria-label="Sipariş geçmişini görüntüle"
+                    >
+                        <History className="mr-2 h-4 w-4" aria-hidden="true"/> Geçmiş
                     </Button>
-                    <Button onClick={() => router.push('/urun-iade')} variant="outline">
-                        <Undo className="mr-2 h-4 w-4"/> Ürün İade
+                    <Button
+                      onClick={() => router.push('/urun-iade')}
+                      variant="outline"
+                      aria-label="Ürün iade işlemlerine git"
+                    >
+                        <Undo className="mr-2 h-4 w-4" aria-hidden="true"/> Ürün İade
                     </Button>
-                    <Button variant="outline" onClick={() => setShowBulk(!showBulk)}>Toplu Sipariş</Button>
-                </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowBulk(!showBulk)}
+                      aria-expanded={showBulk}
+                      aria-controls="bulk-order-section"
+                    >
+                      Toplu Sipariş
+                    </Button>
+                </nav>
             </CardHeader>
         </Card>
       
       {showBulk && (
-        <LiquidGlass className="p-4 mb-6">
+        <LiquidGlass
+          className="p-4 mb-6"
+          id="bulk-order-section"
+          role="region"
+          aria-label="Toplu sipariş oluşturma"
+        >
           <CardHeader>
-            <CardTitle>Toplu Sipariş</CardTitle>
+            <CardTitle id="bulk-order-title">Toplu Sipariş</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <h3 className="text-lg font-medium mb-2">Depolar</h3>
-              <ScrollArea className="h-48 border rounded p-2">
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6" aria-labelledby="bulk-order-title">
+            <fieldset>
+              <legend className="text-lg font-medium mb-2">Depolar</legend>
+              <ScrollArea className="h-48 border rounded p-2" role="group" aria-label="Depo seçim listesi">
                 {depots.map(d => (
-                  <div key={d.id} className="flex items-center mb-1">
+                  <div key={d.id} className="flex items-center mb-1" role="listitem">
                     <Checkbox
                       checked={selectedBulkDepots.includes(d.id ?? '')}
                       onCheckedChange={() => toggleSelect(d.id ?? '', selectedBulkDepots, setSelectedBulkDepots)}
                       id={`depot-${d.id ?? ''}`}
+                      aria-describedby={`depot-label-${d.id}`}
                     />
-                    <label htmlFor={`depot-${d.id ?? ''}`} className="ml-2">{d.name}</label>
+                    <label id={`depot-label-${d.id}`} htmlFor={`depot-${d.id ?? ''}`} className="ml-2">{d.name}</label>
                   </div>
                 ))}
               </ScrollArea>
-            </div>
-            <div>
-              <h3 className="text-lg font-medium mb-2">Laboratuvarlar</h3>
-              <ScrollArea className="h-48 border rounded p-2">
+            </fieldset>
+            <fieldset>
+              <legend className="text-lg font-medium mb-2">Laboratuvarlar</legend>
+              <ScrollArea className="h-48 border rounded p-2" role="group" aria-label="Laboratuvar seçim listesi">
                 {hospitals.map(h => (
-                  <div key={h.id} className="flex items-center mb-1">
+                  <div key={h.id} className="flex items-center mb-1" role="listitem">
                     <Checkbox
                       checked={selectedBulkLabs.includes(h.id ?? '')}
                       onCheckedChange={() => toggleSelect(h.id ?? '', selectedBulkLabs, setSelectedBulkLabs)}
                       id={`lab-${h.id ?? ''}`}
+                      aria-describedby={`lab-label-${h.id}`}
                     />
-                    <label htmlFor={`lab-${h.id ?? ''}`} className="ml-2">{h.name}</label>
+                    <label id={`lab-label-${h.id}`} htmlFor={`lab-${h.id ?? ''}`} className="ml-2">{h.name}</label>
                   </div>
                 ))}
               </ScrollArea>
-            </div>
+            </fieldset>
           </CardContent>
           <CardFooter className="pt-4">
-            <Button onClick={generateBulkOrder} className="w-full">
+            <Button
+              onClick={generateBulkOrder}
+              className="w-full"
+              aria-label="Seçili depolar ve laboratuvarlar için Excel sipariş dosyası oluştur"
+            >
               Toplu Sipariş Oluştur
             </Button>
           </CardFooter>
@@ -479,35 +548,42 @@ export default function SiparislerPanel() {
       )}
 
       <div className="flex flex-col md:flex-row gap-6">
-        <LiquidGlass className="w-full md:w-1/3 p-4">
+        <LiquidGlass className="w-full md:w-1/3 p-4" role="region" aria-labelledby="create-order-title">
           <CardHeader className="p-2 flex flex-row justify-between items-center">
-            <CardTitle>Sipariş Oluştur</CardTitle>
-            <Button onClick={prepareOrder} disabled={orderItems.length === 0 || isProcessing}>
+            <CardTitle id="create-order-title">Sipariş Oluştur</CardTitle>
+            <Button
+              onClick={prepareOrder}
+              disabled={orderItems.length === 0 || isProcessing}
+              aria-label={`Siparişi oluştur (${orderItems.length} kalem)`}
+            >
               Oluştur
             </Button>
           </CardHeader>
           <CardContent className="p-2 space-y-4">
             <div>
-                <label className="block text-sm font-medium mb-1">Laboratuvar</label>
+                <Label htmlFor="lab-select" className="block text-sm font-medium mb-1">Laboratuvar</Label>
                 <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
                   <PopoverTrigger asChild>
                     <Button
+                      id="lab-select"
                       variant="outline"
                       role="combobox"
                       aria-expanded={isLabPopoverOpen}
+                      aria-haspopup="listbox"
+                      aria-label="Laboratuvar seçin"
                       className="w-full justify-between font-normal"
                       disabled={!selectedDepotId || hospitals.length === 0}
                     >
                       {selectedLabId
                         ? hospitals.find((hospital) => hospital.id === selectedLabId)?.name
                         : "Laboratuvar seçin..."}
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
                     <Command>
-                      <CommandInput placeholder="Laboratuvar ara..." />
-                      <CommandList>
+                      <CommandInput placeholder="Laboratuvar ara..." aria-label="Laboratuvar ara" />
+                      <CommandList role="listbox" aria-label="Laboratuvar listesi">
                         <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
                         <CommandGroup>
                           {hospitals.sort((a,b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
@@ -518,12 +594,15 @@ export default function SiparislerPanel() {
                                 setSelectedLabId(hospital.id ?? '');
                                 setIsLabPopoverOpen(false);
                               }}
+                              role="option"
+                              aria-selected={selectedLabId === hospital.id}
                             >
                               <Check
                                 className={cn(
                                   "mr-2 h-4 w-4",
                                   selectedLabId === hospital.id ? "opacity-100" : "opacity-0"
                                 )}
+                                aria-hidden="true"
                               />
                               {hospital.name}
                             </CommandItem>
@@ -535,46 +614,74 @@ export default function SiparislerPanel() {
                 </Popover>
             </div>
             <div className="space-y-2">
-                 <Button onClick={handleMinMaxOrder} disabled={!selectedLabId} className="w-full">
-                    <Calculator className="mr-2 h-4 w-4" />
+                 <Button
+                   onClick={handleMinMaxOrder}
+                   disabled={!selectedLabId}
+                   className="w-full"
+                   aria-label="Min/Max kurallarına göre sipariş kalemlerini hesapla"
+                 >
+                    <Calculator className="mr-2 h-4 w-4" aria-hidden="true" />
                     Min/Max'a Göre Hesapla
                 </Button>
             </div>
-            <hr/>
-            <div className="space-y-2">
+            <hr aria-hidden="true" />
+            <fieldset className="space-y-2">
+                <legend className="sr-only">Manuel ürün ekleme</legend>
                 <Select value={manualStockCode} onValueChange={setManualStockCode}>
-                    <SelectTrigger><SelectValue placeholder="Manuel ürün seçin..." /></SelectTrigger>
+                    <SelectTrigger aria-label="Manuel eklenecek ürünü seçin">
+                      <SelectValue placeholder="Manuel ürün seçin..." />
+                    </SelectTrigger>
                     <SelectContent>{productCodes.map(p => <SelectItem key={p.id ?? ''} value={p.stokKodu ?? ''}>{p.stokAdi}</SelectItem>)}</SelectContent>
                 </Select>
                 <div className="flex gap-2">
-                    <Input type="number" min="1" value={manualQty} onChange={e => setManualQty(e.target.value)} placeholder="Adet"/>
-                    <Button onClick={addManualItem} size="icon"><PlusCircle className="h-4 w-4"/></Button>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={manualQty}
+                      onChange={e => setManualQty(e.target.value)}
+                      placeholder="Adet"
+                      aria-label="Eklenecek adet"
+                    />
+                    <Button
+                      onClick={addManualItem}
+                      size="icon"
+                      aria-label="Ürünü siparişe ekle"
+                    >
+                      <PlusCircle className="h-4 w-4" aria-hidden="true" />
+                    </Button>
                 </div>
-            </div>
-            <ScrollArea className="h-40 border rounded-md p-2">
+            </fieldset>
+            <ScrollArea className="h-40 border rounded-md p-2" role="list" aria-label="Sipariş kalemleri">
                 {orderItems.map(i => (
-                    <div key={i.id} className="flex justify-between items-center p-1 rounded hover:bg-muted">
+                    <div key={i.id} className="flex justify-between items-center p-1 rounded hover:bg-muted" role="listitem">
                        <span className="text-sm truncate" title={i.stokAdi}>{i.stokAdi}</span>
-                       <span className="text-sm font-bold">{i.adet}</span>
-                       <Button variant="ghost" size="icon" onClick={() => removeItem(i.id ?? '')}><Trash2 className="h-4 w-4 text-destructive"/></Button>
+                       <span className="text-sm font-bold" aria-label={`${i.adet} adet`}>{i.adet}</span>
+                       <Button
+                         variant="ghost"
+                         size="icon"
+                         onClick={() => removeItem(i.id ?? '')}
+                         aria-label={`${i.stokAdi} ürününü kaldır`}
+                       >
+                         <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+                       </Button>
                     </div>
                 ))}
             </ScrollArea>
           </CardContent>
         </LiquidGlass>
 
-        <LiquidGlass className="w-full md:w-2/3 p-4">
+        <LiquidGlass className="w-full md:w-2/3 p-4" role="region" aria-labelledby="pending-orders-title">
           <CardHeader className="p-2">
-            <CardTitle>Bekleyen Siparişler</CardTitle>
+            <CardTitle id="pending-orders-title">Bekleyen Siparişler</CardTitle>
           </CardHeader>
           <CardContent className="p-2">
-            <ScrollArea className="h-[400px]">
+            <ScrollArea className="h-[400px]" aria-label="Bekleyen siparişler listesi">
               {allOrders.filter(o => o.status !== 'completed').length === 0 ? (
-                <p className="text-center text-muted-foreground py-20">Bekleyen sipariş yok.</p>
+                <p className="text-center text-muted-foreground py-20" role="status">Bekleyen sipariş yok.</p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3" role="list" aria-label="Aktif siparişler">
                   {allOrders.filter(o => o.status !== 'completed').map(order => (
-                    <div key={order.id} data-row-id={order.id} className="border p-3 rounded-md bg-background/50">
+                    <article key={order.id} data-row-id={order.id} className="border p-3 rounded-md bg-background/50" role="listitem" aria-label={`Sipariş: ${order.kurumAdi}`}>
                       <div className="flex justify-between items-start">
                         <div className="space-y-0.5">
                           <p className="font-semibold">{order.kurumAdi}</p>
@@ -585,19 +692,34 @@ export default function SiparislerPanel() {
                             Oluşturma: {order.createdAt ? formatDate(order.createdAt as Date, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={order.status === 'toplaniyor' ? 'default' : 'secondary'} className="py-1 px-3">
+                        <div className="flex items-center gap-2" role="group" aria-label="Sipariş işlemleri">
+                          <Badge
+                            variant={order.status === 'toplaniyor' ? 'default' : 'secondary'}
+                            className="py-1 px-3"
+                            aria-label={`Toplam ${(order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0)} adet`}
+                          >
                               {(order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0)} Adet
                           </Badge>
-                          <Button size="sm" variant="destructive" onClick={() => handleDeleteOrder(order.id ?? '')} disabled={isProcessing}>
-                            <Trash2 className="h-4 w-4"/>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDeleteOrder(order.id ?? '')}
+                            disabled={isProcessing}
+                            aria-label={`${order.kurumAdi} siparişini sil`}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
                           </Button>
-                          <Button size="sm" onClick={() => startPickingProcess(order)} disabled={isProcessing}>
+                          <Button
+                            size="sm"
+                            onClick={() => startPickingProcess(order)}
+                            disabled={isProcessing}
+                            aria-label={`${order.kurumAdi} için toplama işlemini başlat`}
+                          >
                             Toplama Başlat
                           </Button>
                         </div>
                       </div>
-                    </div>
+                    </article>
                   ))}
                 </div>
               )}

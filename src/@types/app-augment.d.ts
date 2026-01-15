@@ -7,24 +7,45 @@ declare module "@/lib/types" {
 
   export type AppView =
     | "dashboard"
-    | "arama"
+    | "mal-kabul"
     | "stok-yonetimi"
-    | "depo-sayim"
-    | "urun-kullanim"
-    | "sevkiyat"
+    | "siparisler"
+    | "laboratuvar-yonetimi"
     | "raporlama"
     | "yonetim"
+    | "urun-kullanim"
+    | "sarf-dagitim"
+    | "tuketim-istatistikleri"
+    | "cihaz-yonetimi-ana"
+    | "cihaz-ustu-ekle"
+    | "cihaz-ustu-gecmisi"
+    | "direkt-transfer"
+    | "urun-talep"
+    | "verimlilik-hesaplama"
+    | "cost-dashboard"
+    | "teknik-servis"
+    | "transfer-gecmis"
+    | "siparis-gecmis"
+    | "kumulatif-gecmis"
+    | "kumulatif-hesaplama"
+    | "arama"
+    | "cihaz-ariza-gecmis"
+    | "personel-islemleri"
+    | "is-analizi"
+    | "total-verimlilik"
+    | "cihazdan-cikan-kit"
+    | "sevkiyat"
+    | "depo-sayim"
     | "cihaz-yonetimi"
     | "miad-uyarilari"
     | "verimlilik"
-    | "cihaz-ustu-ekle"
     | "numune-arsivi";
 
   export interface User {
-    id?: ID;
+    id: ID;
     uid?: string;
     displayName?: string;
-    email?: string;
+    email?: string | null;
     role?: "admin" | "editor" | "viewer" | "user" | "teknik_servis" | "aplikasyon" | string;
     hospitalId?: ID;
     depotId?: ID;
@@ -39,13 +60,14 @@ declare module "@/lib/types" {
     createdAt?: TimestampLike;
     notificationsEnabled?: boolean;
     notificationPreferences?: string[];
+    themePreference?: 'light' | 'dark' | 'system';
   }
 
   // ---------- Master Data ----------
   export interface ProductCode {
-    id?: ID;
-    stokKodu?: string;
-    stokAdi?: string;
+    id: ID;
+    stokKodu: string;
+    stokAdi: string;
     barkod?: string;
     anaBirim?: "Kutu" | "Adet" | "Test" | "Flakon" | "Paket" | "Şişe" | string;
     uretici?: string;
@@ -82,7 +104,7 @@ declare module "@/lib/types" {
   }
 
   export interface Depot {
-    id?: ID;
+    id: ID;
     ad?: string;
     name?: string;
     kod?: string;
@@ -95,9 +117,9 @@ declare module "@/lib/types" {
   }
 
   export interface Hospital {
-    id?: ID;
+    id: ID;
     ad?: string;
-    name?: string;
+    name: string;
     kod?: string;
     sehir?: string;
     ilce?: string;
@@ -114,7 +136,7 @@ declare module "@/lib/types" {
   export type Laboratory = Hospital;
 
   export interface AddressDefinition {
-    id?: ID;
+    id: ID;
     code?: string;
     description?: string;
     group?: string;
@@ -123,24 +145,24 @@ declare module "@/lib/types" {
     hospitalId?: ID;
     depotId?: ID;
     active?: boolean;
-    addressBarcode?: string;
-    addressName?: string;
+    addressBarcode: string;
+    addressName: string;
     [k: string]: unknown;
   }
 
   // ---------- Inventory & Counting ----------
   export interface DepoStokItem {
-    id?: ID;
+    id: ID;
     productCodeId?: ID;
-    stokKodu?: string;
-    stokAdi?: string;
+    stokKodu: string;
+    stokAdi: string;
     lot?: string;
     lotNumarasi?: string;
     seriNo?: string;
     seriNumarasi?: string;
     adet?: number;
     birim?: string;
-    miad?: TimestampLike;
+    miad: TimestampLike;
     depotId?: ID;
     hospitalId?: ID;
     shelf?: string;
@@ -153,11 +175,16 @@ declare module "@/lib/types" {
     depotName?: string;
     eklenmeTarihi?: TimestampLike;
     irsaliyeNumarasi?: string;
+    urunGrubu?: 'kit' | 'sarf';
+    ambalajDegeri?: number;
+    transferId?: string;
+    hedefKurumId?: string | null;
+    gtin?: string;
     [k: string]: unknown;
   }
 
   export interface DepotStockCountSession {
-    id?: ID;
+    id: ID;
     depotId?: ID;
     depotName?: string;
     brand?: string;
@@ -186,8 +213,14 @@ declare module "@/lib/types" {
   export interface CellDef {
     row?: number;
     col?: number;
+    x?: number;
+    y?: number;
     code?: string;
     label?: string;
+    group?: string;
+    merged?: boolean;
+    stokKodu?: string;
+    products?: string[];
     [k: string]: unknown;
   }
 
@@ -219,7 +252,7 @@ declare module "@/lib/types" {
   }
 
   export interface Shipment {
-    id?: ID;
+    id: ID;
     no?: string;
     tarih?: TimestampLike;
     sourceDepotId?: ID;
@@ -237,18 +270,18 @@ declare module "@/lib/types" {
   }
 
   export interface OrderItem {
-    id?: ID;
+    id: ID;
     productCodeId?: ID;
     miktar?: number;
     birim?: string;
-    stokKodu?: string;
-    stokAdi?: string;
-    adet?: number;
+    stokKodu: string;
+    stokAdi: string;
+    adet: number;
     [k: string]: unknown;
   }
 
   export interface Order {
-    id?: ID;
+    id: ID;
     hospitalId?: ID;
     tarih?: TimestampLike;
     items?: OrderItem[];
@@ -268,7 +301,7 @@ declare module "@/lib/types" {
   }
 
   export interface PickingListItem {
-    id?: ID;
+    id: ID;
     shipmentId?: ID;
     productCodeId?: ID;
     lot?: string;
@@ -297,7 +330,7 @@ declare module "@/lib/types" {
   }
 
   export interface ConsumptionRecord {
-    id?: ID;
+    id: ID;
     productCodeId?: ID;
     hospitalId?: ID;
     deviceId?: ID;
@@ -305,19 +338,26 @@ declare module "@/lib/types" {
     birim?: string;
     lot?: string;
     seriNo?: string;
-    seriNumarasi?: string;
-    stokKodu?: string;
-    stokAdi?: string;
-    lotNumarasi?: string;
-    miad?: TimestampLike;
+    seriNumarasi: string;
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi: string;
+    miad: string;
     tarih?: TimestampLike;
-    consumptionTimestamp?: TimestampLike;
+    consumptionTimestamp: TimestampLike;
     createdBy?: ID;
-    laboratoryId?: string;
-    laboratoryName?: string;
-    userName?: string;
-    userId?: string;
-    consumptionType?: string;
+    laboratoryId: string;
+    laboratoryName: string;
+    userName: string;
+    userId: string;
+    consumptionType: 'normal_kullanim' | 'sayimdan_dusum' | 'imha_dogrulama_sonrasi_dusum' | string;
+    rafAdresi?: string;
+    irsaliyeNumarasi?: string;
+    urunGrubu?: 'kit' | 'sarf';
+    ambalajDegeri?: number;
+    isImhaDogrulandi?: boolean;
+    subPointId?: string;
+    subPointName?: string;
     [k: string]: unknown;
   }
   
@@ -342,7 +382,7 @@ declare module "@/lib/types" {
   }
 
   export interface ScannedItem {
-    id?: ID;
+    id: ID;
     barkod?: string;
     parsed?: ParsedBarcode;
     at?: TimestampLike;
@@ -361,7 +401,7 @@ declare module "@/lib/types" {
 
   // ---------- Devices ----------
   export interface Device {
-    id?: ID;
+    id: ID;
     ad?: string;
     name?: string;
     brand?: string;
@@ -384,7 +424,7 @@ declare module "@/lib/types" {
   }
 
   export interface AssignedDevice {
-    id?: ID;
+    id: ID;
     hastaneId?: string;
     cihazId?: string;
     assignedAt?: TimestampLike;
@@ -411,8 +451,40 @@ declare module "@/lib/types" {
     order: number;
     subPointId?: string | null;
     subPointName?: string | null;
-    // Changed from deviceIds: string[]
-    slots: DeviceGroupSlot[];
+    deviceIds?: string[];
+    slots?: DeviceGroupSlot[];
+    imageUrl?: string;
+  }
+
+  export interface DeviceFaultReport {
+    id: string;
+    labId: string;
+    labName: string;
+    groupId: string;
+    groupName: string;
+    deviceId: string;
+    model: string;
+    serial: string;
+    orderInGroup: number;
+    description: string;
+    status: 'open' | 'closed';
+    faultType: 'teknik_servis' | 'aplikasyon';
+    openedAt: Date | null;
+    openedBy: string;
+    openedByName: string;
+    closedAt: Date | null;
+    closedBy?: string;
+    closedByName?: string;
+    source: string;
+    isEjectedKitFault?: boolean;
+    productStokKodu?: string;
+    productStokAdi?: string;
+    productCihazGrubu?: string;
+    kitResolution?: 'imha' | 'tekrar_kullanim' | null;
+    ejectedKitRecordId?: string;
+    testCount?: number;
+    title?: string;
+    closeDescription?: string;
   }
 
   export interface CihazUstuStokInput {
@@ -477,12 +549,13 @@ declare module "@/lib/types" {
 
   // ---------- Min/Max & Settings ----------
   export interface MinMaxRule {
-    id?: ID;
+    id: ID;
     hospitalId?: ID;
     productCodeId?: ID;
-    min?: number;
-    max?: number;
-    stokKodu?: string;
+    min: number;
+    max: number;
+    stokKodu: string;
+    aylikTuketimLimiti?: number;
     [k: string]: unknown;
   }
 
@@ -539,6 +612,8 @@ declare module "@/lib/types" {
   export interface LedgerData {
     header: LedgerHeader;
     items: Array<LedgerItemRow | GroupedLedgerRow>;
+    rows?: Array<LedgerItemRow | GroupedLedgerRow>;
+    product?: ProductCode;
   }
   
   export type Currency = 'EUR' | 'USD' | 'TRY';
@@ -592,6 +667,17 @@ declare module "@/lib/types" {
     linkedProductCode: string; // stokKodu
   }
 
+  export interface LabPool {
+    id: string;
+    name: string;
+    memberIds: string[];
+    active: boolean;
+    createdAt: any;
+    createdByUid: string;
+    createdByName: string;
+    mainLabId?: string;
+  }
+
   export interface EventRow {
     id: string;
     stokKodu: string;
@@ -604,5 +690,128 @@ declare module "@/lib/types" {
     adet: number;
     seriNolar: string[];
     konum: string;
+  }
+
+  // ManualProductOption
+  export type ManualProductOption = {
+    code: string;
+    name: string;
+    tracking: 'serial' | 'lot_barcode' | 'lot_manual' | 'qty_barcode' | 'qty_manual';
+  };
+
+  // GridDefinition
+  export interface CellDef {
+    row: number;
+    col: number;
+    merged?: boolean;
+    stokKodu?: string;
+    products?: string[];
+  }
+
+  export interface GridDefinition {
+    rows: number;
+    cols: number;
+    cells: CellDef[];
+  }
+
+  // DailyConsumptionStats
+  export interface DailyConsumptionStats {
+    id: string;
+    date: string;
+    totalCount: number;
+    byLab: Record<string, number>;
+    createdAt?: TimestampLike;
+    updatedAt?: TimestampLike;
+  }
+
+  // EfficiencyPool
+  export interface EfficiencyPool {
+    id: string;
+    name: string;
+    memberIds: string[];
+    centerLabId?: string;
+    active: boolean;
+    createdAt: any;
+    createdByUid: string;
+    createdByName: string;
+  }
+
+  // EjectedKitRecord
+  export interface EjectedKitRecord {
+    id: string;
+    laboratoryId: string;
+    laboratoryName: string;
+    deviceId: string;
+    deviceModel: string;
+    deviceSerial: string;
+    deviceImageUrl: string;
+    stokKodu: string;
+    stokAdi: string;
+    cihazGrubu?: string;
+    quantityType: 'kutu' | 'test';
+    testCount: number;
+    aciklama: string;
+    createdAt: TimestampLike;
+    createdByUid: string;
+    createdByName: string;
+    faultReportId: string;
+  }
+
+  // DestroyedKitRecord
+  export interface DestroyedKitRecord {
+    id: string;
+    ejectedKitRecordId: string | null;
+    faultReportId: string | null;
+    laboratoryId: string | null;
+    laboratoryName: string;
+    depotId?: string | null;
+    depotName?: string;
+    deviceId: string | null;
+    deviceModel: string;
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi?: string;
+    miad?: string;
+    seriNumarasi?: string;
+    testCount: number;
+    remainingTests?: number;
+    aciklama: string;
+    resolvedAt: TimestampLike;
+    resolvedByUid: string;
+    resolvedByName: string;
+    sourceType?: 'barcode' | 'excel' | 'fault';
+  }
+
+  // TrashBinRecord
+  export interface TrashBinRecord {
+    id: string;
+    laboratoryId: string;
+    laboratoryName: string;
+    deviceId: string;
+    deviceModel: string;
+    deviceSerialNumber: string;
+    stokKodu: string;
+    stokAdi: string;
+    remainingTests: number;
+    createdAt: TimestampLike;
+    createdByUid: string;
+    createdByName: string;
+    sourceType: 'manual';
+  }
+
+  // Rack
+  export interface Rack {
+    id: string;
+    labId: string;
+    labCode: string;
+    fridgeCode: string;
+    date: string;
+    sequence: number;
+    status: 'open' | 'sealed';
+    specimens?: string[];
+    specimenCount?: number;
+    sealedAt?: any;
+    createdAt?: any;
+    [k: string]: any;
   }
 }

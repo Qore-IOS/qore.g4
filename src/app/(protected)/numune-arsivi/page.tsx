@@ -51,7 +51,7 @@ export default function NumuneArsiviPage() {
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [loading, setLoading] = useState({ labs: true, fridges: false });
-  const [scannedSpecimens, setScannedSpecimens] = useState<(string | null)[]>(Array(100).fill(null));
+  const [scannedSpecimens, setScannedSpecimens] = useState<(string | null)[]>(Array(100).fill(null) as (string | null)[]);
   const [lastScannedInfo, setLastScannedInfo] = useState<LastScannedInfo | null>(null);
 
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -89,11 +89,11 @@ export default function NumuneArsiviPage() {
   const authorizedLaboratories = useMemo(() => {
     if (isAdmin) return laboratories;
     if (!currentUserProfile?.assignedLaboratories) return [];
-    return laboratories.filter(lab => currentUserProfile.assignedLaboratories?.includes(lab.id));
+    return laboratories.filter(lab => lab.id && currentUserProfile.assignedLaboratories?.includes(lab.id));
   }, [laboratories, currentUserProfile, isAdmin]);
   
   useEffect(() => {
-    if (authorizedLaboratories.length === 1 && !selectedLabId) {
+    if (authorizedLaboratories.length === 1 && !selectedLabId && authorizedLaboratories[0].id) {
       setSelectedLabId(authorizedLaboratories[0].id);
     }
   }, [authorizedLaboratories, selectedLabId]);
@@ -152,7 +152,7 @@ export default function NumuneArsiviPage() {
             labName: lab?.name,
             labCode: lab?.kod,
             fridgeCode: selectedFridgeCode,
-            specimens: scannedSpecimens, // Use the sparse array directly
+            specimens: scannedSpecimens.map(s => s ?? '') as string[], // Use the sparse array directly
             sealedAt: new Date(),
             sealedBy: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
         };
@@ -284,7 +284,7 @@ export default function NumuneArsiviPage() {
                           <Trash2 className="mr-2 h-4 w-4" />
                           Raftakileri Temizle
                         </Button>
-                        <Button variant="secondary" onClick={() => handleSealAndSave(scannedSpecimens.filter((s): s is string => s !== null))} disabled={isSaving || scannedSpecimens.filter(s => s !== null).length === 0} className="h-8 px-3">
+                        <Button variant="secondary" onClick={() => handleSealAndSave()} disabled={isSaving || scannedSpecimens.filter(s => s !== null).length === 0} className="h-8 px-3">
                           <Printer className="mr-2 h-4 w-4" />
                           Erken Sonlandır ve Yazdır
                         </Button>
@@ -339,8 +339,8 @@ export default function NumuneArsiviPage() {
                       </SelectTrigger>
                       <SelectContent>
                           {authorizedLaboratories.length > 0 ? (
-                          authorizedLaboratories.map(lab => (
-                              <SelectItem key={lab.id} value={lab.id}>
+                          authorizedLaboratories.filter(lab => lab.id).map(lab => (
+                              <SelectItem key={lab.id} value={lab.id!}>
                               {lab.name}
                               </SelectItem>
                           ))

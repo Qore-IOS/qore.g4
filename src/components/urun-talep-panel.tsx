@@ -40,7 +40,7 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, PlusCircle, Trash2, ClipboardPlus, Check, ChevronsUpDown } from 'lucide-react';
+import { Loader2, PlusCircle, Trash2, ClipboardPlus, Check, ChevronsUpDown, Unplug } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
@@ -54,13 +54,14 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem } from '@/lib/types';
-import { generateId } from '@/lib/utils';
+import { generateId, playNotificationSound, cn } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
-import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 
 
 export default function UrunTalepPanel() {
+  const router = useRouter();
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -181,7 +182,7 @@ export default function UrunTalepPanel() {
     setLoading(true);
     try {
       const orderId = generateId();
-      const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Lab';
+      const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
       const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
       
       const newOrder = {
@@ -215,6 +216,7 @@ export default function UrunTalepPanel() {
         }
       });
       
+      playNotificationSound(); // Play notification sound on success
       toast({ title: 'Talep Oluşturuldu', description: `Siparişiniz "${depotName}" deposuna iletildi.` });
       
       // Reset form
@@ -235,13 +237,20 @@ export default function UrunTalepPanel() {
       <BackButton fallback="/urun-kullanim" />
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ClipboardPlus className="h-6 w-6 text-primary" />
-            Ürün Talep Paneli
-          </CardTitle>
-          <CardDescription>
-            Yetkili olduğunuz laboratuvarlar için ürün talebi oluşturun.
-          </CardDescription>
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardPlus className="h-6 w-6 text-primary" />
+                Ürün Talep Paneli
+              </CardTitle>
+              <CardDescription>
+                Yetkili olduğunuz laboratuvarlar için ürün talebi oluşturun.
+              </CardDescription>
+            </div>
+             <Button variant="outline" onClick={() => router.push('/cihazdan-cikan-kit')}>
+              <Unplug className="mr-2 h-4 w-4" /> Cihazdan Çıkan Kit
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid md:grid-cols-2 gap-4">

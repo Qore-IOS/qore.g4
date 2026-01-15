@@ -3,20 +3,20 @@
 import React from 'react';
 import DashboardPanel from '@/components/dashboard-panel';
 import { useDashboardData } from '@/components/dashboard/useDashboardData';
+import { useSyncedLoading } from '@/hooks/useSyncedLoading';
 import { Loader2 } from 'lucide-react';
 
 export default function DashboardPage() {
-    const { 
+    const {
         hospitals,
-        devices,
         productCodes,
-        depoStok,
         tuketimKayitlari,
-        shipments,
         efficiencyHistoryRecords,
-        minMaxRulesByLab,
-        isLoading 
+        isLoading
     } = useDashboardData();
+
+    // Sync dashboard loading with global loader
+    useSyncedLoading(isLoading);
 
     if (isLoading) {
         return (
@@ -25,17 +25,13 @@ export default function DashboardPage() {
             </div>
         );
     }
-    
+
     return (
         <DashboardPanel
             hospitals={hospitals}
-            devices={devices}
             productCodes={productCodes}
-            depoStok={depoStok}
             tuketimKayitlari={tuketimKayitlari}
-            shipments={shipments}
             efficiencyHistoryRecords={efficiencyHistoryRecords}
-            minMaxRulesByLab={minMaxRulesByLab}
         />
     );
 }

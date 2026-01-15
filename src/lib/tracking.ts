@@ -48,3 +48,68 @@ export const trackingModeFromExcel = (val?: string): TrackingMode => {
       return 'qty_barcode';
   }
 };
+
+/**
+ * Resolves the effective tracking mode based on what the barcode actually contains.
+ * This allows products to support multiple barcode formats with different tracking modes.
+ *
+ * @param parsed - The parsed barcode data (to check what it contains)
+ * @param matchedFormat - The barcode format that was matched during parsing
+ * @param product - The product data (for fallback to static tracking mode)
+ * @returns The effective tracking mode to use for this specific scan
+ */
+export function resolveEffectiveTrackingMode(
+  parsed: { seriNumarasi?: string; lotNumarasi?: string } | null | undefined,
+  matchedFormat: { trackSerial?: boolean; trackLot?: boolean } | null | undefined,
+  product?: { trackingMode?: TrackingMode; marka?: string; manufacturer?: string; stokAdi?: string }
+): TrackingMode {
+  // If we have parsed data and a matched format, determine mode based on actual barcode content
+  if (parsed && matchedFormat) {
+    const hasSeri = !!(parsed.seriNumarasi && parsed.seriNumarasi.trim());
+    const hasLot = !!(parsed.lotNumarasi && parsed.lotNumarasi.trim());
+
+    // Default: formats support both serial and lot tracking unless explicitly disabled
+    const formatSupportsSerial = matchedFormat.trackSerial !== false; // undefined = true (default)
+    const formatSupportsLot = matchedFormat.trackLot !== false;       // undefined = true (default)
+
+    console.log('[resolveEffectiveTrackingMode] Parsed:', {
+      seriNumarasi: parsed.seriNumarasi,
+      lotNumarasi: parsed.lotNumarasi,
+      hasSeri,
+      hasLot,
+      matchedFormat: {
+        trackSerial: matchedFormat.trackSerial,
+        trackLot: matchedFormat.trackLot,
+        formatSupportsSerial,
+        formatSupportsLot
+      }
+    });
+
+    // If barcode has serial number and format supports it (priority over lot)
+    if (hasSeri && formatSupportsSerial) {
+      console.log('[resolveEffectiveTrackingMode] → serial mode (has seri + format supports)');
+      return 'serial';
+    }
+
+    // If barcode has lot and format supports it
+    if (hasLot && formatSupportsLot) {
+      console.log('[resolveEffectiveTrackingMode] → lot_barcode mode (has lot + format supports)');
+      return 'lot_barcode';
+    }
+
+    // Otherwise quantity tracking
+    console.log('[resolveEffectiveTrackingMode] → qty_barcode mode (fallback)');
+    return 'qty_barcode';
+  }
+
+  // Fall back to product's static tracking mode
+  if (product) {
+    const mode = resolveDefaultTrackingMode(product);
+    console.log('[resolveEffectiveTrackingMode] → fallback to product tracking mode:', mode);
+    return mode;
+  }
+
+  // Ultimate fallback
+  console.log('[resolveEffectiveTrackingMode] → ultimate fallback (qty_barcode)');
+  return 'qty_barcode';
+}

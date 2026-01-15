@@ -296,19 +296,52 @@ export function exportAllDataToJSON(data: Record<string, any[]>, fileName: strin
     }
 }
 
+// Preloaded notification sound for instant playback
+let notificationAudio: HTMLAudioElement | null = null;
+
+const getNotificationAudio = () => {
+  if (typeof window === 'undefined') return null;
+  if (!notificationAudio) {
+    notificationAudio = new Audio('/notif.wav');
+    notificationAudio.volume = 0.5;
+    notificationAudio.preload = 'auto';
+  }
+  return notificationAudio;
+};
+
+// Preload on first import (client-side only)
+if (typeof window !== 'undefined') {
+  getNotificationAudio();
+}
+
+export const playNotificationSound = () => {
+  if (typeof window === 'undefined') return;
+  const audio = getNotificationAudio();
+  if (audio) {
+    audio.currentTime = 0;
+    audio.play().catch(() => {
+      // Ignore autoplay errors (user hasn't interacted yet)
+    });
+  }
+};
+
 export const playFeedback = (isError = false) => {
   if (typeof window === 'undefined') return;
   if (navigator.vibrate) navigator.vibrate(isError ? [200, 100, 200] : 100);
+
+  // Play browser-generated beep for both success and error
   try {
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContext) return;
     const ctx = new AudioContext();
     const oscillator = ctx.createOscillator();
+    
     oscillator.type = isError ? 'square' : 'sine';
-    oscillator.frequency.setValueAtTime(isError ? 220 : 600, ctx.currentTime);
+    oscillator.frequency.setValueAtTime(isError ? 220 : 440, ctx.currentTime);
     oscillator.connect(ctx.destination);
     oscillator.start();
-    oscillator.stop(ctx.currentTime + (isError ? 0.2 : 0.1));
+    oscillator.stop(ctx.currentTime + 0.15); // Short beep
+
   } catch {
     // fallback silently if sound is not supported
   }

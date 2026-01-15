@@ -1,9 +1,30 @@
+/**
+ * @fileoverview Total Verimlilik Geçmiş Detay (Total Efficiency History Detail) Panel
+ * @description Displays detailed view of a saved total efficiency calculation record
+ * with full table data, efficiency metrics visualization, and export capabilities.
+ * @module components/total-verimlilik-gecmis-detay-panel
+ * @version 1.0.0
+ *
+ * @features
+ * - Full table view with all efficiency columns
+ * - Results-only view toggle
+ * - Efficiency metrics visualization with circular charts
+ * - Excel export functionality
+ * - Column 22 box loss calculation with mode toggle
+ *
+ * @accessibility
+ * - ARIA labels for charts and tables
+ * - Screen reader compatible data display
+ * - Keyboard accessible toggle buttons
+ */
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -109,7 +130,9 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
           });
         }
       } catch (error) {
-        console.error('Error fetching record:', error);
+        totalVerimlilikLogger.error('Total verimlilik detay kaydı yüklenemedi', error, {
+          recordId,
+        });
         toast({
           title: 'Hata',
           description: 'Kayıt yüklenirken bir hata oluştu.',
@@ -161,8 +184,9 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     return (
       <div className="p-4">
         <BackButton fallback="/total-verimlilik/gecmis" />
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin" />
+        <div className="flex items-center justify-center h-64" role="status" aria-label="Yükleniyor">
+          <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+          <span className="sr-only">Kayıt detayları yükleniyor...</span>
         </div>
       </div>
     );
@@ -172,7 +196,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     return (
       <div className="p-4">
         <BackButton fallback="/total-verimlilik/gecmis" />
-        <div className="text-center py-8 text-muted-foreground">
+        <div className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">
           Kayıt bulunamadı.
         </div>
       </div>
@@ -180,7 +204,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
   }
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Geçmiş Detayı">
       <BackButton fallback="/total-verimlilik/gecmis" />
 
       <Card>
@@ -188,7 +212,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <CardTitle className="text-xl flex items-center gap-2">
-                <History className="h-6 w-6 text-primary" />
+                <History className="h-6 w-6 text-primary" aria-hidden="true" />
                 Total Verimlilik Geçmişi
               </CardTitle>
               <CardDescription className="mt-2 space-y-1">
@@ -311,22 +335,24 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
             )}
 
             <div className="flex gap-2">
-              <Button variant="outline" onClick={handleExportExcel}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
+              <Button variant="outline" onClick={handleExportExcel} aria-label="Excel dosyasına aktar">
+                <FileSpreadsheet className="h-4 w-4 mr-2" aria-hidden="true" />
                 Excel'e Aktar
               </Button>
               <Button
                 variant={showResultsOnly ? 'default' : 'outline'}
                 onClick={() => setShowResultsOnly(!showResultsOnly)}
+                aria-pressed={showResultsOnly}
+                aria-label={showResultsOnly ? "Tüm sütunları göster" : "Sadece sonuçları göster"}
               >
                 {showResultsOnly ? (
                   <>
-                    <EyeOff className="h-4 w-4 mr-2" />
+                    <EyeOff className="h-4 w-4 mr-2" aria-hidden="true" />
                     Tüm Sütunları Göster
                   </>
                 ) : (
                   <>
-                    <Eye className="h-4 w-4 mr-2" />
+                    <Eye className="h-4 w-4 mr-2" aria-hidden="true" />
                     Sadece Sonuçları Göster
                   </>
                 )}
@@ -336,13 +362,13 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
         </CardHeader>
         <CardContent>
           {record.rows.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">
               Bu kayıtta veri bulunmuyor.
             </div>
           ) : (
             <ScrollArea className="w-full">
               <div className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'}>
-                <Table>
+                <Table aria-label="Total verimlilik detay tablosu">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[180px] bg-muted/50 sticky left-0 z-10">

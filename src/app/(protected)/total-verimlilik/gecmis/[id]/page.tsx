@@ -5,7 +5,7 @@ import TotalVerimlilikGecmisDetayPanel from '@/components/total-verimlilik-gecmi
 
 export default function TotalVerimlilikGecmisDetayPage() {
   const params = useParams();
-  const recordId = params.id as string;
+  const recordId = (params?.id as string) ?? '';
 
   return <TotalVerimlilikGecmisDetayPanel recordId={recordId} />;
 }

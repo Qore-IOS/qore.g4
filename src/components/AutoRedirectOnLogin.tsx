@@ -14,12 +14,23 @@ export default function AutoRedirectOnLogin() {
   const { currentUser, isLoadingAuth, currentUserProfile } = useAuth();
 
   useEffect(() => {
-    if (isLoadingAuth || !currentUser || pathname === '/login' || pathname === '/urun-kullanim') {
+    if (isLoadingAuth || !currentUser || pathname === '/login') {
         return;
     }
 
-    if (hasOnlyProductUsagePermission(currentUserProfile?.accessibleViews)) {
+    // Check for specific role-based redirects first
+    const userRole = currentUserProfile?.role;
+
+    // Redirect teknik_servis and aplikasyon users to /cihaz-yonetimi-ana
+    if ((userRole === 'teknik_servis' || userRole === 'aplikasyon') && pathname === '/dashboard') {
+      router.replace('/cihaz-yonetimi-ana');
+      return;
+    }
+
+    // Redirect users with only product usage permission
+    if (pathname !== '/urun-kullanim' && hasOnlyProductUsagePermission(currentUserProfile?.accessibleViews)) {
       router.replace('/urun-kullanim');
+      return;
     }
   }, [currentUser, isLoadingAuth, currentUserProfile, router, pathname]);
 

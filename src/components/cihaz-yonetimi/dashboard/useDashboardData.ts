@@ -38,7 +38,7 @@ export function useDashboardData() {
     productCodes: [] as ProductCode[],
     depoStok: [] as DepoStokItem[],
     tuketimKayitlari: [] as ConsumptionRecord[],
-    efficiencyHistoryRecords: [] as any[], // Changed
+    efficiencyDataRecords: [] as any[], // Changed
     minMaxRulesByLab: {} as Record<string, Record<string, MinMaxRule>>,
     cihazUstuGecmisi: [] as any[],
     kumulatifRaporlar: [] as any[],
@@ -113,7 +113,7 @@ export function useDashboardData() {
         productCodes: productCodesSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode)),
         depoStok: depoStokSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem)),
         tuketimKayitlari: tuketimKayitlariSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord)),
-        efficiencyHistoryRecords: efficiencyHistorySnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
+        efficiencyDataRecords: efficiencyHistorySnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
         cihazUstuGecmisi: cihazUstuSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
         kumulatifRaporlar: kumulatifSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
         shipments: shipmentsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment)),

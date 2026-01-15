@@ -1,23 +1,28 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { 
-  getAuth, onAuthStateChanged, User as FirebaseUser, signOut as firebaseSignOut, 
-  createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider, 
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import {
+  getAuth, onAuthStateChanged, User as FirebaseUser, signOut as firebaseSignOut,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider,
   signInWithPopup, signInAnonymously, signInWithCustomToken
 } from 'firebase/auth';
 import { app, db } from '@/lib/firebase';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs, deleteField } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
-import type { User, AppView } from '@/lib/types'; 
-import { VIEWS } from '@/lib/constants'; 
+import { useTheme } from 'next-themes';
+import type { User, AppView } from '@/lib/types';
+import { VIEWS } from '@/lib/constants';
 import { safeSignOut } from '@/lib/presence-client';
+
+type ThemePreference = 'light' | 'dark' | 'system';
 
 type NavMode = 'dock' | 'sidebar';
 
+type DockStyle = 'hover' | 'liquid';
+
 interface AuthContextType {
   currentUser: FirebaseUser | null;
-  currentUserProfile: User | null; 
+  currentUserProfile: User | null;
   isLoadingAuth: boolean;
   isAdmin: boolean;
   permissions: AppView[];
@@ -25,6 +30,10 @@ interface AuthContextType {
   toggleOrbAnimation: () => void;
   navMode: NavMode;
   toggleNavMode: () => void;
+  dockStyle: DockStyle;
+  setDockStyle: (style: DockStyle) => void;
+  themePreference: ThemePreference;
+  setUserTheme: (theme: ThemePreference) => Promise<void>;
   login: (email: string, pass: string) => Promise<FirebaseUser | null>;
   loginWithGoogle: () => Promise<FirebaseUser | null>;
   loginAnonymously: () => Promise<FirebaseUser | null>;
@@ -45,16 +54,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
+  const [dockStyle, setDockStyleState] = useState<DockStyle>('hover');
+  const [themePreference, setThemePreference] = useState<ThemePreference>('dark');
   const router = useRouter();
   const auth = getAuth(app);
+  const { setTheme, theme } = useTheme();
 
   useEffect(() => {
     const savedOrbState = localStorage.getItem('orb_animation_enabled');
     setIsOrbAnimationEnabled(savedOrbState === null ? true : savedOrbState === 'true');
-    
+
     const savedNavMode = localStorage.getItem('nav_mode') as NavMode | null;
     setNavMode(savedNavMode || 'dock');
 
+    const savedDockStyle = localStorage.getItem('dock_style') as DockStyle | null;
+    setDockStyleState(savedDockStyle || 'hover');
   }, []);
 
   const toggleOrbAnimation = () => {
@@ -72,6 +86,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return newMode;
     });
   };
+
+  const setDockStyle = (style: DockStyle) => {
+    setDockStyleState(style);
+    localStorage.setItem('dock_style', style);
+  };
+
+  // Save theme preference to Firestore and apply it
+  const setUserTheme = useCallback(async (newTheme: ThemePreference) => {
+    setTheme(newTheme);
+    setThemePreference(newTheme);
+
+    // Save to Firestore if user is logged in
+    if (currentUser && !currentUser.isAnonymous) {
+      try {
+        const userDocRef = doc(db, "users", currentUser.uid);
+        await updateDoc(userDocRef, { themePreference: newTheme });
+      } catch (error) {
+        console.error("Error saving theme preference to Firestore:", error);
+      }
+    }
+  }, [currentUser, setTheme]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -99,10 +134,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               if (!userPermissions.includes('arama')) {
                   userPermissions.push('arama');
               }
-              
+
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
               setIsAdmin(userData.role === 'admin' || user.uid === ADMIN_USER_UID);
               setPermissions(userPermissions);
+
+              // Apply user's theme preference from Firestore
+              if (userData.themePreference) {
+                setTheme(userData.themePreference);
+                setThemePreference(userData.themePreference);
+              }
 
             } else {
               const defaultRole = user.uid === ADMIN_USER_UID ? 'admin' : 'user';
@@ -211,11 +252,104 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     try {
       await safeSignOut();
-      router.push('/login'); 
+      router.push('/login');
     } catch (error) {
       console.error("Logout error:", error);
     }
   };
+
+  // Listen for forceLogout flag and auto-logout time from personnel groups
+  useEffect(() => {
+    if (!currentUser || currentUser.isAnonymous) return;
+
+    const userDocRef = doc(db, 'users', currentUser.uid);
+    let lastForceLogoutTime: number | null = null;
+
+    // Listen for forceLogout changes
+    const unsubForceLogout = onSnapshot(userDocRef, async (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+
+      // Check forceLogout field
+      if (data.forceLogout) {
+        const forceLogoutTime = data.forceLogout.toMillis ? data.forceLogout.toMillis() : data.forceLogout;
+
+        // Only logout if this is a new forceLogout (not the one we've already processed)
+        if (lastForceLogoutTime === null || forceLogoutTime > lastForceLogoutTime) {
+          lastForceLogoutTime = forceLogoutTime;
+          console.log('Force logout triggered by admin');
+
+          // Clear the forceLogout flag to prevent re-triggering
+          try {
+            await updateDoc(userDocRef, { forceLogout: deleteField() });
+          } catch (e) {
+            console.error('Failed to clear forceLogout flag:', e);
+          }
+
+          // Perform logout
+          await logout();
+        }
+      }
+    });
+
+    return () => {
+      unsubForceLogout();
+    };
+  }, [currentUser]);
+
+  // Auto-logout based on personnel group's autoLogoutTime
+  useEffect(() => {
+    if (!currentUser || currentUser.isAnonymous) return;
+
+    let intervalId: NodeJS.Timeout | null = null;
+    let currentAutoLogoutTime: string | null = null;
+    let hasLoggedOut = false;
+
+    // Listen to user's personnel groups for autoLogoutTime changes (realtime)
+    const groupsQuery = query(
+      collection(db, 'personelGruplari'),
+      where('memberIds', 'array-contains', currentUser.uid)
+    );
+
+    const unsubGroups = onSnapshot(groupsQuery, (snap) => {
+      currentAutoLogoutTime = null;
+      for (const groupDoc of snap.docs) {
+        const groupData = groupDoc.data();
+        if (groupData.autoLogoutTime) {
+          currentAutoLogoutTime = groupData.autoLogoutTime;
+          break;
+        }
+      }
+    }, (err) => {
+      console.error('Error listening to personnel groups:', err);
+    });
+
+    // Check time every minute (lightweight local comparison only)
+    const checkAndLogout = () => {
+      if (!currentAutoLogoutTime || hasLoggedOut) return;
+
+      const now = new Date();
+      const [targetHours, targetMinutes] = currentAutoLogoutTime.split(':').map(Number);
+      const currentHours = now.getHours();
+      const currentMinutes = now.getMinutes();
+
+      if (currentHours === targetHours && currentMinutes === targetMinutes) {
+        hasLoggedOut = true;
+        console.log(`Auto-logout triggered at ${currentAutoLogoutTime}`);
+        logout();
+      }
+    };
+
+    // Check every minute (60 seconds is sufficient for minute-level precision)
+    intervalId = setInterval(checkAndLogout, 60000);
+    // Also check immediately
+    checkAndLogout();
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      unsubGroups();
+    };
+  }, [currentUser]);
 
   const contextValue = {
     currentUser,
@@ -227,6 +361,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     toggleOrbAnimation,
     navMode,
     toggleNavMode,
+    dockStyle,
+    setDockStyle,
+    themePreference,
+    setUserTheme,
     login,
     signup,
     logout,

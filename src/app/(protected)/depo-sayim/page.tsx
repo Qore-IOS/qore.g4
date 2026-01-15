@@ -11,14 +11,17 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Loader2, Trash2, History, ListChecks, Check, Search } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Loader2, Trash2, History, ListChecks, Check, Search, Plus, PackagePlus, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, writeBatch, doc, addDoc, serverTimestamp, setDoc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, writeBatch, doc, addDoc, serverTimestamp, setDoc, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Depot, ProductCode, DepoStokItem, ConsumptionRecord, DepotStockCountSession } from '@/lib/types';
+import type { MalKabulHeader, MalKabulLine } from '@/lib/mal-kabul/types';
 import BackButton from '@/components/BackButton';
 import useHidScanner from '@/hooks/useHidScanner';
-import { playFeedback, generateId } from '@/lib/utils';
+import { playFeedback } from '@/lib/utils';
+import { nanoid } from 'nanoid';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -28,6 +31,7 @@ import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
+import { Badge } from '@/components/ui/badge';
 
 type CountGroup = {
   id: string; // stokKodu-lot-miad
@@ -41,6 +45,20 @@ type CountGroup = {
   scannedSerials: Set<string>;
   scannedAdet: number;
   items: DepoStokItem[]; // Added to access original items
+  isNewFound?: boolean; // Sayımda yeni bulunan ürün grubu
+};
+
+// Sayımda bulunan yeni ürün (listeye eklenmek üzere bekleyen)
+type PendingNewItem = {
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  miad: string;
+  adet: number;
+  seriNumarasi?: string;
+  trackingMode: TrackingMode;
+  isUnknownProduct: boolean; // productCodes'da tanımlı değil
+  rawBarcode?: string;
 };
 
 export default function DepoSayimPage() {
@@ -56,13 +74,31 @@ export default function DepoSayimPage() {
     
     const [selectedDepotId, setSelectedDepotId] = useState('');
     const [brandForCount, setBrandForCount] = useState('');
+    const [categoryForCount, setCategoryForCount] = useState<'kit' | 'sarf' | ''>('');
     const [brandCountItems, setBrandCountItems] = useState<CountGroup[]>([]);
     const [isCounting, setIsCounting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    
+
+    // Yeni ürün ekleme dialog state'leri
+    const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+    const [pendingNewItem, setPendingNewItem] = useState<PendingNewItem | null>(null);
+    const [newItemForm, setNewItemForm] = useState({
+        stokKodu: '',
+        stokAdi: '',
+        lotNumarasi: '',
+        miad: '',
+        adet: 1,
+        seriNumarasi: '',
+    });
+
     const availableBrands = useMemo(() => {
         const brands = new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]);
         return Array.from(brands).sort();
+    }, [productCodes]);
+
+    const availableCategories = useMemo(() => {
+        const categories = new Set(productCodes.map(p => p.urunGrubu).filter(Boolean) as string[]);
+        return Array.from(categories).sort();
     }, [productCodes]);
 
     const fetchData = useCallback(async () => {
@@ -78,7 +114,7 @@ export default function DepoSayimPage() {
             setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
             setFullDepotStok(stockSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)));
 
-            if(depotList.length > 0 && !selectedDepotId) {
+            if(depotList.length > 0 && depotList[0].id && !selectedDepotId) {
                 setSelectedDepotId(depotList[0].id);
             }
         } catch (e) {
@@ -99,7 +135,12 @@ export default function DepoSayimPage() {
         }
         const items = fullDepotStok.filter(item => {
           const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-          return product?.marka === brandForCount && !item.isShipped && item.depotId === selectedDepotId;
+          if (!product?.marka || product.marka !== brandForCount) return false;
+          if (!item.depotId || item.depotId !== selectedDepotId) return false;
+          if (item.isShipped) return false;
+          // Kategori seçildiyse, sadece o kategorideki ürünleri filtrele
+          if (categoryForCount && product.urunGrubu !== categoryForCount) return false;
+          return true;
         });
 
         const grouped = items.reduce((acc, item) => {
@@ -108,8 +149,8 @@ export default function DepoSayimPage() {
             const product = productCodes.find(p => p.stokKodu === item.stokKodu);
             acc[key] = {
               id: key,
-              stokKodu: item.stokKodu,
-              stokAdi: item.stokAdi,
+              stokKodu: item.stokKodu || '',
+              stokAdi: item.stokAdi || '',
               lotNumarasi: item.lotNumarasi || '',
               miad: item.miad as string || '',
               trackingMode: product ? resolveDefaultTrackingMode(product as any) : 'serial',
@@ -130,55 +171,166 @@ export default function DepoSayimPage() {
         setIsCounting(true);
     };
     
-    const handleScan = useCallback((barcode: string) => {
-        const parsed = parseAuto(barcode, productCodes);
-    
-        if (!parsed || !parsed.product) {
-            playFeedback(true);
-            toast({ title: 'Bilinmeyen Barkod', description: 'Okutulan barkod herhangi bir ürünle eşleşmedi.' });
+    // Yeni ürün ekleme dialog'unu aç
+    const openAddDialog = useCallback((item: PendingNewItem) => {
+        setPendingNewItem(item);
+        setNewItemForm({
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            lotNumarasi: item.lotNumarasi,
+            miad: item.miad,
+            adet: 1,
+            seriNumarasi: item.seriNumarasi || '',
+        });
+        setIsAddDialogOpen(true);
+    }, []);
+
+    // Yeni ürünü listeye ekle
+    const handleAddNewItem = useCallback(() => {
+        if (!pendingNewItem) return;
+
+        const { stokKodu, stokAdi, lotNumarasi, miad, adet, seriNumarasi } = newItemForm;
+
+        if (!stokKodu || !stokAdi) {
+            toast({ title: 'Eksik Bilgi', description: 'Stok kodu ve adı zorunludur.', variant: 'destructive' });
             return;
         }
-    
+
+        const key = `${stokKodu}-${lotNumarasi || ''}-${miad || ''}`;
+
+        setBrandCountItems(prev => {
+            // Aynı grup var mı kontrol et
+            const existingIndex = prev.findIndex(g => g.id === key);
+
+            if (existingIndex !== -1) {
+                // Varsa, scannedAdet'i artır
+                const newItems = [...prev];
+                const group = { ...newItems[existingIndex] };
+
+                if (group.trackingMode === 'serial' && seriNumarasi) {
+                    group.scannedSerials = new Set(group.scannedSerials).add(seriNumarasi);
+                    group.scannedAdet = group.scannedSerials.size;
+                } else {
+                    group.scannedAdet += adet;
+                }
+
+                newItems[existingIndex] = group;
+                return newItems;
+            }
+
+            // Yoksa yeni grup oluştur
+            const newGroup: CountGroup = {
+                id: key,
+                stokKodu,
+                stokAdi,
+                lotNumarasi: lotNumarasi || '',
+                miad: miad || '',
+                trackingMode: pendingNewItem.trackingMode,
+                expectedSerials: [],
+                expectedAdet: 0, // Sistemde yok, beklenen 0
+                scannedSerials: seriNumarasi ? new Set([seriNumarasi]) : new Set(),
+                scannedAdet: pendingNewItem.trackingMode === 'serial' ? (seriNumarasi ? 1 : 0) : adet,
+                items: [],
+                isNewFound: true,
+            };
+
+            return [...prev, newGroup].sort((a, b) => a.stokAdi.localeCompare(b.stokAdi));
+        });
+
+        playFeedback();
+        toast({
+            title: 'Ürün Eklendi',
+            description: `${stokAdi} sayım listesine eklendi.${pendingNewItem.isUnknownProduct ? ' (Sistemde tanımlı değil)' : ''}`
+        });
+
+        setIsAddDialogOpen(false);
+        setPendingNewItem(null);
+    }, [pendingNewItem, newItemForm, toast]);
+
+    const handleScan = useCallback((barcode: string) => {
+        const parsed = parseAuto(barcode, productCodes);
+
+        // Sistemde tanımlı olmayan ürün
+        if (!parsed || !parsed.product) {
+            playFeedback(true);
+            // Dialog aç ve kullanıcıya ekleme seçeneği sun
+            openAddDialog({
+                stokKodu: parsed?.stokKodu || '',
+                stokAdi: '',
+                lotNumarasi: parsed?.lotNumarasi || '',
+                miad: parsed?.miad || '',
+                adet: 1,
+                seriNumarasi: parsed?.seriNumarasi || '',
+                trackingMode: 'lot_miad',
+                isUnknownProduct: true,
+                rawBarcode: barcode,
+            });
+            toast({
+                title: 'Bilinmeyen Ürün',
+                description: 'Bu ürün sistemde tanımlı değil. Bilgileri girerek ekleyebilirsiniz.'
+            });
+            return;
+        }
+
         const groupIndex = brandCountItems.findIndex(g =>
             g.stokKodu === parsed.stokKodu &&
             (g.trackingMode.startsWith('qty_') || g.trackingMode.startsWith('lot_') || g.lotNumarasi === (parsed.lotNumarasi || ''))
         );
-    
+
+        // Ürün tanımlı ama sayım listesinde yok
         if (groupIndex === -1) {
             playFeedback(true);
-            toast({ title: 'Listede Yok', description: 'Okutulan ürün bu markanın sayım listesinde bulunmuyor.', variant: 'destructive' });
+            const product = parsed.product as ProductCode;
+            // Dialog aç ve kullanıcıya ekleme seçeneği sun
+            openAddDialog({
+                stokKodu: parsed.stokKodu || '',
+                stokAdi: product.stokAdi || '',
+                lotNumarasi: parsed.lotNumarasi || '',
+                miad: parsed.miad || '',
+                adet: 1,
+                seriNumarasi: parsed.seriNumarasi || '',
+                trackingMode: resolveDefaultTrackingMode(product as any),
+                isUnknownProduct: false,
+                rawBarcode: barcode,
+            });
+            const categoryText = categoryForCount ? ` ve ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'} kategorisinin` : '';
+            toast({
+                title: 'Listede Yok',
+                description: `Bu ürün sayım listesinde yok. Depoda bulunuyorsa ekleyebilirsiniz.`
+            });
             return;
         }
-    
+
         setBrandCountItems(prevItems => {
             const newItems = [...prevItems];
             const group = { ...newItems[groupIndex] };
-    
+
             if (group.trackingMode === 'serial') {
                 if (!parsed.seriNumarasi) {
                     playFeedback(true);
                     toast({ title: 'Seri No Eksik', description: 'Bu ürün seri numarası ile takip ediliyor, barkod seri no içermiyor.', variant: 'destructive' });
                     return prevItems;
                 }
-                if (group.scannedSerials.has(parsed.seriNumarasi)) {
+                const seriNo = parsed.seriNumarasi as string;
+                if (group.scannedSerials.has(seriNo)) {
                     playFeedback(true);
                     toast({ title: 'Tekrar', description: 'Bu seri numarası zaten okutuldu.', variant: 'default' });
                     return prevItems;
                 }
-                group.scannedSerials = new Set(group.scannedSerials).add(parsed.seriNumarasi);
+                group.scannedSerials = new Set(group.scannedSerials).add(seriNo);
                 // For serial tracked, scannedAdet is the size of the set
                 group.scannedAdet = group.scannedSerials.size;
             } else {
                  group.scannedAdet++; // For lot/qty tracking, just increment
             }
-            
+
             newItems[groupIndex] = group;
             playFeedback();
             toast({ title: 'Doğrulandı', description: `${group.stokAdi} (${group.lotNumarasi}) - Adet: ${group.scannedAdet}` });
             return newItems;
         });
-    
-    }, [brandCountItems, productCodes, parseAuto, toast]);
+
+    }, [brandCountItems, productCodes, parseAuto, toast, categoryForCount, openAddDialog]);
     
     const handleManualVerifyGroup = useCallback((groupId: string) => {
         setBrandCountItems(prevItems => {
@@ -205,37 +357,61 @@ export default function DepoSayimPage() {
     
     const finishBrandCount = async () => {
         if (!currentUserProfile) return;
-        
-        const changes: { group: CountGroup; diff: number }[] = [];
+
+        // Mevcut ürünlerdeki farklar
+        const existingChanges: { group: CountGroup; diff: number }[] = [];
+        // Yeni bulunan ürünler (mal kabul kaydı için)
+        const newFoundItems: CountGroup[] = [];
+
         brandCountItems.forEach(group => {
             const scanned = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
             const diff = scanned - group.expectedAdet;
-            if (diff !== 0) changes.push({ group, diff });
+
+            if (group.isNewFound && scanned > 0) {
+                // Yeni bulunan ve sayılan ürünler
+                newFoundItems.push(group);
+            } else if (diff !== 0) {
+                // Mevcut ürünlerdeki fark
+                existingChanges.push({ group, diff });
+            }
         });
-        
-        const changeSummary = changes.map(c => 
+
+        // Özet oluştur
+        const existingChangeSummary = existingChanges.map(c =>
             `${c.group.stokAdi} (${c.group.lotNumarasi}): ${c.diff > 0 ? `+${c.diff}` : c.diff}`
         ).join('\n');
 
-        if (changes.length === 0) {
+        const newFoundSummary = newFoundItems.map(g => {
+            const adet = g.trackingMode === 'serial' ? g.scannedSerials.size : g.scannedAdet;
+            return `[YENİ] ${g.stokAdi} (${g.lotNumarasi}): +${adet}`;
+        }).join('\n');
+
+        const fullSummary = [existingChangeSummary, newFoundSummary].filter(Boolean).join('\n');
+
+        if (existingChanges.length === 0 && newFoundItems.length === 0) {
             toast({ title: 'Tamamlandı', description: 'Tüm ürünler doğrulandı, stokta değişiklik yok.' });
             setIsCounting(false);
             setBrandCountItems([]);
             return;
         }
-    
-        if (!confirm(`Aşağıdaki stok değişiklikleri uygulanacak:\n\n${changeSummary}\n\nOnaylıyor musunuz?`)) return;
-    
+
+        const confirmMsg = newFoundItems.length > 0
+            ? `Aşağıdaki stok değişiklikleri uygulanacak:\n\n${fullSummary}\n\n⚠️ Yeni bulunan ürünler için mal kabul kaydı oluşturulacak.\n\nOnaylıyor musunuz?`
+            : `Aşağıdaki stok değişiklikleri uygulanacak:\n\n${fullSummary}\n\nOnaylıyor musunuz?`;
+
+        if (!confirm(confirmMsg)) return;
+
         setIsLoading(true);
         const batch = writeBatch(db);
         const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
-    
-        for (const { group, diff } of changes) {
-            if (diff < 0) { // Items are missing
+
+        // 1. Mevcut ürünlerdeki farkları işle
+        for (const { group, diff } of existingChanges) {
+            if (diff < 0) { // Items are missing - Stoktan düşür
                 const itemsToDelete = group.trackingMode === 'serial'
                     ? group.items.filter(item => !group.scannedSerials.has(item.seriNumarasi!))
                     : group.items.slice(0, Math.abs(diff));
-                
+
                 itemsToDelete.forEach(item => {
                     batch.delete(doc(db, 'depoStok', item.id!));
                     const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
@@ -246,29 +422,117 @@ export default function DepoSayimPage() {
                     };
                     batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
                 });
-            } else { // Items are extra
+            } else { // Items are extra - Stoğa ekle
                 for (let i = 0; i < diff; i++) {
                     const newDocRef = doc(collection(db, 'depoStok'));
                     const newEntry: Omit<DepoStokItem, 'id'> = {
                         depotId: selectedDepotId, depotName, stokKodu: group.stokKodu, stokAdi: group.stokAdi,
                         lotNumarasi: group.lotNumarasi, miad: group.miad, eklenmeTarihi: new Date(), isShipped: false,
-                        irsaliyeNumarasi: 'SAYIMDAN_FAZLA', createdByName: currentUserProfile.name, seriNumarasi: `FAZLA-${generateId(6)}`,
+                        irsaliyeNumarasi: 'SAYIMDAN_FAZLA', createdByName: currentUserProfile.name, seriNumarasi: `FAZLA-${nanoid(6)}`,
                     };
                     batch.set(newDocRef, newEntry);
                 }
             }
         }
-        
+
+        // 2. Yeni bulunan ürünler için mal kabul kaydı ve stok oluştur
+        let malKabulTransactionId: string | null = null;
+
+        if (newFoundItems.length > 0) {
+            // Mal kabul transaction ID oluştur
+            malKabulTransactionId = `MK-SAYIM-${nanoid(8)}`;
+            const malKabulRef = doc(collection(db, 'malKabulTransactions'));
+
+            // Mal kabul header
+            const malKabulHeader: MalKabulHeader = {
+                transactionId: malKabulTransactionId,
+                depotId: selectedDepotId,
+                depotName,
+                userId: currentUserProfile.uid,
+                userName: currentUserProfile.name || '',
+                timestamp: Timestamp.now(),
+                itemCount: newFoundItems.reduce((sum, g) =>
+                    sum + (g.trackingMode === 'serial' ? g.scannedSerials.size : g.scannedAdet), 0),
+                brands: [...new Set(newFoundItems.map(g => brandForCount))],
+                mode: 'unverified',
+            };
+
+            batch.set(malKabulRef, malKabulHeader);
+
+            // Her yeni ürün için mal kabul line ve stok kayıtları
+            for (const group of newFoundItems) {
+                const adet = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
+                const serials = group.trackingMode === 'serial' ? Array.from(group.scannedSerials) : [];
+
+                // Mal kabul line
+                const lineRef = doc(collection(db, 'malKabulTransactions', malKabulRef.id, 'lines'));
+                const malKabulLine: MalKabulLine = {
+                    stokKodu: group.stokKodu,
+                    stokAdi: group.stokAdi,
+                    lotNumarasi: group.lotNumarasi,
+                    miad: group.miad,
+                    adet,
+                    serials,
+                };
+                batch.set(lineRef, malKabulLine);
+
+                // Stok kayıtları oluştur
+                if (group.trackingMode === 'serial') {
+                    // Seri takipli - her seri için ayrı kayıt
+                    for (const seri of serials) {
+                        const stockRef = doc(collection(db, 'depoStok'));
+                        const stockEntry: Omit<DepoStokItem, 'id'> = {
+                            depotId: selectedDepotId,
+                            depotName,
+                            stokKodu: group.stokKodu,
+                            stokAdi: group.stokAdi,
+                            lotNumarasi: group.lotNumarasi,
+                            miad: group.miad,
+                            seriNumarasi: seri,
+                            eklenmeTarihi: new Date(),
+                            isShipped: false,
+                            irsaliyeNumarasi: malKabulTransactionId,
+                            createdByName: currentUserProfile.name,
+                        };
+                        batch.set(stockRef, stockEntry);
+                    }
+                } else {
+                    // Lot/Adet takipli - adet kadar kayıt
+                    for (let i = 0; i < adet; i++) {
+                        const stockRef = doc(collection(db, 'depoStok'));
+                        const stockEntry: Omit<DepoStokItem, 'id'> = {
+                            depotId: selectedDepotId,
+                            depotName,
+                            stokKodu: group.stokKodu,
+                            stokAdi: group.stokAdi,
+                            lotNumarasi: group.lotNumarasi,
+                            miad: group.miad,
+                            seriNumarasi: `SAYIM-${nanoid(6)}`,
+                            eklenmeTarihi: new Date(),
+                            isShipped: false,
+                            irsaliyeNumarasi: malKabulTransactionId,
+                            createdByName: currentUserProfile.name,
+                        };
+                        batch.set(stockRef, stockEntry);
+                    }
+                }
+            }
+        }
+
         try {
-          await batch.commit();
-          toast({ title: 'Başarılı', description: 'Stok farkları başarıyla kaydedildi.' });
-          await fetchData();
+            await batch.commit();
+            const message = malKabulTransactionId
+                ? `Stok farkları kaydedildi. Mal Kabul No: ${malKabulTransactionId}`
+                : 'Stok farkları başarıyla kaydedildi.';
+            toast({ title: 'Başarılı', description: message });
+            await fetchData();
         } catch(e) {
-          toast({ title: 'Hata', description: 'Stok güncellenirken bir hata oluştu.', variant: 'destructive' });
+            toast({ title: 'Hata', description: 'Stok güncellenirken bir hata oluştu.', variant: 'destructive' });
+            console.error('finishBrandCount error:', e);
         } finally {
-          setIsLoading(false);
-          setIsCounting(false);
-          setBrandCountItems([]);
+            setIsLoading(false);
+            setIsCounting(false);
+            setBrandCountItems([]);
         }
     };
     
@@ -308,11 +572,11 @@ export default function DepoSayimPage() {
                         Depo Sayımı
                     </CardTitle>
                     <CardDescription>
-                        Belirli bir markaya ait ürünlerin depo sayımını yapmak için depo ve marka seçin.
+                        Belirli bir markaya ve opsiyonel olarak ürün kategorisine (Kit/Sarf) ait ürünlerin depo sayımını yapmak için depo, marka ve kategori seçin.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <Label>Depo</Label>
                             <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isCounting}>
@@ -325,6 +589,22 @@ export default function DepoSayimPage() {
                             <Select value={brandForCount} onValueChange={setBrandForCount} disabled={isCounting}>
                                 <SelectTrigger><SelectValue placeholder="Marka Seçin..." /></SelectTrigger>
                                 <SelectContent>{availableBrands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Ürün Kategorisi</Label>
+                            <Select
+                                value={categoryForCount || '__all__'}
+                                onValueChange={(v) => setCategoryForCount(v === '__all__' ? '' : v as 'kit' | 'sarf')}
+                                disabled={isCounting}
+                            >
+                                <SelectTrigger><SelectValue placeholder="Kategori Seçin (Opsiyonel)..." /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__all__">Tümü</SelectItem>
+                                    {availableCategories.map(c => (
+                                        <SelectItem key={c} value={c}>{c === 'kit' ? 'Kit' : 'Sarf'}</SelectItem>
+                                    ))}
+                                </SelectContent>
                             </Select>
                         </div>
                     </div>
@@ -344,7 +624,7 @@ export default function DepoSayimPage() {
             {isCounting && (
                  <Card className="shadow-lg">
                   <CardHeader>
-                    <CardTitle>Marka Sayımı: {brandForCount}</CardTitle>
+                    <CardTitle>Sayım: {brandForCount}{categoryForCount ? ` - ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'}` : ''}</CardTitle>
                     <CardDescription>Okutulan ürünler yeşil, kalanlar kırmızı ile gösterilir. Tümünü doğrulamak için satır yanındaki tik butonunu kullanın.</CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -362,26 +642,59 @@ export default function DepoSayimPage() {
                         {filteredBrandCountItems.map((group) => {
                           const scannedCount = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
                           const isComplete = scannedCount >= group.expectedAdet;
+                          const isNewFound = group.isNewFound;
                           return (
-                            <AccordionItem key={group.id} value={group.id} className={cn("border-b", isComplete && 'bg-green-500/10')}>
+                            <AccordionItem key={group.id} value={group.id} className={cn(
+                              "border-b",
+                              isNewFound && 'bg-blue-500/10 border-blue-300',
+                              !isNewFound && isComplete && 'bg-green-500/10'
+                            )}>
                               <AccordionTrigger>
-                                <div className="flex-1 text-left">{group.stokAdi} ({group.stokKodu}) - Lot: {group.lotNumarasi}</div>
-                                <div className="text-right font-bold pr-4">{scannedCount} / {group.expectedAdet}</div>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleManualVerifyGroup(group.id);
-                                    }}
-                                    className="h-8 w-8 ml-2 hover:bg-green-500/20"
-                                    title="Tümünü doğrula"
-                                >
-                                    <Check className="h-5 w-5 text-green-600" />
-                                </Button>
+                                <div className="flex-1 text-left flex items-center gap-2">
+                                  {group.stokAdi} ({group.stokKodu}) - Lot: {group.lotNumarasi}
+                                  {isNewFound && (
+                                    <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
+                                      <PackagePlus className="h-3 w-3 mr-1" />
+                                      YENİ
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="text-right font-bold pr-4">
+                                  {isNewFound ? `+${scannedCount}` : `${scannedCount} / ${group.expectedAdet}`}
+                                </div>
+                                {!isNewFound && (
+                                  <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleManualVerifyGroup(group.id);
+                                      }}
+                                      className="h-8 w-8 ml-2 hover:bg-green-500/20"
+                                      title="Tümünü doğrula"
+                                  >
+                                      <Check className="h-5 w-5 text-green-600" />
+                                  </Button>
+                                )}
                               </AccordionTrigger>
                               <AccordionContent>
-                                {group.trackingMode === 'serial' ? (
+                                {isNewFound ? (
+                                  <div className="p-2 text-sm">
+                                    <p className="text-blue-600 font-medium mb-1">Sayımda yeni bulunan ürün</p>
+                                    <p className="text-muted-foreground">
+                                      Bu ürün sistemde kayıtlı değildi. Sayım bittiğinde mal kabul kaydı oluşturularak stoğa eklenecek.
+                                    </p>
+                                    {group.trackingMode === 'serial' && group.scannedSerials.size > 0 && (
+                                      <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        {Array.from(group.scannedSerials).map((serial) => (
+                                          <div key={serial} className="p-1 text-xs rounded font-mono bg-blue-200">
+                                            {serial}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : group.trackingMode === 'serial' ? (
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-2">
                                     {group.expectedSerials.map((serial: any) => (
                                         <div key={serial} className={cn("p-1 text-xs rounded font-mono", group.scannedSerials.has(serial) ? 'bg-green-200' : 'bg-red-200')}>
@@ -401,6 +714,109 @@ export default function DepoSayimPage() {
                   </CardContent>
                 </Card>
             )}
+
+            {/* Yeni Ürün Ekleme Dialog'u */}
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <PackagePlus className="h-5 w-5 text-blue-600" />
+                            {pendingNewItem?.isUnknownProduct ? 'Bilinmeyen Ürün Ekle' : 'Yeni Ürün Ekle'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {pendingNewItem?.isUnknownProduct
+                                ? 'Bu ürün sistemde tanımlı değil. Bilgilerini girerek sayım listesine ekleyebilirsiniz.'
+                                : 'Bu ürün sayım listesinde yok. Depoda bulunuyorsa aşağıdaki bilgilerle ekleyebilirsiniz.'}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {pendingNewItem?.isUnknownProduct && (
+                        <div className="flex items-center gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md text-sm">
+                            <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                            <span className="text-yellow-700">Bu ürün sistemde tanımlı değil. Sayım bittiğinde mal kabul kaydı oluşturulacak.</span>
+                        </div>
+                    )}
+
+                    <div className="space-y-4 py-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <Label>Stok Kodu *</Label>
+                                <Input
+                                    value={newItemForm.stokKodu}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, stokKodu: e.target.value }))}
+                                    placeholder="Stok kodu..."
+                                    disabled={!pendingNewItem?.isUnknownProduct && !!pendingNewItem?.stokKodu}
+                                />
+                            </div>
+                            <div>
+                                <Label>Stok Adı *</Label>
+                                <Input
+                                    value={newItemForm.stokAdi}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, stokAdi: e.target.value }))}
+                                    placeholder="Ürün adı..."
+                                    disabled={!pendingNewItem?.isUnknownProduct && !!pendingNewItem?.stokAdi}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <Label>Lot Numarası</Label>
+                                <Input
+                                    value={newItemForm.lotNumarasi}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, lotNumarasi: e.target.value }))}
+                                    placeholder="Lot no..."
+                                />
+                            </div>
+                            <div>
+                                <Label>Miad (SKT)</Label>
+                                <Input
+                                    value={newItemForm.miad}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, miad: e.target.value }))}
+                                    placeholder="dd.MM.yyyy"
+                                />
+                            </div>
+                        </div>
+
+                        {pendingNewItem?.trackingMode === 'serial' ? (
+                            <div>
+                                <Label>Seri Numarası</Label>
+                                <Input
+                                    value={newItemForm.seriNumarasi}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, seriNumarasi: e.target.value }))}
+                                    placeholder="Seri numarası..."
+                                />
+                            </div>
+                        ) : (
+                            <div>
+                                <Label>Adet</Label>
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    value={newItemForm.adet}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, adet: parseInt(e.target.value) || 1 }))}
+                                />
+                            </div>
+                        )}
+
+                        {pendingNewItem?.rawBarcode && (
+                            <div className="text-xs text-muted-foreground">
+                                <span className="font-medium">Okunan Barkod:</span> {pendingNewItem.rawBarcode}
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => { setIsAddDialogOpen(false); setPendingNewItem(null); }}>
+                            İptal
+                        </Button>
+                        <Button onClick={handleAddNewItem} disabled={!newItemForm.stokKodu || !newItemForm.stokAdi}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Listeye Ekle
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

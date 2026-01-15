@@ -74,10 +74,228 @@
 }
 
 @layer components {
-    .glass-card {
-        @apply bg-card/60 backdrop-blur-xl border border-white/10;
+    /* --- NEU-CARD: Neumorphic (Light) / Liquid Glass (Dark) --- */
+    .neu-card {
+        /* Light mode: Neumorphic */
+        background-color: #e0e0e0;
+        box-shadow: 9px 9px 18px #bebebe, -9px -9px 18px #ffffff;
     }
-    
+
+    /* Dark mode: 3D Liquid Glass Card with Refraction */
+    .dark .neu-card {
+        position: relative;
+        background: linear-gradient(
+          145deg,
+          rgba(255, 255, 255, 0.07) 0%,
+          rgba(255, 255, 255, 0.02) 40%,
+          rgba(255, 255, 255, 0.01) 60%,
+          rgba(255, 255, 255, 0.04) 100%
+        );
+        border: none;
+        border-radius: 20px;
+        /* Lens effect: magnification + saturation */
+        backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
+        -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
+        overflow: visible;
+        isolation: isolate;
+
+        /* 3D Depth: Multiple shadow layers + inner refraction shadows */
+        box-shadow:
+          /* Dış derinlik gölgesi */
+          0 16px 56px rgba(15, 30, 60, 0.4),
+          0 6px 20px rgba(15, 30, 60, 0.3),
+          /* İç üst ışık - üst kenardan vuran ışık (Y: 1) */
+          inset 0 1px 2px rgba(255, 255, 255, 0.15),
+          /* İç alt ışık refraksiyonu - caustic effect (Y: -1) */
+          inset 0 -1px 2px rgba(255, 255, 255, 0.08),
+          /* İç kenar refraksiyon halkası - soldan */
+          inset 2px 0 3px rgba(255, 255, 255, 0.06),
+          /* İç kenar refraksiyon halkası - sağdan */
+          inset -2px 0 3px rgba(255, 255, 255, 0.06);
+    }
+
+    /* Light A - Üst kenar rim glow (dış parlama) */
+    .dark .neu-card::before {
+        content: '';
+        position: absolute;
+        inset: -4px;
+        border-radius: 24px;
+        background:
+          /* Üst kenar gradient ışık */
+          radial-gradient(
+            ellipse 60% 20% at 50% 0%,
+            rgba(255, 255, 255, 0.18) 0%,
+            transparent 60%
+          ),
+          /* Sol üst köşe speküler */
+          radial-gradient(
+            ellipse 30% 20% at 10% 10%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+          );
+        filter: blur(8px);
+        opacity: 0.5;
+        pointer-events: none;
+        z-index: -1;
+    }
+
+    /* Light B/C/D - İç hacimsel parlama, speküler ve refraksiyon */
+    .dark .neu-card::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background:
+          /* Light C - Sol üst speküler highlight (metalik parlama) */
+          radial-gradient(
+            ellipse 40% 30% at 12% 12%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+          ),
+          /* Light D - Sağ alt speküler */
+          radial-gradient(
+            ellipse 35% 25% at 88% 88%,
+            rgba(255, 255, 255, 0.06) 0%,
+            transparent 50%
+          ),
+          /* Light B - Üst hacimsel iç ışık (camın içine yayılan) */
+          radial-gradient(
+            ellipse 90% 40% at 50% 5%,
+            rgba(255, 255, 255, 0.1) 0%,
+            transparent 50%
+          ),
+          /* Inner edge refraction gradient - üst kenar */
+          linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.08) 0%,
+            transparent 15%,
+            transparent 85%,
+            rgba(255, 255, 255, 0.04) 100%
+          );
+        pointer-events: none;
+        mix-blend-mode: overlay;
+    }
+
+    /* Hover state - enhanced 3D effect */
+    .dark .neu-card:hover {
+        box-shadow:
+          0 0 35px rgba(255, 255, 255, 0.05),
+          0 20px 64px rgba(15, 30, 60, 0.45),
+          0 8px 24px rgba(15, 30, 60, 0.35),
+          inset 0 1px 3px rgba(255, 255, 255, 0.2),
+          inset 0 -1px 3px rgba(255, 255, 255, 0.1),
+          inset 2px 0 4px rgba(255, 255, 255, 0.08),
+          inset -2px 0 4px rgba(255, 255, 255, 0.08);
+    }
+
+    .dark .neu-card:hover::before {
+        opacity: 0.65;
+    }
+
+    /* --- GLASS-CARD: For other glass elements (same 3D effect) --- */
+    .glass-card {
+        @apply bg-card/60 backdrop-blur-xl;
+    }
+
+    /* Dark mode: 3D Liquid Glass effect for glass-card */
+    .dark .glass-card {
+        background: linear-gradient(
+          145deg,
+          rgba(255, 255, 255, 0.07) 0%,
+          rgba(255, 255, 255, 0.02) 40%,
+          rgba(255, 255, 255, 0.01) 60%,
+          rgba(255, 255, 255, 0.04) 100%
+        );
+        border: none !important;
+        border-radius: 20px;
+        backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
+        -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
+
+        box-shadow:
+          0 16px 56px rgba(15, 30, 60, 0.4),
+          0 6px 20px rgba(15, 30, 60, 0.3),
+          inset 0 1px 2px rgba(255, 255, 255, 0.15),
+          inset 0 -1px 2px rgba(255, 255, 255, 0.08),
+          inset 2px 0 3px rgba(255, 255, 255, 0.06),
+          inset -2px 0 3px rgba(255, 255, 255, 0.06);
+    }
+
+    /* Apply position and isolation only for non-fixed elements */
+    .dark .glass-card:not([data-fixed="true"]) {
+        position: relative;
+        overflow: visible;
+        isolation: isolate;
+    }
+
+    .dark .glass-card:not([data-fixed="true"])::before {
+        content: '';
+        position: absolute;
+        inset: -4px;
+        border-radius: 24px;
+        background:
+          radial-gradient(
+            ellipse 60% 20% at 50% 0%,
+            rgba(255, 255, 255, 0.18) 0%,
+            transparent 60%
+          ),
+          radial-gradient(
+            ellipse 30% 20% at 10% 10%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+          );
+        filter: blur(8px);
+        opacity: 0.5;
+        pointer-events: none;
+        z-index: -1;
+    }
+
+    .dark .glass-card:not([data-fixed="true"])::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background:
+          radial-gradient(
+            ellipse 40% 30% at 12% 12%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+          ),
+          radial-gradient(
+            ellipse 35% 25% at 88% 88%,
+            rgba(255, 255, 255, 0.06) 0%,
+            transparent 50%
+          ),
+          radial-gradient(
+            ellipse 90% 40% at 50% 5%,
+            rgba(255, 255, 255, 0.1) 0%,
+            transparent 50%
+          ),
+          linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.08) 0%,
+            transparent 15%,
+            transparent 85%,
+            rgba(255, 255, 255, 0.04) 100%
+          );
+        pointer-events: none;
+        mix-blend-mode: overlay;
+    }
+
+    .dark .glass-card:hover {
+        box-shadow:
+          0 0 35px rgba(255, 255, 255, 0.05),
+          0 20px 64px rgba(15, 30, 60, 0.45),
+          0 8px 24px rgba(15, 30, 60, 0.35),
+          inset 0 1px 3px rgba(255, 255, 255, 0.2),
+          inset 0 -1px 3px rgba(255, 255, 255, 0.1),
+          inset 2px 0 4px rgba(255, 255, 255, 0.08),
+          inset -2px 0 4px rgba(255, 255, 255, 0.08);
+    }
+
+    .dark .glass-card:hover::before {
+        opacity: 0.65;
+    }
+
     .text-gradient-primary {
         @apply bg-gradient-to-r from-primary to-orange-400 text-transparent bg-clip-text;
     }
@@ -115,6 +333,219 @@
   /* Specific Text Colors for Light Mode Variants (since we removed bg color) */
   :root:not(.dark) .neu-text-primary { color: #f59e0b; /* Amber/Gold or your primary var */ font-weight: 600; }
   :root:not(.dark) .neu-text-destructive { color: #ef4444; font-weight: 600; }
+
+  /* --- DARK MODE: LIQUID GLASS BUTTON --- */
+  .dark .neu-btn-universal {
+    position: relative;
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.06) 0%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(255, 255, 255, 0.04) 100%
+    );
+    /* Kenarlık yok - sadece ışık ve gölge ile tanımlanır */
+    border: none;
+    border-radius: 12px;
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    overflow: visible;
+    isolation: isolate;
+
+    /* Sadece dış gölge - kenar çizgisi yok */
+    box-shadow:
+      0 8px 32px rgba(20, 40, 80, 0.35),
+      0 2px 8px rgba(20, 40, 80, 0.25);
+
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Light A - Çok yumuşak rim glow (kenar çizgisi değil, parlama) */
+  .dark .neu-btn-universal::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 14px;
+    background: radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      rgba(255, 255, 255, 0.15) 0%,
+      transparent 50%
+    );
+    filter: blur(8px);
+    opacity: 0.3;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* Light B - Volumetric Glow + Light C/D - Specular Highlights */
+  .dark .neu-btn-universal::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      /* Light C - Specular highlight top-left */
+      radial-gradient(
+        ellipse 60% 40% at 20% 20%,
+        rgba(255, 255, 255, 0.15) 0%,
+        transparent 50%
+      ),
+      /* Light D - Specular highlight bottom-right */
+      radial-gradient(
+        ellipse 50% 30% at 80% 80%,
+        rgba(255, 255, 255, 0.08) 0%,
+        transparent 50%
+      ),
+      /* Light B - Volumetric inner glow */
+      radial-gradient(
+        ellipse 100% 100% at 50% 0%,
+        rgba(255, 255, 255, 0.1) 0%,
+        transparent 60%
+      );
+    pointer-events: none;
+    mix-blend-mode: overlay;
+  }
+
+  /* Hover state - enhanced glow */
+  .dark .neu-btn-universal:hover {
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.04) 50%,
+      rgba(255, 255, 255, 0.08) 100%
+    );
+    box-shadow:
+      0 0 25px rgba(255, 255, 255, 0.06),
+      0 12px 40px rgba(20, 40, 80, 0.45),
+      0 4px 12px rgba(20, 40, 80, 0.35);
+    transform: translateY(-1px);
+  }
+
+  .dark .neu-btn-universal:hover::before {
+    opacity: 0.5;
+  }
+
+  /* Active/Pressed state */
+  .dark .neu-btn-universal:active {
+    transform: translateY(0) scale(0.98);
+    box-shadow:
+      0 4px 16px rgba(20, 40, 80, 0.4),
+      0 1px 4px rgba(20, 40, 80, 0.3),
+      inset 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Primary variant - warm amber glow */
+  .dark .neu-btn-universal.neu-text-primary {
+    background: linear-gradient(
+      135deg,
+      rgba(245, 158, 11, 0.12) 0%,
+      rgba(245, 158, 11, 0.04) 50%,
+      rgba(245, 158, 11, 0.08) 100%
+    );
+    box-shadow:
+      0 8px 32px rgba(180, 100, 20, 0.3),
+      0 2px 8px rgba(180, 100, 20, 0.2);
+  }
+
+  .dark .neu-btn-universal.neu-text-primary::before {
+    background: radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      rgba(245, 158, 11, 0.25) 0%,
+      transparent 50%
+    );
+  }
+
+  .dark .neu-btn-universal.neu-text-primary:hover {
+    background: linear-gradient(
+      135deg,
+      rgba(245, 158, 11, 0.18) 0%,
+      rgba(245, 158, 11, 0.06) 50%,
+      rgba(245, 158, 11, 0.12) 100%
+    );
+    box-shadow:
+      0 0 30px rgba(245, 158, 11, 0.12),
+      0 12px 40px rgba(180, 100, 20, 0.4),
+      0 4px 12px rgba(180, 100, 20, 0.3);
+  }
+
+  /* Destructive variant - red glow */
+  .dark .neu-btn-universal.neu-text-destructive {
+    background: linear-gradient(
+      135deg,
+      rgba(239, 68, 68, 0.12) 0%,
+      rgba(239, 68, 68, 0.04) 50%,
+      rgba(239, 68, 68, 0.08) 100%
+    );
+    box-shadow:
+      0 8px 32px rgba(120, 30, 30, 0.3),
+      0 2px 8px rgba(120, 30, 30, 0.2);
+  }
+
+  .dark .neu-btn-universal.neu-text-destructive::before {
+    background: radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      rgba(239, 68, 68, 0.25) 0%,
+      transparent 50%
+    );
+  }
+
+  .dark .neu-btn-universal.neu-text-destructive:hover {
+    background: linear-gradient(
+      135deg,
+      rgba(239, 68, 68, 0.18) 0%,
+      rgba(239, 68, 68, 0.06) 50%,
+      rgba(239, 68, 68, 0.12) 100%
+    );
+    box-shadow:
+      0 0 30px rgba(239, 68, 68, 0.12),
+      0 12px 40px rgba(120, 30, 30, 0.4),
+      0 4px 12px rgba(120, 30, 30, 0.3);
+  }
+
+  /* Secondary/Outline variant - subtle glass */
+  .dark .neu-btn-universal:not(.neu-text-primary):not(.neu-text-destructive) {
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(255, 255, 255, 0.04) 100%
+    );
+    box-shadow:
+      0 6px 24px rgba(20, 40, 80, 0.3),
+      0 2px 6px rgba(20, 40, 80, 0.2);
+  }
+
+  .dark .neu-btn-universal:not(.neu-text-primary):not(.neu-text-destructive):hover {
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.08) 0%,
+      rgba(255, 255, 255, 0.03) 50%,
+      rgba(255, 255, 255, 0.06) 100%
+    );
+    box-shadow:
+      0 0 20px rgba(255, 255, 255, 0.04),
+      0 10px 32px rgba(20, 40, 80, 0.4),
+      0 4px 10px rgba(20, 40, 80, 0.3);
+  }
+
+  /* Disabled state for dark mode */
+  .dark .neu-btn-universal:disabled {
+    background: rgba(255, 255, 255, 0.02) !important;
+    box-shadow: 0 4px 16px rgba(20, 40, 80, 0.2) !important;
+    opacity: 0.5;
+  }
+
+  .dark .neu-btn-universal:disabled::before {
+    opacity: 0.05 !important;
+  }
+
+  /* Focus state ring for dark mode */
+  .dark .neu-btn-universal:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px rgba(245, 158, 11, 0.4),
+      0 8px 32px rgba(20, 40, 80, 0.4),
+      0 2px 8px rgba(20, 40, 80, 0.3);
+  }
 
   /* --- STOP BUTTON STYLES --- */
   .btn-wrapper {
@@ -329,4 +760,65 @@
      background-image: none;
      background-color: hsla(var(--hue), 50%, 50%, 1);
   }
+}
+
+/* Dialog/Modal specific styles */
+.animation-dialog-content {
+  animation: dialogContentShow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dialogContentShow {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* Ensure dialogs with glass-card maintain fixed positioning */
+[data-radix-dialog-content] {
+  position: fixed !important;
+}
+
+/* Leaflet map z-index fix - ensure maps don't overlap dialogs */
+.route-map,
+.route-map .leaflet-container {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.route-map .leaflet-pane,
+.route-map .leaflet-tile-pane,
+.route-map .leaflet-overlay-pane,
+.route-map .leaflet-shadow-pane,
+.route-map .leaflet-marker-pane,
+.route-map .leaflet-tooltip-pane,
+.route-map .leaflet-popup-pane {
+  z-index: 1 !important;
+}
+
+.route-map .leaflet-control {
+  z-index: 10 !important;
+}
+
+.route-map .leaflet-top,
+.route-map .leaflet-bottom {
+  z-index: 10 !important;
+}
+
+/* Flow animation for on-the-road status */
+@keyframes flow {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-flow {
+  animation: flow 2s ease-in-out infinite;
 }

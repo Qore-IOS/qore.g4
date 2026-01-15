@@ -12,6 +12,7 @@ import { Loader2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { toDateSafe } from '@/lib/date';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from "@/hooks/use-toast";
 
@@ -173,8 +174,8 @@ export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayi
     return months.map(monthStart => {
         const monthEnd = endOfMonth(monthStart);
         const monthConsumptions = tuketimKayitlari.filter(k => {
-            if (!k.consumptionTimestamp || !isValid(new Date(k.consumptionTimestamp))) return false;
-            const d = new Date(k.consumptionTimestamp);
+            const d = toDateSafe(k.consumptionTimestamp);
+            if (!d || !isValid(d)) return false;
             return d >= monthStart && d <= monthEnd;
         });
 

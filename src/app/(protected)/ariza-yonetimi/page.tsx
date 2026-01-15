@@ -35,7 +35,7 @@ import {
   FileSpreadsheet, // Added for Excel icon
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
-import { format } from 'date-fns';
+import { format, differenceInMinutes } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -183,6 +183,9 @@ export default function ArizaYonetimiPage() {
       'Kapanış Tarihi': r.closedAt ? format(r.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
       'Kapatan Personel': r.closedByName || '',
       'Kapanış Açıklaması': r.closeDescription || '',
+      'Çözüm Süresi (dk)': r.status === 'closed' && r.openedAt && r.closedAt
+        ? differenceInMinutes(r.closedAt, r.openedAt)
+        : '',
     }));
     exportDataToExcel(dataToExport, 'Tum_Ariza_Kayitlari', 'Arızalar', toast);
   };
@@ -272,13 +275,14 @@ export default function ArizaYonetimiPage() {
                       </TableHead>
                       <TableHead>Açılış</TableHead>
                       <TableHead>Kapanış</TableHead>
+                      <TableHead>Çözüm Süresi</TableHead>
                       {isAdmin && <TableHead className="text-right">İşlemler</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paginatedReports.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={isAdmin ? 7 : 6} className="h-24 text-center">
+                        <TableCell colSpan={isAdmin ? 8 : 7} className="h-24 text-center">
                           Arıza kaydı bulunamadı.
                         </TableCell>
                       </TableRow>
@@ -316,6 +320,11 @@ export default function ArizaYonetimiPage() {
                           <TableCell data-label="Kapanış" className="text-xs">
                             {report.closedAt
                               ? format(report.closedAt, 'dd.MM.yy HH:mm', { locale: tr })
+                              : '-'}
+                          </TableCell>
+                          <TableCell data-label="Çözüm Süresi" className="text-xs">
+                            {report.status === 'closed' && report.openedAt && report.closedAt
+                              ? `${differenceInMinutes(report.closedAt, report.openedAt)} dk`
                               : '-'}
                           </TableCell>
                           {isAdmin && (

@@ -1,20 +1,28 @@
+/**
+ * @fileoverview Product Usage Panel Component
+ * @description Enterprise-grade product usage panel for barcode scanning,
+ * stock deduction, manual consumption, and trash bin operations in laboratory environments.
+ * @module components/urun-kullanim-panel
+ * @version 2.0.0
+ */
 
 'use client';
 import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useParams } from 'next/navigation';
-import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup } from '@/lib/types';
+import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup, TrashBinRecord } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play } from 'lucide-react';
+import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut } from 'lucide-react';
 import { playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { useLoading } from '@/contexts/loading-context';
 import { compareAsc, parse as parseDate } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
@@ -22,23 +30,31 @@ import Image from 'next/image';
 import { Label } from '@/components/ui/label';
 import { useUsageRouteSync } from '@/hooks/useUsageRouteSync';
 import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
-import { TrackingMode } from '@/lib/tracking';
+import { TrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { emitFaultOpened, emitFefoOverride } from '@/lib/notifications';
 import { Input } from './ui/input';
 import { openDeviceFaultReport } from '@/lib/faults';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useLightDashboardData } from './dashboard/useDashboardData';
-import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices } from '@/hooks/useFirebaseQueries';
+import { incrementTodayStats } from '@/lib/dailyConsumptionStats';
+import { urunKullanimLogger } from '@/lib/logger';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>,
 });
 
-const logSerialHistory = async (seriNo: string, type: string, details: any) => {
+/**
+ * Logs serial number history to Firestore
+ * @param seriNo - Serial number to log
+ * @param type - Event type (consumption, transfer, etc.)
+ * @param details - Event details
+ */
+const logSerialHistory = async (seriNo: string, type: string, details: Record<string, unknown>) => {
     if (!seriNo) {
-        console.warn("Attempted to log history for an empty serial number.");
+        urunKullanimLogger.warn('Boş seri numarası için geçmiş kaydı atlandı', { type });
         return;
     }
     const historyRef = collection(db, `serialHistory/${seriNo}/events`);
@@ -50,32 +66,45 @@ const logSerialHistory = async (seriNo: string, type: string, details: any) => {
 };
 
 export default function UrunKullanimPanel() {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, logout } = useAuth();
+  const { suppressGlobalLoading } = useLoading();
   const { toast } = useToast();
   const router = useRouter();
   const params = useParams();
+
+  // Suppress global loading animation on this page for better performance
+  useEffect(() => {
+    const unsuppress = suppressGlobalLoading();
+    return unsuppress;
+  }, [suppressGlobalLoading]);
 
   const slug = params.slug as string[] | undefined;
   const labIdFromUrl = slug?.[0] || '';
   const pointIdFromUrl = slug?.[1] || '';
 
+  // State must be defined before using in hooks
+  const [selectedLabId, setSelectedLabId] = useState(labIdFromUrl);
+  const [selectedSubPointId, setSelectedSubPointId] = useState(pointIdFromUrl);
+
   // Use lightweight dashboard data (no heavy collections like depoStok, tuketimKayitlari)
   const {
       hospitals: laboratories,
-      devices,
       productCodes: products,
-      labPools,
       isLoading,
   } = useLightDashboardData();
+
+  // Fetch lab pools and devices separately
+  const { data: labPools = [], isLoading: labPoolsLoading } = useLabPools();
+  const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
   const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
   const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
 
-  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
+  // Fetch min/max rules for selected lab (for trash bin product filtering)
+  const { data: minMaxRules = [] } = useMinMaxRules(selectedLabId);
 
-  const [selectedLabId, setSelectedLabId] = useState(labIdFromUrl);
-  const [selectedSubPointId, setSelectedSubPointId] = useState(pointIdFromUrl);
+  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
 
   // Use TanStack Query for subPoints of selected lab only (not all labs!)
   const { data: selectedLabSubPoints = [] } = useSubPoints(selectedLabId);
@@ -110,6 +139,20 @@ export default function UrunKullanimPanel() {
   const [manualQuantity, setManualQuantity] = useState(1);
   const [isSessionActive, setIsSessionActive] = useState(false);
 
+  // Trash bin modal states
+  const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
+  const [selectedTrashDevice, setSelectedTrashDevice] = useState<Device | null>(null);
+  const [trashItems, setTrashItems] = useState<Array<{
+    id: string;
+    productCode: string;
+    productName: string;
+    remainingTests: number;
+  }>>([]);
+  const [selectedTrashProduct, setSelectedTrashProduct] = useState('');
+  const [trashRemainingTests, setTrashRemainingTests] = useState<number>(0);
+  const [trashProductSearch, setTrashProductSearch] = useState('');
+  const [isTrashProductPopoverOpen, setIsTrashProductPopoverOpen] = useState(false);
+
   useEffect(() => {
     const handleOpenFaultModal = (event: CustomEvent<Device>) => {
       setSelectedDevice(event.detail);
@@ -123,13 +166,16 @@ export default function UrunKullanimPanel() {
     };
   }, []);
 
+
   // Fetch device groups (small collection, rarely changes)
   useEffect(() => {
     const fetchDeviceGroups = async () => {
       try {
         const dgsnap = await getDocs(collection(db, 'def_deviceGroups'));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
+        urunKullanimLogger.debug('Cihaz grupları yüklendi', { count: dgsnap.docs.length });
       } catch (e) {
+        urunKullanimLogger.error('Cihaz grupları yüklenemedi', e);
         toast({title: 'Hata', description: 'Cihaz grupları yüklenemedi.', variant: 'destructive'});
       }
     };
@@ -161,11 +207,36 @@ export default function UrunKullanimPanel() {
     return [];
   }, [currentUserProfile, laboratories]);
 
+  // Auto-select lab: for teknisyen use lastSelectedLabId, otherwise use first assigned lab if only one
   useEffect(() => {
-    if (assignedLaboratories.length === 1 && !selectedLabId) {
+    if (selectedLabId) return; // Already selected
+
+    // For teknisyen users, use lastSelectedLabId from profile
+    if (currentUserProfile?.role === 'teknisyen' && currentUserProfile.lastSelectedLabId) {
+      onHospitalSelect(currentUserProfile.lastSelectedLabId);
+      return;
+    }
+
+    // For other users, auto-select if only one lab assigned
+    if (assignedLaboratories.length === 1) {
       onHospitalSelect(assignedLaboratories[0].id);
     }
-  }, [assignedLaboratories, selectedLabId, onHospitalSelect]);
+  }, [assignedLaboratories, selectedLabId, onHospitalSelect, currentUserProfile]);
+
+  // Save last selected lab to Firestore for teknisyen users
+  useEffect(() => {
+    if (
+      currentUserProfile?.role === 'teknisyen' &&
+      currentUser?.uid &&
+      selectedLabId &&
+      !currentUser.isAnonymous
+    ) {
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      updateDoc(userDocRef, { lastSelectedLabId: selectedLabId }).catch((err) => {
+        urunKullanimLogger.warn('lastSelectedLabId kaydedilemedi', { error: err?.message });
+      });
+    }
+  }, [selectedLabId, currentUserProfile?.role, currentUser]);
 
   const selectedLabName = laboratories.find(h => h.id === selectedLabId)?.name || '';
   const selectedSubPoint = useMemo(
@@ -173,14 +244,21 @@ export default function UrunKullanimPanel() {
     [selectedLabSubPoints, selectedSubPointId]
   );
 
-  // Compute pool member IDs for lab stock
-  const poolMemberIds = useMemo(() => {
+  // Compute pool member IDs and names for lab stock
+  const { poolMemberIds, poolMemberNames } = useMemo(() => {
     const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
-    return pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
-  }, [labPools, selectedLabId]);
+    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    // Get names for legacy record support
+    const names = ids.map(id => laboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
+    return { poolMemberIds: ids, poolMemberNames: names };
+  }, [labPools, selectedLabId, laboratories]);
 
   // Use TanStack Query for lab stock - much more efficient than full depoStok
-  const { data: labStock = [] } = useLabStock(poolMemberIds);
+  // Now also passes lab names to support legacy records without hedefKurumId
+  // Wait for labPools to load before querying to ensure pool members are included
+  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames, {
+    enabled: !labPoolsLoading && poolMemberIds.length > 0
+  });
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
@@ -241,6 +319,11 @@ export default function UrunKullanimPanel() {
       invalidateDepoStok();
       invalidateConsumption();
 
+      // Update daily consumption stats for dashboard KPI
+      incrementTodayStats(selectedLab.id).catch(err =>
+        urunKullanimLogger.warn('Günlük tüketim istatistikleri güncellenemedi', { error: err?.message })
+      );
+
       await logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
         stokKodu: itemToConsume.stokKodu,
         usageLabId: selectedLab.id,
@@ -267,7 +350,10 @@ export default function UrunKullanimPanel() {
 
       return newTuketimDocRef.id;
     } catch (err) {
-      console.error("Consumption write error: ", err);
+      urunKullanimLogger.error('Tüketim kaydı yazılamadı', err, {
+        stokKodu: itemToConsume.stokKodu,
+        seriNumarasi: itemToConsume.seriNumarasi
+      });
       setScanStatus('error');
       toast({ title: "Veritabanı Hatası", description: "Tüketim kaydedilirken hata oluştu.", variant: 'destructive'});
       setTimeout(() => setScanStatus('idle'), 3000);
@@ -313,11 +399,16 @@ export default function UrunKullanimPanel() {
       toast({ title: 'Ürün Bulunamadı', description: 'Barkoddan bir ürün çözümlenemedi.', variant: 'destructive' });
       return;
     }
-    
+
     const stokKodu = resolved.stokKodu!;
     const lot = resolved.lotNumarasi || '';
     const seri = resolved.seriNumarasi || '';
-    const mode = productTracking[stokKodu] ?? 'serial';
+
+    // Determine tracking mode based on what the barcode contains
+    const matchedFormat = parsed.matchedFormatId
+      ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+      : undefined;
+    const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, resolved.product as any);
 
     let item: DepoStokItem | undefined;
 
@@ -350,9 +441,10 @@ export default function UrunKullanimPanel() {
     }
 
     if (item.irsaliyeNumarasi !== 'İSTİSNA GİRİŞİ' && item.seriNumarasi) {
-        const alreadyConsumed = tuketimKayitlari.some(c => c.seriNumarasi === item!.seriNumarasi);
+        // Check by both stokKodu AND seriNumarasi since same serial can exist for different products
+        const alreadyConsumed = tuketimKayitlari.some(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
         if (alreadyConsumed) {
-            toast({ title: 'Zaten Tüketilmiş', description: `Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
+            toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
             playFeedback(true);
             setScanStatus('error');
             setTimeout(() => setScanStatus('idle'), 3000);
@@ -375,7 +467,9 @@ export default function UrunKullanimPanel() {
           toast({ title: 'Yanlış Lot', description: `Lütfen ${lotReplaceTarget.recommended.lotNumarasi} lotundan bir seri okutun.`, variant: 'destructive' });
           return;
         }
-        const newItem = findBySerial(parsed.stokKodu ?? '', parsed.seriNumarasi);
+        // Use stokKodu from the recommended item to ensure we find the correct product
+        const targetStokKodu = lotReplaceTarget.recommended.stokKodu;
+        const newItem = findBySerial(targetStokKodu, parsed.seriNumarasi);
         if (!newItem) {
           toast({ title: 'Depoda Bulunamadı', description: 'Bu seri lotta bulunamadı.', variant: 'destructive' });
           return;
@@ -428,12 +522,20 @@ export default function UrunKullanimPanel() {
         hospitalName: selectedLabName ?? '',
       });
   
+      urunKullanimLogger.info('Arıza kaydı oluşturuldu', {
+        deviceId: selectedDevice.id,
+        deviceName: selectedDevice.cihazAdi,
+        faultType,
+      });
       toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için arıza bildirildi.` });
       setFaultModalOpen(false);
       setFaultDescription('');
       setSelectedDevice(null);
     } catch (err) {
-      console.error('Failed to report fault:', err);
+      urunKullanimLogger.error('Arıza kaydı oluşturulamadı', err, {
+        deviceId: selectedDevice?.id,
+        faultType,
+      });
       toast({ title: 'Hata', description: 'Arıza kaydı oluşturulamadı.', variant: 'destructive' });
     } finally {
       setIsSavingFault(false);
@@ -460,7 +562,69 @@ export default function UrunKullanimPanel() {
       });
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
   }, [labStock, manualProductCode]);
-  
+
+  const handleTrashBinSubmit = useCallback(async () => {
+    if (!selectedTrashDevice || trashItems.length === 0 || !selectedLab) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen cihaz seçin ve en az bir ürün ekleyin.', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+
+      trashItems.forEach((item) => {
+        const trashBinRef = doc(collection(db, 'trashBinRecords'));
+        const trashBinRecord: Omit<TrashBinRecord, 'id'> & { id: string } = {
+          id: trashBinRef.id,
+          laboratoryId: selectedLab.id,
+          laboratoryName: selectedLab.name || '',
+          deviceId: selectedTrashDevice.id,
+          deviceModel: selectedTrashDevice.cihazAdi || selectedTrashDevice.model || '',
+          deviceSerialNumber: selectedTrashDevice.seriNumarasi || '',
+          stokKodu: item.productCode,
+          stokAdi: item.productName,
+          remainingTests: item.remainingTests,
+          createdAt: Timestamp.now(),
+          createdByUid: currentUser?.uid || '',
+          createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+          sourceType: 'manual',
+        };
+
+        batch.set(trashBinRef, trashBinRecord);
+      });
+
+      await batch.commit();
+
+      urunKullanimLogger.info('Çöp kutusu kaydı oluşturuldu', {
+        laboratoryId: selectedLab.id,
+        deviceId: selectedTrashDevice.id,
+        itemCount: trashItems.length,
+      });
+
+      toast({
+        title: 'Çöpe Gönderildi',
+        description: `${trashItems.length} ürün çöp kutusuna eklendi.`,
+      });
+
+      // Reset state
+      setIsTrashBinModalOpen(false);
+      setSelectedTrashDevice(null);
+      setTrashItems([]);
+      setSelectedTrashProduct('');
+      setTrashRemainingTests(0);
+    } catch (error) {
+      urunKullanimLogger.error('Çöp kutusu kaydı oluşturulamadı', error, {
+        laboratoryId: selectedLab?.id,
+        deviceId: selectedTrashDevice?.id,
+      });
+      toast({
+        title: 'Hata',
+        description: 'Ürünler çöp kutusuna eklenirken bir hata oluştu.',
+        variant: 'destructive',
+      });
+    }
+  }, [selectedTrashDevice, trashItems, selectedLab, currentUser, currentUserProfile, toast]);
+
   const handleManualDeduction = async () => {
     if (!manualProductCode || !manualLotKey || manualQuantity <= 0) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen ürün, lot ve geçerli bir adet girin.', variant: 'destructive' });
@@ -493,223 +657,282 @@ export default function UrunKullanimPanel() {
   };
 
   return (
-    <div className="space-y-6">
-       <div className="p-4 sm:p-6 pb-0">
-          <h2 className="text-2xl font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
-          <p className="text-sm text-muted-foreground">{selectedLabName || 'Laboratuvar seçilmedi'}</p>
+    <div className="flex flex-col min-h-[calc(100vh-100px)] p-4 gap-4">
+      {/* Header with user name and action buttons */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-2xl font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
+            <p className="text-sm text-muted-foreground">{selectedLabName || 'Laboratuvar seçilmedi'}</p>
+          </div>
+          {currentUserProfile?.role === 'teknisyen' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={logout}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4 mr-1" />
+              Çıkış
+            </Button>
+          )}
         </div>
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle className="text-xl font-headline flex items-center"><PackageMinus className="mr-2 h-6 w-6 text-primary" />Ürün Kullanım Kaydı</CardTitle>
-          <CardDescription>Laboratuvar seçerek kullanılan ürünlerin barkodlarını okutup stoktan düşün.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid md:grid-cols-2 gap-6">
-              <div className="w-full flex items-center justify-center">
-                <Image
-                  src="/ChatGPT%20Image%206%20A%C4%9Fu%202025%2009_10_30.png"
-                  alt="Merkez Laboratuvar dioraması"
-                  width={1080}
-                  height={1080}
-                  data-ai-hint="laboratory illustration"
-                  className="w-full h-auto object-contain"
-                  priority
-                />
-              </div>
 
-              <div className="w-full space-y-4">
-                  <div className="flex items-end gap-2">
-                    <div className="flex-grow">
-                      <Label className="block text-sm font-medium mb-1">Laboratuvar Seçin</Label>
-                      <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={isLabPopoverOpen}
-                            className="w-full justify-between font-normal"
-                            disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
-                          >
-                            {selectedLabId
-                              ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
-                              : "Laboratuvar seçin..."}
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                          <Command>
-                            <CommandInput placeholder="Laboratuvar ara..." />
-                            <CommandList>
-                              {isLoading ? <div className="p-4 text-sm text-center">Yükleniyor...</div> : 
-                               <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                              }
-                              <CommandGroup>
-                                {assignedLaboratories.sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((lab) => (
-                                  <CommandItem
-                                    key={lab.id}
-                                    value={lab.name}
-                                    onSelect={() => {
-                                      onHospitalSelect(lab.id);
-                                      setIsLabPopoverOpen(false);
-                                    }}
-                                  >
-                                    <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                                    {lab.name}
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <Button onClick={() => setIsCameraScannerOpen(true)} variant="outline" size="icon" className="h-10 w-10" title="Kamera ile Tara" disabled={!selectedLabId}>
-                      <Camera className="h-5 w-5" />
-                    </Button>
-                     {selectedLab?.manualDeductionEnabled && (
-                      <Button variant="outline" size="icon" className="h-10 w-10" title="Manuel Düşüm" disabled={!selectedLabId} onClick={() => setIsManualDeductionOpen(true)}>
-                          <Pencil className="h-5 w-5" />
-                      </Button>
-                    )}
-                  </div>
-
-                  <p className="text-sm text-muted-foreground text-center">
-                      <Info className="inline h-4 w-4 mr-1 text-primary"/>
-                      Barkod okuyucu bu alanda aktiftir. Okutulan ürünler stoktan düşecektir.
-                  </p>
-
-                  <Card className={cn("w-full transition-colors relative overflow-hidden", scanStatus === 'success' && 'border-green-500', scanStatus === 'error' && 'border-destructive')}>
-                      <div className="flex">
-                          <div className="flex-1 p-4">
-                              <CardHeader className="p-0 mb-2">
-                                <div className={cn("flex items-center gap-2", scanStatus === 'success' && 'text-green-500', scanStatus === 'error' && 'text-destructive')}>
-                                  {scanStatus === 'success' ? <CheckCircle className="w-6 w-6" /> : scanStatus === 'error' ? <XCircle className="w-6 w-6" /> : <Barcode className="w-6 w-6" />}
-                                  <span className="font-semibold">Son Okutulan Ürün</span>
-                                </div>
-                              </CardHeader>
-                              <CardContent className="p-0">
-                                {lastScannedProduct ? (
-                                  <div className="space-y-1">
-                                    <p className="text-lg font-semibold">{safeName(lastScannedProduct.stokKodu, lastScannedProduct.stokAdi ?? '')}</p>
-                                    <p className="text-sm text-muted-foreground">Seri No: <span className="font-mono">{lastScannedProduct.seriNumarasi}</span></p>
-                                    <p className="text-sm text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad ?? ''}</p>
-                                    {lastScannedProduct.subPointName ? (
-                                      <p className="text-sm text-muted-foreground">Tüketim Noktası: {lastScannedProduct.subPointName}</p>
-                                    ) : null}
-                                    {scanStatus === 'success' && <p className="text-green-500 text-sm font-medium mt-2">Stoktan Düşüldü!</p>}
-                                  </div>
-                                ) : (
-                                  <p className="text-muted-foreground text-sm">Henüz ürün okutulmadı.</p>
-                                )}
-                              </CardContent>
-                          </div>
-                          {lastScannedDeviceGroupImage && (
-                              <div className="w-2/5 p-2 flex items-center justify-center">
-                                  <Image
-                                      src={`/${lastScannedDeviceGroupImage}`}
-                                      alt="Cihaz Grubu"
-                                      width={150}
-                                      height={150}
-                                      className="object-contain max-h-full"
-                                  />
-                              </div>
-                          )}
-                      </div>
-                  </Card>
-
-                  <Card className="w-full">
-                      <CardHeader>
-                          <CardTitle className="text-base flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-muted-foreground"/>
-                              Son 10 Tüketim
-                          </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                          <ScrollArea className="h-32">
-                              {sessionHistory.length === 0 ? (
-                                  <p className="text-sm text-muted-foreground">Henüz tüketim kaydı yok.</p>
-                              ) : (
-                                  <ul className="text-sm space-y-1">
-                                      {sessionHistory.map((item, index) => (
-                                          <li key={index} className="flex justify-between items-center text-xs p-1 rounded-md hover:bg-muted/50">
-                                              <div className="truncate">
-                                                  <span className="font-semibold">{safeName(item.stokKodu, item.stokAdi ?? '')}</span>
-                                                  <span className="text-muted-foreground ml-2">({item.lotNumarasi})</span>
-                                              </div>
-                                              <span className="font-mono text-muted-foreground flex-shrink-0">{item.seriNumarasi}</span>
-                                          </li>
-                                      ))}
-                                  </ul>
-                              )}
-                          </ScrollArea>
-                      </CardContent>
-                  </Card>
-              </div>
-            </div>
-        </CardContent>
-        <CardFooter className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t">
-            <Button variant="outline" onClick={() => router.push(`/urun-talep`)} className="w-full sm:w-auto">
-              <ClipboardPlus className="mr-2 h-4 w-4" /> Ürün Talep
-            </Button>
-            <Button variant="outline" onClick={() => router.push('/tuketim-istatistikleri')} className="w-full sm:w-auto">
-                <TrendingUp className="mr-2 h-4 w-4"/> Tüketim İstatistikleri
-            </Button>
-        </CardFooter>
-      </Card>
-      
-      <Card className="bg-gradient-to-br from-slate-900/40 to-black/20 border-white/10">
-        <CardContent className="pt-6">
-          {selectedLabId && (
-            devicesToDisplay.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 w-full">
-                {devicesToDisplay.map((c) => (
-                  <button
-                    key={c.id}
-                    className="group relative w-full outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-transform hover:scale-105"
-                    onClick={() => {
-                      const event = new CustomEvent('openDeviceFaultModal', { detail: c });
-                      window.dispatchEvent(event);
-                    }}
-                    title={`${c.cihazAdi || c.model || ''} • ${c.seriNumarasi || ''}`}
-                  >
-                    <div className="text-center mb-2">
-                      <div className="text-sm font-medium leading-tight truncate px-1">{c.cihazAdi || c.model}</div>
-                      <div className="text-xs text-white/60 font-mono truncate">{c.seriNumarasi || '-'}</div>
-                    </div>
-                    <div className="relative w-full aspect-square bg-white/5 rounded-lg flex items-center justify-center overflow-hidden border border-white/5 group-hover:border-primary/30">
-                      <Image
-                        src={c.imageUrl ? (c.imageUrl.startsWith('/') ? c.imageUrl : `/${c.imageUrl}`) : '/lab_diorama.png'}
-                        alt={c.cihazAdi || c.model || 'Device'}
-                        fill
-                        className="object-contain p-2"
-                        sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 20vw"
-                        priority={false}
-                        onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.srcset = '/lab_diorama.png'; 
-                            target.src = '/lab_diorama.png';
+        {/* Action buttons row */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Lab selector */}
+          <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={isLabPopoverOpen}
+                className="w-[200px] justify-between font-normal"
+                disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
+              >
+                {selectedLabId
+                  ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
+                  : "Laboratuvar seçin..."}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[200px] p-0">
+              <Command>
+                <CommandInput placeholder="Laboratuvar ara..." />
+                <CommandList>
+                  {isLoading ? <div className="p-4 text-sm text-center">Yükleniyor...</div> :
+                   <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
+                  }
+                  <CommandGroup>
+                    {assignedLaboratories.sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((lab) => (
+                      <CommandItem
+                        key={lab.id}
+                        value={lab.name}
+                        onSelect={() => {
+                          onHospitalSelect(lab.id);
+                          setIsLabPopoverOpen(false);
                         }}
-                      />
-                      <div
-                        className={cn(
-                          "absolute bottom-0 w-full h-1",
-                          (c.arizaDurumu !== 'yok') ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]'
-                        )}
-                      />
-                    </div>
-                  </button>
-                ))}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
+                        {lab.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          <Button
+            onClick={() => setIsCameraScannerOpen(true)}
+            variant="outline"
+            size="icon"
+            className="h-9 w-9"
+            title="Kamera ile Tara"
+            aria-label="Kamera ile barkod tara"
+            disabled={!selectedLabId}
+          >
+            <Camera className="h-4 w-4" aria-hidden="true" />
+          </Button>
+
+          {selectedLab?.manualDeductionEnabled && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9"
+              title="Manuel Düşüm"
+              aria-label="Manuel stok düşümü yap"
+              disabled={!selectedLabId}
+              onClick={() => setIsManualDeductionOpen(true)}
+            >
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push(`/cop-kutusu/${selectedLabId}`)}
+            disabled={!selectedLabId}
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Çöp Kutusu
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={() => router.push('/tuketim-istatistikleri')}>
+            <TrendingUp className="h-4 w-4 mr-1" /> İstatistikler
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={() => router.push(`/urun-talep`)}>
+            <ClipboardPlus className="h-4 w-4 mr-1" /> Ürün Talep
+          </Button>
+        </div>
+      </div>
+
+      {/* Title and info */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <PackageMinus className="h-5 w-5 text-primary" aria-hidden="true" />
+          <h3 className="text-lg font-semibold">Ürün Kullanım Kaydı</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          <Info className="inline h-3 w-3 mr-1 text-primary"/>
+          Barkod okuyucu aktif - Okutulan ürünler stoktan düşecektir.
+        </p>
+      </div>
+
+      {/* Main content: Image + Cards in a single row - equal width */}
+      <div className="grid grid-cols-12 gap-4" role="region" aria-labelledby="urun-kullanim-title">
+        {/* Lab image - 4 cols (33%) */}
+        <div className="col-span-12 md:col-span-4 flex items-center justify-center">
+          <Image
+            src="/ChatGPT%20Image%206%20A%C4%9Fu%202025%2009_10_30.png"
+            alt="Merkez Laboratuvar dioraması"
+            width={540}
+            height={540}
+            data-ai-hint="laboratory illustration"
+            className="w-full max-w-[280px] h-auto object-contain"
+            priority
+          />
+        </div>
+
+        {/* Son Okutulan Ürün Card - 4 cols (33%) */}
+        <Card
+          className={cn("col-span-12 md:col-span-4 transition-colors relative overflow-hidden flex flex-col", scanStatus === 'success' && 'border-green-500', scanStatus === 'error' && 'border-destructive')}
+          role="status"
+          aria-live="polite"
+          aria-label="Son okutulan ürün bilgisi"
+        >
+          <CardHeader className="pb-2">
+            <div className={cn("flex items-center gap-2", scanStatus === 'success' && 'text-green-500', scanStatus === 'error' && 'text-destructive')}>
+              {scanStatus === 'success' ? <CheckCircle className="w-5 h-5" aria-hidden="true" /> : scanStatus === 'error' ? <XCircle className="w-5 h-5" aria-hidden="true" /> : <Barcode className="w-5 h-5" aria-hidden="true" />}
+              <span className="font-semibold text-sm">Son Okutulan Ürün</span>
+            </div>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-center">
+            {lastScannedProduct ? (
+              <div className="space-y-1">
+                <p className="text-base font-semibold truncate">{safeName(lastScannedProduct.stokKodu, lastScannedProduct.stokAdi ?? '')}</p>
+                <p className="text-xs text-muted-foreground">Seri: <span className="font-mono">{lastScannedProduct.seriNumarasi}</span></p>
+                <p className="text-xs text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad ?? ''}</p>
+                {lastScannedProduct.subPointName && (
+                  <p className="text-xs text-muted-foreground">Nokta: {lastScannedProduct.subPointName}</p>
+                )}
+                {scanStatus === 'success' && <p className="text-green-500 text-xs font-medium mt-1">Stoktan Düşüldü!</p>}
+                {lastScannedDeviceGroupImage && (
+                  <div className="mt-2 flex justify-center">
+                    <Image
+                      src={`/${lastScannedDeviceGroupImage}`}
+                      alt="Cihaz Grubu"
+                      width={80}
+                      height={80}
+                      className="object-contain"
+                    />
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-10 text-white/40 space-y-2">
-                <Info className="w-10 h-10 mb-2 opacity-20" />
-                <p>Bu laboratuvara tanımlı cihaz bulunamadı.</p>
-                <p className="text-xs">Cihaz Yönetimi panelinden cihaz ekleyebilirsiniz.</p>
-              </div>
-            )
+              <p className="text-muted-foreground text-sm">Henüz ürün okutulmadı.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Son 10 Tüketim Card - 4 cols (33%) */}
+        <Card className="col-span-12 md:col-span-4 flex flex-col">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Clock className="w-4 h-4 text-muted-foreground"/>
+              Son 10 Tüketim
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1">
+            <ScrollArea className="h-[140px]">
+              {sessionHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Henüz tüketim kaydı yok.</p>
+              ) : (
+                <ul className="text-sm space-y-1">
+                  {sessionHistory.map((item, index) => (
+                    <li key={index} className="flex justify-between items-center text-xs p-1 rounded-md hover:bg-muted/50">
+                      <div className="truncate flex-1">
+                        <span className="font-semibold">{safeName(item.stokKodu, item.stokAdi ?? '')}</span>
+                        <span className="text-muted-foreground ml-1">({item.lotNumarasi})</span>
+                      </div>
+                      <span className="font-mono text-muted-foreground flex-shrink-0 ml-2">{item.seriNumarasi}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Device Grid - Dynamically sized, centered at bottom */}
+      {selectedLabId && (
+        <div className="flex-1 flex items-end justify-center pt-4" role="region" aria-label="Laboratuvar cihazları">
+          {devicesToDisplay.length > 0 ? (
+            <div
+              className="flex flex-wrap justify-center items-end gap-4 w-full px-4"
+              role="list"
+              aria-label="Cihaz listesi"
+              style={{
+                // Dynamic sizing: fewer devices = larger size, more devices = smaller size
+                // Min 80px, Max 180px per device based on count
+                '--device-size': `clamp(80px, calc((100vw - 64px) / ${Math.min(devicesToDisplay.length, 8)}), 180px)`
+              } as React.CSSProperties}
+            >
+              {devicesToDisplay.map((c) => (
+                <button
+                  key={c.id}
+                  className="group relative outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-transform hover:scale-105"
+                  style={{ width: 'var(--device-size)', maxWidth: '180px' }}
+                  onClick={() => {
+                    const event = new CustomEvent('openDeviceFaultModal', { detail: c });
+                    window.dispatchEvent(event);
+                  }}
+                  title={`${c.cihazAdi || c.model || ''} • ${c.seriNumarasi || ''}`}
+                  aria-label={`${c.cihazAdi || c.model || 'Cihaz'} - Seri: ${c.seriNumarasi || 'N/A'} - ${(c.arizaDurumu !== 'yok') ? 'Arızalı' : 'Çalışıyor'}`}
+                  role="listitem"
+                >
+                  {/* Device name and serial above image */}
+                  <div className="text-center mb-1">
+                    <div className="text-xs font-medium leading-tight truncate">{c.cihazAdi || c.model}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono truncate">{c.seriNumarasi || '-'}</div>
+                  </div>
+                  {/* No background container */}
+                  <div className="relative w-full aspect-square flex items-center justify-center">
+                    <Image
+                      src={c.imageUrl ? (c.imageUrl.startsWith('/') ? c.imageUrl : `/${c.imageUrl}`) : '/lab_diorama.png'}
+                      alt={c.cihazAdi || c.model || 'Device'}
+                      fill
+                      className="object-contain"
+                      sizes="180px"
+                      priority={false}
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.srcset = '/lab_diorama.png';
+                        target.src = '/lab_diorama.png';
+                      }}
+                    />
+                    {/* Status light at bottom */}
+                    <div
+                      className={cn(
+                        "absolute bottom-0 w-full h-1.5 rounded-full",
+                        (c.arizaDurumu !== 'yok') ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.7)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.7)]'
+                      )}
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6 text-muted-foreground space-y-1">
+              <Info className="w-6 h-6 opacity-40" />
+              <p className="text-sm">Bu laboratuvara tanımlı cihaz bulunamadı.</p>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      )}
       
       <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
         <DialogContent className="max-w-xl p-0">
@@ -726,53 +949,331 @@ export default function UrunKullanimPanel() {
       </Dialog>
       
       <Dialog open={faultModalOpen} onOpenChange={setFaultModalOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby="fault-dialog-description">
           <DialogHeader>
             <DialogTitle>Arıza Kaydı: {selectedDevice?.cihazAdi}</DialogTitle>
-            <DialogDescription>SN: {selectedDevice?.seriNumarasi}</DialogDescription>
+            <DialogDescription id="fault-dialog-description">SN: {selectedDevice?.seriNumarasi}</DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
             <Input
               placeholder="Arıza açıklaması (opsiyonel)"
               value={faultDescription}
               onChange={(e) => setFaultDescription(e.target.value)}
+              aria-label="Arıza açıklaması"
             />
             <div className="grid grid-cols-2 gap-4">
-              <Button variant="outline" onClick={() => handleFaultReport('teknik_servis')} disabled={isSavingFault}>{isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}<span className="ml-2">Teknik Servis</span></Button>
-              <Button variant="outline" onClick={() => handleFaultReport('aplikasyon')} disabled={isSavingFault}>{isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}<span className="ml-2">Aplikasyon</span></Button>
+              <Button variant="outline" onClick={() => handleFaultReport('teknik_servis')} disabled={isSavingFault} aria-label="Teknik servis arızası bildir">
+                {isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Wrench className="h-4 w-4" aria-hidden="true" />}
+                <span className="ml-2">Teknik Servis</span>
+              </Button>
+              <Button variant="outline" onClick={() => handleFaultReport('aplikasyon')} disabled={isSavingFault} aria-label="Aplikasyon arızası bildir">
+                {isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Wrench className="h-4 w-4" aria-hidden="true" />}
+                <span className="ml-2">Aplikasyon</span>
+              </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isTrashBinModalOpen} onOpenChange={setIsTrashBinModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <Trash2 className="mr-2 h-5 w-5 text-destructive" />
+              Çöp Kutusu - Ürün Ekleme
+            </DialogTitle>
+            <DialogDescription>
+              Çöpe atılacak ürünleri cihaz seçerek veya manuel olarak ekleyin.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-6">
+            {/* Device selection */}
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Cihaz Seçin</Label>
+              <p className="text-xs text-muted-foreground mb-3">
+                Ürün eklemek için önce bir cihaz seçin
+              </p>
+              {devicesToDisplay.length > 0 ? (
+                <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+                  {devicesToDisplay.map((device) => (
+                    <button
+                      key={device.id}
+                      type="button"
+                      onClick={() => setSelectedTrashDevice(device)}
+                      className={cn(
+                        "group relative w-full outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-center transition-all",
+                        selectedTrashDevice?.id === device.id
+                          ? "scale-105 ring-2 ring-primary"
+                          : "hover:scale-105"
+                      )}
+                    >
+                      <div className="text-center mb-1">
+                        <div className="text-xs font-medium leading-tight truncate px-1">
+                          {device.cihazAdi || device.model}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono truncate">
+                          {device.seriNumarasi || '-'}
+                        </div>
+                      </div>
+                      <div className={cn(
+                        "relative w-full aspect-square bg-muted rounded-lg flex items-center justify-center overflow-hidden border-2 transition-colors",
+                        selectedTrashDevice?.id === device.id
+                          ? "border-primary bg-primary/10"
+                          : "border-border group-hover:border-primary/30"
+                      )}>
+                        <Image
+                          src={device.imageUrl ? (device.imageUrl.startsWith('/') ? device.imageUrl : `/${device.imageUrl}`) : '/lab_diorama.png'}
+                          alt={device.cihazAdi || device.model || 'Device'}
+                          fill
+                          className="object-contain p-1"
+                          sizes="(max-width: 768px) 33vw, 20vw"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.srcset = '/lab_diorama.png';
+                            target.src = '/lab_diorama.png';
+                          }}
+                        />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center text-muted-foreground py-6 bg-muted rounded-lg">
+                  <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Bu laboratuvara tanımlı cihaz bulunamadı.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Product selection form - shown after device selection */}
+            {selectedTrashDevice && (
+              <div className="border-t pt-6 space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  <div>
+                    <p className="text-sm font-medium">
+                      Seçilen Cihaz: {selectedTrashDevice.cihazAdi || selectedTrashDevice.model}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      SN: {selectedTrashDevice.seriNumarasi}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Manuel product selection */}
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-sm font-medium mb-2 block">Ürün Seçin</Label>
+                    <Popover open={isTrashProductPopoverOpen} onOpenChange={setIsTrashProductPopoverOpen} modal={false}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className="w-full justify-between font-normal"
+                        >
+                          {selectedTrashProduct
+                            ? products.find((p) => p.stokKodu === selectedTrashProduct)?.stokAdi
+                            : "Ürün seçin..."}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[400px] p-0 z-[9999]" style={{ pointerEvents: 'auto' }}>
+                        <div className="flex flex-col">
+                          <div className="p-2 border-b">
+                            <Input
+                              placeholder="Ürün ara..."
+                              value={trashProductSearch}
+                              onChange={(e) => setTrashProductSearch(e.target.value)}
+                              className="h-9"
+                            />
+                          </div>
+                          <div className="max-h-[300px] overflow-y-auto">
+                            <div className="p-1">
+                              {(() => {
+                                const filtered = products
+                                  .filter(p => {
+                                    // Filter products with min/max stock levels defined in lab management
+                                    const rule = minMaxRules.find(r => r.stokKodu === p.stokKodu);
+                                    if (!rule || (rule.min == null && rule.max == null)) return false;
+
+                                    // Apply search filter
+                                    if (trashProductSearch) {
+                                      const search = trashProductSearch.toLowerCase();
+                                      const nameMatch = (p.stokAdi || '').toLowerCase().includes(search);
+                                      const codeMatch = (p.stokKodu || '').toLowerCase().includes(search);
+                                      return nameMatch || codeMatch;
+                                    }
+                                    return true;
+                                  })
+                                  .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''));
+
+                                if (filtered.length === 0) {
+                                  return (
+                                    <div className="p-4 text-center text-sm text-muted-foreground">
+                                      Ürün bulunamadı.
+                                    </div>
+                                  );
+                                }
+
+                                return filtered.map((product) => (
+                                  <div
+                                    key={product.id}
+                                    className={cn(
+                                      "flex items-center gap-2 p-2 rounded-sm cursor-pointer hover:bg-accent",
+                                      selectedTrashProduct === product.stokKodu && "bg-accent"
+                                    )}
+                                    role="option"
+                                    aria-selected={selectedTrashProduct === product.stokKodu}
+                                    onClick={() => {
+                                      setSelectedTrashProduct(product.stokKodu || '');
+                                      setTrashRemainingTests(product.ambalajDegeri || 0);
+                                      setIsTrashProductPopoverOpen(false);
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "h-4 w-4 shrink-0",
+                                        selectedTrashProduct === product.stokKodu ? "opacity-100" : "opacity-0"
+                                      )}
+                                    />
+                                    <div className="flex flex-col flex-1 min-w-0">
+                                      <span className="text-sm">{product.stokAdi}</span>
+                                      <span className="text-xs text-muted-foreground">{product.stokKodu}</span>
+                                    </div>
+                                  </div>
+                                ));
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {selectedTrashProduct && (
+                    <div>
+                      <Label htmlFor="remaining-tests" className="text-sm font-medium mb-2 block">
+                        Kalan Test Adeti
+                      </Label>
+                      <Input
+                        id="remaining-tests"
+                        type="number"
+                        min="0"
+                        value={trashRemainingTests}
+                        onChange={(e) => setTrashRemainingTests(Number(e.target.value))}
+                        placeholder="Kalan test adedini girin"
+                      />
+                    </div>
+                  )}
+
+                  {selectedTrashProduct && (
+                    <Button
+                      onClick={() => {
+                        const product = products.find(p => p.stokKodu === selectedTrashProduct);
+                        if (product) {
+                          setTrashItems(prev => [...prev, {
+                            id: Math.random().toString(36).substr(2, 9),
+                            productCode: product.stokKodu || '',
+                            productName: product.stokAdi || '',
+                            remainingTests: trashRemainingTests,
+                          }]);
+                          setSelectedTrashProduct('');
+                          setTrashRemainingTests(0);
+                        }
+                      }}
+                      className="w-full"
+                    >
+                      <ClipboardPlus className="h-4 w-4 mr-2" />
+                      Listeye Ekle
+                    </Button>
+                  )}
+
+                  {/* Display added items */}
+                  {trashItems.length > 0 && (
+                    <div className="border rounded-lg p-4 space-y-2">
+                      <Label className="text-sm font-medium">Eklenecek Ürünler ({trashItems.length})</Label>
+                      <ScrollArea className="h-32">
+                        <div className="space-y-2">
+                          {trashItems.map((item) => (
+                            <div key={item.id} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
+                              <div className="flex-1">
+                                <p className="font-medium">{item.productName}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {item.productCode} • Kalan Test: {item.remainingTests}
+                                </p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setTrashItems(prev => prev.filter(i => i.id !== item.id))}
+                              >
+                                <XCircle className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setIsTrashBinModalOpen(false);
+              setSelectedTrashDevice(null);
+              setTrashItems([]);
+              setSelectedTrashProduct('');
+              setTrashRemainingTests(0);
+            }}>
+              İptal
+            </Button>
+            {trashItems.length > 0 && (
+              <Button onClick={handleTrashBinSubmit}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Çöpe Gönder ({trashItems.length})
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isManualDeductionOpen} onOpenChange={setIsManualDeductionOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby="manual-deduction-description">
           <DialogHeader>
             <DialogTitle>Manuel Stok Düşüm</DialogTitle>
-            <DialogDescription>Listeden ürün seçerek stoktan düşün.</DialogDescription>
+            <DialogDescription id="manual-deduction-description">Listeden ürün seçerek stoktan düşün.</DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
               <div>
-                <Label>Ürün</Label>
+                <Label htmlFor="manual-product-select">Ürün</Label>
                 <Select value={manualProductCode} onValueChange={setManualProductCode}>
-                    <SelectTrigger><SelectValue placeholder="Ürün seçin..." /></SelectTrigger>
+                    <SelectTrigger id="manual-product-select" aria-label="Ürün seçin"><SelectValue placeholder="Ürün seçin..." /></SelectTrigger>
                     <SelectContent>{manualDeductionAvailableProducts.map(p => (<SelectItem key={p.id} value={p.stokKodu ?? ''}>{p.stokAdi}</SelectItem>))}</SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>Lot / Miad</Label>
+                <Label htmlFor="manual-lot-select">Lot / Miad</Label>
                 <Select value={manualLotKey} onValueChange={setManualLotKey} disabled={!manualProductCode}>
-                    <SelectTrigger><SelectValue placeholder="Lot seçin..." /></SelectTrigger>
+                    <SelectTrigger id="manual-lot-select" aria-label="Lot ve miad seçin"><SelectValue placeholder="Lot seçin..." /></SelectTrigger>
                     <SelectContent>{manualDeductionLotOptions.map(opt => (<SelectItem key={opt.key} value={opt.key}>{opt.label} ({opt.count})</SelectItem>))}</SelectContent>
                 </Select>
               </div>
               <div>
-                  <Label>Adet</Label>
-                  <Input type="number" value={manualQuantity} onChange={e => setManualQuantity(Number(e.target.value))} min={1}/>
+                  <Label htmlFor="manual-quantity-input">Adet</Label>
+                  <Input
+                    id="manual-quantity-input"
+                    type="number"
+                    value={manualQuantity}
+                    onChange={e => setManualQuantity(Number(e.target.value))}
+                    min={1}
+                    aria-label="Düşülecek adet"
+                  />
               </div>
           </div>
           <DialogFooter>
-            <Button onClick={handleManualDeduction}>Düşüm Yap</Button>
+            <Button onClick={handleManualDeduction} aria-label="Manuel düşüm işlemini başlat">Düşüm Yap</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

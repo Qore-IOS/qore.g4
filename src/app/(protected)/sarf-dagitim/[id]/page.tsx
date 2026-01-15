@@ -64,7 +64,7 @@ export default function SarfDagilimDetayPage() {
   const { toast } = useToast();
   const router = useRouter();
   const params = useParams();
-  const hospitalId = params.id as string;
+  const hospitalId = (params?.id as string) ?? '';
   const { currentUser, currentUserProfile } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
@@ -116,7 +116,8 @@ export default function SarfDagilimDetayPage() {
       .filter(p => ruleStockCodes.has(p.stokKodu))
       .map(p => {
         const deviceGroup = deviceGroups.find(dg => dg.name === p.cihazGrubu);
-        return { ...p, deviceGroupImageUrl: deviceGroup?.imageUrl ? `/${deviceGroup.imageUrl}` : undefined };
+        const dgData = deviceGroup as (DeviceGroup & { imageUrl?: string }) | undefined;
+        return { ...p, deviceGroupImageUrl: dgData?.imageUrl ? `/${dgData.imageUrl}` : undefined };
       })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''));
   }, [minMaxRules, allProducts, deviceGroups]);
@@ -249,20 +250,22 @@ export default function SarfDagilimDetayPage() {
                                     <TableCell className="font-mono text-xs">{product.stokKodu}</TableCell>
                                     <TableCell>
                                         {product.deviceGroupImageUrl ? (
-                                            <Image src={product.deviceGroupImageUrl} alt={product.stokAdi} width={60} height={60} className="object-contain" />
+                                            <Image src={product.deviceGroupImageUrl} alt={product.stokAdi || ''} width={60} height={60} className="object-contain" />
                                         ) : null}
                                     </TableCell>
                                     <TableCell>{product.stokAdi}</TableCell>
                                     <TableCell>{product.anaBirim || '-'}</TableCell>
                                     <TableCell>
+                                        {product.stokKodu && (
                                         <Input
                                             type="number"
                                             min="0"
                                             value={requestItems[product.stokKodu] || ''}
-                                            onChange={(e) => handleQuantityChange(product.stokKodu, e.target.value)}
+                                            onChange={(e) => handleQuantityChange(product.stokKodu!, e.target.value)}
                                             className="h-8 w-24 text-center"
                                             placeholder="0"
                                         />
+                                        )}
                                     </TableCell>
                                 </TableRow>
                             ))}

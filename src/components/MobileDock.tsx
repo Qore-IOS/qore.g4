@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Bell } from "lucide-react";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { MobileProfileButton } from "@/components/ui/MobileProfileButton";
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
+import { useAI } from "@/contexts/ai-context";
 import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
 import Image from "next/image";
 
@@ -26,11 +27,14 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-const triggerHaptic = () => {
+const triggerHaptic = (pattern: number | number[] = 10) => {
   if (typeof navigator !== "undefined" && navigator.vibrate) {
-    navigator.vibrate(10);
+    navigator.vibrate(pattern);
   }
 };
+
+// Long press duration in milliseconds
+const LONG_PRESS_DURATION = 500;
 
 // --- MAIN COMPONENT ---
 
@@ -39,6 +43,104 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const { openAI } = useAI();
+
+  // Long press handling
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const isLongPress = useRef(false);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const hasHandledTouch = useRef(false);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // Prevent default to avoid ghost clicks
+    e.preventDefault();
+
+    // Reset state
+    isLongPress.current = false;
+    hasHandledTouch.current = false;
+
+    // Store touch start position
+    const touch = e.touches[0];
+    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+
+    // Start long press timer
+    longPressTimer.current = setTimeout(() => {
+      isLongPress.current = true;
+      hasHandledTouch.current = true;
+      triggerHaptic([50, 30, 50]); // Distinctive haptic for AI
+      openAI();
+    }, LONG_PRESS_DURATION);
+  }, [openAI]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    clearLongPressTimer();
+
+    // If already handled (long press) or moved too much, don't open menu
+    if (hasHandledTouch.current) {
+      return;
+    }
+
+    // Short tap - open menu
+    triggerHaptic();
+    setIsOpen(true);
+  }, [clearLongPressTimer]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    // Check if finger moved more than threshold (10px)
+    if (touchStartPos.current && e.touches[0]) {
+      const touch = e.touches[0];
+      const deltaX = Math.abs(touch.clientX - touchStartPos.current.x);
+      const deltaY = Math.abs(touch.clientY - touchStartPos.current.y);
+
+      if (deltaX > 10 || deltaY > 10) {
+        clearLongPressTimer();
+        hasHandledTouch.current = true; // Mark as handled to prevent menu open
+      }
+    }
+  }, [clearLongPressTimer]);
+
+  const handleTouchCancel = useCallback(() => {
+    clearLongPressTimer();
+    hasHandledTouch.current = true;
+  }, [clearLongPressTimer]);
+
+  // Mouse events for desktop testing (separate from touch)
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Only handle if not a touch device (avoid double firing)
+    if ('ontouchstart' in window) return;
+
+    e.preventDefault();
+    isLongPress.current = false;
+
+    longPressTimer.current = setTimeout(() => {
+      isLongPress.current = true;
+      openAI();
+    }, LONG_PRESS_DURATION);
+  }, [openAI]);
+
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    if ('ontouchstart' in window) return;
+
+    e.preventDefault();
+    clearLongPressTimer();
+
+    if (!isLongPress.current) {
+      setIsOpen(true);
+    }
+  }, [clearLongPressTimer]);
+
+  const handleMouseLeave = useCallback(() => {
+    if ('ontouchstart' in window) return;
+    clearLongPressTimer();
+  }, [clearLongPressTimer]);
 
   if (!isMobile) return null;
 
@@ -72,21 +174,27 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             <MobileProfileButton isDark={isDark} />
 
             {/* Center - Logo Button (Floating Above) */}
+            {/* Tap: Open menu | Long press: Open AI */}
             <div className="absolute left-1/2 -translate-x-1/2 -top-[2.375rem]">
               <motion.button
                 whileTap={{ scale: 0.9 }}
-                onClick={() => {
-                  triggerHaptic();
-                  setIsOpen(true);
-                }}
-                className="w-20 h-20 flex items-center justify-center transition-all duration-300"
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+                onTouchMove={handleTouchMove}
+                onTouchCancel={handleTouchCancel}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseLeave}
+                className="w-20 h-20 flex items-center justify-center transition-all duration-300 select-none touch-none"
+                style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
               >
                 <Image
                   src={isDark ? "/newlogoblk.png" : "/newlogowh.png"}
-                  alt="Qore"
+                  alt="Qore - Basılı tut: AI"
                   width={80}
                   height={80}
-                  className="w-20 h-20 object-contain"
+                  className="w-20 h-20 object-contain pointer-events-none select-none"
+                  draggable={false}
                 />
               </motion.button>
             </div>

@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { compareAsc, parse } from 'date-fns';
 
 export default function SarfDagilimPage() {
@@ -49,7 +50,7 @@ export default function SarfDagilimPage() {
 
         const depotList = depotsQuery.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
         setDepots(depotList);
-        if (depotList.length > 0) {
+        if (depotList.length > 0 && depotList[0].id) {
             setSelectedDepotId(depotList[0].id);
         }
 
@@ -133,9 +134,14 @@ export default function SarfDagilimPage() {
     }
     setFulfilling(true);
   
-    const itemsToFulfill = (request.items || []).map(item => ({
+    if (!request.id) {
+      toast({ title: 'Hata', description: 'Talep kimliği bulunamadı.', variant: 'destructive' });
+      setFulfilling(false);
+      return;
+    }
+    const itemsToFulfill = (request.items || []).filter(item => item.id).map(item => ({
       ...item,
-      adet: editedItems[request.id]?.[item.id] ?? item.adet
+      adet: editedItems[request.id!]?.[item.id!] ?? item.adet
     })).filter(item => item.adet > 0);
   
     if (itemsToFulfill.length === 0) {
@@ -163,8 +169,8 @@ export default function SarfDagilimPage() {
       }
   
       const itemsToUpdate = availableItems.slice(0, item.adet);
-      itemsToUpdate.forEach(stockItem => {
-        batch.update(doc(db, 'depoStok', stockItem.id), {
+      itemsToUpdate.filter(s => s.id).forEach(stockItem => {
+        batch.update(doc(db, 'depoStok', stockItem.id!), {
           isShipped: true,
           hedefKurum: selectedLabForFulfillment?.name,
           hedefKurumId: selectedLabForFulfillment?.id,
@@ -178,10 +184,10 @@ export default function SarfDagilimPage() {
       return;
     }
   
-    batch.update(doc(db, 'consumableRequests', request.id), {
+    batch.update(doc(db, 'consumableRequests', request.id!), {
       status: 'completed',
       depotId: selectedDepotId,
-      items: itemsToFulfill 
+      items: itemsToFulfill
     });
   
     try {
@@ -237,8 +243,8 @@ export default function SarfDagilimPage() {
                     </p>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {filteredHospitals.map(lab => {
-                            const openRequests = pendingRequestsByLab[lab.id] || [];
+                        {filteredHospitals.filter(lab => lab.id).map(lab => {
+                            const openRequests = pendingRequestsByLab[lab.id!] || [];
                             const openRequestCount = openRequests.length;
                             return (
                             <div key={lab.id} className="flex gap-0.5">
@@ -282,19 +288,19 @@ export default function SarfDagilimPage() {
                     <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={loading}>
                         <SelectTrigger className="max-w-xs"><SelectValue placeholder="Depo Seç..." /></SelectTrigger>
                         <SelectContent>
-                            {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                            {depots.filter(d => d.id).map(d => <SelectItem key={d.id} value={d.id!}>{d.name}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
                 
-                {selectedLabForFulfillment && (pendingRequestsByLab[selectedLabForFulfillment.id] || []).length > 0 ? (
+                {selectedLabForFulfillment?.id && (pendingRequestsByLab[selectedLabForFulfillment.id] || []).length > 0 ? (
                     <Accordion type="single" collapsible className="w-full">
-                        {(pendingRequestsByLab[selectedLabForFulfillment.id] || []).map(req => (
-                            <AccordionItem value={req.id} key={req.id}>
+                        {(pendingRequestsByLab[selectedLabForFulfillment.id] || []).filter(req => req.id).map(req => (
+                            <AccordionItem value={req.id!} key={req.id}>
                                 <AccordionTrigger>
                                     <div className="flex justify-between w-full pr-4">
-                                        <span>{new Date(req.createdAt).toLocaleString('tr-TR')}</span>
-                                        <span>{(req.items || []).reduce((sum, i) => sum + i.adet, 0)} adet</span>
+                                        <span>{new Date(req.createdAt as Date).toLocaleString('tr-TR')}</span>
+                                        <span>{(req.items || []).reduce((sum: number, i) => sum + (i.adet ?? 0), 0)} adet</span>
                                         <span>Açan: {req.createdBy}</span>
                                     </div>
                                 </AccordionTrigger>
@@ -302,15 +308,15 @@ export default function SarfDagilimPage() {
                                    <Table>
                                     <TableHeader><TableRow><TableHead>Ürün</TableHead><TableHead>Depo Stoğu</TableHead><TableHead className="w-48">Karşılanacak Adet</TableHead></TableRow></TableHeader>
                                     <TableBody>
-                                        {(req.items || []).map(item => (
+                                        {(req.items || []).filter((item): item is OrderItem & { id: string; stokKodu: string } => !!(item.id && item.stokKodu)).map(item => (
                                             <TableRow key={item.id}>
                                                 <TableCell>{item.stokAdi}</TableCell>
                                                 <TableCell>{getStockForProduct(item.stokKodu)}</TableCell>
                                                 <TableCell>
                                                     <Input
                                                         type="number"
-                                                        value={editedItems[req.id]?.[item.id] ?? item.adet}
-                                                        onChange={e => handleQuantityChange(req.id, item.id, e.target.value)}
+                                                        value={editedItems[req.id!]?.[item.id] ?? item.adet}
+                                                        onChange={e => handleQuantityChange(req.id!, item.id, e.target.value)}
                                                         min="0"
                                                         max={getStockForProduct(item.stokKodu)}
                                                         className="h-8"

@@ -19,14 +19,20 @@ import {
   where,
   orderBy,
   limit,
-  Timestamp
+  Timestamp,
+  doc,
+  onSnapshot,
+  setDoc,
+  serverTimestamp
 } from 'firebase/firestore';
+import { useEffect, useRef } from 'react';
 import type {
   Hospital,
   Depot,
   ProductCode,
   DepoStokItem,
   ConsumptionRecord,
+  DailyConsumptionStats,
   Device,
   Shipment,
   LabPool,
@@ -183,7 +189,7 @@ export function useUsers() {
 
 /**
  * Depot Stock - Filtered by depot
- * Shorter stale time since this changes more frequently
+ * No polling - invalidated via metadata listener when stock changes
  */
 export function useDepoStokByDepot(depotId: string | null) {
   return useQuery({
@@ -195,15 +201,15 @@ export function useDepoStokByDepot(depotId: string | null) {
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
     enabled: !!depotId,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 10 * 60 * 1000,
-    refetchInterval: 60 * 1000, // Poll every minute
+    staleTime: 5 * 60 * 1000, // 5 minutes - no polling, relies on metadata listener
+    gcTime: 30 * 60 * 1000,
+    // No refetchInterval - cache invalidated by useStockUpdateListener
   });
 }
 
 /**
  * All Depot Stock - For dashboard summaries
- * Uses longer polling interval to reduce reads
+ * No polling - invalidated via metadata listener when stock changes
  */
 export function useAllDepoStok() {
   return useQuery({
@@ -213,30 +219,66 @@ export function useAllDepoStok() {
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000, // Poll every 5 minutes
+    gcTime: 30 * 60 * 1000,
+    // No refetchInterval - cache invalidated by useStockUpdateListener
   });
 }
 
 /**
  * Shipped stock for a specific lab (or pool of labs)
+ * Now also queries by hedefKurum (name) for legacy records that may not have hedefKurumId
+ * @param labIds - Array of lab IDs to query
+ * @param labNames - Array of lab names for legacy record support
+ * @param options - Optional configuration: { enabled?: boolean }
  */
-export function useLabStock(labIds: string[]) {
+export function useLabStock(
+  labIds: string[],
+  labNames: string[] = [],
+  options: { enabled?: boolean } = {}
+) {
+  const { enabled: externalEnabled = true } = options;
+
   return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(',')],
+    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(',')],
     queryFn: async () => {
       if (labIds.length === 0) return [];
       // We can only use 'in' with up to 30 values
       const ids = labIds.slice(0, 30);
-      const q = query(
+      const names = labNames.slice(0, 30);
+
+      // Query by hedefKurumId
+      const idQuery = query(
         collection(db, 'depoStok'),
         where('hedefKurumId', 'in', ids),
         where('isShipped', '==', true)
       );
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      const idSnap = await getDocs(idQuery);
+      const idResults = idSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+
+      // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
+      let legacyResults: DepoStokItem[] = [];
+      if (names.length > 0) {
+        const nameQuery = query(
+          collection(db, 'depoStok'),
+          where('hedefKurum', 'in', names),
+          where('isShipped', '==', true)
+        );
+        const nameSnap = await getDocs(nameQuery);
+        legacyResults = nameSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      }
+
+      // Merge results, avoiding duplicates
+      const resultMap = new Map<string, DepoStokItem>();
+      idResults.forEach(item => resultMap.set(item.id, item));
+      legacyResults.forEach(item => {
+        if (!resultMap.has(item.id)) {
+          resultMap.set(item.id, item);
+        }
+      });
+
+      return Array.from(resultMap.values());
     },
-    enabled: labIds.length > 0,
+    enabled: externalEnabled && labIds.length > 0,
     staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchInterval: 60 * 1000,
@@ -261,6 +303,34 @@ export function useRecentConsumption(limitCount = 500) {
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Daily Consumption Stats - Aggregated daily totals for dashboard KPI
+ * Fetches pre-computed daily consumption counts instead of all consumption records
+ */
+export function useDailyConsumptionStats(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: ['dailyConsumptionStats', startDate, endDate],
+    queryFn: async () => {
+      const q = query(
+        collection(db, 'dailyConsumptionStats'),
+        where('date', '>=', startDate),
+        where('date', '<=', endDate),
+        orderBy('date', 'asc')
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })) as Array<{
+        id: string;
+        date: string;
+        totalCount: number;
+        byLab: Record<string, number>;
+      }>;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -417,6 +487,65 @@ export function useSubPoints(hospitalId: string | null) {
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   });
+}
+
+// ============================================================================
+// STOCK UPDATE METADATA LISTENER - Event-based cache invalidation
+// ============================================================================
+
+/**
+ * Metadata document path for stock updates
+ * Single document that gets touched whenever stock changes (mal kabul, transfer)
+ */
+const STOCK_METADATA_DOC = 'metadata/stockLastUpdated';
+
+/**
+ * Touch the stock metadata document to signal a stock change
+ * Call this after mal kabul or transfer operations
+ */
+export async function touchStockMetadata() {
+  try {
+    await setDoc(doc(db, STOCK_METADATA_DOC), {
+      lastUpdated: serverTimestamp(),
+      updatedAt: new Date().toISOString(), // Fallback for offline
+    });
+  } catch (error) {
+    console.error('Failed to touch stock metadata:', error);
+  }
+}
+
+/**
+ * Hook that listens to stock metadata changes and invalidates cache
+ * Uses Firestore onSnapshot for real-time updates (single document = very cheap)
+ *
+ * Usage: Call this hook once in a high-level component (e.g., layout or provider)
+ */
+export function useStockUpdateListener() {
+  const queryClient = useQueryClient();
+  const isFirstLoad = useRef(true);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, STOCK_METADATA_DOC),
+      (snapshot) => {
+        // Skip invalidation on first load (initial fetch)
+        if (isFirstLoad.current) {
+          isFirstLoad.current = false;
+          return;
+        }
+
+        // Invalidate all depoStok queries when metadata changes
+        if (snapshot.exists()) {
+          queryClient.invalidateQueries({ queryKey: ['depoStok'] });
+        }
+      },
+      (error) => {
+        console.error('Stock metadata listener error:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [queryClient]);
 }
 
 // ============================================================================

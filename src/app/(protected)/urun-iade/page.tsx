@@ -69,7 +69,7 @@ export default function UrunIadePanel() {
       setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setProductCodes(productsSnap.docs.map(p => ({ id: p.id, ...p.data() } as ProductCode)));
 
-      if (depotList.length > 0 && !selectedDepotId) {
+      if (depotList.length > 0 && !selectedDepotId && depotList[0].id) {
         setSelectedDepotId(depotList[0].id);
       }
     } catch (error) {
@@ -109,7 +109,7 @@ export default function UrunIadePanel() {
         return;
     }
 
-    const { product, stokKodu, seriNumarasi, lotNumarasi } = resolveProductFromParsed(parsed, productCodes);
+    const { product, stokKodu, seriNumarasi, lotNumarasi } = resolveProductFromParsed(parsed, productCodes as any);
     if (!product) {
         toast({ title: 'Ürün Bulunamadı', description: 'Barkodla eşleşen bir ürün tanımı bulunamadı.', variant: 'destructive'});
         setProcessing(false);
@@ -238,8 +238,8 @@ export default function UrunIadePanel() {
         }))
     });
 
-    itemsToProcess.forEach(item => {
-      const itemRef = doc(db, 'depoStok', item.id);
+    itemsToProcess.filter(item => item.id).forEach(item => {
+      const itemRef = doc(db, 'depoStok', item.id!);
       batch.update(itemRef, {
         isShipped: false,
         depotId: selectedDepotId,
@@ -344,7 +344,7 @@ export default function UrunIadePanel() {
                                         <TableCell className="text-muted-foreground">{item.hedefKurum}</TableCell>
                                         <TableCell className="text-right font-bold">{item.adet}</TableCell>
                                         <TableCell className="text-right">
-                                            <Button size="icon" variant="ghost" onClick={() => removeItem(item.id, item.isGroup, item.key)}>
+                                            <Button size="icon" variant="ghost" onClick={() => removeItem(item.id || '', item.isGroup ?? false, item.key as string | undefined)}>
                                                 <Trash2 className="h-4 w-4 text-destructive" />
                                             </Button>
                                         </TableCell>

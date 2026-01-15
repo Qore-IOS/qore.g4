@@ -14,7 +14,7 @@ export interface ProductCode {
   id: string;
   stokKodu: string; // The company's internal stock code
   stokAdi: string;
-  urunGrubu?: 'kit' | 'sarf';
+  urunGrubu?: 'kit' | 'sarf' | 'yedek_parca';
   ambalajDegeri?: number;
   anaBirim?: string;
   cost?: number;
@@ -24,9 +24,14 @@ export interface ProductCode {
   testGrubu?: string;
   cihazGrubu?: string;
   testAdi?: string; // Ürünün çalıştığı testin adı (Total Verimlilik paneli için)
-  barcodeFormatId?: string | null; // Links to a BarcodeFormat
+  barcodeFormatId?: string | null; // Links to a BarcodeFormat (legacy - tek format)
+  barcodeFormatIds?: string[]; // Çoklu barkod formatları (yeni sistem)
   barcodeNumber?: string; // The unique identifier part of the barcode for this product (UDI)
   trackingMode?: TrackingMode;
+  // Ürün boyutları (cm cinsinden) - araç doluluk oranı hesaplaması için
+  genislik?: number; // Genişlik (cm)
+  yukseklik?: number; // Yükseklik (cm)
+  derinlik?: number; // Derinlik/Uzunluk (cm)
   [k: string]: any;
 }
 
@@ -47,7 +52,7 @@ export interface LaboratoryProductTrackingRule {
 }
 
 export interface Hospital {
-  id:string;
+  id: string;
   name: string;
   ad?: string;
   kod?: string;
@@ -60,6 +65,7 @@ export interface Hospital {
   isConsumablesHospital?: boolean; // NEW: For "Hastane Sarf"
   manualDeductionEnabled?: boolean; // NEW: For "Manuel Düşüm"
   fefoEnabled?: boolean;
+  customProductOrder?: string[]; // Özel ürün sıralama - sipariş toplama ekranında kullanılır
   [k: string]: any;
 }
 
@@ -100,20 +106,24 @@ export interface Depot {
   name: string;
   mapDefinition?: GridDefinition;
   companies?: string[]; // Added for Borç Depo
+  // Konum bilgileri - rota planlama için
+  lat?: number;
+  lng?: number;
+  address?: string;
   [k: string]: any;
 }
 
 export interface MinMaxRule {
-    stokKodu: string; // Add stokKodu to be able to identify the rule
-    min: number;
-    max: number;
-    aylikTuketimLimiti?: number; // Monthly consumption limit
+  stokKodu: string; // Add stokKodu to be able to identify the rule
+  min: number;
+  max: number;
+  aylikTuketimLimiti?: number; // Monthly consumption limit
 }
 
 export interface User {
   uid: string;
   email: string | null;
-  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | string;
+  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | string;
   name?: string;
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
@@ -124,6 +134,8 @@ export interface User {
   assignedBrands?: string[]; // Array of brand names
   notificationsEnabled?: boolean; // User notification preferences
   notificationPreferences?: string[]; // Array of notification types
+  themePreference?: 'light' | 'dark' | 'system'; // User's theme preference stored in Firestore
+  lastSelectedLabId?: string; // Last selected laboratory ID for teknisyen users (persisted in Firestore)
 }
 
 export interface ScannedItem {
@@ -288,12 +300,12 @@ export interface AssignedDevice {
 }
 
 export interface DeviceGroup {
-    id: string;
-    name: string;
-    deviceIds: string[];
-    order: number;
-    subPointId?: string;
-    subPointName?: string;
+  id: string;
+  name: string;
+  deviceIds: string[];
+  order: number;
+  subPointId?: string;
+  subPointName?: string;
 }
 
 
@@ -317,6 +329,19 @@ export interface ConsumptionRecord {
   isImhaDogrulandi?: boolean;
   userId: string;
   userName: string;
+}
+
+/**
+ * Daily consumption statistics for dashboard KPI
+ * Stores aggregated daily consumption counts to avoid querying all consumption records
+ */
+export interface DailyConsumptionStats {
+  id: string;              // Format: "YYYY-MM-DD"
+  date: string;            // "YYYY-MM-DD" for easy querying
+  totalCount: number;      // Total consumption count for the day
+  byLab: Record<string, number>;  // Consumption count by laboratory ID
+  createdAt?: TimestampLike;
+  updatedAt?: TimestampLike;
 }
 
 export interface CihazUstuStokInput {
@@ -390,6 +415,17 @@ export interface DeviceFaultReport {
   closedBy?: string;
   closedByName?: string;
   source: string;
+  // Ejected kit fault fields
+  isEjectedKitFault?: boolean;
+  productStokKodu?: string;
+  productStokAdi?: string;
+  productCihazGrubu?: string;
+  kitResolution?: 'imha' | 'tekrar_kullanim' | null;
+  ejectedKitRecordId?: string;
+  testCount?: number;
+  // Additional fields
+  title?: string;
+  closeDescription?: string;
 }
 
 
@@ -412,6 +448,7 @@ export type AppView =
   | 'verimlilik-hesaplama'
   | 'cost-dashboard'
   | 'teknik-servis'
+  | 'aplikasyon-paneli'
   | 'transfer-gecmis'
   | 'siparis-gecmis'
   | 'kumulatif-gecmis'
@@ -421,6 +458,13 @@ export type AppView =
   | 'personel-islemleri'
   | 'is-analizi'
   | 'total-verimlilik'
+  | 'cihazdan-cikan-kit'
+  | 'sevkiyat'
+  | 'depo-sayim'
+  | 'cihaz-yonetimi'
+  | 'miad-uyarilari'
+  | 'verimlilik'
+  | 'numune-arsivi'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
@@ -465,21 +509,21 @@ export type PositionDef = { start: number; length: number };
 
 
 export type BarcodeFormat = {
-    id: string;
-    name: string;
-    strategy: 'positional' | 'regex' | 'legacy_roche';
-    active: boolean;
-    priority: number;
-    totalLength?: number;
-    reference?: { start: number; length: number };
-    lot?: { start: number; length: number };
-    expiry?: { start: number; length: number; pattern: ExpiryPattern };
-    serial?: { start: number; length: number };
-    trackSerial?: boolean;
-    trackLot?: boolean;
-    regex?: string;
-    fields?: { reference?: number; lot?: number; expiry?: number; serial?: number };
-    parseTarget?: ParseTarget;
+  id: string;
+  name: string;
+  strategy: 'positional' | 'regex' | 'legacy_roche';
+  active: boolean;
+  priority: number;
+  totalLength?: number;
+  reference?: { start: number; length: number };
+  lot?: { start: number; length: number };
+  expiry?: { start: number; length: number; pattern: ExpiryPattern };
+  serial?: { start: number; length: number };
+  trackSerial?: boolean;
+  trackLot?: boolean;
+  regex?: string;
+  fields?: { reference?: number; lot?: number; expiry?: number; serial?: number };
+  parseTarget?: ParseTarget;
 };
 
 
@@ -601,6 +645,68 @@ export interface LabResultExcelRow {
   tupAdi?: string;
 }
 
+// Cihazdan çıkan kit (ejected kit) records
+export interface EjectedKitRecord {
+  id: string;
+  laboratoryId: string;
+  laboratoryName: string;
+  deviceId: string;
+  deviceModel: string;
+  deviceSerial: string;
+  deviceImageUrl: string;
+  stokKodu: string;
+  stokAdi: string;
+  cihazGrubu?: string;
+  quantityType: 'kutu' | 'test';
+  testCount: number; // ambalajDegeri if kutu, manual entry if test
+  aciklama: string;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  faultReportId: string; // Link to created fault reports
+}
+
+// Destroyed kits report for "imha" resolution
+export interface DestroyedKitRecord {
+  id: string;
+  ejectedKitRecordId: string | null;
+  faultReportId: string | null;
+  laboratoryId: string | null;
+  laboratoryName: string;
+  depotId?: string | null; // NEW: For depot-sourced destructions
+  depotName?: string; // NEW: For depot-sourced destructions
+  deviceId: string | null;
+  deviceModel: string;
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi?: string; // NEW: Lot number
+  miad?: string; // NEW: Expiry date
+  seriNumarasi?: string; // NEW: Serial number
+  testCount: number;
+  remainingTests?: number; // NEW: Remaining tests in the kit before destruction
+  aciklama: string;
+  resolvedAt: TimestampLike;
+  resolvedByUid: string;
+  resolvedByName: string;
+  sourceType?: 'barcode' | 'excel' | 'fault'; // NEW: Source of destruction
+}
+
+export interface TrashBinRecord {
+  id: string;
+  laboratoryId: string;
+  laboratoryName: string;
+  deviceId: string;
+  deviceModel: string;
+  deviceSerialNumber: string;
+  stokKodu: string;
+  stokAdi: string;
+  remainingTests: number;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  sourceType: 'manual'; // For now, only manual entry
+}
+
 export interface Rack {
   id: string;
   labId: string;
@@ -614,4 +720,51 @@ export interface Rack {
   sealedAt?: any;
   createdAt?: any;
   [k: string]: any;
+}
+
+// Lab Transfer Dates - Tracks last transfer dates per product from depot to lab
+export interface LabTransferDates {
+  id: string; // Format: {labId}_{depotId}
+  labId: string;
+  depotId: string;
+  labName: string;
+  depotName: string;
+  // Map of stokKodu -> transfer info
+  transfers: Record<string, {
+    lastTransferDate: TimestampLike;
+    lastTransferBy?: string;
+  }>;
+  updatedAt: TimestampLike;
+}
+
+// Route Request - Laboratuvar ekleme veya yer değişikliği talepleri
+export interface RouteRequest {
+  id: string;
+  type: 'add' | 'reorder'; // 'add': Route'a ekleme, 'reorder': Yer değişikliği
+  labId: string;
+  labName: string;
+  labLat?: number;
+  labLng?: number;
+  routeId: string;
+  routeDate: string; // ISO date string
+  routeDriverName: string;
+  // Ekleme talebi için: hangi duraktan sonra eklenmeli
+  insertAfterStopId?: string | null;
+  insertAfterStopName?: string | null;
+  // Yer değişikliği için: mevcut ve istenen sıra
+  currentOrder?: number;
+  requestedOrder?: number;
+  requestedAfterStopId?: string | null;
+  requestedAfterStopName?: string | null;
+  // Talep bilgileri
+  requestedBy: string; // User ID
+  requestedByName: string;
+  requestedAt: TimestampLike;
+  note?: string;
+  // Durum
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: TimestampLike;
+  rejectionReason?: string;
 }

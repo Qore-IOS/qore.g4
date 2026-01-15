@@ -1,6 +1,7 @@
 
+
 import type { AppView } from './types';
-import { LayoutDashboard, Package, TestTube, BarChart3, Settings, ScanBarcode, ShieldCheck, TrendingUp, Calculator, PackagePlus, Server, CheckSquare, LogOut, Moon, Wallet, Map, ShoppingBag, Truck, Activity, Archive, BookText, Bell, Search, SprayCan, ClipboardPlus, UserCog, ListChecks } from 'lucide-react';
+import { LayoutDashboard, Package, TestTube, BarChart3, Settings, ScanBarcode, ShieldCheck, TrendingUp, Calculator, PackagePlus, Server, CheckSquare, LogOut, Moon, Wallet, Map, ShoppingBag, Truck, Activity, Archive, BookText, Bell, Search, SprayCan, ClipboardPlus, UserCog, ListChecks, Unplug } from 'lucide-react';
 
 // VIEWS dizisi Türkçeleştirildi ve "Hastane" "Laboratuvar" olarak güncellendi.
 // URL'ler kebab-case yapısına uygun güncellendi.
@@ -17,6 +18,7 @@ export const VIEWS: { key: string; label: string; icon: React.ElementType; type:
   { key: 'urun-kullanim', label: 'Ürün Kullanım', icon: ScanBarcode, type: 'nav', href: '/urun-kullanim' },
   { key: 'sarf-dagitim', label: 'Sarf Dağıtım', icon: ClipboardPlus, type: 'nav', href: '/sarf-dagitim'},
   { key: 'numune-arsivi', label: 'Numune Arşivi', icon: Archive, type: 'nav', href: '/numune-arsivi' },
+  { key: 'cihazdan-cikan-kit', label: 'Cihazdan Çıkan Kit', icon: Unplug, type: 'nav', href: '/cihazdan-cikan-kit' },
   { key: 'is-analizi', label: 'İş Analizi', icon: TrendingUp, type: 'nav', href: '/is-analizi'},
   { key: 'verimlilik-hesaplama', label: 'Verimlilik & Maliyet', icon: Calculator, type: 'nav' }, // onClick will be handled in app-layout
   { key: 'total-verimlilik', label: 'Total Verimlilik', icon: BarChart3, type: 'nav', href: '/total-verimlilik' },

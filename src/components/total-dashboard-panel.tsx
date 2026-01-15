@@ -1,9 +1,35 @@
+/**
+ * @fileoverview Total Dashboard Panel Component
+ * @description Comprehensive dashboard for visualizing total efficiency metrics
+ * across all laboratories and efficiency pools. Provides KPI cards, trend analysis,
+ * comparative charts, and device fault tracking.
+ * @module components/total-dashboard-panel
+ * @version 1.0.0
+ *
+ * @features
+ * - Multi-pool efficiency overview with KPI cards
+ * - Period-based filtering (last 6 months default)
+ * - Pool and laboratory filtering
+ * - Stock accuracy and kit efficiency visualization
+ * - Cost and profit analysis with multi-currency support
+ * - Device fault tracking integration
+ * - Lab performance ranking
+ * - Trend indicators for efficiency changes
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Screen reader compatible data visualization
+ * - Keyboard accessible filters and controls
+ * - Semantic HTML structure
+ */
+
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { totalVerimlilikLogger } from '@/lib/logger';
 import type { Hospital, EfficiencyPool, DeviceFaultReport } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import {
@@ -131,7 +157,7 @@ const NeumorphicCard = ({
   </div>
 );
 
-// KPI Card Component
+// KPI Card Component - Mobile Responsive
 const KPICard = ({
   title,
   value,
@@ -164,38 +190,50 @@ const KPICard = ({
   };
 
   return (
-    <NeumorphicCard className={cn("p-5", size === 'large' && "p-6")}>
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <p className="text-sm font-medium text-muted-foreground mb-1">{title}</p>
+    <NeumorphicCard className={cn(
+      // Responsive padding: smaller on mobile, larger on desktop
+      "p-3 sm:p-4 md:p-5",
+      size === 'large' && "md:p-6",
+      "kpi-card"
+    )}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-0.5 sm:mb-1 truncate">{title}</p>
           <p className={cn(
             "font-bold tracking-tight",
-            size === 'large' ? "text-3xl" : "text-2xl"
+            // Responsive text size
+            size === 'large'
+              ? "text-xl sm:text-2xl md:text-3xl"
+              : "text-lg sm:text-xl md:text-2xl"
           )}>
             {value}
           </p>
           {subtitle && (
-            <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 truncate">{subtitle}</p>
           )}
           {trend && trendValue && (
             <div className={cn(
-              "flex items-center gap-1 mt-2 text-sm font-medium",
+              "flex items-center gap-1 mt-1 sm:mt-2 text-xs sm:text-sm font-medium",
               trend === 'up' && "text-green-500",
               trend === 'down' && "text-red-500",
               trend === 'neutral' && "text-muted-foreground"
             )}>
-              {trend === 'up' && <TrendingUp className="h-4 w-4" />}
-              {trend === 'down' && <TrendingDown className="h-4 w-4" />}
-              <span>{trendValue}</span>
+              {trend === 'up' && <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4" />}
+              {trend === 'down' && <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4" />}
+              <span className="truncate">{trendValue}</span>
             </div>
           )}
         </div>
         <div className={cn(
-          "p-3 rounded-xl",
+          // Responsive icon container padding
+          "p-2 sm:p-2.5 md:p-3 rounded-lg sm:rounded-xl flex-shrink-0",
           colorClasses[color]
         )}>
           <Icon className={cn(
-            size === 'large' ? "h-7 w-7" : "h-6 w-6"
+            // Responsive icon size
+            size === 'large'
+              ? "h-5 w-5 sm:h-6 sm:w-6 md:h-7 md:w-7"
+              : "h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6"
           )} />
         </div>
       </div>
@@ -600,7 +638,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         setSelectedPeriods(defaultPeriods);
 
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        totalVerimlilikLogger.error('Dashboard verileri yüklenirken hata oluştu', error);
         toast({ title: 'Hata', description: 'Veriler yüklenirken hata oluştu.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
@@ -944,17 +982,18 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex items-center justify-center h-96" role="status" aria-label="Yükleniyor">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+          <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden="true" />
           <p className="text-muted-foreground">Dashboard yükleniyor...</p>
+          <span className="sr-only">Dashboard verileri yükleniyor, lütfen bekleyin</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6 min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="p-6 space-y-6 min-h-screen bg-gray-50 dark:bg-gray-950" role="main" aria-label="Total Dashboard">
       <BackButton fallback="/total-verimlilik" />
 
       {/* Header */}
@@ -972,11 +1011,11 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap" role="group" aria-label="Dashboard filtreleri">
           {/* Pool Filter */}
           <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
-            <SelectTrigger className="w-[200px] bg-background">
-              <Layers className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectTrigger className="w-[200px] bg-background" aria-label="Verimlilik havuzu seçin">
+              <Layers className="h-4 w-4 mr-2 text-muted-foreground" aria-hidden="true" />
               <SelectValue placeholder="Havuz seçin..." />
             </SelectTrigger>
             <SelectContent>
@@ -989,8 +1028,8 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
 
           {/* Lab Filter */}
           <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-            <SelectTrigger className="w-[200px] bg-background">
-              <FlaskConical className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectTrigger className="w-[200px] bg-background" aria-label="Laboratuvar seçin">
+              <FlaskConical className="h-4 w-4 mr-2 text-muted-foreground" aria-hidden="true" />
               <SelectValue placeholder="Laboratuvar seçin..." />
             </SelectTrigger>
             <SelectContent>
@@ -1004,19 +1043,19 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
           {/* Period Filter */}
           <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Calendar className="h-4 w-4" />
+              <Button variant="outline" className="gap-2" aria-label={`Dönem filtresi, ${selectedPeriods.size} dönem seçili`} aria-expanded={isFilterOpen}>
+                <Calendar className="h-4 w-4" aria-hidden="true" />
                 Dönem ({selectedPeriods.size})
-                {isFilterOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {isFilterOpen ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-72 p-4" align="end">
-              <div className="space-y-4">
+              <div className="space-y-4" role="group" aria-label="Dönem seçim paneli">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-medium">Dönem Seçimi</h4>
+                  <h4 className="font-medium" id="period-selection-title">Dönem Seçimi</h4>
                   <div className="flex gap-2">
-                    <Button variant="ghost" size="sm" onClick={selectAllPeriods}>Tümü</Button>
-                    <Button variant="ghost" size="sm" onClick={clearPeriods}>Temizle</Button>
+                    <Button variant="ghost" size="sm" onClick={selectAllPeriods} aria-label="Tüm dönemleri seç">Tümü</Button>
+                    <Button variant="ghost" size="sm" onClick={clearPeriods} aria-label="Seçimleri temizle">Temizle</Button>
                   </div>
                 </div>
                 <div className="space-y-2">

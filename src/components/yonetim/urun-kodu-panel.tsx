@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
 import { Badge } from '../ui/badge';
 import { useAuth } from '@/contexts/auth-context';
+import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -157,6 +158,7 @@ export default function UrunKoduPanel() {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser } = useAuth();
+  const { formats: barcodeFormats } = useSafeBarcodeFormats();
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
   // Maliyet Checkpoint State'leri
@@ -429,6 +431,9 @@ export default function UrunKoduPanel() {
         trackingMode: trackingModeToExcel((p as any).trackingMode),
         barcodeNumber: (p as any).barcodeNumber ?? '',
         barcodeFormatId: (p as any).barcodeFormatId ?? '',
+        barcodeFormatIds: Array.isArray((p as any).barcodeFormatIds)
+          ? (p as any).barcodeFormatIds.join(',')
+          : '',
     }));
     
     const workbook = XLSX.utils.book_new();
@@ -468,7 +473,8 @@ export default function UrunKoduPanel() {
           }
   
           const stokAdi = String(row['stokadi'] || row['stokadı'] || '').trim();
-          const urunGrubu: 'kit' | 'sarf' = String(row['urungrubu'] || row['ürüngrubu'] || 'kit').toLowerCase().includes('sarf') ? 'sarf' : 'kit';
+          const urunGrubuRaw = String(row['urungrubu'] || row['ürüngrubu'] || 'kit').toLowerCase();
+          const urunGrubu: 'kit' | 'sarf' | 'yedek_parca' = urunGrubuRaw.includes('yedek') || urunGrubuRaw.includes('parca') ? 'yedek_parca' : (urunGrubuRaw.includes('sarf') ? 'sarf' : 'kit');
           const ambalajDegeri = parseNum(row['ambalajdegeri'] ?? row['ambalajdeğeri']);
           
           if (urunGrubu === 'kit' && mode === 'add' && (!ambalajDegeri || ambalajDegeri <= 0)) {
@@ -493,6 +499,9 @@ export default function UrunKoduPanel() {
             trackingMode: trackingModeFromExcel(row['trackingmode']),
             barcodeNumber: row['barcodenumber'] ?? null,
             barcodeFormatId: row['barcodeformatid'] || null,
+            barcodeFormatIds: row['barcodeformatids']
+              ? String(row['barcodeformatids']).split(',').map(s => s.trim()).filter(Boolean)
+              : undefined,
           };
           
           const cleanedProductData = Object.fromEntries(
@@ -529,7 +538,7 @@ export default function UrunKoduPanel() {
 
   const availableFilterGroups = useMemo(() => {
     const markaSet = new Set<string>();
-    const urunGrubuSet = new Set<'kit' | 'sarf'>();
+    const urunGrubuSet = new Set<'kit' | 'sarf' | 'yedek_parca'>();
     productCodes.forEach(p => {
         if(p.marka) markaSet.add(p.marka);
         if(p.urunGrubu) urunGrubuSet.add(p.urunGrubu);
@@ -744,6 +753,7 @@ export default function UrunKoduPanel() {
                       <TableHead>Stok Adı</TableHead>
                       <TableHead>Ürün Grubu</TableHead>
                       <TableHead>Marka</TableHead>
+                      <TableHead>Barkod Formatları</TableHead>
                       <TableHead>Test Grubu</TableHead>
                       <TableHead>Cihaz Grubu</TableHead>
                       <TableHead className="text-right">İşlemler</TableHead>
@@ -763,6 +773,44 @@ export default function UrunKoduPanel() {
                         <TableCell className="font-medium">{p.stokAdi}</TableCell>
                         <TableCell>{p.urunGrubu}</TableCell>
                         <TableCell>{p.marka}</TableCell>
+                        <TableCell>
+                          {(() => {
+                            // Çoklu format desteği (yeni)
+                            const formatIds = (p as any).barcodeFormatIds;
+                            if (Array.isArray(formatIds) && formatIds.length > 0) {
+                              return (
+                                <div className="flex flex-wrap gap-1">
+                                  {formatIds.map((fmtId: string) => {
+                                    const fmt = barcodeFormats.find(f => f.id === fmtId);
+                                    return fmt ? (
+                                      <Badge key={fmtId} variant="secondary" className="text-xs">
+                                        {fmt.name}
+                                      </Badge>
+                                    ) : null;
+                                  })}
+                                </div>
+                              );
+                            }
+                            // Tek format (eski - geriye uyumluluk)
+                            const singleFormatId = (p as any).barcodeFormatId;
+                            if (singleFormatId && singleFormatId !== '__auto__') {
+                              const fmt = barcodeFormats.find(f => f.id === singleFormatId);
+                              return fmt ? (
+                                <Badge variant="outline" className="text-xs">
+                                  {fmt.name}
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">{singleFormatId}</span>
+                              );
+                            }
+                            // Otomatik veya tanımsız
+                            return (
+                              <span className="text-xs text-muted-foreground">
+                                {singleFormatId === '__auto__' ? 'Otomatik' : '—'}
+                              </span>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell>{p.testGrubu}</TableCell>
                         <TableCell>{p.cihazGrubu}</TableCell>
                         <TableCell className="text-right space-x-1">

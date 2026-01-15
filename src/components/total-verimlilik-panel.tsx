@@ -1,3 +1,47 @@
+/**
+ * @fileoverview Total Verimlilik (Total Efficiency) Panel Component
+ * @description Comprehensive efficiency calculation panel for multi-laboratory environments.
+ * Provides stock accuracy tracking, kit efficiency metrics, cost analysis, and
+ * hak ediş (entitlement) calculations across verimlilik pools.
+ * @module components/total-verimlilik-panel
+ * @version 1.0.0
+ *
+ * @features
+ * - Multi-laboratory efficiency pool management
+ * - 25-column data table with manual and calculated fields
+ * - Stock accuracy deviation tracking (Stok Doğruluk)
+ * - Kit efficiency deviation tracking (Kit Verimlilik)
+ * - Box loss calculation (Kutu Kayıp)
+ * - Cost calculation with multi-currency support (TRY/USD/EUR)
+ * - Hak ediş karşılığı (entitlement equivalent) calculation
+ * - Profit/loss analysis per product
+ * - Center lab hak ediş calculation from İş Analizi data
+ * - Excel import/export functionality
+ * - Previous period data carryover
+ * - Real-time exchange rate fetching with fallback
+ * - Cost checkpoint system for historical cost tracking
+ * - Advanced filtering and sorting capabilities
+ * - Results-only view mode
+ *
+ * @accessibility
+ * - ARIA labels for all interactive elements
+ * - Keyboard accessible inputs and buttons
+ * - Screen reader compatible data table
+ * - Clear visual indicators for efficiency states
+ * - Focus management for modal dialogs
+ *
+ * @calculations
+ * - Column 9: Total Ay Başı Stok = (Kutu × Ambalaj) + Cihaz Üstü Test
+ * - Column 14: Sevkiyatlar Sonrası Total = ((10+11+12+13) × Ambalaj) + 9
+ * - Column 18: Dönem Sonu Toplam = (Kutu × Ambalaj) + Cihaz Üstü Test
+ * - Column 20: Stok Doğruluk Fark = (14-18) - 15, Sapma % = Fark/15 × 100
+ * - Column 21: Kit Verimlilik Fark = 15 - 19, Sapma % = Fark/15 × 100
+ * - Column 22: Kutu Kayıp = Fark / Ambalaj
+ * - Column 23: Sarfiyat Maliyeti = (14-18) × (Maliyet/Ambalaj)
+ * - Column 24: Hak Ediş Karşılığı = HakEdişTL × TestSayısı(19)
+ * - Column 25: Kâr = Sütun 24 - Sütun 23
+ */
+
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -36,6 +80,7 @@ import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, wh
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { totalVerimlilikLogger } from '@/lib/logger';
 import BackButton from '@/components/BackButton';
 import { exportDataToExcel } from '@/lib/utils';
 import Link from 'next/link';
@@ -204,7 +249,7 @@ export default function TotalVerimlilikPanel({
         setLabPools(labPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
         setDepots(depotsSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name || d.id })));
       } catch (error) {
-        console.error('Error fetching pools:', error);
+        totalVerimlilikLogger.error('Verimlilik havuzları yüklenirken hata oluştu', error);
         toast({ title: 'Hata', description: 'Havuzlar yüklenemedi.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
@@ -249,7 +294,7 @@ export default function TotalVerimlilikPanel({
           return;
         }
       } catch (e) {
-        console.error('Primary exchange rate API failed:', e);
+        totalVerimlilikLogger.warn('Birincil döviz kuru API başarısız oldu, yedek API deneniyor', { error: e });
       }
 
       // Backup API (Frankfurter)
@@ -267,7 +312,7 @@ export default function TotalVerimlilikPanel({
           return;
         }
       } catch (e) {
-        console.error('Backup exchange rate API failed:', e);
+        totalVerimlilikLogger.warn('Yedek döviz kuru API başarısız oldu, fallback değerler kullanılıyor', { error: e });
       }
 
       // Fallback değerler
@@ -300,7 +345,7 @@ export default function TotalVerimlilikPanel({
           setSelectedCostCheckpoint(checkpointsList[0].id);
         }
       } catch (error) {
-        console.error('Error fetching cost checkpoints:', error);
+        totalVerimlilikLogger.error('Maliyet checkpoint kayıtları yüklenirken hata oluştu', error);
       }
     };
 
@@ -324,7 +369,7 @@ export default function TotalVerimlilikPanel({
           setCostCheckpointData(null);
         }
       } catch (error) {
-        console.error('Error fetching checkpoint data:', error);
+        totalVerimlilikLogger.error('Checkpoint verisi yüklenirken hata oluştu', error, { checkpointId: selectedCostCheckpoint });
         setCostCheckpointData(null);
       }
     };
@@ -360,14 +405,14 @@ export default function TotalVerimlilikPanel({
               ...d.data()
             } as HakEdisDefinition));
           } catch (e) {
-            console.error(`Error fetching hakEdis for lab ${labId}:`, e);
+            totalVerimlilikLogger.warn('Laboratuvar hak ediş tanımları yüklenirken hata oluştu', { labId, error: e });
             hakEdisMap[labId] = [];
           }
         }
 
         setLabHakEdisDefinitions(hakEdisMap);
       } catch (error) {
-        console.error('Error fetching hak ediş definitions:', error);
+        totalVerimlilikLogger.error('Hak ediş tanımları yüklenirken hata oluştu', error, { poolId: selectedPoolId });
       }
     };
 
@@ -443,7 +488,7 @@ export default function TotalVerimlilikPanel({
             const rulesSnap = await getDocs(collection(db, 'hospitals', labId, 'minMaxRules'));
             rulesMap[labId] = rulesSnap.docs.map(d => ({ stokKodu: d.id, ...d.data() } as MinMaxRule));
           } catch (e) {
-            console.error(`Error fetching minMax for ${labId}:`, e);
+            totalVerimlilikLogger.warn('Min-max kuralları yüklenirken hata oluştu', { labId, error: e });
             rulesMap[labId] = [];
           }
         }
@@ -548,7 +593,12 @@ export default function TotalVerimlilikPanel({
             });
           }
         } catch (e) {
-          console.error('Error fetching previous month data:', e);
+          totalVerimlilikLogger.warn('Önceki dönem verileri yüklenirken hata oluştu', {
+            prevMonth,
+            prevYear,
+            poolId: selectedPoolId,
+            error: e,
+          });
           // Hata olursa sessizce devam et, devir yapılmaz
         }
 
@@ -658,7 +708,11 @@ export default function TotalVerimlilikPanel({
           setAraKayitInfo({ exists: false });
         }
       } catch (error) {
-        console.error('Error building rows:', error);
+        totalVerimlilikLogger.error('Tablo satırları oluşturulurken hata oluştu', error, {
+          poolId: selectedPoolId,
+          month: selectedMonth,
+          year: selectedYear,
+        });
         toast({ title: 'Hata', description: 'Veriler yüklenirken bir sorun oluştu.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
@@ -862,7 +916,11 @@ export default function TotalVerimlilikPanel({
 
       toast({ title: 'Başarılı', description: 'Göztepe sevkiyat verileri çekildi.' });
     } catch (error) {
-      console.error('Error fetching sevkiyat:', error);
+      totalVerimlilikLogger.error('Göztepe sevkiyat verileri çekilirken hata oluştu', error, {
+        selectedLabs: Array.from(selectedLabsForSevkiyat),
+        month: selectedMonth,
+        year: selectedYear,
+      });
       toast({ title: 'Hata', description: 'Sevkiyat verileri çekilirken hata oluştu.', variant: 'destructive' });
     } finally {
       setIsFetchingSevkiyat(false);
@@ -1018,7 +1076,7 @@ export default function TotalVerimlilikPanel({
           description: `${updatedCount} satır güncellendi.`,
         });
       } catch (error) {
-        console.error('Error importing Excel:', error);
+        totalVerimlilikLogger.error('Excel dosyası içe aktarılırken hata oluştu', error);
         toast({
           title: 'Hata',
           description: 'Excel dosyası okunurken bir hata oluştu.',
@@ -1093,7 +1151,12 @@ export default function TotalVerimlilikPanel({
       await setDoc(doc(db, 'totalEfficiencyRecords', docId), dataToSave, { merge: true });
       toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${genelVerimlilik.toFixed(1)}` });
     } catch (error) {
-      console.error('Error saving:', error);
+      totalVerimlilikLogger.error('Total verimlilik kaydedilirken hata oluştu', error, {
+        poolId: selectedPoolId,
+        month: selectedMonth,
+        year: selectedYear,
+        rowCount: rows.length,
+      });
       toast({ title: 'Hata', description: 'Kayıt sırasında bir sorun oluştu.', variant: 'destructive' });
     } finally {
       setIsSaving(false);
@@ -1611,21 +1674,11 @@ export default function TotalVerimlilikPanel({
         return;
       }
 
-      console.log('=== Merkez Hak Ediş Hesaplama Debug ===');
-      console.log('Toplam rawData kayıt sayısı:', rawData.length);
-      console.log('Örnek rawData kayıt:', rawData[0]);
-      console.log('Seçili dönem:', selectedYear, '-', selectedMonth + 1);
-
-      // labHakEdisDefinitions durumunu göster
-      console.log('labHakEdisDefinitions anahtarları:', Object.keys(labHakEdisDefinitions));
-      for (const labId of Object.keys(labHakEdisDefinitions)) {
-        const definitions = labHakEdisDefinitions[labId] || [];
-        const labName = hospitals.find(h => h.id === labId)?.name || labId;
-        console.log(`  - ${labName}: ${definitions.length} tanım`);
-        if (definitions.length > 0) {
-          console.log(`    Örnek: sutTestAdi="${definitions[0].sutTestAdi}", linkedStokKodu="${definitions[0].linkedStokKodu}"`);
-        }
-      }
+      totalVerimlilikLogger.debug('Merkez hak ediş hesaplama başlatıldı', {
+        rawDataCount: rawData.length,
+        selectedPeriod: `${selectedYear}-${selectedMonth + 1}`,
+        labDefinitionsCount: Object.keys(labHakEdisDefinitions).length,
+      });
 
       // Seçilen dönemin başlangıç ve bitiş tarihlerini hesapla
       const periodStart = new Date(selectedYear, selectedMonth, 1);
@@ -1669,7 +1722,11 @@ export default function TotalVerimlilikPanel({
         const sutTestAdi = String(hakEdisDefinition.sutTestAdi || '').trim().toLowerCase();
         const labKod = String(labInfo.kod || '').trim();
 
-        console.log(`Aranan: Lab=${labKod}, SUT Test Adı="${hakEdisDefinition.sutTestAdi}", Ürün=${row.stokAdi}`);
+        totalVerimlilikLogger.debug('Test eşleşmesi aranıyor', {
+          labKod,
+          sutTestAdi: hakEdisDefinition.sutTestAdi,
+          stokAdi: row.stokAdi,
+        });
 
         // İş analizi verisinde eşleşmeleri say
         let testCount = 0;
@@ -1722,31 +1779,32 @@ export default function TotalVerimlilikPanel({
         }
 
         if (testCount > 0) {
-          console.log(`✓ Eşleşme bulundu: ${row.labName} - ${row.stokAdi}: ${testCount} test`);
-          console.log('Örnek eşleşen kayıtlar:', matchedRecords);
+          totalVerimlilikLogger.debug('Eşleşme bulundu', {
+            labName: row.labName,
+            stokAdi: row.stokAdi,
+            testCount,
+            sampleRecords: matchedRecords.length,
+          });
         }
 
         sentToCenter[row.id] = testCount;
       }
 
-      // Debug bilgilerini konsola yaz
+      // Debug bilgilerini loga yaz
       if (debugInfo.length > 0) {
-        console.log('Debug bilgileri:', debugInfo);
+        totalVerimlilikLogger.debug('Merkez hak ediş hesaplama debug bilgileri', {
+          warnings: debugInfo,
+        });
       }
 
-      // rawData'daki benzersiz hastaneId ve testAdi değerlerini göster
+      // rawData istatistiklerini loga yaz
       const uniqueHastaneIds = [...new Set(rawData.map((r: any) => String(r.hastaneId || '').trim()))];
       const uniqueTestAdis = [...new Set(rawData.map((r: any) => String(r.testAdi || '').trim()))];
-      console.log('rawData benzersiz hastaneId değerleri:', uniqueHastaneIds);
-      console.log('rawData benzersiz testAdi değerleri (ilk 20):', uniqueTestAdis.slice(0, 20));
 
-      // hakEdisDefinitions'daki sutTestAdi değerlerini göster
-      const allSutTestAdis: string[] = [];
-      for (const labId of Object.keys(labHakEdisDefinitions)) {
-        const definitions = labHakEdisDefinitions[labId] || [];
-        definitions.forEach(d => allSutTestAdis.push(d.sutTestAdi || ''));
-      }
-      console.log('labHakEdisDefinitions benzersiz sutTestAdi değerleri:', [...new Set(allSutTestAdis)]);
+      totalVerimlilikLogger.debug('Raw data istatistikleri', {
+        uniqueHastaneIdCount: uniqueHastaneIds.length,
+        uniqueTestAdiCount: uniqueTestAdis.length,
+      });
 
       setTestsSentToCenter(sentToCenter);
       setCenterHakEdisMode(true);
@@ -1757,7 +1815,10 @@ export default function TotalVerimlilikPanel({
         description: `Toplam ${totalSent} test merkeze gönderilmiş olarak hesaplandı.`,
       });
     } catch (error) {
-      console.error('Error calculating center hakediş:', error);
+      totalVerimlilikLogger.error('Merkez hak ediş hesaplaması yapılırken hata oluştu', error, {
+        centerLabId: selectedPool?.centerLabId,
+        rowCount: rows.length,
+      });
       toast({ title: 'Hata', description: 'Merkez hak ediş hesaplaması yapılırken bir hata oluştu.', variant: 'destructive' });
     } finally {
       setIsCalculatingCenterHakEdis(false);
@@ -1778,7 +1839,7 @@ export default function TotalVerimlilikPanel({
   }, []);
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Paneli">
       <BackButton fallback="/" />
 
       <Card>
@@ -1847,11 +1908,11 @@ export default function TotalVerimlilikPanel({
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4" role="group" aria-label="Dönem ve havuz seçimi">
             <div>
-              <label className="text-sm font-medium mb-1 block">Verimlilik Havuzu</label>
+              <label id="pool-label" className="text-sm font-medium mb-1 block">Verimlilik Havuzu</label>
               <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="pool-label">
                   <SelectValue placeholder="Havuz seçin..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -1864,9 +1925,9 @@ export default function TotalVerimlilikPanel({
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium mb-1 block">Ay</label>
+              <label id="month-label" className="text-sm font-medium mb-1 block">Ay</label>
               <Select value={String(selectedMonth)} onValueChange={v => setSelectedMonth(Number(v))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-labelledby="month-label"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {MONTHS.map((m, i) => (
                     <SelectItem key={i} value={String(i)}>{m.label}</SelectItem>
@@ -1875,9 +1936,9 @@ export default function TotalVerimlilikPanel({
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium mb-1 block">Yıl</label>
+              <label id="year-label" className="text-sm font-medium mb-1 block">Yıl</label>
               <Select value={String(selectedYear)} onValueChange={v => setSelectedYear(Number(v))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-labelledby="year-label"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {YEARS.map(y => (
                     <SelectItem key={y} value={String(y)}>{y}</SelectItem>
@@ -1886,12 +1947,12 @@ export default function TotalVerimlilikPanel({
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium mb-1 block">Maliyet Dönemi</label>
+              <label id="cost-period-label" className="text-sm font-medium mb-1 block">Maliyet Dönemi</label>
               <Select
                 value={selectedCostCheckpoint}
                 onValueChange={setSelectedCostCheckpoint}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="cost-period-label">
                   <SelectValue placeholder={costCheckpoints.length === 0 ? "Checkpoint yok" : "Seçin..."} />
                 </SelectTrigger>
                 <SelectContent>
@@ -1919,8 +1980,8 @@ export default function TotalVerimlilikPanel({
           {selectedPoolId && (
             <div className="flex items-center justify-between gap-4 pt-4 border-t flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
-                <Button onClick={handleSave} disabled={isSaving || rows.length === 0}>
-                  {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                <Button onClick={handleSave} disabled={isSaving || rows.length === 0} aria-label="Verileri kaydet">
+                  {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4 mr-2" aria-hidden="true" />}
                   Kaydet
                 </Button>
                 {/* Ara Kayıt Butonu */}
@@ -1967,16 +2028,18 @@ export default function TotalVerimlilikPanel({
                   variant="secondary"
                   onClick={() => setShowGoztepeSevkiyatModal(true)}
                   disabled={rows.length === 0}
+                  aria-label="Göztepe sevkiyat verilerini çek"
                 >
-                  <Download className="h-4 w-4 mr-2" />
+                  <Download className="h-4 w-4 mr-2" aria-hidden="true" />
                   Göztepe Sevkiyat Çek
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => setShowExcelImportModal(true)}
                   disabled={rows.length === 0}
+                  aria-label="Excel dosyasından veri içe aktar"
                 >
-                  <Upload className="h-4 w-4 mr-2" />
+                  <Upload className="h-4 w-4 mr-2" aria-hidden="true" />
                   Excel ile Veri Gir
                 </Button>
                 <Link href="/total-verimlilik/gecmis">
@@ -2164,19 +2227,22 @@ export default function TotalVerimlilikPanel({
               <div className="flex items-center gap-2 flex-wrap">
                 {/* Search Bar */}
                 <div className="relative">
-                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
                   <Input
                     placeholder="Ara..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-8 w-48 h-9"
+                    aria-label="Tabloda ara"
                   />
                   {searchTerm && (
                     <button
                       onClick={() => setSearchTerm('')}
                       className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                      aria-label="Aramayı temizle"
+                      type="button"
                     >
-                      <X className="h-4 w-4" />
+                      <X className="h-4 w-4" aria-hidden="true" />
                     </button>
                   )}
                 </div>
@@ -2187,8 +2253,9 @@ export default function TotalVerimlilikPanel({
                     size="sm"
                     onClick={clearAllFilters}
                     className="text-muted-foreground"
+                    aria-label="Tüm filtreleri temizle"
                   >
-                    <X className="h-4 w-4 mr-1" />
+                    <X className="h-4 w-4 mr-1" aria-hidden="true" />
                     Filtreleri Temizle
                   </Button>
                 )}
@@ -2197,15 +2264,17 @@ export default function TotalVerimlilikPanel({
                   variant={showResultsOnly ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setShowResultsOnly(!showResultsOnly)}
+                  aria-pressed={showResultsOnly}
+                  aria-label={showResultsOnly ? "Tüm sütunları göster" : "Sadece sonuçları göster"}
                 >
                   {showResultsOnly ? (
                     <>
-                      <EyeOff className="h-4 w-4 mr-2" />
+                      <EyeOff className="h-4 w-4 mr-2" aria-hidden="true" />
                       Tüm Sütunları Göster
                     </>
                   ) : (
                     <>
-                      <Eye className="h-4 w-4 mr-2" />
+                      <Eye className="h-4 w-4 mr-2" aria-hidden="true" />
                       Sadece Sonuçları Göster
                     </>
                   )}
@@ -2225,17 +2294,18 @@ export default function TotalVerimlilikPanel({
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="flex items-center justify-center h-64">
-                <Loader2 className="h-8 w-8 animate-spin" />
+              <div className="flex items-center justify-center h-64" role="status" aria-label="Yükleniyor">
+                <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+                <span className="sr-only">Veriler yükleniyor...</span>
               </div>
             ) : rows.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">
                 Bu havuz için min-max tanımlı ürün bulunamadı.
               </div>
             ) : (
               <ScrollArea className="w-full">
                 <div className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'}>
-                  <Table>
+                  <Table aria-label="Total verimlilik veri tablosu">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="min-w-[180px] bg-muted/50 sticky left-0 z-10">
@@ -3458,6 +3528,8 @@ export default function TotalVerimlilikPanel({
         onChange={handleExcelImport}
         accept=".xlsx,.xls"
         className="hidden"
+        aria-hidden="true"
+        tabIndex={-1}
       />
     </div>
   );

@@ -165,12 +165,14 @@ export default function KumulatifHesaplamaPage() {
         );
 
         // Fetch all min-max rules for all hospitals at once
-        const rulesPromises = fetchedHospitals.map(async (h) => {
+        const rulesPromises = fetchedHospitals
+          .filter((h) => h.id)
+          .map(async (h) => {
           const rulesSnap = await getDocs(
-            collection(db, 'hospitals', h.id, 'minMaxRules')
+            collection(db, 'hospitals', h.id!, 'minMaxRules')
           );
           return {
-            labId: h.id,
+            labId: h.id!,
             rules: rulesSnap.docs.map((d) => d.data() as MinMaxRule),
           };
         });
@@ -553,8 +555,8 @@ export default function KumulatifHesaplamaPage() {
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  {hospitals.map((h) => (
-                    <SelectItem key={h.id} value={h.id}>
+                  {hospitals.filter((h) => h.id).map((h) => (
+                    <SelectItem key={h.id} value={h.id!}>
                       {h.name}
                     </SelectItem>
                   ))}

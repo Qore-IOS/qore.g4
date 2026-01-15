@@ -119,3 +119,29 @@ export const formatTimestamp = (value: TimestampLike, fmt = 'dd.MM.yyyy') => {
 };
 export const parseMiad = (v: TimestampLike) => toDateSafe(v);
 export const safeCompareByMiad = compareMiadAsc;
+
+/**
+ * Miad string'ini DD.MM.YYYY formatına normalize eder.
+ * Kabul edilen formatlar: YYMMDD, DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY
+ */
+function pad(n: number) { return n < 10 ? `0${n}` : String(n); }
+
+export function normalizeMiad(input: string): string {
+  const raw = (input || '').trim();
+
+  if (/^\d{6}$/.test(raw)) {
+    const yy = parseInt(raw.slice(0, 2), 10);
+    const mm = parseInt(raw.slice(2, 4), 10);
+    const dd = parseInt(raw.slice(4, 6), 10);
+    const yyyy = yy >= 70 ? 1900 + yy : 2000 + yy;
+    return `${pad(dd)}.${pad(mm)}.${yyyy}`;
+  }
+
+  if (/^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}$/.test(raw)) {
+    const [d, m, y] = raw.replace(/-/g, '.').replace(/\//g, '.').split('.');
+    const yyyy = (y.length === 2) ? (parseInt(y, 10) >= 70 ? `19${y}` : `20${y}`) : y;
+    return `${pad(parseInt(d, 10))}.${pad(parseInt(m, 10))}.${yyyy}`;
+  }
+
+  return raw;
+}
