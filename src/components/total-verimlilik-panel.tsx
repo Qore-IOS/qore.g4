@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History, Filter, ArrowUpDown, ArrowUp, ArrowDown, Search, X, Crown, Building2, RotateCcw } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History, Filter, ArrowUpDown, ArrowUp, ArrowDown, Search, X, Crown, Building2, RotateCcw, Clock } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -111,6 +111,14 @@ export default function TotalVerimlilikPanel({
   const [efficiencyPools, setEfficiencyPools] = useState<EfficiencyPool[]>([]);
   const [labPools, setLabPools] = useState<LabPool[]>([]);
   const [allMinMaxRules, setAllMinMaxRules] = useState<Record<string, MinMaxRule[]>>({});
+
+  // Ara Kayıt (Checkpoint/Draft) State'leri
+  const [isSavingAraKayit, setIsSavingAraKayit] = useState(false);
+  const [araKayitInfo, setAraKayitInfo] = useState<{
+    exists: boolean;
+    savedAt?: Date;
+    savedBy?: string;
+  } | null>(null);
 
   const [rows, setRows] = useState<TableRow[]>([]);
 
@@ -570,7 +578,85 @@ export default function TotalVerimlilikPanel({
           };
         });
 
-        setRows(computedRows);
+        // Ara kayıt kontrolü - varsa yükle
+        const araKayitDocId = `araKayit-${selectedPoolId}-${selectedYear}-${selectedMonth}`;
+        try {
+          const araKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId));
+          if (araKayitSnap.exists()) {
+            const araKayitData = araKayitSnap.data();
+            const araKayitRows = araKayitData.rows as TableRow[] || [];
+
+            // Ara kayıttaki değerleri mevcut row'lara uygula
+            const mergedRows = computedRows.map(row => {
+              const savedRow = araKayitRows.find(ar => ar.id === row.id);
+              if (savedRow) {
+                // Kullanıcı tarafından girilmiş verileri ara kayıttan al
+                return {
+                  ...row,
+                  baslangicStokuKutu: savedRow.baslangicStokuKutu,
+                  ayBasiCihazUstuTest: savedRow.ayBasiCihazUstuTest,
+                  ayBasiSevkiyatKutu: savedRow.ayBasiSevkiyatKutu,
+                  goztepeSevkiyat: savedRow.goztepeSevkiyat,
+                  kurumlarArasiSevk: savedRow.kurumlarArasiSevk,
+                  lojistikAraTransfer: savedRow.lojistikAraTransfer,
+                  kumulatifTotal: savedRow.kumulatifTotal,
+                  donemSonuStokKutu: savedRow.donemSonuStokKutu,
+                  donemSonuCihazUstuTest: savedRow.donemSonuCihazUstuTest,
+                  hakEdis: savedRow.hakEdis,
+                };
+              }
+              return row;
+            });
+
+            // Hesaplanan alanları yeniden hesapla
+            const recomputedRows = mergedRows.map(row => {
+              const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
+              const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
+              const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
+              const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
+              const beklenenTuketim = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
+              const stokDogrulukFark = beklenenTuketim - row.kumulatifTotal;
+              const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
+              const kitVerimlilikFark = row.kumulatifTotal - row.hakEdis;
+              const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
+
+              return {
+                ...row,
+                totalAyBasiStok,
+                sevkiyatlarSonrasiTotalTest,
+                donemSonuToplamTest,
+                stokDogrulukFark,
+                stokDogrulukYuzde,
+                kitVerimlilikFark,
+                kitVerimlilikYuzde,
+              };
+            });
+
+            // Inter-lab transferleri de yükle
+            if (araKayitData.interLabTransfers) {
+              setInterLabTransfers(araKayitData.interLabTransfers);
+            }
+
+            setRows(recomputedRows);
+            setAraKayitInfo({
+              exists: true,
+              savedAt: araKayitData.updatedAt?.toDate?.() || new Date(),
+              savedBy: araKayitData.createdByName || 'Bilinmiyor',
+            });
+
+            toast({
+              title: 'Ara Kayıt Yüklendi',
+              description: `${araKayitData.createdByName || 'Bilinmiyor'} tarafından kaydedilen ara kayıt yüklendi.`,
+            });
+          } else {
+            setRows(computedRows);
+            setAraKayitInfo({ exists: false });
+          }
+        } catch (araKayitError) {
+          console.error('Error loading ara kayit:', araKayitError);
+          setRows(computedRows);
+          setAraKayitInfo({ exists: false });
+        }
       } catch (error) {
         console.error('Error building rows:', error);
         toast({ title: 'Hata', description: 'Veriler yüklenirken bir sorun oluştu.', variant: 'destructive' });
@@ -1013,6 +1099,49 @@ export default function TotalVerimlilikPanel({
       setIsSaving(false);
     }
   }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, toast]);
+
+  // Ara Kayıt (Checkpoint) Kaydetme
+  const handleAraKayitSave = useCallback(async () => {
+    if (!selectedPoolId || rows.length === 0) return;
+
+    setIsSavingAraKayit(true);
+    try {
+      const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
+      const araKayitDocId = `araKayit-${selectedPoolId}-${selectedYear}-${selectedMonth}`;
+
+      const dataToSave = {
+        poolId: selectedPoolId,
+        poolName: selectedPool?.name || '',
+        month: selectedMonth,
+        year: selectedYear,
+        rows: rows,
+        interLabTransfers: interLabTransfers, // Kurumlar arası transferleri de kaydet
+        isAraKayit: true, // Ara kayıt olduğunu belirt
+        createdAt: araKayitInfo?.exists ? araKayitInfo.savedAt : Timestamp.now(),
+        createdByUid: currentUser?.uid || '',
+        createdByName: currentUser?.name || currentUser?.email || '',
+        updatedAt: Timestamp.now(),
+      };
+
+      await setDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId), dataToSave, { merge: true });
+
+      setAraKayitInfo({
+        exists: true,
+        savedAt: new Date(),
+        savedBy: currentUser?.name || currentUser?.email || 'Bilinmiyor',
+      });
+
+      toast({
+        title: 'Ara Kayıt Alındı',
+        description: `${selectedPool?.name} havuzu için ${MONTHS[selectedMonth]?.label} ${selectedYear} dönemi ara kaydı alındı.`,
+      });
+    } catch (error) {
+      console.error('Error saving ara kayit:', error);
+      toast({ title: 'Hata', description: 'Ara kayıt sırasında bir sorun oluştu.', variant: 'destructive' });
+    } finally {
+      setIsSavingAraKayit(false);
+    }
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, interLabTransfers, araKayitInfo, toast]);
 
   // Laboratuvar gruplarını hesapla (aynı laboratuvarın satırlarını gruplamak için)
   const labGroups = useMemo(() => {
@@ -1794,6 +1923,42 @@ export default function TotalVerimlilikPanel({
                   {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
                   Kaydet
                 </Button>
+                {/* Ara Kayıt Butonu */}
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={araKayitInfo?.exists ? 'secondary' : 'outline'}
+                        onClick={handleAraKayitSave}
+                        disabled={isSavingAraKayit || rows.length === 0}
+                        className={araKayitInfo?.exists ? 'border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/50' : ''}
+                      >
+                        {isSavingAraKayit ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Clock className="h-4 w-4 mr-2" />
+                        )}
+                        Ara Kayıt
+                        {araKayitInfo?.exists && (
+                          <span className="ml-1.5 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      {araKayitInfo?.exists ? (
+                        <div className="text-sm space-y-1">
+                          <div className="font-semibold text-amber-600">Ara kayıt mevcut</div>
+                          <div>Kaydeden: {araKayitInfo.savedBy}</div>
+                          <div>Tarih: {araKayitInfo.savedAt?.toLocaleString('tr-TR')}</div>
+                        </div>
+                      ) : (
+                        <div className="text-sm">
+                          Kısmi veri girişini kaydetmek için ara kayıt alın. Diğer kullanıcılar da bu verileri görebilir.
+                        </div>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 <Button variant="outline" onClick={handleExportExcel} disabled={rows.length === 0}>
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
                   Excel'e Aktar
