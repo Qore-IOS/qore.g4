@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, deleteDoc, writeBatch, getDoc } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory } from '@/lib/types';
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, FileSpreadsheet, MoreVertical, Trash2, Eye, AlertCircle } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -194,38 +194,77 @@ export default function LaboratuvarYonetimiPanel() {
     console.log(`[LAB-GROUP-DELETE] Starting deletion for group: ${groupKey}, ${group.items.length} items`);
 
     try {
-      const batch = writeBatch(db);
-      let deleteCount = 0;
+      // Collect valid item IDs
+      const itemsToDelete = group.items.filter(item => item.id);
 
-      for (const item of group.items) {
-        if (item.id) {
-          batch.delete(doc(db, 'depoStok', item.id));
-          deleteCount++;
-        }
-      }
-
-      if (deleteCount === 0) {
+      if (itemsToDelete.length === 0) {
         toast({ title: 'Hata', description: 'Silinecek geçerli kayıt bulunamadı.', variant: 'destructive' });
         return;
       }
 
-      await batch.commit();
-      console.log(`[LAB-GROUP-DELETE] Successfully deleted ${deleteCount} items from group: ${groupKey}`);
+      // Delete items one by one to handle errors individually
+      let successCount = 0;
+      let failCount = 0;
+      const failedIds: string[] = [];
 
-      // Update local state
-      const deletedIds = new Set(group.items.map(item => item.id));
-      setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+      for (const item of itemsToDelete) {
+        try {
+          console.log(`[LAB-GROUP-DELETE] Deleting item: ${item.id}`);
+          await deleteDoc(doc(db, 'depoStok', item.id!));
 
-      toast({
-        title: 'Silindi',
-        description: `${deleteCount} kayıt kalıcı olarak silindi.`
-      });
+          // Verify deletion by trying to read the document
+          const verifySnap = await getDoc(doc(db, 'depoStok', item.id!));
+          if (verifySnap.exists()) {
+            console.error(`[LAB-GROUP-DELETE] VERIFICATION FAILED: Item ${item.id} still exists after delete!`);
+            failCount++;
+            failedIds.push(item.id!);
+          } else {
+            console.log(`[LAB-GROUP-DELETE] Verified: Item ${item.id} successfully deleted`);
+            successCount++;
+          }
+        } catch (itemErr: unknown) {
+          const itemError = itemErr as Error;
+          console.error(`[LAB-GROUP-DELETE] Error deleting item ${item.id}:`, itemError);
+          failCount++;
+          failedIds.push(item.id!);
+        }
+      }
+
+      console.log(`[LAB-GROUP-DELETE] Deletion complete. Success: ${successCount}, Failed: ${failCount}`);
+
+      if (failCount > 0 && successCount === 0) {
+        // All deletions failed
+        toast({
+          title: 'Silme Başarısız',
+          description: `Kayıtlar silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.`,
+          variant: 'destructive'
+        });
+      } else if (failCount > 0) {
+        // Partial success
+        const deletedIds = new Set(
+          itemsToDelete.filter(item => !failedIds.includes(item.id!)).map(item => item.id)
+        );
+        setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+        toast({
+          title: 'Kısmi Başarı',
+          description: `${successCount} kayıt silindi, ${failCount} kayıt silinemedi. Firebase Security Rules kontrol edin.`,
+          variant: 'default'
+        });
+      } else {
+        // All successful
+        const deletedIds = new Set(itemsToDelete.map(item => item.id));
+        setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+        toast({
+          title: 'Silindi',
+          description: `${successCount} kayıt kalıcı olarak silindi.`
+        });
+      }
     } catch (err: unknown) {
       const error = err as Error;
-      console.error(`[LAB-GROUP-DELETE] Error deleting group ${groupKey}:`, error);
+      console.error(`[LAB-GROUP-DELETE] Error in deletion process:`, error);
       toast({
         title: 'Silme Hatası',
-        description: `Kayıtlar silinemedi: ${error.message || 'Bilinmeyen hata'}`,
+        description: `İşlem sırasında hata: ${error.message || 'Bilinmeyen hata'}. Firebase Security Rules kontrol edin.`,
         variant: 'destructive'
       });
     } finally {
