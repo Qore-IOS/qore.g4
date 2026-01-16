@@ -216,8 +216,40 @@ export async function runAgent(
     };
   } catch (error) {
     console.error('[Agent] Error:', error);
+    console.error('[Agent] Error details:', {
+      name: error instanceof Error ? error.name : 'unknown',
+      message: error instanceof Error ? error.message : String(error),
+      type: error?.constructor?.name,
+    });
+
+    // Classify error for better user feedback
+    let errorMessage = 'Bir hata oluştu. Lütfen tekrar deneyin.';
+
+    if (error instanceof Anthropic.APIError) {
+      console.error('[Agent] Anthropic API Error:', { status: error.status, message: error.message });
+
+      if (error.status === 401) {
+        errorMessage = 'API anahtarı geçersiz veya süresi dolmuş. Lütfen console.anthropic.com adresinden yeni bir anahtar alın.';
+      } else if (error.status === 403) {
+        errorMessage = 'API anahtarının bu işlem için yetkisi yok.';
+      } else if (error.status === 429) {
+        errorMessage = 'API rate limit aşıldı. Lütfen birkaç saniye bekleyip tekrar deneyin.';
+      } else if (error.status >= 500) {
+        errorMessage = 'Claude API geçici olarak kullanılamıyor. Lütfen tekrar deneyin.';
+      }
+    } else if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('fetch') || msg.includes('network') || msg.includes('enotfound')) {
+        errorMessage = 'Ağ bağlantısı hatası. İnternet bağlantınızı kontrol edin.';
+      } else if (msg.includes('api_key') || msg.includes('authentication')) {
+        errorMessage = 'API anahtarı ile ilgili bir sorun var. Lütfen API anahtarınızı kontrol edin.';
+      } else if (msg.includes('timeout')) {
+        errorMessage = 'İstek zaman aşımına uğradı. Lütfen tekrar deneyin.';
+      }
+    }
+
     return {
-      message: 'Bir hata oluştu. Lütfen tekrar deneyin.',
+      message: errorMessage,
       toolsUsed,
       error: error instanceof Error ? error.message : 'Bilinmeyen hata',
     };
