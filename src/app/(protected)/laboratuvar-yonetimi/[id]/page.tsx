@@ -170,8 +170,21 @@ export default function LabStockDetailPage() {
       }
 
       await deleteDoc(stockRef);
-      console.log(`[LAB-DELETE] Successfully deleted item ID: ${id}`);
+      console.log(`[LAB-DELETE] Delete command sent for item ID: ${id}`);
 
+      // Verify deletion by reading the document again
+      const verifySnap = await getDoc(stockRef);
+      if (verifySnap.exists()) {
+        console.error(`[LAB-DELETE] VERIFICATION FAILED: Item ${id} still exists after delete!`);
+        toast({
+          title: 'Silme Başarısız',
+          description: 'Kayıt silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      console.log(`[LAB-DELETE] Verified: Item ${id} successfully deleted`);
       setItems(prev => prev.filter(item => item.id !== id));
       toast({
         title: 'Silindi',
@@ -182,7 +195,7 @@ export default function LabStockDetailPage() {
       console.error(`[LAB-DELETE] Error deleting item ${id}:`, error);
       toast({
         title: 'Silme Hatası',
-        description: `Kayıt silinemedi: ${error.message || 'Bilinmeyen hata'}. Lütfen tekrar deneyin.`,
+        description: `Kayıt silinemedi: ${error.message || 'Bilinmeyen hata'}. Firebase Security Rules kontrol edin.`,
         variant: 'destructive'
       });
     } finally {
@@ -254,8 +267,21 @@ export default function LabStockDetailPage() {
       batch.delete(stockRef);
 
       await batch.commit();
-      console.log(`[LAB-DEDUCT] Successfully deducted item ID: ${id}`);
+      console.log(`[LAB-DEDUCT] Batch commit completed for item ID: ${id}`);
 
+      // Verify deletion by reading the document again
+      const verifySnap = await getDoc(stockRef);
+      if (verifySnap.exists()) {
+        console.error(`[LAB-DEDUCT] VERIFICATION FAILED: Item ${id} still exists after delete!`);
+        toast({
+          title: 'Stoktan Düşme Başarısız',
+          description: 'Kayıt silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      console.log(`[LAB-DEDUCT] Verified: Item ${id} successfully deducted`);
       setItems(prev => prev.filter(item => item.id !== id));
       toast({ title: 'Başarılı', description: `${itemToDeduct.stokAdi} stoktan düşüldü.` });
     } catch (err: unknown) {
@@ -263,7 +289,7 @@ export default function LabStockDetailPage() {
       console.error(`[LAB-DEDUCT] Error deducting item ${id}:`, error);
       toast({
         title: 'Stoktan Düşme Hatası',
-        description: `İşlem başarısız: ${error.message || 'Bilinmeyen hata'}. Lütfen tekrar deneyin.`,
+        description: `İşlem başarısız: ${error.message || 'Bilinmeyen hata'}. Firebase Security Rules kontrol edin.`,
         variant: 'destructive'
       });
     } finally {
