@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, writeBatch, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, deleteDoc, writeBatch, getDocFromServer } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory } from '@/lib/types';
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, FileSpreadsheet, MoreVertical, Trash2, Eye, AlertCircle } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -212,8 +212,8 @@ export default function LaboratuvarYonetimiPanel() {
           console.log(`[LAB-GROUP-DELETE] Deleting item: ${item.id}`);
           await deleteDoc(doc(db, 'depoStok', item.id!));
 
-          // Verify deletion by trying to read the document
-          const verifySnap = await getDoc(doc(db, 'depoStok', item.id!));
+          // Verify deletion by reading directly from server (bypass cache)
+          const verifySnap = await getDocFromServer(doc(db, 'depoStok', item.id!));
           if (verifySnap.exists()) {
             console.error(`[LAB-GROUP-DELETE] VERIFICATION FAILED: Item ${item.id} still exists after delete!`);
             failCount++;
