@@ -7,7 +7,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Trash2, AlertCircle } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, getDocFromServer, writeBatch, deleteDoc } from 'firebase/firestore';
 import type { DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
@@ -172,10 +172,10 @@ export default function LabStockDetailPage() {
       await deleteDoc(stockRef);
       console.log(`[LAB-DELETE] Delete command sent for item ID: ${id}`);
 
-      // Verify deletion by reading the document again
-      const verifySnap = await getDoc(stockRef);
+      // Verify deletion by reading directly from server (bypass cache)
+      const verifySnap = await getDocFromServer(stockRef);
       if (verifySnap.exists()) {
-        console.error(`[LAB-DELETE] VERIFICATION FAILED: Item ${id} still exists after delete!`);
+        console.error(`[LAB-DELETE] VERIFICATION FAILED (SERVER): Item ${id} still exists after delete!`);
         toast({
           title: 'Silme Başarısız',
           description: 'Kayıt silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.',
@@ -269,10 +269,10 @@ export default function LabStockDetailPage() {
       await batch.commit();
       console.log(`[LAB-DEDUCT] Batch commit completed for item ID: ${id}`);
 
-      // Verify deletion by reading the document again
-      const verifySnap = await getDoc(stockRef);
+      // Verify deletion by reading directly from server (bypass cache)
+      const verifySnap = await getDocFromServer(stockRef);
       if (verifySnap.exists()) {
-        console.error(`[LAB-DEDUCT] VERIFICATION FAILED: Item ${id} still exists after delete!`);
+        console.error(`[LAB-DEDUCT] VERIFICATION FAILED (SERVER): Item ${id} still exists after delete!`);
         toast({
           title: 'Stoktan Düşme Başarısız',
           description: 'Kayıt silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.',
