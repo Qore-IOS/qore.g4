@@ -13,9 +13,10 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, deleteDoc, writeBatch } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory } from '@/lib/types';
-import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, FileSpreadsheet } from 'lucide-react';
+import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, FileSpreadsheet, MoreVertical, Trash2, Eye, AlertCircle } from 'lucide-react';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad } from '@/lib/date';
@@ -62,6 +63,7 @@ export default function LaboratuvarYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [isDeletingGroup, setIsDeletingGroup] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -175,6 +177,62 @@ export default function LaboratuvarYonetimiPanel() {
   };
   const goToDetail = (id: string) => router.push(`/laboratuvar-yonetimi/${id}`);
 
+  // Delete all items in a group directly (for incorrectly entered items)
+  const handleDeleteGroup = async (groupKey: string) => {
+    const group = groupedMap[groupKey];
+    if (!group || group.items.length === 0) {
+      toast({ title: 'Hata', description: 'Silinecek kayıt bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    const confirmMessage = `${group.stokAdi} - Lot: ${group.lot}\n\n${group.items.length} adet kayıt KALICI OLARAK SİLİNECEK.\nTüketim kaydı oluşturulmayacak.\n\nDevam etmek istiyor musunuz?`;
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    setIsDeletingGroup(groupKey);
+    console.log(`[LAB-GROUP-DELETE] Starting deletion for group: ${groupKey}, ${group.items.length} items`);
+
+    try {
+      const batch = writeBatch(db);
+      let deleteCount = 0;
+
+      for (const item of group.items) {
+        if (item.id) {
+          batch.delete(doc(db, 'depoStok', item.id));
+          deleteCount++;
+        }
+      }
+
+      if (deleteCount === 0) {
+        toast({ title: 'Hata', description: 'Silinecek geçerli kayıt bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      await batch.commit();
+      console.log(`[LAB-GROUP-DELETE] Successfully deleted ${deleteCount} items from group: ${groupKey}`);
+
+      // Update local state
+      const deletedIds = new Set(group.items.map(item => item.id));
+      setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+
+      toast({
+        title: 'Silindi',
+        description: `${deleteCount} kayıt kalıcı olarak silindi.`
+      });
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(`[LAB-GROUP-DELETE] Error deleting group ${groupKey}:`, error);
+      toast({
+        title: 'Silme Hatası',
+        description: `Kayıtlar silinemedi: ${error.message || 'Bilinmeyen hata'}`,
+        variant: 'destructive'
+      });
+    } finally {
+      setIsDeletingGroup(null);
+    }
+  };
+
   const handleExport = () => {
     if (summaryList.length === 0) {
       toast({
@@ -278,26 +336,80 @@ export default function LaboratuvarYonetimiPanel() {
                             <SortableHeader label="Lot" field="lot" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Miad" field="miad" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Adet" field="quantity" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
+                            <TableHead className="w-12">İşlem</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {paginated.map(row => (
                             <TableRow
                               key={row.groupKey}
-                              onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
-                              className={`cursor-pointer hover:bg-muted ${row.firstId ? '' : 'pointer-events-none opacity-60'}`}
-                              title={row.firstId ? '' : 'Kayıtta geçerli bir ID bulunamadı'}
+                              className="hover:bg-muted"
                             >
-                              <TableCell>{row.stokKodu}</TableCell>
-                              <TableCell>{row.stokAdi}</TableCell>
-                              <TableCell>{row.lot}</TableCell>
-                              <TableCell>{row.miad}</TableCell>
-                              <TableCell className="text-right font-semibold">{row.quantity}</TableCell>
+                              <TableCell
+                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
+                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
+                              >
+                                {row.stokKodu}
+                              </TableCell>
+                              <TableCell
+                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
+                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
+                              >
+                                {row.stokAdi}
+                              </TableCell>
+                              <TableCell
+                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
+                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
+                              >
+                                {row.lot}
+                              </TableCell>
+                              <TableCell
+                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
+                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
+                              >
+                                {row.miad}
+                              </TableCell>
+                              <TableCell
+                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
+                                className={`cursor-pointer text-right font-semibold ${row.firstId ? '' : 'opacity-60'}`}
+                              >
+                                {row.quantity}
+                              </TableCell>
+                              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isDeletingGroup === row.groupKey}>
+                                      {isDeletingGroup === row.groupKey ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <MoreVertical className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
+                                      disabled={!row.firstId}
+                                    >
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      Detayları Görüntüle
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleDeleteGroup(row.groupKey)}
+                                      className="text-destructive focus:text-destructive"
+                                    >
+                                      <AlertCircle className="mr-2 h-4 w-4" />
+                                      Hatalı Kayıt - Tümünü Sil
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
                             </TableRow>
                           ))}
                           {paginated.length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                              <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
                                 Kayıt bulunamadı.
                               </TableCell>
                             </TableRow>
