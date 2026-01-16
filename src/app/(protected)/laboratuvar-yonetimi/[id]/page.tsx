@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Trash2 } from 'lucide-react';
+import { Loader2, Trash2, AlertCircle } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import type { DepoStokItem, ConsumptionRecord } from '@/lib/types';
@@ -125,12 +125,77 @@ export default function LabStockDetailPage() {
     }
   };
 
+  // Direct delete without consumption record - for incorrectly entered items
+  const handleDirectDelete = async (itemToDelete: DepoStokItem) => {
+    if (!currentUserProfile) {
+      toast({ title: 'Hata', description: 'Bu işlemi yapmak için giriş yapmalısınız.', variant: 'destructive'});
+      return;
+    }
+
+    const itemIdentifier = itemToDelete.seriNumarasi
+      ? `Seri: ${itemToDelete.seriNumarasi}`
+      : `Lot: ${itemToDelete.lotNumarasi || 'Bilinmiyor'}`;
+
+    if (!confirm(`${itemIdentifier} - ${itemToDelete.stokAdi || itemToDelete.stokKodu}\n\nBu kayıt KALICI OLARAK SİLİNECEK.\nTüketim kaydı oluşturulmayacak.\n\nDevam etmek istiyor musunuz?`)) {
+      return;
+    }
+
+    const id = itemToDelete?.id;
+    if (!id) {
+      toast({
+        title: "Kayıt ID bulunamadı",
+        description: "Seçilen stok kaleminin kimliği eksik.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsDeleting(id);
+    console.log(`[LAB-DELETE] Starting direct delete for item ID: ${id}, stokKodu: ${itemToDelete.stokKodu}`);
+
+    try {
+      const stockRef = doc(db, 'depoStok', id);
+
+      // First verify the document exists
+      const docSnap = await getDoc(stockRef);
+      if (!docSnap.exists()) {
+        console.warn(`[LAB-DELETE] Document ${id} does not exist in database, removing from local state`);
+        setItems(prev => prev.filter(item => item.id !== id));
+        toast({
+          title: 'Kayıt Bulunamadı',
+          description: 'Bu kayıt zaten veritabanında mevcut değil. Liste güncellendi.',
+          variant: 'default'
+        });
+        return;
+      }
+
+      await deleteDoc(stockRef);
+      console.log(`[LAB-DELETE] Successfully deleted item ID: ${id}`);
+
+      setItems(prev => prev.filter(item => item.id !== id));
+      toast({
+        title: 'Silindi',
+        description: `${itemToDelete.stokAdi || itemToDelete.stokKodu} kalıcı olarak silindi.`
+      });
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(`[LAB-DELETE] Error deleting item ${id}:`, error);
+      toast({
+        title: 'Silme Hatası',
+        description: `Kayıt silinemedi: ${error.message || 'Bilinmeyen hata'}. Lütfen tekrar deneyin.`,
+        variant: 'destructive'
+      });
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
   const handleDeductFromStock = async (itemToDeduct: DepoStokItem) => {
     if (!currentUserProfile) {
         toast({ title: 'Hata', description: 'Bu işlemi yapmak için giriş yapmalısınız.', variant: 'destructive'});
         return;
     }
-    
+
     const itemIdentifier = itemToDeduct.seriNumarasi
       ? `${itemToDeduct.seriNumarasi} seri numaralı`
       : `${itemToDeduct.lotNumarasi || 'Lot bilgisi yok'} lotlu`;
@@ -150,35 +215,57 @@ export default function LabStockDetailPage() {
     }
 
     setIsDeleting(id);
+    console.log(`[LAB-DEDUCT] Starting deduction for item ID: ${id}, stokKodu: ${itemToDeduct.stokKodu}`);
 
     try {
+      // First verify the document exists
+      const stockRef = doc(db, 'depoStok', id);
+      const docSnap = await getDoc(stockRef);
+
+      if (!docSnap.exists()) {
+        console.warn(`[LAB-DEDUCT] Document ${id} does not exist, removing from local state`);
+        setItems(prev => prev.filter(item => item.id !== id));
+        toast({
+          title: 'Kayıt Bulunamadı',
+          description: 'Bu kayıt zaten veritabanında mevcut değil. Liste güncellendi.',
+          variant: 'default'
+        });
+        return;
+      }
+
       const newConsumptionRecord: Omit<ConsumptionRecord, 'id'> = {
         stokKodu: itemToDeduct.stokKodu,
         stokAdi: itemToDeduct.stokAdi,
         lotNumarasi: itemToDeduct.lotNumarasi ?? '',
         miad: formatMiad(itemToDeduct.miad),
         seriNumarasi: itemToDeduct.seriNumarasi ?? '',
-        laboratoryId: '', // We don't have the lab ID here, just the name. This might need refinement.
+        laboratoryId: itemToDeduct.hedefKurumId || '',
         laboratoryName: itemToDeduct.hedefKurum || 'Bilinmeyen Lab.',
         consumptionTimestamp: new Date(),
-        consumptionType: 'sayimdan_dusum', // Or a new type like 'manuel_düşüm'
+        consumptionType: 'sayimdan_dusum',
         userId: currentUserProfile.uid,
         userName: currentUserProfile.name || 'Bilinmeyen Kullanıcı',
       };
-      
+
       const batch = writeBatch(db);
       const consumptionRef = doc(collection(db, 'tuketimKayitlari'));
-      const stockRef = doc(db, 'depoStok', id);
 
       batch.set(consumptionRef, newConsumptionRecord);
       batch.delete(stockRef);
 
       await batch.commit();
+      console.log(`[LAB-DEDUCT] Successfully deducted item ID: ${id}`);
+
       setItems(prev => prev.filter(item => item.id !== id));
       toast({ title: 'Başarılı', description: `${itemToDeduct.stokAdi} stoktan düşüldü.` });
-    } catch (err) {
-      console.error("Error deducting stock:", err);
-      toast({ title: 'Hata', description: 'Stoktan düşme işlemi sırasında bir hata oluştu.', variant: 'destructive'});
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(`[LAB-DEDUCT] Error deducting item ${id}:`, error);
+      toast({
+        title: 'Stoktan Düşme Hatası',
+        description: `İşlem başarısız: ${error.message || 'Bilinmeyen hata'}. Lütfen tekrar deneyin.`,
+        variant: 'destructive'
+      });
     } finally {
       setIsDeleting(null);
     }
@@ -288,15 +375,26 @@ export default function LabStockDetailPage() {
                       <TableCell>{item.rafAdresi || '-'}</TableCell>
                       <TableCell><TimestampText value={item.sevkTarihi} /></TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeductFromStock(item)}
-                          disabled={isDeleting === item.id}
-                          title="Stoktan Düş"
-                        >
-                          {isDeleting === item.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeductFromStock(item)}
+                            disabled={isDeleting === item.id}
+                            title="Stoktan Düş (Tüketim kaydı oluşturur)"
+                          >
+                            {isDeleting === item.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDirectDelete(item)}
+                            disabled={isDeleting === item.id}
+                            title="Kalıcı Sil (Hatalı kayıtlar için - tüketim kaydı oluşturmaz)"
+                          >
+                            {isDeleting === item.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <AlertCircle className="h-4 w-4 text-orange-500" />}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
