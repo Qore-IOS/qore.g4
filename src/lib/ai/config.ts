@@ -1,9 +1,39 @@
 import Anthropic from '@anthropic-ai/sdk';
 
+// Validate API key format
+function validateApiKey(apiKey: string | undefined): string | null {
+  if (!apiKey) {
+    return null;
+  }
+
+  // Trim whitespace
+  const trimmedKey = apiKey.trim();
+
+  // Check for common issues
+  if (trimmedKey === 'your_anthropic_api_key_here') {
+    console.error('[AI Config] API key is still set to placeholder value');
+    return null;
+  }
+
+  // Anthropic API keys start with 'sk-ant-'
+  if (!trimmedKey.startsWith('sk-ant-')) {
+    console.error('[AI Config] Invalid API key format. Anthropic keys should start with "sk-ant-"');
+    return null;
+  }
+
+  return trimmedKey;
+}
+
+// Get validated API key
+const validatedApiKey = validateApiKey(process.env.ANTHROPIC_API_KEY);
+
 // Initialize Anthropic client
 export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: validatedApiKey || undefined,
 });
+
+// Export validation status for route checks
+export const isApiKeyValid = !!validatedApiKey;
 
 // Model configuration
 export const CLAUDE_MODEL = 'claude-sonnet-4-20250514';

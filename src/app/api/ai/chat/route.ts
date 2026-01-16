@@ -1,19 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { chat, chatStream, ChatMessage } from '@/lib/ai/chat';
 import { runAgent, runAgentStream, AgentMessage } from '@/lib/ai/agent';
+import { isApiKeyValid } from '@/lib/ai/config';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 60 seconds timeout
 
 export async function POST(request: NextRequest) {
   try {
-    // Check API key first
+    // Check API key first - use validated check from config
     if (!process.env.ANTHROPIC_API_KEY) {
       console.error('[AI API] ANTHROPIC_API_KEY is not set');
       return NextResponse.json(
         {
           error: 'API anahtarı ayarlanmamış',
           message: 'ANTHROPIC_API_KEY environment variable eksik. Lütfen .env.local dosyasına ekleyin.'
+        },
+        { status: 500 }
+      );
+    }
+
+    // Check if API key format is valid
+    if (!isApiKeyValid) {
+      console.error('[AI API] ANTHROPIC_API_KEY format is invalid');
+      return NextResponse.json(
+        {
+          error: 'Geçersiz API anahtarı formatı',
+          message: 'API anahtarı geçersiz formatta. Anthropic API anahtarları "sk-ant-" ile başlamalıdır. Lütfen console.anthropic.com adresinden doğru anahtarı alın.'
         },
         { status: 500 }
       );

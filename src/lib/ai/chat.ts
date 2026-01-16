@@ -111,9 +111,23 @@ function toAnthropicMessages(
 
 // Classify error type for better user feedback
 function classifyError(error: unknown): string {
+  console.error('[Claude] Error details:', {
+    name: error instanceof Error ? error.name : 'unknown',
+    message: error instanceof Error ? error.message : String(error),
+    type: error?.constructor?.name,
+  });
+
   if (error instanceof Anthropic.APIError) {
+    console.error('[Claude] Anthropic API Error:', {
+      status: error.status,
+      message: error.message,
+    });
+
     if (error.status === 401) {
-      return ERROR_MESSAGES.API_KEY_MISSING;
+      return 'API anahtarı geçersiz veya süresi dolmuş. Lütfen console.anthropic.com adresinden yeni bir anahtar alın.';
+    }
+    if (error.status === 403) {
+      return 'API anahtarının bu işlem için yetkisi yok. Lütfen API anahtar izinlerini kontrol edin.';
     }
     if (error.status === 429) {
       return ERROR_MESSAGES.RATE_LIMIT;
@@ -126,9 +140,26 @@ function classifyError(error: unknown): string {
     }
   }
 
+  if (error instanceof Anthropic.AuthenticationError) {
+    return 'API anahtarı geçersiz. Lütfen doğru Anthropic API anahtarını girdiğinizden emin olun.';
+  }
+
   if (error instanceof Error) {
-    if (error.message.includes('fetch') || error.message.includes('network')) {
+    const msg = error.message.toLowerCase();
+
+    // Network errors
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('enotfound') || msg.includes('econnrefused')) {
       return ERROR_MESSAGES.NETWORK_ERROR;
+    }
+
+    // API key related errors
+    if (msg.includes('api_key') || msg.includes('apikey') || msg.includes('authentication') || msg.includes('unauthorized')) {
+      return 'API anahtarı ile ilgili bir sorun var. Lütfen API anahtarınızı kontrol edin.';
+    }
+
+    // Timeout errors
+    if (msg.includes('timeout') || msg.includes('timed out')) {
+      return 'İstek zaman aşımına uğradı. Lütfen tekrar deneyin.';
     }
   }
 
