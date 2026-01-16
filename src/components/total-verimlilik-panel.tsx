@@ -44,7 +44,8 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import * as XLSX from 'xlsx';
 import type { Hospital, ProductCode, EfficiencyPool, LabPool, MinMaxRule } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -140,6 +141,59 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   label: new Date(2000, i, 1).toLocaleString('tr-TR', { month: 'long' })
 }));
 
+// Optimizasyon için Debounced Input bileşeni
+// Kullanıcı yazmayı bitirene kadar ana state'i güncellemez
+const DebouncedInput = memo(function DebouncedInput({
+  value,
+  onChange,
+  debounceMs = 300,
+  ...props
+}: {
+  value: string | number;
+  onChange: (value: string) => void;
+  debounceMs?: number;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'>) {
+  const [localValue, setLocalValue] = useState(value);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Dış value değiştiğinde local'i güncelle
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setLocalValue(newValue);
+
+    // Önceki timeout'u temizle
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    // Yeni debounced güncelleme
+    timeoutRef.current = setTimeout(() => {
+      onChange(newValue);
+    }, debounceMs);
+  }, [onChange, debounceMs]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <Input
+      {...props}
+      value={localValue}
+      onChange={handleChange}
+    />
+  );
+});
+
 export default function TotalVerimlilikPanel({
   hospitals = [],
   productCodes = [],
@@ -188,6 +242,11 @@ export default function TotalVerimlilikPanel({
   const [isImportingExcel, setIsImportingExcel] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Virtualization ve Edge Scroll için Ref'ler
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const tableParentRef = useRef<HTMLDivElement>(null);
+  const edgeScrollIntervalRef = useRef<number | null>(null);
+
   // Phase 6 - Sonuç Odaklı Görünüm
   const [showResultsOnly, setShowResultsOnly] = useState(false);
 
@@ -226,6 +285,10 @@ export default function TotalVerimlilikPanel({
     direction: 'asc' | 'desc';
   }>({ column: null, direction: 'asc' });
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Marka ve Ürün Grubu Filtreleri (Hesaplama başlamadan önce)
+  const [selectedBrand, setSelectedBrand] = useState<string>('');
+  const [selectedUrunGrubu, setSelectedUrunGrubu] = useState<string>('');
 
   // Merkez Hak Edişi Hesaplama State'leri
   const [centerHakEdisMode, setCenterHakEdisMode] = useState(false);
@@ -519,6 +582,12 @@ export default function TotalVerimlilikPanel({
             const product = productCodes.find(p => p.stokKodu === stokKodu);
             if (!product) return;
 
+            // Marka filtresi uygula
+            if (selectedBrand && product.marka !== selectedBrand) return;
+
+            // Ürün grubu filtresi uygula
+            if (selectedUrunGrubu && product.urunGrubu !== selectedUrunGrubu) return;
+
             newRows.push({
               id: `${labId}-${stokKodu}`,
               labId: labId,
@@ -720,7 +789,7 @@ export default function TotalVerimlilikPanel({
     };
 
     fetchMinMaxAndBuildRows();
-  }, [selectedPoolId, selectedMonth, selectedYear, efficiencyPools, labPools, hospitals, productCodes, toast]);
+  }, [selectedPoolId, selectedMonth, selectedYear, efficiencyPools, labPools, hospitals, productCodes, toast, selectedBrand, selectedUrunGrubu]);
 
   // Hesaplama fonksiyonu
   const computeRow = useCallback((row: TableRow, allRows?: TableRow[], transfers?: Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>): TableRow => {
@@ -944,35 +1013,46 @@ export default function TotalVerimlilikPanel({
     if (rows.length === 0) return;
 
     const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
-    const dataToExport = rows.map(r => ({
-      'Laboratuvar': r.labName,
-      'Lab Kodu': r.labKod,
-      'Stok Kodu': r.stokKodu,
-      'Ürün Adı': r.stokAdi,
-      'Test Adı': r.testAdi,
-      'Ambalaj Miktarı': r.ambalajDegeri,
-      'Cihaz Grubu': r.cihazGrubu,
-      'Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu,
-      'Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest,
-      'Total Ay Başı Stok (Test)': r.totalAyBasiStok,
-      'Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu,
-      'Göztepe Sevkiyat (Kutu)': r.goztepeSevkiyat,
-      'Kurumlar Arası Sevk (Kutu)': r.kurumlarArasiSevk,
-      'Kaynak Lab': interLabTransfers[r.id]?.sourceLabName || '',
-      'Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer,
-      'Sevkiyatlar Sonrası Total Test': r.sevkiyatlarSonrasiTotalTest,
-      // Phase 3
-      'Kümülatif Total (Test)': r.kumulatifTotal,
-      'Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu,
-      'Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest,
-      'Dönem Sonu Toplam Test': r.donemSonuToplamTest,
-      'Hak Ediş (Test)': r.hakEdis,
-      // Phase 4
-      'Stok Doğruluk Fark (Test)': r.stokDogrulukFark,
-      'Stok Doğruluk Sapma (%)': Number(r.stokDogrulukYuzde.toFixed(2)),
-      'Kit Verimlilik Fark (Test)': r.kitVerimlilikFark,
-      'Kit Verimlilik Sapma (%)': Number(r.kitVerimlilikYuzde.toFixed(2)),
-    }));
+    const dataToExport = rows.map(r => {
+      // Fark değerlerini paneldeki gibi ters işaretle göster
+      // Pozitif fark (kayıp) -> negatif olarak göster
+      // Negatif fark (kazanç) -> pozitif olarak göster
+      const stokFarkExcel = r.stokDogrulukFark !== 0 ? -r.stokDogrulukFark : 0;
+      const kitFarkExcel = r.kitVerimlilikFark !== 0 ? -r.kitVerimlilikFark : 0;
+      // Kutu Fark = Stok Doğruluk Fark / Ambalaj (aynı işaret mantığıyla)
+      const kutuFark = r.ambalajDegeri > 0 ? stokFarkExcel / r.ambalajDegeri : 0;
+
+      return {
+        'Laboratuvar': r.labName,
+        'Lab Kodu': r.labKod,
+        'Stok Kodu': r.stokKodu,
+        'Ürün Adı': r.stokAdi,
+        'Test Adı': r.testAdi,
+        'Ambalaj Miktarı': r.ambalajDegeri,
+        'Cihaz Grubu': r.cihazGrubu,
+        'Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu,
+        'Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest,
+        'Total Ay Başı Stok (Test)': r.totalAyBasiStok,
+        'Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu,
+        'Göztepe Sevkiyat (Kutu)': r.goztepeSevkiyat,
+        'Kurumlar Arası Sevk (Kutu)': r.kurumlarArasiSevk,
+        'Kaynak Lab': interLabTransfers[r.id]?.sourceLabName || '',
+        'Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer,
+        'Sevkiyatlar Sonrası Total Test': r.sevkiyatlarSonrasiTotalTest,
+        // Phase 3
+        'Kümülatif Total (Test)': r.kumulatifTotal,
+        'Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu,
+        'Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest,
+        'Dönem Sonu Toplam Test': r.donemSonuToplamTest,
+        'Hak Ediş (Test)': r.hakEdis,
+        // Phase 4 - Fark değerleri paneldeki işaretle (kayıp = negatif)
+        'Stok Doğruluk Fark (Test)': stokFarkExcel,
+        'Kutu Fark': Number(kutuFark.toFixed(1)),
+        'Stok Doğruluk Sapma (%)': Number(r.stokDogrulukYuzde.toFixed(2)),
+        'Kit Verimlilik Fark (Test)': kitFarkExcel,
+        'Kit Verimlilik Sapma (%)': Number(r.kitVerimlilikYuzde.toFixed(2)),
+      };
+    });
 
     const fileName = `Total_Verimlilik_${selectedPool?.name || 'Rapor'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
@@ -1232,6 +1312,29 @@ export default function TotalVerimlilikPanel({
 
     return groups;
   }, [rows]);
+
+  // Marka ve Ürün Grubu seçenekleri (ürün kodlarından çek)
+  const brandAndGroupOptions = useMemo(() => {
+    const brands = new Set<string>();
+    const groups = new Set<string>();
+
+    productCodes.forEach(pc => {
+      if (pc.marka) brands.add(pc.marka);
+      if (pc.urunGrubu) groups.add(pc.urunGrubu);
+    });
+
+    return {
+      brands: Array.from(brands).sort((a, b) => a.localeCompare(b, 'tr')),
+      groups: Array.from(groups).sort((a, b) => a.localeCompare(b, 'tr')),
+    };
+  }, [productCodes]);
+
+  // Ürün grubu Türkçe etiketleri
+  const urunGrubuLabels: Record<string, string> = {
+    'kit': 'Kit',
+    'sarf': 'Sarf Malzemesi',
+    'yedek_parca': 'Yedek Parça',
+  };
 
   // Filter için benzersiz değerleri hesapla
   const uniqueFilterValues = useMemo(() => {
@@ -1838,6 +1941,94 @@ export default function TotalVerimlilikPanel({
     setTestsSentToCenter({});
   }, []);
 
+  // Edge Scroll - Mouse ekranın sağına geldiğinde yumuşak kaydırma
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const EDGE_THRESHOLD = 80; // Kenardan 80px içinde tetikle
+    const SCROLL_SPEED = 8; // Kaydırma hızı
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = scrollContainer.getBoundingClientRect();
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+
+      // Mouse scroll container içinde mi kontrol et
+      if (mouseY < rect.top || mouseY > rect.bottom) {
+        if (edgeScrollIntervalRef.current) {
+          clearInterval(edgeScrollIntervalRef.current);
+          edgeScrollIntervalRef.current = null;
+        }
+        return;
+      }
+
+      const distanceFromRight = rect.right - mouseX;
+      const distanceFromLeft = mouseX - rect.left;
+
+      // Sağ kenara yakınsa sağa kaydır
+      if (distanceFromRight < EDGE_THRESHOLD && distanceFromRight > 0) {
+        if (!edgeScrollIntervalRef.current) {
+          edgeScrollIntervalRef.current = window.setInterval(() => {
+            const scrollEl = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+            if (scrollEl) {
+              const speed = Math.max(1, SCROLL_SPEED * (1 - distanceFromRight / EDGE_THRESHOLD));
+              scrollEl.scrollLeft += speed;
+            }
+          }, 16);
+        }
+      }
+      // Sol kenara yakınsa sola kaydır
+      else if (distanceFromLeft < EDGE_THRESHOLD && distanceFromLeft > 0) {
+        if (!edgeScrollIntervalRef.current) {
+          edgeScrollIntervalRef.current = window.setInterval(() => {
+            const scrollEl = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+            if (scrollEl) {
+              const speed = Math.max(1, SCROLL_SPEED * (1 - distanceFromLeft / EDGE_THRESHOLD));
+              scrollEl.scrollLeft -= speed;
+            }
+          }, 16);
+        }
+      }
+      // Kenarlardan uzaksa durdur
+      else {
+        if (edgeScrollIntervalRef.current) {
+          clearInterval(edgeScrollIntervalRef.current);
+          edgeScrollIntervalRef.current = null;
+        }
+      }
+    };
+
+    const handleMouseLeave = () => {
+      if (edgeScrollIntervalRef.current) {
+        clearInterval(edgeScrollIntervalRef.current);
+        edgeScrollIntervalRef.current = null;
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    scrollContainer.addEventListener('mouseleave', handleMouseLeave);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      scrollContainer.removeEventListener('mouseleave', handleMouseLeave);
+      if (edgeScrollIntervalRef.current) {
+        clearInterval(edgeScrollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Row virtualization için virtualizer
+  const rowVirtualizer = useVirtualizer({
+    count: filteredAndSortedRows.length,
+    getScrollElement: () => {
+      const container = scrollContainerRef.current;
+      return container?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
+    },
+    estimateSize: () => 60, // Tahmini satır yüksekliği
+    overscan: 5, // Görünür alanın dışında render edilecek ekstra satır sayısı
+  });
+
   return (
     <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Paneli">
       <BackButton fallback="/" />
@@ -1908,7 +2099,7 @@ export default function TotalVerimlilikPanel({
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4" role="group" aria-label="Dönem ve havuz seçimi">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4" role="group" aria-label="Dönem ve havuz seçimi">
             <div>
               <label id="pool-label" className="text-sm font-medium mb-1 block">Verimlilik Havuzu</label>
               <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
@@ -1942,6 +2133,34 @@ export default function TotalVerimlilikPanel({
                 <SelectContent>
                   {YEARS.map(y => (
                     <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label id="brand-label" className="text-sm font-medium mb-1 block">Marka</label>
+              <Select value={selectedBrand} onValueChange={setSelectedBrand}>
+                <SelectTrigger aria-labelledby="brand-label">
+                  <SelectValue placeholder="Tümü" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Tümü</SelectItem>
+                  {brandAndGroupOptions.brands.map(brand => (
+                    <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label id="urun-grubu-label" className="text-sm font-medium mb-1 block">Ürün Grubu</label>
+              <Select value={selectedUrunGrubu} onValueChange={setSelectedUrunGrubu}>
+                <SelectTrigger aria-labelledby="urun-grubu-label">
+                  <SelectValue placeholder="Tümü" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Tümü</SelectItem>
+                  {brandAndGroupOptions.groups.map(group => (
+                    <SelectItem key={group} value={group}>{urunGrubuLabels[group] || group}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -2303,8 +2522,8 @@ export default function TotalVerimlilikPanel({
                 Bu havuz için min-max tanımlı ürün bulunamadı.
               </div>
             ) : (
-              <ScrollArea className="w-full">
-                <div className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'}>
+              <ScrollArea className="w-full" ref={scrollContainerRef}>
+                <div ref={tableParentRef} className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'}>
                   <Table aria-label="Total verimlilik veri tablosu">
                     <TableHeader>
                       <TableRow>
@@ -2854,9 +3073,16 @@ export default function TotalVerimlilikPanel({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredAndSortedRows.map((row) => {
+                      {filteredAndSortedRows.map((row, index) => {
                         return (
-                          <TableRow key={row.id} className="text-sm">
+                          <TableRow
+                            key={row.id}
+                            className="text-sm"
+                            style={{
+                              contentVisibility: 'auto',
+                              containIntrinsicSize: '0 60px'
+                            }}
+                          >
                             <TableCell className="font-medium bg-muted/30 sticky left-0 z-10">
                               <div>
                                 <span>{row.labName}</span>
@@ -2875,22 +3101,22 @@ export default function TotalVerimlilikPanel({
                                 <TableCell className="text-center">{row.ambalajDegeri || '-'}</TableCell>
                                 <TableCell className="text-muted-foreground">{row.cihazGrubu || '-'}</TableCell>
                                 <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-24"
                                     value={row.baslangicStokuKutu || ''}
-                                    onChange={e => handleValueChange(row.id, 'baslangicStokuKutu', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'baslangicStokuKutu', value)}
                                     placeholder="0"
                                   />
                                 </TableCell>
                                 <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-28"
                                     value={row.ayBasiCihazUstuTest || ''}
-                                    onChange={e => handleValueChange(row.id, 'ayBasiCihazUstuTest', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'ayBasiCihazUstuTest', value)}
                                     placeholder="0"
                                   />
                                 </TableCell>
@@ -2904,23 +3130,23 @@ export default function TotalVerimlilikPanel({
                                 {/* Phase 2 - Sütunlar 10-14 */}
                                 {/* Sütun 10: Ay Başı Sevkiyat (Kutu) */}
                                 <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-24"
                                     value={row.ayBasiSevkiyatKutu || ''}
-                                    onChange={e => handleValueChange(row.id, 'ayBasiSevkiyatKutu', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'ayBasiSevkiyatKutu', value)}
                                     placeholder="0"
                                   />
                                 </TableCell>
                                 {/* Sütun 11: Göztepe Sevkiyat (Kutu) */}
                                 <TableCell className="bg-purple-50/50 dark:bg-purple-950/50">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-24"
                                     value={row.goztepeSevkiyat || ''}
-                                    onChange={e => handleValueChange(row.id, 'goztepeSevkiyat', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'goztepeSevkiyat', value)}
                                     placeholder="0"
                                   />
                                 </TableCell>
@@ -2944,12 +3170,12 @@ export default function TotalVerimlilikPanel({
                                 </TableCell>
                                 {/* Sütun 13: Lojistik Ara Transfer (Kutu) */}
                                 <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-24"
                                     value={row.lojistikAraTransfer || ''}
-                                    onChange={e => handleValueChange(row.id, 'lojistikAraTransfer', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'lojistikAraTransfer', value)}
                                     placeholder="0"
                                   />
                                 </TableCell>
@@ -2965,12 +3191,12 @@ export default function TotalVerimlilikPanel({
                               {showResultsOnly ? (
                                 <span className="font-semibold">{row.kumulatifTotal.toLocaleString('tr-TR')}</span>
                               ) : (
-                                <Input
+                                <DebouncedInput
                                   type="number"
                                   min="0"
                                   className="h-8 w-28"
                                   value={row.kumulatifTotal || ''}
-                                  onChange={e => handleValueChange(row.id, 'kumulatifTotal', e.target.value)}
+                                  onChange={(value) => handleValueChange(row.id, 'kumulatifTotal', value)}
                                   placeholder="0"
                                 />
                               )}
@@ -2979,23 +3205,23 @@ export default function TotalVerimlilikPanel({
                               <>
                                 {/* Sütun 16: Dönem Sonu Stok (Kutu) */}
                                 <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-24"
                                     value={row.donemSonuStokKutu || ''}
-                                    onChange={e => handleValueChange(row.id, 'donemSonuStokKutu', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'donemSonuStokKutu', value)}
                                     placeholder="0"
                                   />
                                 </TableCell>
                                 {/* Sütun 17: Dönem Sonu Cihaz Üstü (Test) */}
                                 <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-28"
                                     value={row.donemSonuCihazUstuTest || ''}
-                                    onChange={e => handleValueChange(row.id, 'donemSonuCihazUstuTest', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'donemSonuCihazUstuTest', value)}
                                     placeholder="0"
                                   />
                                 </TableCell>
@@ -3019,12 +3245,12 @@ export default function TotalVerimlilikPanel({
                                 </div>
                               ) : (
                                 <div className="flex flex-col gap-1">
-                                  <Input
+                                  <DebouncedInput
                                     type="number"
                                     min="0"
                                     className="h-8 w-28"
                                     value={row.hakEdis || ''}
-                                    onChange={e => handleValueChange(row.id, 'hakEdis', e.target.value)}
+                                    onChange={(value) => handleValueChange(row.id, 'hakEdis', value)}
                                     placeholder="0"
                                   />
                                   {centerHakEdisMode && testsSentToCenter[row.id] > 0 && (
