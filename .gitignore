@@ -47,3 +47,7 @@ next-env.d.ts
 firebase-debug.log
 firestore-debug.logproje_arsivi.tar.gz
 qore-studio-work
+
+# Environment files
+.env.local
+.env*.local
