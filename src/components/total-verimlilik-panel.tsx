@@ -2139,12 +2139,12 @@ export default function TotalVerimlilikPanel({
             </div>
             <div>
               <label id="brand-label" className="text-sm font-medium mb-1 block">Marka</label>
-              <Select value={selectedBrand} onValueChange={setSelectedBrand}>
+              <Select value={selectedBrand || '__all__'} onValueChange={(v) => setSelectedBrand(v === '__all__' ? '' : v)}>
                 <SelectTrigger aria-labelledby="brand-label">
                   <SelectValue placeholder="Tümü" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Tümü</SelectItem>
+                  <SelectItem value="__all__">Tümü</SelectItem>
                   {brandAndGroupOptions.brands.map(brand => (
                     <SelectItem key={brand} value={brand}>{brand}</SelectItem>
                   ))}
@@ -2153,12 +2153,12 @@ export default function TotalVerimlilikPanel({
             </div>
             <div>
               <label id="urun-grubu-label" className="text-sm font-medium mb-1 block">Ürün Grubu</label>
-              <Select value={selectedUrunGrubu} onValueChange={setSelectedUrunGrubu}>
+              <Select value={selectedUrunGrubu || '__all__'} onValueChange={(v) => setSelectedUrunGrubu(v === '__all__' ? '' : v)}>
                 <SelectTrigger aria-labelledby="urun-grubu-label">
                   <SelectValue placeholder="Tümü" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Tümü</SelectItem>
+                  <SelectItem value="__all__">Tümü</SelectItem>
                   {brandAndGroupOptions.groups.map(group => (
                     <SelectItem key={group} value={group}>{urunGrubuLabels[group] || group}</SelectItem>
                   ))}
