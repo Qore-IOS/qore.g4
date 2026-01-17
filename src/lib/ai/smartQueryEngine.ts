@@ -13,6 +13,7 @@ import { anthropic, CLAUDE_MODEL } from './config';
 import { resolveEntities, extractQueryIntent, type ExtractedQueryIntent } from './entityResolver';
 import { QueryType, type QueryPlan } from './queryPlanner';
 import { aiLogger } from '@/lib/logger';
+import { FIRESTORE_COLLECTIONS, QUERY_COLLECTION_MAP } from './firestoreSchema';
 
 // ============================================
 // TYPES
@@ -129,32 +130,65 @@ async function determineQueryPlan(
   if (queries.size === 0) {
     reasoning = 'Temel sorgu analizi kullaniliyor. ';
 
-    // Add queries based on entities
-    if (intent.entities.hospitals.length > 0) {
-      queries.add('stock_by_hospital');
-    }
-    if (intent.entities.products.length > 0) {
-      queries.add('stock_by_product');
-      queries.add('product_info');
+    // First check QUERY_COLLECTION_MAP for keyword matches
+    const queryLower = intent.originalQuery.toLowerCase();
+    for (const [keyword, collections] of Object.entries(QUERY_COLLECTION_MAP)) {
+      if (queryLower.includes(keyword.toLowerCase())) {
+        reasoning += `"${keyword}" anahtar kelimesi bulundu. `;
+        // Map collections to query types
+        for (const col of collections) {
+          if (col === 'depoStok') {
+            if (queryLower.includes('depo') && !queryLower.includes('laboratuvar') && !queryLower.includes('lab')) {
+              queries.add('stock_by_product'); // Depo stoku
+            } else if (queryLower.includes('lab') || queryLower.includes('hastane')) {
+              queries.add('stock_by_hospital'); // Lab stoku
+            } else {
+              queries.add('all_hospitals_stock'); // Genel stok
+            }
+          } else if (col === 'tuketimKayitlari') {
+            queries.add('consumption_history');
+          } else if (col === 'orders') {
+            // Orders don't have a direct query type, will be handled separately
+            reasoning += 'Siparis verileri sorgulanacak. ';
+          } else if (col === 'deviceFaultReports') {
+            queries.add('device_faults');
+          } else if (col === 'efficiencyData' || col === 'efficiencyHistory') {
+            queries.add('efficiency_data');
+          } else if (col === 'productCodes') {
+            queries.add('product_info');
+          }
+        }
+      }
     }
 
-    // Add based on action
-    switch (intent.action) {
-      case 'count':
+    // If still no queries, add based on entities
+    if (queries.size === 0) {
+      if (intent.entities.hospitals.length > 0) {
         queries.add('stock_by_hospital');
-        break;
-      case 'analyze':
-        queries.add('efficiency_data');
-        queries.add('consumption_history');
-        break;
-      case 'trend':
-        queries.add('consumption_history');
-        queries.add('efficiency_data');
-        break;
-      case 'list':
-        queries.add('device_faults');
-        queries.add('expiring_stock');
-        break;
+      }
+      if (intent.entities.products.length > 0) {
+        queries.add('stock_by_product');
+        queries.add('product_info');
+      }
+
+      // Add based on action
+      switch (intent.action) {
+        case 'count':
+          queries.add('stock_by_hospital');
+          break;
+        case 'analyze':
+          queries.add('efficiency_data');
+          queries.add('consumption_history');
+          break;
+        case 'trend':
+          queries.add('consumption_history');
+          queries.add('efficiency_data');
+          break;
+        case 'list':
+          queries.add('device_faults');
+          queries.add('expiring_stock');
+          break;
+      }
     }
   }
 

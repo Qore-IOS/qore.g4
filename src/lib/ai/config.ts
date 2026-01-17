@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { COLLECTION_GUIDE_PROMPT } from './firestoreSchema';
 
 // Validate API key format
 function validateApiKey(apiKey: string | undefined): string | null {
@@ -76,6 +77,8 @@ export const SYSTEM_PROMPT = `Sen Qore sisteminin yapay zeka asistanısın. Tür
 - Sayısal karşılaştırmalar için tablo formatı tercih et
 - Kritik bilgileri **kalın** yap
 - Tarih formatı: GG.AA.YYYY
+
+${COLLECTION_GUIDE_PROMPT}
 `;
 
 // Error messages
