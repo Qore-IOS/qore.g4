@@ -3,6 +3,7 @@ import { planQueries, QueryPlan } from './queryPlanner';
 import { fetchDataForQueries, FetchedData } from './dataFetcher';
 import { executeSmartQuery, SmartQueryResult } from './smartQueryEngine';
 import Anthropic from '@anthropic-ai/sdk';
+import { aiLogger } from '@/lib/logger';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -170,16 +171,20 @@ function toAnthropicMessages(
 
 // Classify error type for better user feedback
 function classifyError(error: unknown): string {
-  console.error('[Claude] Error details:', {
+  const errorDetails = {
     name: error instanceof Error ? error.name : 'unknown',
     message: error instanceof Error ? error.message : String(error),
     type: error?.constructor?.name,
-  });
+    stack: error instanceof Error ? error.stack : undefined,
+  };
+
+  aiLogger.error('AI error occurred', error, errorDetails);
 
   if (error instanceof Anthropic.APIError) {
-    console.error('[Claude] Anthropic API Error:', {
+    aiLogger.error('Anthropic API Error', error, {
       status: error.status,
       message: error.message,
+      headers: error.headers,
     });
 
     if (error.status === 401) {
@@ -197,9 +202,12 @@ function classifyError(error: unknown): string {
     if (error.status >= 500) {
       return 'Claude API gecici olarak kullanilamiyor. Lutfen tekrar deneyin.';
     }
+    // Unknown API error - log and return specific message
+    return `Claude API hatasi (${error.status}): ${error.message}`;
   }
 
   if (error instanceof Anthropic.AuthenticationError) {
+    aiLogger.error('Authentication Error', error);
     return 'API anahtari gecersiz. Lutfen dogru Anthropic API anahtarini girdiginizden emin olun.';
   }
 
@@ -208,20 +216,41 @@ function classifyError(error: unknown): string {
 
     // Network errors
     if (msg.includes('fetch') || msg.includes('network') || msg.includes('enotfound') || msg.includes('econnrefused')) {
+      aiLogger.error('Network error', error);
       return ERROR_MESSAGES.NETWORK_ERROR;
     }
 
     // API key related errors
     if (msg.includes('api_key') || msg.includes('apikey') || msg.includes('authentication') || msg.includes('unauthorized')) {
+      aiLogger.error('API key error', error);
       return 'API anahtari ile ilgili bir sorun var. Lutfen API anahtarinizi kontrol edin.';
     }
 
     // Timeout errors
     if (msg.includes('timeout') || msg.includes('timed out')) {
+      aiLogger.error('Timeout error', error);
       return 'Istek zaman asimina ugradi. Lutfen tekrar deneyin.';
     }
+
+    // Firebase/Database errors
+    if (msg.includes('firebase') || msg.includes('firestore') || msg.includes('permission-denied')) {
+      aiLogger.error('Firebase error', error);
+      return 'Veritabani erisim hatasi. Lutfen sistem yoneticinize basvurun.';
+    }
+
+    // JSON parse errors
+    if (msg.includes('json') || msg.includes('parse') || msg.includes('unexpected token')) {
+      aiLogger.error('JSON parse error', error);
+      return 'Veri isleme hatasi. Lutfen tekrar deneyin.';
+    }
+
+    // Return the actual error message for better debugging
+    aiLogger.error('Unclassified error', error, { originalMessage: error.message });
+    return `Hata: ${error.message}`;
   }
 
+  // Truly unknown error - log everything we can
+  aiLogger.fatal('Unknown error type', error, { rawError: String(error) });
   return ERROR_MESSAGES.UNKNOWN_ERROR;
 }
 
@@ -262,9 +291,9 @@ export async function smartChat(
 ): Promise<ChatResponse> {
   try {
     // Step 1: Use Smart Query Engine
-    console.log('[SmartChat] Processing:', userMessage);
+    aiLogger.info('Processing smart chat', { message: userMessage.substring(0, 100) });
     const smartResult = await executeSmartQuery(userMessage);
-    console.log('[SmartChat] Smart query result:', smartResult.summary);
+    aiLogger.info('Smart query completed', { summary: smartResult.summary });
 
     // Step 2: Build contextual prompt with hallucination guard
     const guardedContext = addHallucinationGuard(
@@ -311,7 +340,7 @@ Yukaridaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri KESIN
     ];
 
     // Step 4: Generate response
-    console.log('[SmartChat] Generating response...');
+    aiLogger.debug('Generating AI response');
     const response = await anthropic.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: MAX_TOKENS,
@@ -323,14 +352,14 @@ Yukaridaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri KESIN
     const textContent = response.content.find((block) => block.type === 'text');
     const responseText = textContent?.type === 'text' ? textContent.text : '';
 
-    console.log('[SmartChat] Response generated successfully');
+    aiLogger.info('Response generated successfully', { responseLength: responseText.length });
 
     return {
       message: responseText,
       smartQueryResult: smartResult,
     };
   } catch (error) {
-    console.error('[SmartChat] Error:', error);
+    aiLogger.error('SmartChat error', error, { userMessage: userMessage.substring(0, 100) });
     const errorMessage = classifyError(error);
 
     return {
@@ -360,9 +389,9 @@ export async function smartChatStream(
 ): Promise<ChatResponse> {
   try {
     // Step 1: Use Smart Query Engine
-    console.log('[SmartChatStream] Processing:', userMessage);
+    aiLogger.info('Processing smart chat stream', { message: userMessage.substring(0, 100) });
     const smartResult = await executeSmartQuery(userMessage);
-    console.log('[SmartChatStream] Smart query result:', smartResult.summary);
+    aiLogger.info('Smart query completed for stream', { summary: smartResult.summary });
 
     // Step 2: Build contextual prompt
     const guardedContext = addHallucinationGuard(
@@ -403,7 +432,7 @@ Yukaridaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri KESIN
     ];
 
     // Step 4: Stream response
-    console.log('[SmartChatStream] Starting stream...');
+    aiLogger.debug('Starting AI stream');
     const stream = await anthropic.messages.stream({
       model: CLAUDE_MODEL,
       max_tokens: MAX_TOKENS,
@@ -421,14 +450,14 @@ Yukaridaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri KESIN
       }
     }
 
-    console.log('[SmartChatStream] Stream completed');
+    aiLogger.info('Stream completed', { responseLength: fullMessage.length });
 
     return {
       message: fullMessage,
       smartQueryResult: smartResult,
     };
   } catch (error) {
-    console.error('[SmartChatStream] Error:', error);
+    aiLogger.error('SmartChatStream error', error, { userMessage: userMessage.substring(0, 100) });
     const errorMessage = classifyError(error);
     onChunk(errorMessage);
 

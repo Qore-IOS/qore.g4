@@ -49,6 +49,7 @@ export type LogModule =
   | 'firebase'
   | 'ocr'
   | 'barcode'
+  | 'ai'
   | 'general';
 
 /**
@@ -588,6 +589,11 @@ export const verimlilikGecmisLogger = createLogger('verimlilik-gecmis');
  * Total Verimlilik (Total Efficiency) module logger
  */
 export const totalVerimlilikLogger = createLogger('total-verimlilik');
+
+/**
+ * AI module logger
+ */
+export const aiLogger = createLogger('ai');
 
 // =============================================================================
 // UTILITY FUNCTIONS
