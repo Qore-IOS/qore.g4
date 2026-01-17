@@ -1,6 +1,7 @@
 import { adminDb } from '@/lib/firebase-admin';
 import { QueryType } from './queryPlanner';
 import type { Timestamp, Query, DocumentData } from 'firebase-admin/firestore';
+import { aiLogger } from '@/lib/logger';
 
 // Simplified types for AI context
 interface StockItem {
@@ -434,7 +435,7 @@ export async function fetchDataForQueries(
 
   for (const query of queries) {
     try {
-      console.log(`[DataFetcher] Fetching ${query.type}:`, query.params);
+      aiLogger.debug(`Fetching ${query.type}`, { params: query.params });
 
       switch (query.type) {
         case 'stock_by_product':
@@ -463,20 +464,28 @@ export async function fetchDataForQueries(
           break;
         case 'low_stock':
           // Will be implemented with min/max rules
-          console.log('[DataFetcher] low_stock query type not yet implemented');
+          aiLogger.debug('low_stock query type not yet implemented');
           break;
         case 'product_info':
           result.products = await fetchProductInfo(query.params);
           break;
         default:
-          console.warn(`[DataFetcher] Unknown query type: ${query.type}`);
+          aiLogger.warn(`Unknown query type: ${query.type}`);
       }
 
-      console.log(`[DataFetcher] ${query.type} completed successfully`);
+      aiLogger.debug(`${query.type} completed successfully`);
     } catch (error) {
+      const errorCode = (error as { code?: number | string })?.code;
       const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
-      console.error(`[DataFetcher] Error fetching ${query.type}:`, errorMessage);
-      errors.push(`${query.type}: ${errorMessage}`);
+
+      // Check for Firestore-specific errors
+      if (errorCode === 5 || errorCode === 'NOT_FOUND' || errorMessage.includes('NOT_FOUND')) {
+        aiLogger.warn(`Collection/index not found for ${query.type}`, { errorCode });
+        errors.push(`${query.type}: Veri kaynagi bulunamadi`);
+      } else {
+        aiLogger.error(`Error fetching ${query.type}`, error);
+        errors.push(`${query.type}: ${errorMessage}`);
+      }
     }
   }
 
@@ -494,7 +503,7 @@ export async function fetchDataForQueries(
   // Add errors if any
   if (errors.length > 0) {
     result.errors = errors;
-    console.warn('[DataFetcher] Completed with errors:', errors);
+    aiLogger.warn('DataFetcher completed with errors', { errors });
   }
 
   return result;
