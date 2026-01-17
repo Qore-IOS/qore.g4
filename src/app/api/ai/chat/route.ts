@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { chat, chatStream, ChatMessage } from '@/lib/ai/chat';
 import { runAgent, runAgentStream, AgentMessage } from '@/lib/ai/agent';
 import { isApiKeyValid } from '@/lib/ai/config';
+import { aiLogger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 60 seconds timeout
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest) {
   try {
     // Check API key first - use validated check from config
     if (!process.env.ANTHROPIC_API_KEY) {
-      console.error('[AI API] ANTHROPIC_API_KEY is not set');
+      aiLogger.error('ANTHROPIC_API_KEY is not set');
       return NextResponse.json(
         {
           error: 'API anahtarı ayarlanmamış',
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     // Check if API key format is valid
     if (!isApiKeyValid) {
-      console.error('[AI API] ANTHROPIC_API_KEY format is invalid');
+      aiLogger.error('ANTHROPIC_API_KEY format is invalid');
       return NextResponse.json(
         {
           error: 'Geçersiz API anahtarı formatı',
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
       mode?: 'chat' | 'agent';
     };
 
-    console.log('[AI API] Request received:', {
+    aiLogger.info('Request received', {
       message: message?.substring(0, 50) + '...',
       stream,
       mode,
@@ -63,12 +64,12 @@ export async function POST(request: NextRequest) {
 
     // ============ AGENT MODE ============
     if (mode === 'agent') {
-      console.log('[AI API] Using AGENT mode');
+      aiLogger.info('Using AGENT mode');
 
       if (!stream) {
         const response = await runAgent(message, history as AgentMessage[]);
 
-        console.log('[AI API] Agent response ready:', {
+        aiLogger.info('Agent response ready', {
           hasMessage: !!response.message,
           toolsUsed: response.toolsUsed,
           actionTaken: response.actionTaken,
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
             );
             controller.close();
           } catch (error) {
-            console.error('[AI API] Agent stream error:', error);
+            aiLogger.error('Agent stream error', error);
             const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
@@ -125,10 +126,10 @@ export async function POST(request: NextRequest) {
 
     // ============ CHAT MODE (Default) ============
     if (!stream) {
-      console.log('[AI API] Using CHAT mode (non-streaming)');
+      aiLogger.info('Using CHAT mode (non-streaming)');
       const response = await chat(message, history as ChatMessage[]);
 
-      console.log('[AI API] Response ready:', {
+      aiLogger.info('Response ready', {
         hasMessage: !!response.message,
         messageLength: response.message?.length,
         error: response.error
@@ -138,7 +139,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Streaming chat response
-    console.log('[AI API] Using CHAT mode (streaming)');
+    aiLogger.info('Using CHAT mode (streaming)');
     const encoder = new TextEncoder();
 
     const customStream = new ReadableStream({
@@ -159,7 +160,7 @@ export async function POST(request: NextRequest) {
           );
           controller.close();
         } catch (error) {
-          console.error('[AI API] Stream error:', error);
+          aiLogger.error('Stream error', error);
           const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
@@ -177,10 +178,11 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[AI API] Error:', error);
+    aiLogger.error('API error', error, {
+      stack: error instanceof Error ? error.stack : undefined
+    });
+
     const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
-    const errorStack = error instanceof Error ? error.stack : '';
-    console.error('[AI API] Error stack:', errorStack);
 
     return NextResponse.json(
       { error: 'Sunucu hatası', message: errorMessage },
