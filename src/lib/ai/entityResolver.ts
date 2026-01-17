@@ -235,7 +235,8 @@ async function loadHospitalCache() {
   if (hospitalCache) return hospitalCache;
 
   try {
-    const snapshot = await adminDb.collection('hospitals').get();
+    // Limit hospital cache to 500 entries for performance
+    const snapshot = await adminDb.collection('hospitals').limit(500).get();
     hospitalCache = snapshot.docs.map(doc => {
       const data = doc.data();
       const name = data.name || data.ad || '';

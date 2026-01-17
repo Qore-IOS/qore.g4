@@ -556,8 +556,8 @@ async function fetchExpiringStockEnhanced(params: FetchParams) {
 }
 
 async function fetchLowStockEnhanced(params: FetchParams) {
-  // Get min/max rules
-  const hospitalsSnap = await adminDb.collection('hospitals').get();
+  // Get min/max rules - limit to 100 hospitals for performance
+  const hospitalsSnap = await adminDb.collection('hospitals').limit(100).get();
   const lowStockItems: unknown[] = [];
 
   for (const hospDoc of hospitalsSnap.docs) {
@@ -607,7 +607,8 @@ async function fetchLowStockEnhanced(params: FetchParams) {
 }
 
 async function fetchAllHospitalsStockEnhanced(params: FetchParams) {
-  const hospitalsSnap = await adminDb.collection('hospitals').get();
+  // Limit to 200 hospitals for performance
+  const hospitalsSnap = await adminDb.collection('hospitals').limit(200).get();
   const hospitals = hospitalsSnap.docs.map(d => ({
     id: d.id,
     name: d.data().name || d.data().ad,
