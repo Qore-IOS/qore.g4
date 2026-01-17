@@ -12,6 +12,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { anthropic, CLAUDE_MODEL } from './config';
 import { resolveEntities, extractQueryIntent, type ExtractedQueryIntent } from './entityResolver';
 import { QueryType, type QueryPlan } from './queryPlanner';
+import { aiLogger } from '@/lib/logger';
 
 // ============================================
 // TYPES
@@ -215,8 +216,29 @@ async function fetchEnhancedData(
       const data = await executeSingleQuery(queryType, params);
       return { type: queryType, data, error: null };
     } catch (error) {
-      console.error(`[SmartQuery] Error fetching ${queryType}:`, error);
-      return { type: queryType, data: null, error: error instanceof Error ? error.message : 'Unknown error' };
+      // Check for Firestore-specific errors
+      const errorCode = (error as { code?: number | string })?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Handle gRPC NOT_FOUND (code 5) - usually missing index or collection
+      if (errorCode === 5 || errorCode === 'NOT_FOUND' || errorMessage.includes('NOT_FOUND')) {
+        aiLogger.warn(`Firestore collection/index not found for ${queryType}`, {
+          queryType,
+          errorCode,
+          message: errorMessage,
+          suggestion: 'Check if Firestore composite index exists or collection is empty'
+        });
+        return { type: queryType, data: null, error: `${queryType}: Veri kaynagi bulunamadi veya index eksik` };
+      }
+
+      // Handle permission denied
+      if (errorCode === 7 || errorCode === 'PERMISSION_DENIED' || errorMessage.includes('PERMISSION_DENIED')) {
+        aiLogger.error(`Firestore permission denied for ${queryType}`, error);
+        return { type: queryType, data: null, error: `${queryType}: Yetki hatasi` };
+      }
+
+      aiLogger.error(`Error fetching ${queryType}`, error, { queryType, params });
+      return { type: queryType, data: null, error: errorMessage };
     }
   });
 
@@ -398,7 +420,24 @@ async function fetchEfficiencyEnhanced(params: FetchParams) {
     query = query.where('hospitalId', '==', params.hospitalId);
   }
 
-  const snapshot = await query.orderBy('year', 'desc').orderBy('month', 'desc').limit(12).get();
+  let snapshot;
+  try {
+    // Try with ordering (requires composite index)
+    snapshot = await query.orderBy('year', 'desc').orderBy('month', 'desc').limit(12).get();
+  } catch (orderError) {
+    // If composite index is missing, fall back to simple query
+    const errorCode = (orderError as { code?: number | string })?.code;
+    if (errorCode === 5 || errorCode === 'NOT_FOUND' || (orderError as Error).message?.includes('NOT_FOUND')) {
+      aiLogger.warn('Composite index missing for efficiencyHistory, using simple query', {
+        suggestion: 'Create composite index in Firebase Console: efficiencyHistory (hospitalId ASC, year DESC, month DESC)'
+      });
+      // Fall back to simple query without ordering
+      snapshot = await query.limit(12).get();
+    } else {
+      throw orderError;
+    }
+  }
+
   const records: unknown[] = [];
 
   for (const doc of snapshot.docs) {
@@ -415,9 +454,15 @@ async function fetchEfficiencyEnhanced(params: FetchParams) {
     });
   }
 
+  // Sort in memory if we couldn't do it in query
+  records.sort((a: { year: number; month: number }, b: { year: number; month: number }) => {
+    if (b.year !== a.year) return b.year - a.year;
+    return b.month - a.month;
+  });
+
   return {
     totalRecords: records.length,
-    records,
+    records: records.slice(0, 12),
     trend: records.length >= 2 ? 'calculated' : 'insufficient_data',
   };
 }
@@ -734,19 +779,23 @@ function formatDataAsContext(data: Record<string, unknown>, intent: ExtractedQue
 // ============================================
 
 export async function executeSmartQuery(userQuery: string): Promise<SmartQueryResult> {
-  console.log('[SmartQuery] Processing:', userQuery);
+  aiLogger.info('Smart query processing', { query: userQuery.substring(0, 100) });
 
   // Step 1: Extract intent and resolve entities
   const intent = await extractQueryIntent(userQuery);
-  console.log('[SmartQuery] Intent:', intent);
+  aiLogger.debug('Query intent extracted', {
+    action: intent.action,
+    hospitalCount: intent.entities.hospitals.length,
+    productCount: intent.entities.products.length,
+  });
 
   // Step 2: Determine query plan
   const queryPlan = await determineQueryPlan(intent);
-  console.log('[SmartQuery] Query plan:', queryPlan);
+  aiLogger.debug('Query plan determined', { queries: queryPlan.queries, reasoning: queryPlan.reasoning });
 
   // Step 3: Fetch data
   const data = await fetchEnhancedData(queryPlan.queries, intent);
-  console.log('[SmartQuery] Data fetched:', Object.keys(data));
+  aiLogger.info('Data fetched', { dataKeys: Object.keys(data) });
 
   // Step 4: Format context
   const context = formatDataAsContext(data, intent);

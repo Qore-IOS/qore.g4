@@ -8,6 +8,7 @@
  */
 
 import { adminDb } from '@/lib/firebase-admin';
+import { aiLogger } from '@/lib/logger';
 
 // ============================================
 // TYPES
@@ -233,69 +234,93 @@ let productCache: Array<{ stokKodu: string; stokAdi: string; aliases: string[] }
 async function loadHospitalCache() {
   if (hospitalCache) return hospitalCache;
 
-  const snapshot = await adminDb.collection('hospitals').get();
-  hospitalCache = snapshot.docs.map(doc => {
-    const data = doc.data();
-    const name = data.name || data.ad || '';
-    const kod = data.kod || '';
+  try {
+    const snapshot = await adminDb.collection('hospitals').get();
+    hospitalCache = snapshot.docs.map(doc => {
+      const data = doc.data();
+      const name = data.name || data.ad || '';
+      const kod = data.kod || '';
 
-    // Generate aliases
-    const aliases: string[] = [name, kod].filter(Boolean);
+      // Generate aliases
+      const aliases: string[] = [name, kod].filter(Boolean);
 
-    // Add variations
-    if (name) {
-      // "Ankara Hastanesi" -> ["ankara", "hastanesi", "ankara hastanesi"]
-      const words = name.toLowerCase().split(/\s+/);
-      aliases.push(...words);
+      // Add variations
+      if (name) {
+        // "Ankara Hastanesi" -> ["ankara", "hastanesi", "ankara hastanesi"]
+        const words = name.toLowerCase().split(/\s+/);
+        aliases.push(...words);
 
-      // Lab number extraction
-      const labNum = extractLabNumber(name);
-      if (labNum) {
-        aliases.push(`line ${labNum}`, `l${labNum}`, `lab ${labNum}`);
+        // Lab number extraction
+        const labNum = extractLabNumber(name);
+        if (labNum) {
+          aliases.push(`line ${labNum}`, `l${labNum}`, `lab ${labNum}`);
+        }
       }
+
+      return {
+        id: doc.id,
+        name,
+        kod,
+        aliases,
+      };
+    });
+
+    aiLogger.debug('Hospital cache loaded', { count: hospitalCache.length });
+    return hospitalCache;
+  } catch (error) {
+    const errorCode = (error as { code?: number | string })?.code;
+    if (errorCode === 5 || errorCode === 'NOT_FOUND') {
+      aiLogger.warn('Hospitals collection not found in Firestore');
+    } else {
+      aiLogger.error('Failed to load hospital cache', error);
     }
-
-    return {
-      id: doc.id,
-      name,
-      kod,
-      aliases,
-    };
-  });
-
-  return hospitalCache;
+    hospitalCache = [];
+    return hospitalCache;
+  }
 }
 
 async function loadProductCache() {
   if (productCache) return productCache;
 
-  const snapshot = await adminDb.collection('productCodes').limit(2000).get();
-  productCache = snapshot.docs.map(doc => {
-    const data = doc.data();
-    const stokKodu = data.stokKodu || '';
-    const stokAdi = data.stokAdi || '';
+  try {
+    const snapshot = await adminDb.collection('productCodes').limit(2000).get();
+    productCache = snapshot.docs.map(doc => {
+      const data = doc.data();
+      const stokKodu = data.stokKodu || '';
+      const stokAdi = data.stokAdi || '';
 
-    // Generate aliases from product name
-    const aliases: string[] = [stokKodu, stokAdi].filter(Boolean);
+      // Generate aliases from product name
+      const aliases: string[] = [stokKodu, stokAdi].filter(Boolean);
 
-    // Extract meaningful parts
-    if (stokAdi) {
-      const words = stokAdi.toLowerCase().split(/[\s\-_]+/);
-      aliases.push(...words.filter(w => w.length > 2));
+      // Extract meaningful parts
+      if (stokAdi) {
+        const words = stokAdi.toLowerCase().split(/[\s\-_]+/);
+        aliases.push(...words.filter(w => w.length > 2));
 
-      // Add alias matches
-      const aliasMatches = findProductAliasMatch(stokAdi);
-      aliases.push(...aliasMatches);
+        // Add alias matches
+        const aliasMatches = findProductAliasMatch(stokAdi);
+        aliases.push(...aliasMatches);
+      }
+
+      return {
+        stokKodu,
+        stokAdi,
+        aliases,
+      };
+    });
+
+    aiLogger.debug('Product cache loaded', { count: productCache.length });
+    return productCache;
+  } catch (error) {
+    const errorCode = (error as { code?: number | string })?.code;
+    if (errorCode === 5 || errorCode === 'NOT_FOUND') {
+      aiLogger.warn('ProductCodes collection not found in Firestore');
+    } else {
+      aiLogger.error('Failed to load product cache', error);
     }
-
-    return {
-      stokKodu,
-      stokAdi,
-      aliases,
-    };
-  });
-
-  return productCache;
+    productCache = [];
+    return productCache;
+  }
 }
 
 // ============================================
