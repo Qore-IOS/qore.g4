@@ -341,6 +341,7 @@ export function useDock() {
   const router = useRouter();
   const isMobile = useIsMobile();
   const [isVerimlilikSwitchOpen, setIsVerimlilikSwitchOpen] = useState(false);
+  const [isPlannerPanelOpen, setIsPlannerPanelOpen] = useState(false);
 
   // Dock Visibility State
   const [isVisible, setIsVisible] = useState(true);
@@ -549,6 +550,8 @@ export function useDock() {
         onClick:
           view.key === "verimlilik-hesaplama"
             ? () => setIsVerimlilikSwitchOpen(true)
+            : view.key === "planner"
+            ? () => setIsPlannerPanelOpen(true)
             : view.href
             ? () => router.push(view.href!)
             : undefined,
@@ -585,6 +588,8 @@ export function useDock() {
     dockItems,
     isVerimlilikSwitchOpen,
     setIsVerimlilikSwitchOpen,
+    isPlannerPanelOpen,
+    setIsPlannerPanelOpen,
     currentViewKey,
     isMobile,
     isVisible,
