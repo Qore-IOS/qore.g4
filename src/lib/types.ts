@@ -431,6 +431,7 @@ export interface DeviceFaultReport {
 
 export type AppView =
   | 'dashboard'
+  | 'planner'
   | 'mal-kabul'
   | 'stok-yonetimi'
   | 'siparisler'

@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useTheme } from "next-themes";
 import { Dock } from "@/components/dock";
 import VerimlilikSwitch from "./VerimlilikSwitch";
+import TaskPlannerPanel from "./TaskPlannerPanel";
 import AutoRedirectOnLogin from "./AutoRedirectOnLogin";
 import OnlyUsageAutoRedirect from "./OnlyUsageAutoRedirect";
 import { useDock } from "@/hooks/use-dock";
@@ -76,6 +77,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     dockItems,
     isVerimlilikSwitchOpen,
     setIsVerimlilikSwitchOpen,
+    isPlannerPanelOpen,
+    setIsPlannerPanelOpen,
     currentViewKey,
     isMobile,
     isVisible,
@@ -178,6 +181,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           {children}
         </main>
+        <TaskPlannerPanel
+          open={isPlannerPanelOpen}
+          onClose={() => setIsPlannerPanelOpen(false)}
+        />
       </SidebarProvider>
     );
   }
@@ -215,6 +222,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <VerimlilikSwitch
           open={isVerimlilikSwitchOpen}
           onClose={() => setIsVerimlilikSwitchOpen(false)}
+        />
+
+        <TaskPlannerPanel
+          open={isPlannerPanelOpen}
+          onClose={() => setIsPlannerPanelOpen(false)}
         />
       </main>
     </div>
