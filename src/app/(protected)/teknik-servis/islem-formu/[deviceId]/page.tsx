@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { format } from 'date-fns';
@@ -25,6 +25,7 @@ import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutan
 import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Textarea } from '@/components/ui/textarea';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -124,6 +125,7 @@ export default function IslemFormuPage() {
   // İşlem Tipi ve Türü
   const [islemTipi, setIslemTipi] = useState<IslemTipi>('');
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
+  const [aciklama, setAciklama] = useState('');
 
   // History
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -346,6 +348,12 @@ export default function IslemFormuPage() {
       return;
     }
 
+    // Validate açıklama (zorunlu)
+    if (!aciklama.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen açıklama alanını doldurun.', variant: 'destructive' });
+      return;
+    }
+
     // Validate part changes have quantity
     const invalidPart = actions.find(a => a.type === 'part_change' && a.quantity <= 0);
     if (invalidPart) {
@@ -390,6 +398,7 @@ export default function IslemFormuPage() {
             actions,
             islemTipi,
             islemTuru,
+            aciklama: aciklama.trim(),
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -404,6 +413,7 @@ export default function IslemFormuPage() {
         setActions([]);
         setIslemTipi('');
         setIslemTuru('');
+        setAciklama('');
     } catch(err) {
         console.error("Error saving action form:", err);
         toast({ title: 'Hata', description: 'Form kaydedilemedi.', variant: 'destructive'});
@@ -510,6 +520,26 @@ export default function IslemFormuPage() {
                     <SelectItem value="sw_update">SW Update</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            {/* Açıklama Alanı (Zorunlu) */}
+            <div className="p-4 border rounded-lg bg-muted/30">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Açıklama <span className="text-destructive">*</span>
+                </Label>
+                <Textarea
+                  placeholder="Yapılan işlem hakkında açıklama yazın... (zorunlu)"
+                  value={aciklama}
+                  onChange={(e) => setAciklama(e.target.value)}
+                  rows={3}
+                  className={!aciklama.trim() ? 'border-amber-500/50' : ''}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
+                </p>
               </div>
             </div>
 
