@@ -7,9 +7,9 @@ import {
   addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch
 } from 'firebase/firestore';
 import { emitFaultOpened } from '@/lib/notifications';
+import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
 
-export type DeviceFaultStatus = 'open' | 'closed';
-export type DeviceFaultEventType = 'opened' | 'note' | 'status_change' | 'closed';
+export type DeviceFaultEventType = 'opened' | 'note' | 'status_change' | 'closed' | 'assigned' | 'intervention_started' | 'location_verified';
 
 export type OpenFaultInput = {
   hospitalId: string;
@@ -38,7 +38,7 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     'personel': openedByName,
     'saat': serverTimestamp(), // Firestore will convert this to a timestamp
     'açıklama': openDescription ?? '',
-    
+
     // Internal fields for the app
     hospitalId,
     labName,
@@ -49,9 +49,17 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     openedByUid,
     openedByName,
     description: openDescription ?? '',
-    status: 'open' as DeviceFaultStatus,
+    status: 'atama_bekliyor' as DeviceFaultStatus, // Yeni durumlar: atama_bekliyor → mudahale_bekliyor → mudahale_ediliyor → cozuldu
     title: title ?? `${labName} • ${model} (${serial}) • ${faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}`,
     openedAt: serverTimestamp(),
+    // Yeni süre takibi alanları
+    assignedAt: null,
+    assignedToUid: null,
+    assignedToName: null,
+    interventionType: null,
+    interventionStartedAt: null,
+    locationVerifiedAt: null,
+    relatedTests: [],
   };
 
   const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
@@ -98,23 +106,32 @@ export async function closeDeviceFaultReport(
 ) {
   const { closedByUid, closedByName, closeDescription } = params;
   const reportRef = doc(db, 'deviceFaultReports', reportId);
-  
+
   const reportSnap = await getDoc(reportRef);
   if (!reportSnap.exists()) {
     throw new Error('Arıza raporu bulunamadı.');
   }
   const reportData = reportSnap.data();
-  const deviceId = reportData?.deviceId; // Safely get deviceId
+  const deviceId = reportData?.deviceId;
+
+  // Süre hesaplama
+  const now = Date.now();
+  const openedAt = reportData?.openedAt?.toDate?.()?.getTime() || now;
+  const interventionStartedAt = reportData?.interventionStartedAt?.toDate?.()?.getTime() || now;
+  const cozumSuresi = now - interventionStartedAt;
+  const toplamCozumSuresi = now - openedAt;
 
   const batch = writeBatch(db);
 
   // 1. Update the fault report
   batch.update(reportRef, {
-    status: 'closed' as DeviceFaultStatus,
+    status: 'cozuldu' as DeviceFaultStatus, // Yeni status
     closedByUid,
     closedByName,
     closedAt: serverTimestamp(),
     closeDescription: closeDescription ?? '',
+    cozumSuresi, // Müdahaleden çözüme süre
+    toplamCozumSuresi, // Toplam süre
   });
 
   // 2. Update the main device document ONLY if a deviceId exists
@@ -132,12 +149,230 @@ export async function closeDeviceFaultReport(
     type: 'closed' as DeviceFaultEventType,
     actorUid: closedByUid,
     actorName: closedByName,
-    description: closeDescription ?? 'Arıza giderildi.', // Provide a default if empty
+    description: closeDescription ?? 'Arıza giderildi.',
     timestamp: serverTimestamp(),
   });
 
   // Commit all writes
   await batch.commit();
+}
+
+// ============================================
+// YENİ FONKSİYONLAR - ARIZA ATAMA SİSTEMİ
+// ============================================
+
+/**
+ * Arızayı personele ata (üzerime al)
+ * Status: atama_bekliyor → mudahale_bekliyor
+ */
+export async function assignFaultToSelf(
+  reportId: string,
+  actor: { uid: string; name: string }
+): Promise<void> {
+  const reportRef = doc(db, 'deviceFaultReports', reportId);
+  const reportSnap = await getDoc(reportRef);
+
+  if (!reportSnap.exists()) {
+    throw new Error('Arıza raporu bulunamadı.');
+  }
+
+  const reportData = reportSnap.data();
+
+  // Sadece atama_bekliyor durumundaki arızalar atanabilir
+  if (reportData.status !== 'atama_bekliyor' && reportData.status !== 'open') {
+    throw new Error('Bu arıza zaten atanmış.');
+  }
+
+  // Atama bekleme süresi hesaplama
+  const now = Date.now();
+  const openedAt = reportData?.openedAt?.toDate?.()?.getTime() || now;
+  const atamaBekmeSuresi = now - openedAt;
+
+  const batch = writeBatch(db);
+
+  batch.update(reportRef, {
+    status: 'mudahale_bekliyor' as DeviceFaultStatus,
+    assignedAt: serverTimestamp(),
+    assignedToUid: actor.uid,
+    assignedToName: actor.name,
+    atamaBekmeSuresi,
+  });
+
+  // History event
+  const historyRef = doc(collection(db, 'deviceFaultReports', reportId, 'history'));
+  batch.set(historyRef, {
+    type: 'assigned' as DeviceFaultEventType,
+    actorUid: actor.uid,
+    actorName: actor.name,
+    description: `Arıza ${actor.name} tarafından üzerine alındı.`,
+    timestamp: serverTimestamp(),
+  });
+
+  await batch.commit();
+}
+
+/**
+ * Müdahaleyi başlat (telefon veya kurum ziyareti)
+ * Status: mudahale_bekliyor → mudahale_ediliyor
+ */
+export async function startIntervention(
+  reportId: string,
+  actor: { uid: string; name: string },
+  interventionType: InterventionType,
+  relatedTests?: string[]
+): Promise<void> {
+  const reportRef = doc(db, 'deviceFaultReports', reportId);
+  const reportSnap = await getDoc(reportRef);
+
+  if (!reportSnap.exists()) {
+    throw new Error('Arıza raporu bulunamadı.');
+  }
+
+  const reportData = reportSnap.data();
+
+  // Sadece mudahale_bekliyor durumunda müdahale başlatılabilir
+  if (reportData.status !== 'mudahale_bekliyor') {
+    throw new Error('Bu arıza müdahale bekliyor durumunda değil.');
+  }
+
+  // Müdahale bekleme süresi hesaplama
+  const now = Date.now();
+  const assignedAt = reportData?.assignedAt?.toDate?.()?.getTime() || now;
+  const mudahaleBekmeSuresi = now - assignedAt;
+
+  const batch = writeBatch(db);
+
+  const updateData: Record<string, any> = {
+    status: 'mudahale_ediliyor' as DeviceFaultStatus,
+    interventionType,
+    interventionStartedAt: serverTimestamp(),
+    mudahaleBekmeSuresi,
+  };
+
+  if (relatedTests && relatedTests.length > 0) {
+    updateData.relatedTests = relatedTests;
+  }
+
+  batch.update(reportRef, updateData);
+
+  // History event
+  const historyRef = doc(collection(db, 'deviceFaultReports', reportId, 'history'));
+  const interventionLabel = interventionType === 'telefon' ? 'Telefonla destek' : 'Kurumda müdahale';
+  batch.set(historyRef, {
+    type: 'intervention_started' as DeviceFaultEventType,
+    actorUid: actor.uid,
+    actorName: actor.name,
+    description: `${interventionLabel} başlatıldı.${relatedTests && relatedTests.length > 0 ? ` İlişkili testler: ${relatedTests.join(', ')}` : ''}`,
+    timestamp: serverTimestamp(),
+    interventionType,
+    relatedTests: relatedTests || [],
+  });
+
+  await batch.commit();
+}
+
+/**
+ * Kurum ziyareti için konum doğrulama
+ * Laboratuvarın koordinatları 100m içindeyse doğrular
+ */
+export async function verifyLocationForIntervention(
+  reportId: string,
+  actor: { uid: string; name: string },
+  userLocation: { lat: number; lng: number }
+): Promise<{ success: boolean; distance: number; message: string }> {
+  const reportRef = doc(db, 'deviceFaultReports', reportId);
+  const reportSnap = await getDoc(reportRef);
+
+  if (!reportSnap.exists()) {
+    throw new Error('Arıza raporu bulunamadı.');
+  }
+
+  const reportData = reportSnap.data();
+  const hospitalId = reportData?.hospitalId;
+
+  if (!hospitalId) {
+    throw new Error('Arıza kaydında laboratuvar bilgisi bulunamadı.');
+  }
+
+  // Laboratuvar koordinatlarını al
+  const hospitalRef = doc(db, 'hospitals', hospitalId);
+  const hospitalSnap = await getDoc(hospitalRef);
+
+  if (!hospitalSnap.exists()) {
+    throw new Error('Laboratuvar bulunamadı.');
+  }
+
+  const hospitalData = hospitalSnap.data();
+  const labLat = hospitalData?.lat;
+  const labLng = hospitalData?.lng;
+
+  if (!labLat || !labLng) {
+    throw new Error('Laboratuvarın koordinat bilgisi tanımlı değil.');
+  }
+
+  // Haversine formülü ile mesafe hesapla
+  const distance = calculateDistance(userLocation.lat, userLocation.lng, labLat, labLng);
+  const GEOFENCE_RADIUS = 100; // 100 metre
+
+  if (distance > GEOFENCE_RADIUS) {
+    return {
+      success: false,
+      distance: Math.round(distance),
+      message: `Laboratuvara ${Math.round(distance)} metre uzaklıktasınız. Konum doğrulaması için ${GEOFENCE_RADIUS} metre içinde olmanız gerekiyor.`,
+    };
+  }
+
+  // Konum doğrulandı - history'ye kaydet
+  const historyRef = doc(collection(db, 'deviceFaultReports', reportId, 'history'));
+  await addDoc(collection(db, 'deviceFaultReports', reportId, 'history'), {
+    type: 'location_verified' as DeviceFaultEventType,
+    actorUid: actor.uid,
+    actorName: actor.name,
+    description: `Konum doğrulandı. Mesafe: ${Math.round(distance)}m`,
+    timestamp: serverTimestamp(),
+    locationLat: userLocation.lat,
+    locationLng: userLocation.lng,
+    labLat,
+    labLng,
+    distance: Math.round(distance),
+  });
+
+  // Ana dokümanı güncelle
+  await updateDoc(reportRef, {
+    locationVerifiedAt: serverTimestamp(),
+    locationVerifiedLat: userLocation.lat,
+    locationVerifiedLng: userLocation.lng,
+  });
+
+  return {
+    success: true,
+    distance: Math.round(distance),
+    message: `Konum doğrulandı. Laboratuvara ${Math.round(distance)} metre uzaklıktasınız.`,
+  };
+}
+
+/**
+ * İlişkili testleri güncelle
+ */
+export async function updateRelatedTests(
+  reportId: string,
+  relatedTests: string[]
+): Promise<void> {
+  const reportRef = doc(db, 'deviceFaultReports', reportId);
+  await updateDoc(reportRef, { relatedTests });
+}
+
+// Haversine formülü ile iki koordinat arasındaki mesafeyi hesapla (metre)
+function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000; // Dünya yarıçapı (metre)
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 // Ejected Kit Fault Types

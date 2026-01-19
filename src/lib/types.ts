@@ -395,10 +395,23 @@ export interface UploadedReport {
   uploaderId: string;
 }
 
+// Arıza durumu tipleri
+export type DeviceFaultStatus =
+  | 'atama_bekliyor'      // Yeni açılan arıza, henüz kimse üzerine almadı
+  | 'mudahale_bekliyor'   // Personel üzerine aldı, müdahale başlamadı
+  | 'mudahale_ediliyor'   // Aktif müdahale (telefon veya yerinde)
+  | 'cozuldu'             // Arıza çözüldü
+  | 'open'                // Legacy - eski sistem uyumluluğu
+  | 'closed';             // Legacy - eski sistem uyumluluğu
+
+// Müdahale tipi
+export type InterventionType = 'telefon' | 'kurum_ziyaret';
+
 export interface DeviceFaultReport {
   id: string;
   labId: string;
   labName: string;
+  hospitalId?: string; // Laboratuvar ID (koordinat erişimi için)
   groupId: string;
   groupName: string;
   deviceId: string;
@@ -406,7 +419,7 @@ export interface DeviceFaultReport {
   serial: string;
   orderInGroup: number;
   description: string;
-  status: 'open' | 'closed';
+  status: DeviceFaultStatus;
   faultType: 'teknik_servis' | 'aplikasyon';
   openedAt: Date | null;
   openedBy: string;
@@ -415,6 +428,30 @@ export interface DeviceFaultReport {
   closedBy?: string;
   closedByName?: string;
   source: string;
+
+  // Yeni atama sistemi alanları
+  assignedAt?: Date | null;           // Atama zamanı
+  assignedToUid?: string;             // Atanan personel UID
+  assignedToName?: string;            // Atanan personel adı
+
+  // Müdahale bilgileri
+  interventionType?: InterventionType | null;  // telefon veya kurum_ziyaret
+  interventionStartedAt?: Date | null;         // Müdahale başlangıç zamanı
+
+  // Konum doğrulama
+  locationVerifiedAt?: Date | null;   // Konum doğrulama zamanı
+  locationVerifiedLat?: number;       // Doğrulanan konum - enlem
+  locationVerifiedLng?: number;       // Doğrulanan konum - boylam
+
+  // İlişkili testler (opsiyonel)
+  relatedTests?: string[];            // İlişkili test adları listesi
+
+  // Süre hesaplama alanları (milisaniye cinsinden)
+  atamaBekmeSuresi?: number;          // Açılıştan atamaya kadar geçen süre
+  mudahaleBekmeSuresi?: number;       // Atamadan müdahaleye kadar geçen süre
+  cozumSuresi?: number;               // Müdahaleden çözüme kadar geçen süre
+  toplamCozumSuresi?: number;         // Açılıştan çözüme kadar toplam süre
+
   // Ejected kit fault fields
   isEjectedKitFault?: boolean;
   productStokKodu?: string;
