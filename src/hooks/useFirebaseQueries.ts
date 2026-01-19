@@ -279,9 +279,10 @@ export function useLabStock(
       return Array.from(resultMap.values());
     },
     enabled: externalEnabled && labIds.length > 0,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0, // Always stale - allows metadata listener to trigger refetch immediately
     gcTime: 10 * 60 * 1000,
-    refetchInterval: 60 * 1000,
+    refetchInterval: 3 * 1000, // Poll every 3 seconds for real-time updates
+    refetchOnWindowFocus: true,
   });
 }
 
