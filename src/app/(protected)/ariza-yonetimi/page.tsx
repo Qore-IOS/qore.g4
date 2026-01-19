@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, onSnapshot, orderBy, query, Timestamp, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { DeviceFaultReport } from '@/lib/types';
+import type { DeviceFaultReport, DeviceFaultStatus } from '@/lib/types';
 import {
   Card,
   CardHeader,
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Loader2,
   ShieldAlert,
@@ -32,7 +33,11 @@ import {
   BarChart,
   Trash2,
   FileDown,
-  FileSpreadsheet, // Added for Excel icon
+  FileSpreadsheet,
+  Clock,
+  UserPlus,
+  Phone,
+  Wrench,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes } from 'date-fns';
@@ -59,7 +64,58 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import PageShell from '@/components/responsive/PageShell.server';
-import { exportDataToExcel } from '@/lib/utils'; // Import the export utility
+import { exportDataToExcel } from '@/lib/utils';
+
+// Status tab değerleri
+type StatusTab = 'all' | 'atama_bekliyor' | 'mudahale_bekliyor' | 'mudahale_ediliyor' | 'cozuldu';
+
+// Status etiketleri ve renkleri
+const STATUS_CONFIG: Record<DeviceFaultStatus, { label: string; variant: 'destructive' | 'default' | 'secondary' | 'outline'; icon: React.ReactNode; className?: string }> = {
+  'atama_bekliyor': {
+    label: 'Atama Bekliyor',
+    variant: 'destructive',
+    icon: <UserPlus className="h-3 w-3" />,
+    className: 'bg-red-600/15 text-red-700 dark:text-red-400 border-red-600/20',
+  },
+  'mudahale_bekliyor': {
+    label: 'Müdahale Bekliyor',
+    variant: 'default',
+    icon: <Clock className="h-3 w-3" />,
+    className: 'bg-amber-600/15 text-amber-700 dark:text-amber-400 border-amber-600/20',
+  },
+  'mudahale_ediliyor': {
+    label: 'Müdahale Ediliyor',
+    variant: 'default',
+    icon: <Wrench className="h-3 w-3" />,
+    className: 'bg-blue-600/15 text-blue-700 dark:text-blue-400 border-blue-600/20',
+  },
+  'cozuldu': {
+    label: 'Çözüldü',
+    variant: 'secondary',
+    icon: <CheckCircle className="h-3 w-3" />,
+    className: 'bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20',
+  },
+  // Legacy status'lar
+  'open': {
+    label: 'Açık',
+    variant: 'destructive',
+    icon: <AlertTriangle className="h-3 w-3" />,
+    className: '',
+  },
+  'closed': {
+    label: 'Giderildi',
+    variant: 'secondary',
+    icon: <CheckCircle className="h-3 w-3" />,
+    className: 'bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20',
+  },
+};
+
+// Normalleştirilmiş status - legacy değerler için
+function normalizeStatus(status: string): DeviceFaultStatus {
+  if (status === 'open') return 'atama_bekliyor';
+  if (status === 'closed') return 'cozuldu';
+  return status as DeviceFaultStatus;
+}
 
 export default function ArizaYonetimiPage() {
   const [reports, setReports] = useState<DeviceFaultReport[]>([]);
@@ -70,11 +126,33 @@ export default function ArizaYonetimiPage() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
-  
-  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
+
+  // Yeni 5 sekmeli filtre sistemi
+  const [statusTab, setStatusTab] = useState<StatusTab>('all');
   const [labFilter, setLabFilter] = useState<string>('all');
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
   const [openerFilter, setOpenerFilter] = useState<string>('all');
+
+  // Her sekme için kayıt sayıları
+  const statusCounts = useMemo(() => {
+    const counts = {
+      all: reports.length,
+      atama_bekliyor: 0,
+      mudahale_bekliyor: 0,
+      mudahale_ediliyor: 0,
+      cozuldu: 0,
+    };
+
+    reports.forEach(r => {
+      const normalized = normalizeStatus(r.status);
+      if (normalized === 'atama_bekliyor') counts.atama_bekliyor++;
+      else if (normalized === 'mudahale_bekliyor') counts.mudahale_bekliyor++;
+      else if (normalized === 'mudahale_ediliyor') counts.mudahale_ediliyor++;
+      else if (normalized === 'cozuldu') counts.cozuldu++;
+    });
+
+    return counts;
+  }, [reports]);
 
   useEffect(() => {
     const q = query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'));
@@ -126,13 +204,15 @@ export default function ArizaYonetimiPage() {
 
   const filteredReports = useMemo(() => {
     return reports.filter(report => {
-      const statusMatch = statusFilter === 'all' || report.status === statusFilter;
+      // Status tab filtresi
+      const normalized = normalizeStatus(report.status);
+      const statusMatch = statusTab === 'all' || normalized === statusTab;
       const labMatch = labFilter === 'all' || report.labName === labFilter;
       const deviceMatch = deviceFilter === 'all' || report.serial === deviceFilter;
       const openerMatch = openerFilter === 'all' || report.openedByName === openerFilter;
       return statusMatch && labMatch && deviceMatch && openerMatch;
     });
-  }, [reports, statusFilter, labFilter, deviceFilter, openerFilter]);
+  }, [reports, statusTab, labFilter, deviceFilter, openerFilter]);
 
   const paginatedReports = useMemo(() => {
     const startIndex = (currentPage - 1) * rowsPerPage;
@@ -149,7 +229,7 @@ export default function ArizaYonetimiPage() {
   
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, labFilter, deviceFilter, openerFilter, rowsPerPage]);
+  }, [statusTab, labFilter, deviceFilter, openerFilter, rowsPerPage]);
 
   const handleDeleteReport = async (reportId: string) => {
     try {
@@ -170,23 +250,28 @@ export default function ArizaYonetimiPage() {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
       return;
     }
-    const dataToExport = reports.map(r => ({
-      'Rapor ID': r.id,
-      'Laboratuvar': r.labName || '',
-      'Cihaz Adı': r.title || r.model || '',
-      'Seri No': r.serial || '',
-      'Arıza Tipi': r.faultType || '',
-      'Açıklama': r.description || '',
-      'Açan Personel': r.openedByName || '',
-      'Açılış Tarihi': r.openedAt ? format(r.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
-      'Durum': r.status === 'open' ? 'Açık' : 'Giderildi',
-      'Kapanış Tarihi': r.closedAt ? format(r.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
-      'Kapatan Personel': r.closedByName || '',
-      'Kapanış Açıklaması': r.closeDescription || '',
-      'Çözüm Süresi (dk)': r.status === 'closed' && r.openedAt && r.closedAt
-        ? differenceInMinutes(r.closedAt, r.openedAt)
-        : '',
-    }));
+    const dataToExport = reports.map(r => {
+      const normalized = normalizeStatus(r.status);
+      const statusConfig = STATUS_CONFIG[normalized];
+      return {
+        'Rapor ID': r.id,
+        'Laboratuvar': r.labName || '',
+        'Cihaz Adı': r.title || r.model || '',
+        'Seri No': r.serial || '',
+        'Arıza Tipi': r.faultType || '',
+        'Açıklama': r.description || '',
+        'Açan Personel': r.openedByName || '',
+        'Açılış Tarihi': r.openedAt ? format(r.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
+        'Durum': statusConfig?.label || r.status,
+        'Atanan Personel': r.assignedToName || '',
+        'Atanma Tarihi': r.assignedAt ? format(r.assignedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
+        'Müdahale Tipi': r.interventionType === 'telefon' ? 'Telefonla' : r.interventionType === 'kurum_ziyaret' ? 'Kurumda' : '',
+        'Kapanış Tarihi': r.closedAt ? format(r.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
+        'Kapatan Personel': r.closedByName || '',
+        'Kapanış Açıklaması': r.closeDescription || '',
+        'Toplam Süre (dk)': r.toplamCozumSuresi ? Math.round(r.toplamCozumSuresi / 60000) : '',
+      };
+    });
     exportDataToExcel(dataToExport, 'Tum_Ariza_Kayitlari', 'Arızalar', toast);
   };
 
@@ -219,6 +304,32 @@ export default function ArizaYonetimiPage() {
             </div>
           </CardHeader>
           <CardContent>
+            {/* Yeni 5 Sekmeli Filtre */}
+            <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="mb-4">
+              <TabsList className="grid w-full grid-cols-5 h-auto">
+                <TabsTrigger value="all" className="flex flex-col gap-0.5 py-2">
+                  <span className="text-xs">Tümü</span>
+                  <span className="text-lg font-bold">{statusCounts.all}</span>
+                </TabsTrigger>
+                <TabsTrigger value="atama_bekliyor" className="flex flex-col gap-0.5 py-2 data-[state=active]:bg-red-600/10 data-[state=active]:text-red-700 dark:data-[state=active]:text-red-400">
+                  <span className="text-xs flex items-center gap-1"><UserPlus className="h-3 w-3" /> Atama Bekleyen</span>
+                  <span className="text-lg font-bold">{statusCounts.atama_bekliyor}</span>
+                </TabsTrigger>
+                <TabsTrigger value="mudahale_bekliyor" className="flex flex-col gap-0.5 py-2 data-[state=active]:bg-amber-600/10 data-[state=active]:text-amber-700 dark:data-[state=active]:text-amber-400">
+                  <span className="text-xs flex items-center gap-1"><Clock className="h-3 w-3" /> Müd. Bekleyen</span>
+                  <span className="text-lg font-bold">{statusCounts.mudahale_bekliyor}</span>
+                </TabsTrigger>
+                <TabsTrigger value="mudahale_ediliyor" className="flex flex-col gap-0.5 py-2 data-[state=active]:bg-blue-600/10 data-[state=active]:text-blue-700 dark:data-[state=active]:text-blue-400">
+                  <span className="text-xs flex items-center gap-1"><Wrench className="h-3 w-3" /> Müd. Edilen</span>
+                  <span className="text-lg font-bold">{statusCounts.mudahale_ediliyor}</span>
+                </TabsTrigger>
+                <TabsTrigger value="cozuldu" className="flex flex-col gap-0.5 py-2 data-[state=active]:bg-green-600/10 data-[state=active]:text-green-700 dark:data-[state=active]:text-green-400">
+                  <span className="text-xs flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Çözülen</span>
+                  <span className="text-lg font-bold">{statusCounts.cozuldu}</span>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
             {loading ? (
               <div className="flex items-center justify-center py-10">
                 <Loader2 className="h-8 w-8 animate-spin" />
@@ -228,18 +339,7 @@ export default function ArizaYonetimiPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>
-                        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
-                            <SelectTrigger className="border-none p-0 h-auto font-semibold [&>svg]:ml-1 w-full bg-transparent focus:ring-0 focus:ring-offset-0">
-                              <SelectValue/>
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Durum (Tümü)</SelectItem>
-                                <SelectItem value="open">Açık</SelectItem>
-                                <SelectItem value="closed">Giderildi</SelectItem>
-                            </SelectContent>
-                        </Select>
-                      </TableHead>
+                      <TableHead>Durum</TableHead>
                       <TableHead>
                         <Select value={labFilter} onValueChange={setLabFilter}>
                             <SelectTrigger className="border-none p-0 h-auto font-semibold [&>svg]:ml-1 w-full bg-transparent focus:ring-0 focus:ring-offset-0">
@@ -294,15 +394,15 @@ export default function ArizaYonetimiPage() {
                           onClick={() => router.push(`/ariza-yonetimi/${report.id}`)}
                         >
                           <TableCell data-label="Durum">
-                            {report.status === 'open' ? (
-                              <Badge variant="destructive" className="flex items-center gap-1">
-                                <AlertTriangle className="h-3 w-3" /> Açık
-                              </Badge>
-                            ) : (
-                              <Badge variant="secondary" className="flex items-center gap-1 bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20">
-                                <CheckCircle className="h-3 w-3" /> Giderildi
-                              </Badge>
-                            )}
+                            {(() => {
+                              const normalized = normalizeStatus(report.status);
+                              const config = STATUS_CONFIG[normalized];
+                              return (
+                                <Badge variant={config.variant} className={`flex items-center gap-1 ${config.className}`}>
+                                  {config.icon} {config.label}
+                                </Badge>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell data-label="Laboratuvar">{report.labName}</TableCell>
                           <TableCell data-label="Cihaz">
@@ -323,9 +423,17 @@ export default function ArizaYonetimiPage() {
                               : '-'}
                           </TableCell>
                           <TableCell data-label="Çözüm Süresi" className="text-xs">
-                            {report.status === 'closed' && report.openedAt && report.closedAt
-                              ? `${differenceInMinutes(report.closedAt, report.openedAt)} dk`
-                              : '-'}
+                            {(() => {
+                              const normalized = normalizeStatus(report.status);
+                              if (normalized === 'cozuldu' && report.toplamCozumSuresi) {
+                                const minutes = Math.round(report.toplamCozumSuresi / 60000);
+                                return `${minutes} dk`;
+                              }
+                              if (normalized === 'cozuldu' && report.openedAt && report.closedAt) {
+                                return `${differenceInMinutes(report.closedAt, report.openedAt)} dk`;
+                              }
+                              return '-';
+                            })()}
                           </TableCell>
                           {isAdmin && (
                             <TableCell className="text-right" data-label="İşlemler">

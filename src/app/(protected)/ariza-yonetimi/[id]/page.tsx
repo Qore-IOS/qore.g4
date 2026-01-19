@@ -5,21 +5,21 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where } from 'firebase/firestore';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X } from 'lucide-react';
 import BackButton from '@/components/BackButton';
-import { format, differenceInMinutes } from 'date-fns';
+import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-import { closeDeviceFaultReport, resolveEjectedKitFault } from '@/lib/faults';
+import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
-import type { Device, DeviceFaultReport } from '@/lib/types';
+import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode } from '@/lib/types';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import {
@@ -29,6 +29,55 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTheme } from 'next-themes';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
+
+// Status config - liste sayfasıyla tutarlı
+const STATUS_CONFIG: Record<DeviceFaultStatus, { label: string; variant: 'destructive' | 'default' | 'secondary' | 'outline'; icon: React.ReactNode; className?: string }> = {
+  'atama_bekliyor': {
+    label: 'Atama Bekliyor',
+    variant: 'destructive',
+    icon: <UserPlus className="h-3 w-3" />,
+    className: 'bg-red-600/15 text-red-700 dark:text-red-400 border-red-600/20',
+  },
+  'mudahale_bekliyor': {
+    label: 'Müdahale Bekliyor',
+    variant: 'default',
+    icon: <Clock className="h-3 w-3" />,
+    className: 'bg-amber-600/15 text-amber-700 dark:text-amber-400 border-amber-600/20',
+  },
+  'mudahale_ediliyor': {
+    label: 'Müdahale Ediliyor',
+    variant: 'default',
+    icon: <Wrench className="h-3 w-3" />,
+    className: 'bg-blue-600/15 text-blue-700 dark:text-blue-400 border-blue-600/20',
+  },
+  'cozuldu': {
+    label: 'Çözüldü',
+    variant: 'secondary',
+    icon: <CheckCircle className="h-3 w-3" />,
+    className: 'bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20',
+  },
+  'open': {
+    label: 'Açık',
+    variant: 'destructive',
+    icon: <AlertTriangle className="h-3 w-3" />,
+    className: '',
+  },
+  'closed': {
+    label: 'Giderildi',
+    variant: 'secondary',
+    icon: <CheckCircle className="h-3 w-3" />,
+    className: 'bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20',
+  },
+};
+
+function normalizeStatus(status: string): DeviceFaultStatus {
+  if (status === 'open') return 'atama_bekliyor';
+  if (status === 'closed') return 'cozuldu';
+  return status as DeviceFaultStatus;
+}
 
 
 type FaultDoc = DeviceFaultReport;
@@ -55,11 +104,24 @@ export default function FaultDetailPage() {
   const [loading, setLoading] = useState(true);
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
   const [closeDescription, setCloseDescription] = useState('');
-  
+
   const [isEditHistoryModalOpen, setIsEditHistoryModalOpen] = useState(false);
   const [editingHistoryItem, setEditingHistoryItem] = useState<HistoryEvent | null>(null);
   const [editingDescription, setEditingDescription] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // Yeni atama sistemi state'leri
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [isStartingIntervention, setIsStartingIntervention] = useState(false);
+  const [isVerifyingLocation, setIsVerifyingLocation] = useState(false);
+  const [locationVerified, setLocationVerified] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  // Test seçimi state'leri
+  const [availableTests, setAvailableTests] = useState<string[]>([]);
+  const [selectedTests, setSelectedTests] = useState<string[]>([]);
+  const [isTestDialogOpen, setIsTestDialogOpen] = useState(false);
+  const [pendingInterventionType, setPendingInterventionType] = useState<InterventionType | null>(null);
 
 
   useEffect(() => {
@@ -108,8 +170,54 @@ export default function FaultDetailPage() {
     };
   }, [params?.id, router, toast]);
 
+  // Laboratuvara ait test listesini çek
+  useEffect(() => {
+    const fetchTests = async () => {
+      if (!fault?.hospitalId) return;
+
+      try {
+        // Laboratuvara tanımlı minMaxRules'dan ürünlerin testAdi'lerini al
+        const minMaxSnap = await getDocs(collection(db, 'hospitals', fault.hospitalId, 'minMaxRules'));
+        const stokKodulari = minMaxSnap.docs.map(d => d.id);
+
+        if (stokKodulari.length === 0) {
+          setAvailableTests([]);
+          return;
+        }
+
+        // ProductCodes'dan testAdi'leri al
+        const productCodesSnap = await getDocs(collection(db, 'productCodes'));
+        const testNames = new Set<string>();
+
+        productCodesSnap.docs.forEach(d => {
+          const data = d.data();
+          if (stokKodulari.includes(data.stokKodu) && data.testAdi) {
+            testNames.add(data.testAdi);
+          }
+        });
+
+        setAvailableTests(Array.from(testNames).sort());
+      } catch (e) {
+        console.error('Test listesi alınamadı:', e);
+      }
+    };
+
+    fetchTests();
+  }, [fault?.hospitalId]);
+
+  // Konum doğrulama durumunu kontrol et
+  useEffect(() => {
+    if (fault?.locationVerifiedAt) {
+      setLocationVerified(true);
+    }
+  }, [fault?.locationVerifiedAt]);
+
   const resolutionTime = useMemo(() => {
-    if (fault?.status === 'closed' && fault.openedAt && fault.closedAt) {
+    const normalized = normalizeStatus(fault?.status || 'open');
+    if (normalized === 'cozuldu' && fault?.toplamCozumSuresi) {
+      return Math.round(fault.toplamCozumSuresi / 60000);
+    }
+    if (normalized === 'cozuldu' && fault?.openedAt && fault?.closedAt) {
       return differenceInMinutes(fault.closedAt, fault.openedAt);
     }
     return null;
@@ -117,13 +225,15 @@ export default function FaultDetailPage() {
 
   const statusBadge = useMemo(() => {
     if (!fault) return null;
-    if (fault.status === 'open') {
-      return <Badge className="bg-destructive/15 text-destructive border border-destructive/20"><AlertTriangle className="h-3 w-3 mr-1" />Açık</Badge>;
-    }
+    const normalized = normalizeStatus(fault.status);
+    const config = STATUS_CONFIG[normalized];
+
     return (
       <div className="flex items-center gap-2">
-        <Badge className="bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20"><CheckCircle className="h-3 w-3 mr-1" />Giderildi</Badge>
-        {resolutionTime !== null && (
+        <Badge variant={config.variant} className={`flex items-center gap-1 ${config.className}`}>
+          {config.icon} {config.label}
+        </Badge>
+        {normalized === 'cozuldu' && resolutionTime !== null && (
           <Badge variant="secondary" className="flex items-center gap-1">
             <Clock className="h-3 w-3" /> {resolutionTime} dk
           </Badge>
@@ -131,6 +241,113 @@ export default function FaultDetailPage() {
       </div>
     );
   }, [fault, resolutionTime]);
+
+  // Arızayı üzerine al
+  const handleAssignToSelf = useCallback(async () => {
+    if (!fault || !currentUser) return;
+    setIsAssigning(true);
+    try {
+      await assignFaultToSelf(fault.id, {
+        uid: currentUser.uid,
+        name: currentUserProfile?.name || 'Bilinmeyen',
+      });
+      toast({ title: 'Başarılı', description: 'Arıza üzerinize atandı.' });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Hata', description: e.message || 'Arıza atanamadı.', variant: 'destructive' });
+    } finally {
+      setIsAssigning(false);
+    }
+  }, [fault, currentUser, currentUserProfile, toast]);
+
+  // Müdahale başlat - test seçimi sonrası
+  const handleStartIntervention = useCallback(async (interventionType: InterventionType) => {
+    if (!fault || !currentUser) return;
+
+    // Kurum ziyareti için konum doğrulaması gerekli
+    if (interventionType === 'kurum_ziyaret' && !locationVerified) {
+      toast({ title: 'Konum Doğrulaması Gerekli', description: 'Kurumda müdahale için önce konumunuzu doğrulamanız gerekiyor.', variant: 'destructive' });
+      return;
+    }
+
+    setIsStartingIntervention(true);
+    try {
+      await startIntervention(fault.id, {
+        uid: currentUser.uid,
+        name: currentUserProfile?.name || 'Bilinmeyen',
+      }, interventionType, selectedTests.length > 0 ? selectedTests : undefined);
+
+      toast({
+        title: 'Müdahale Başlatıldı',
+        description: interventionType === 'telefon' ? 'Telefonla destek başlatıldı.' : 'Kurumda müdahale başlatıldı.',
+      });
+      setIsTestDialogOpen(false);
+      setSelectedTests([]);
+      setPendingInterventionType(null);
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Hata', description: e.message || 'Müdahale başlatılamadı.', variant: 'destructive' });
+    } finally {
+      setIsStartingIntervention(false);
+    }
+  }, [fault, currentUser, currentUserProfile, toast, selectedTests, locationVerified]);
+
+  // Konum doğrulama
+  const handleVerifyLocation = useCallback(async () => {
+    if (!fault || !currentUser) return;
+
+    setIsVerifyingLocation(true);
+    setLocationError(null);
+
+    try {
+      // Konum izni al
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        });
+      });
+
+      const userLocation = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+
+      const result = await verifyLocationForIntervention(fault.id, {
+        uid: currentUser.uid,
+        name: currentUserProfile?.name || 'Bilinmeyen',
+      }, userLocation);
+
+      if (result.success) {
+        setLocationVerified(true);
+        toast({ title: 'Konum Doğrulandı', description: result.message });
+      } else {
+        setLocationError(result.message);
+        toast({ title: 'Konum Doğrulanamadı', description: result.message, variant: 'destructive' });
+      }
+    } catch (e: any) {
+      console.error(e);
+      const errorMessage = e.code === 1
+        ? 'Konum izni reddedildi. Lütfen konum iznini etkinleştirin.'
+        : e.message || 'Konum alınamadı.';
+      setLocationError(errorMessage);
+      toast({ title: 'Hata', description: errorMessage, variant: 'destructive' });
+    } finally {
+      setIsVerifyingLocation(false);
+    }
+  }, [fault, currentUser, currentUserProfile, toast]);
+
+  // Müdahale tipi seçimini aç
+  const openInterventionDialog = (type: InterventionType) => {
+    setPendingInterventionType(type);
+    if (availableTests.length > 0) {
+      setIsTestDialogOpen(true);
+    } else {
+      // Test yoksa direkt müdahale başlat
+      handleStartIntervention(type);
+    }
+  };
 
   const handleClose = useCallback(async () => {
     if (!fault) return;
@@ -390,24 +607,174 @@ export default function FaultDetailPage() {
             </div>
           )}
             
-          {fault.status === 'open' && (
-             <div className="pt-4 border-t">
-                {fault.isEjectedKitFault ? (
+          {/* Yeni Arıza Akış Sistemi */}
+          {(() => {
+            const normalized = normalizeStatus(fault.status);
+
+            // ATAMA BEKLİYOR - Buzlu arka plan ve "Üzerime Ata" butonu
+            if (normalized === 'atama_bekliyor') {
+              return (
+                <div className="pt-4 border-t">
+                  <div className="relative rounded-lg overflow-hidden">
+                    {/* Buzlu arka plan efekti */}
+                    <div className="absolute inset-0 backdrop-blur-sm bg-white/60 dark:bg-black/60 z-10" />
+
+                    {/* Arıza önizlemesi (bulanık) */}
+                    <div className="p-4 opacity-50">
+                      <p className="text-sm text-muted-foreground">{fault.description}</p>
+                    </div>
+
+                    {/* Üzerime Ata butonu */}
+                    <div className="absolute inset-0 z-20 flex items-center justify-center">
+                      <Button
+                        size="lg"
+                        onClick={handleAssignToSelf}
+                        disabled={isAssigning}
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-lg px-8 py-6"
+                      >
+                        {isAssigning ? (
+                          <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                        ) : (
+                          <UserPlus className="h-5 w-5 mr-2" />
+                        )}
+                        Arızayı Üzerime Al
+                      </Button>
+                    </div>
+                  </div>
+
+                  {fault.openedAt && (
+                    <p className="text-xs text-muted-foreground mt-2 text-center">
+                      Arıza {formatDistanceToNow(fault.openedAt, { addSuffix: true, locale: tr })} açıldı - Atama bekliyor
+                    </p>
+                  )}
+                </div>
+              );
+            }
+
+            // MÜDAHALE BEKLİYOR - Test seçimi ve müdahale tipi
+            if (normalized === 'mudahale_bekliyor') {
+              return (
+                <div className="pt-4 border-t space-y-4">
+                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                    <p className="font-medium text-amber-800 dark:text-amber-200 mb-1">Müdahale Tipi Seçin</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-300 mb-4">
+                      Arızaya nasıl müdahale edeceğinizi seçin. Kurumda müdahale için konum doğrulaması gereklidir.
+                    </p>
+
+                    {/* Konum doğrulama (kurum ziyareti için) */}
+                    <div className="mb-4 p-3 bg-white/50 dark:bg-black/20 rounded-md">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <MapPin className={`h-4 w-4 ${locationVerified ? 'text-green-600' : 'text-muted-foreground'}`} />
+                          <span className="text-sm">
+                            {locationVerified ? 'Konum doğrulandı' : 'Konum doğrulanmadı'}
+                          </span>
+                        </div>
+                        {!locationVerified && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleVerifyLocation}
+                            disabled={isVerifyingLocation}
+                          >
+                            {isVerifyingLocation ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <Navigation className="h-4 w-4 mr-2" />
+                            )}
+                            Konumu Doğrula
+                          </Button>
+                        )}
+                      </div>
+                      {locationError && (
+                        <p className="text-xs text-red-600 mt-2">{locationError}</p>
+                      )}
+                    </div>
+
                     <div className="flex flex-col sm:flex-row gap-2">
+                      <Button
+                        variant="default"
+                        className="flex-1 bg-blue-600 hover:bg-blue-700"
+                        onClick={() => openInterventionDialog('telefon')}
+                        disabled={isStartingIntervention}
+                      >
+                        <Phone className="h-4 w-4 mr-2" /> Telefonla Destek Ver
+                      </Button>
+                      <Button
+                        variant="default"
+                        className="flex-1 bg-green-600 hover:bg-green-700"
+                        onClick={() => openInterventionDialog('kurum_ziyaret')}
+                        disabled={isStartingIntervention || !locationVerified}
+                      >
+                        <MapPin className="h-4 w-4 mr-2" /> Kurumda Müdahale Et
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // MÜDAHALE EDİLİYOR - Çözüm açıklaması ve kapat butonu
+            if (normalized === 'mudahale_ediliyor') {
+              return (
+                <div className="pt-4 border-t space-y-4">
+                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Wrench className="h-4 w-4 text-blue-600" />
+                      <span className="font-medium text-blue-800 dark:text-blue-200">
+                        {fault.interventionType === 'telefon' ? 'Telefonla Destek Veriliyor' : 'Kurumda Müdahale Ediliyor'}
+                      </span>
+                    </div>
+
+                    {fault.relatedTests && fault.relatedTests.length > 0 && (
+                      <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+                        İlişkili testler: {fault.relatedTests.join(', ')}
+                      </p>
+                    )}
+
+                    {fault.isEjectedKitFault ? (
+                      <div className="flex flex-col sm:flex-row gap-2">
                         <Button variant="destructive" size="sm" onClick={() => handleKitResolution('imha')} className="flex-1">
-                            <Recycle className="h-4 w-4 mr-2" /> Kit İmhaya Gönderildi
+                          <Recycle className="h-4 w-4 mr-2" /> Kit İmhaya Gönderildi
                         </Button>
                         <Button variant="secondary" size="sm" onClick={() => handleKitResolution('tekrar_kullanim')} className="flex-1">
-                            <CornerDownRight className="h-4 w-4 mr-2" /> Kit Tekrar Kullanılabildi
+                          <CornerDownRight className="h-4 w-4 mr-2" /> Kit Tekrar Kullanılabildi
                         </Button>
+                      </div>
+                    ) : (
+                      <Button variant="default" size="sm" onClick={() => setIsCloseDialogOpen(true)} className="w-full sm:w-auto">
+                        <CheckCircle className="h-4 w-4 mr-2" /> Arızayı Çözüldü Olarak Kapat
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // Legacy 'open' status için eski davranış
+            if (fault.status === 'open') {
+              return (
+                <div className="pt-4 border-t">
+                  {fault.isEjectedKitFault ? (
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <Button variant="destructive" size="sm" onClick={() => handleKitResolution('imha')} className="flex-1">
+                        <Recycle className="h-4 w-4 mr-2" /> Kit İmhaya Gönderildi
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => handleKitResolution('tekrar_kullanim')} className="flex-1">
+                        <CornerDownRight className="h-4 w-4 mr-2" /> Kit Tekrar Kullanılabildi
+                      </Button>
                     </div>
-                ) : (
+                  ) : (
                     <Button variant="default" size="sm" onClick={() => setIsCloseDialogOpen(true)} className="w-full sm:w-auto">
-                        <CheckCircle className="h-4 w-4 mr-2" /> Arızayı Kapat
+                      <CheckCircle className="h-4 w-4 mr-2" /> Arızayı Kapat
                     </Button>
-                )}
-             </div>
-           )}
+                  )}
+                </div>
+              );
+            }
+
+            return null;
+          })()}
 
           <div className="space-y-2 pt-4 border-t">
             <p className="font-medium">Arıza Geçmişi</p>
@@ -478,6 +845,91 @@ export default function FaultDetailPage() {
                     Kaydet
                 </Button>
             </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Test Seçimi ve Müdahale Başlatma Dialog */}
+      <Dialog open={isTestDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsTestDialogOpen(false);
+          setSelectedTests([]);
+          setPendingInterventionType(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {pendingInterventionType === 'telefon' ? 'Telefonla Destek' : 'Kurumda Müdahale'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div>
+              <Label className="text-sm font-medium">İlişkili Testler (Opsiyonel)</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Arızayla ilişkili testleri seçebilirsiniz. Bu bilgi istatistiklerde kullanılacaktır.
+              </p>
+              <ScrollArea className="h-48 border rounded-md p-2">
+                <div className="space-y-2">
+                  {availableTests.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Bu laboratuvar için test tanımı bulunmuyor.</p>
+                  ) : (
+                    availableTests.map(test => (
+                      <div key={test} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`test-${test}`}
+                          checked={selectedTests.includes(test)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedTests(prev => [...prev, test]);
+                            } else {
+                              setSelectedTests(prev => prev.filter(t => t !== test));
+                            }
+                          }}
+                        />
+                        <Label htmlFor={`test-${test}`} className="text-sm cursor-pointer">{test}</Label>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+              {selectedTests.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {selectedTests.map(test => (
+                    <Badge key={test} variant="secondary" className="text-xs">
+                      {test}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}
+                        className="ml-1 hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => {
+              setIsTestDialogOpen(false);
+              setSelectedTests([]);
+              setPendingInterventionType(null);
+            }}>
+              İptal
+            </Button>
+            <Button
+              onClick={() => pendingInterventionType && handleStartIntervention(pendingInterventionType)}
+              disabled={isStartingIntervention}
+            >
+              {isStartingIntervention ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {pendingInterventionType === 'telefon' ? (
+                <><Phone className="h-4 w-4 mr-2" /> Telefonla Başlat</>
+              ) : (
+                <><MapPin className="h-4 w-4 mr-2" /> Kurumda Başlat</>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
