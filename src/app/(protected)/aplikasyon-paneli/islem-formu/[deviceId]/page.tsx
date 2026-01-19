@@ -14,7 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { format } from 'date-fns';
@@ -107,6 +108,7 @@ export default function AplikasyonIslemFormuPage() {
   const [loading, setLoading] = useState(true);
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [aciklama, setAciklama] = useState('');
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [history, setHistory] = useState<ActionFormRecord[]>([]);
@@ -326,6 +328,12 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const startSaveProcess = () => {
+    // Validate açıklama (zorunlu)
+    if (!aciklama.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen açıklama alanını doldurun.', variant: 'destructive' });
+      return;
+    }
+
     // Validate part changes have quantity
     const invalidPart = actions.find(a => a.type === 'part_change' && a.quantity <= 0);
     if (invalidPart) {
@@ -375,6 +383,7 @@ export default function AplikasyonIslemFormuPage() {
             hospitalId: device?.hospitalId,
             labName: hospital?.name,
             actions,
+            aciklama: aciklama.trim(),
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -387,6 +396,7 @@ export default function AplikasyonIslemFormuPage() {
         });
         toast({title: 'Başarılı', description: `İşlem formu #${docRef.id.substring(0,6)}... kaydedildi.`});
         setActions([]);
+        setAciklama('');
     } catch(err) {
         console.error("Error saving action form:", err);
         toast({ title: 'Hata', description: 'Form kaydedilemedi.', variant: 'destructive'});
@@ -461,8 +471,29 @@ export default function AplikasyonIslemFormuPage() {
                 </Button>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="mb-4 flex flex-wrap gap-2">
+          <CardContent className="space-y-6">
+            {/* Açıklama Alanı (Zorunlu) */}
+            <div className="p-4 border rounded-lg bg-muted/30">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Açıklama <span className="text-destructive">*</span>
+                </Label>
+                <Textarea
+                  placeholder="Yapılan işlem hakkında açıklama yazın... (zorunlu)"
+                  value={aciklama}
+                  onChange={(e) => setAciklama(e.target.value)}
+                  rows={3}
+                  className={!aciklama.trim() ? 'border-amber-500/50' : ''}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
+                </p>
+              </div>
+            </div>
+
+            {/* Butonlar */}
+            <div className="flex flex-wrap gap-2">
               <Button onClick={openPartModal} variant="outline">
                 <Wrench className="mr-2 h-4 w-4" /> Değişen Parça Ekle
               </Button>
