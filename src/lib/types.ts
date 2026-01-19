@@ -507,6 +507,52 @@ export type AppView =
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
 
+// ============================================
+// PERİYODİK BAKIM SİSTEMİ TİPLERİ
+// ============================================
+
+// Bakım periyot birimi
+export type MaintenancePeriodUnit = 'hafta' | 'ay' | 'yil';
+
+// Bakım planı tipi
+export type MaintenanceType = 'teknik_servis' | 'aplikasyon';
+
+// Cihaza tanımlı periyodik bakım planı
+export interface MaintenancePlan {
+  id: string;
+  deviceId: string;
+  taskName: string;              // İş adı (örn: "Yıllık kalibrasyon")
+  periodValue: number;           // Periyot değeri (örn: 3)
+  periodUnit: MaintenancePeriodUnit; // Periyot birimi (örn: "ay")
+  type: MaintenanceType;         // Teknik servis veya aplikasyon
+  createdAt?: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}
+
+// Bakım log kaydı - bir bakım yapıldığında oluşturulur
+export interface MaintenanceLog {
+  id: string;
+  deviceId: string;
+  planId: string;                // İlişkili MaintenancePlan ID
+  taskName: string;              // İş adı (denormalize)
+  completedAt: Date;             // Bakımın yapıldığı tarih
+  completedByUid: string;
+  completedByName: string;
+  nextDueDate: Date;             // Bir sonraki bakım tarihi
+  formId?: string;               // İlişkili form ID (deviceActionForms veya aplikasyonActionForms)
+  formType?: 'teknik_servis' | 'aplikasyon';
+}
+
+// Bakım durumu hesaplaması için yardımcı tip
+export interface MaintenanceStatus {
+  plan: MaintenancePlan;
+  lastLog?: MaintenanceLog;
+  daysRemaining: number | null;  // null = hiç yapılmamış
+  isOverdue: boolean;            // Süresi geçmiş mi
+  nextDueDate: Date | null;
+}
+
 export interface FirebaseConfig {
   apiKey: string;
   authDomain: string;
