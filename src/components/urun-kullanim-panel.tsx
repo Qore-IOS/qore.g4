@@ -274,13 +274,16 @@ export default function UrunKullanimPanel() {
   }, [devices, selectedLabId]);
 
   const recordConsumption = useCallback(async (itemToConsume: DepoStokItem) => {
-    if (!selectedLab) return null;
-  
+    if (!selectedLab) {
+      urunKullanimLogger.error('recordConsumption: Lab seçilmemiş');
+      return null;
+    }
+
     const ownerId = itemToConsume.hedefKurumId || laboratories.find(l => l.name === itemToConsume.hedefKurum)?.id || selectedLab.id;
     const ownerName = laboratories.find(l => l.id === ownerId)?.name || itemToConsume.hedefKurum || selectedLab.name || '';
-  
+
     const newTuketimDocRef = doc(collection(db, 'tuketimKayitlari'));
-    
+
     const newRec: Omit<ConsumptionRecord, 'id'> & {
       usageLabId: string; usageLabName: string;
       deductedFromLabId: string; deductedFromLabName: string;
@@ -305,15 +308,29 @@ export default function UrunKullanimPanel() {
       subPointId: selectedSubPoint?.id || '',
       subPointName: selectedSubPoint?.name || '',
     };
-  
+
     const depoStokDocRef = doc(db, 'depoStok', itemToConsume.id);
-  
+
+    urunKullanimLogger.info('Tüketim kaydı başlatılıyor', {
+      stokKodu: itemToConsume.stokKodu,
+      seriNumarasi: itemToConsume.seriNumarasi,
+      itemId: itemToConsume.id,
+      usageLabId: selectedLab.id,
+      deductedFromLabId: ownerId
+    });
+
     const batch = writeBatch(db);
     batch.set(newTuketimDocRef, newRec);
     batch.delete(depoStokDocRef);
-  
+
     try {
       await batch.commit();
+
+      urunKullanimLogger.info('Tüketim kaydı başarıyla yazıldı', {
+        consumptionId: newTuketimDocRef.id,
+        stokKodu: itemToConsume.stokKodu,
+        seriNumarasi: itemToConsume.seriNumarasi
+      });
 
       // Invalidate caches so data refreshes
       invalidateDepoStok();
@@ -324,18 +341,21 @@ export default function UrunKullanimPanel() {
         urunKullanimLogger.warn('Günlük tüketim istatistikleri güncellenemedi', { error: err?.message })
       );
 
-      await logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
+      // Log serial history asynchronously (don't block on this)
+      logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
         stokKodu: itemToConsume.stokKodu,
         usageLabId: selectedLab.id,
         deductedFromLabId: ownerId,
         subPointId: selectedSubPoint?.id || '',
         subPointName: selectedSubPoint?.name || '',
-      });
-  
+      }).catch(err =>
+        urunKullanimLogger.warn('Seri geçmişi kaydedilemedi', { error: err?.message })
+      );
+
       const finalRecord = {...newRec, id: newTuketimDocRef.id, consumptionTimestamp: new Date()};
       setLastScannedProduct(finalRecord as any);
       setSessionHistory(prev => [finalRecord, ...prev].slice(0, 10)); // Update local history
-      
+
       setLastScannedDeviceGroupImage(null);
       setTimeout(() => {
         const productInfo = products.find(p => p.stokKodu === itemToConsume.stokKodu);
@@ -345,19 +365,46 @@ export default function UrunKullanimPanel() {
 
       setScanStatus('success');
       playFeedback();
-      toast({ title: "Başarılı", description: `${itemToConsume.seriNumarasi} seri numaralı ürün ${ownerName} stoğundan düşüldü.` });
+      toast({ title: "Başarılı", description: `${itemToConsume.seriNumarasi || itemToConsume.stokKodu} ${ownerName} stoğundan düşüldü.` });
       setTimeout(() => setScanStatus('idle'), 3000);
 
       return newTuketimDocRef.id;
-    } catch (err) {
+    } catch (err: any) {
+      // Detailed error classification
+      const errorCode = err?.code || 'unknown';
+      const errorMessage = err?.message || 'Bilinmeyen hata';
+
       urunKullanimLogger.error('Tüketim kaydı yazılamadı', err, {
         stokKodu: itemToConsume.stokKodu,
-        seriNumarasi: itemToConsume.seriNumarasi
+        seriNumarasi: itemToConsume.seriNumarasi,
+        itemId: itemToConsume.id,
+        errorCode,
+        errorMessage
       });
+
+      // Classify error for better user feedback
+      let userMessage = 'Tüketim kaydedilirken hata oluştu.';
+
+      if (errorCode === 'permission-denied') {
+        userMessage = 'Yetkiniz yok. Lütfen sistem yöneticisiyle iletişime geçin.';
+      } else if (errorCode === 'not-found') {
+        userMessage = 'Ürün stokta bulunamadı (başka bir kullanıcı düşmüş olabilir).';
+      } else if (errorCode === 'unavailable' || errorCode === 'deadline-exceeded') {
+        userMessage = 'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.';
+      } else if (errorMessage.includes('network')) {
+        userMessage = 'Ağ hatası. İnternet bağlantınızı kontrol edin.';
+      }
+
       setScanStatus('error');
-      toast({ title: "Veritabanı Hatası", description: "Tüketim kaydedilirken hata oluştu.", variant: 'destructive'});
+      toast({
+        title: "Kayıt Hatası",
+        description: userMessage,
+        variant: 'destructive'
+      });
       setTimeout(() => setScanStatus('idle'), 3000);
-      return null;
+
+      // Propagate error for retry mechanism
+      throw err;
     }
   }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption]);
   
@@ -380,12 +427,114 @@ export default function UrunKullanimPanel() {
     return pickEarliest(pool);
   };
 
+  /**
+   * Firestore'dan direkt stok kontrolü - cache'e güvenilmez durumlar için
+   * Cache stale olduğunda real-time verification yapar
+   */
+  const verifyStockInFirestore = useCallback(async (
+    stokKodu: string,
+    seri?: string,
+    lot?: string
+  ): Promise<DepoStokItem | null> => {
+    try {
+      urunKullanimLogger.debug('Firestore\'dan stok doğrulaması yapılıyor', { stokKodu, seri, lot });
+
+      // Build query based on tracking mode
+      let q;
+      if (seri) {
+        // Serial tracking - exact match
+        q = query(
+          collection(db, 'depoStok'),
+          where('hedefKurumId', 'in', poolMemberIds),
+          where('isShipped', '==', true),
+          where('stokKodu', '==', stokKodu),
+          where('seriNumarasi', '==', seri)
+        );
+      } else if (lot) {
+        // Lot tracking - find earliest expiry
+        q = query(
+          collection(db, 'depoStok'),
+          where('hedefKurumId', 'in', poolMemberIds),
+          where('isShipped', '==', true),
+          where('stokKodu', '==', stokKodu),
+          where('lotNumarasi', '==', lot)
+        );
+      } else {
+        // Ref-only tracking - find earliest expiry
+        q = query(
+          collection(db, 'depoStok'),
+          where('hedefKurumId', 'in', poolMemberIds),
+          where('isShipped', '==', true),
+          where('stokKodu', '==', stokKodu)
+        );
+      }
+
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        // Also check legacy records without hedefKurumId
+        const legacyQuery = query(
+          collection(db, 'depoStok'),
+          where('hedefKurum', 'in', poolMemberNames),
+          where('isShipped', '==', true),
+          where('stokKodu', '==', stokKodu)
+        );
+        const legacySnap = await getDocs(legacyQuery);
+
+        if (legacySnap.empty) {
+          return null;
+        }
+
+        const items = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        return seri
+          ? items.find(i => i.seriNumarasi === seri) || null
+          : pickEarliest(items);
+      }
+
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+      return seri ? items[0] : pickEarliest(items);
+    } catch (error) {
+      urunKullanimLogger.error('Firestore stok doğrulama hatası', error, { stokKodu, seri, lot });
+      return null;
+    }
+  }, [poolMemberIds, poolMemberNames]);
+
+  /**
+   * Firestore'dan direkt duplicate kontrolü - cache'e güvenilmez durumlar için
+   * Son 5 dakikadaki tüketimleri sorgular
+   */
+  const checkRecentConsumption = useCallback(async (
+    stokKodu: string,
+    seriNumarasi: string
+  ): Promise<boolean> => {
+    try {
+      if (!seriNumarasi) return false;
+
+      const fiveMinutesAgo = new Date();
+      fiveMinutesAgo.setMinutes(fiveMinutesAgo.getMinutes() - 5);
+
+      const q = query(
+        collection(db, 'tuketimKayitlari'),
+        where('stokKodu', '==', stokKodu),
+        where('seriNumarasi', '==', seriNumarasi),
+        where('consumptionTimestamp', '>=', Timestamp.fromDate(fiveMinutesAgo))
+      );
+
+      const snap = await getDocs(q);
+      return !snap.empty;
+    } catch (error) {
+      urunKullanimLogger.error('Duplicate kontrol hatası', error, { stokKodu, seriNumarasi });
+      // On error, be conservative - don't block consumption
+      return false;
+    }
+  }, []);
+
   const consumeByParsed = useCallback(async (rawInput: string) => {
     if (!selectedLabId) {
       toast({ title: 'Hata', description: 'Lütfen kullanım yapılacak laboratuvarı seçin.', variant: 'destructive' });
       return;
     }
-    
+
     const candidate = sanitizeGS1(rawInput) || rawInput;
     const parsed = parseAnyBarcode(candidate, barcodeFormats);
 
@@ -412,15 +561,33 @@ export default function UrunKullanimPanel() {
 
     let item: DepoStokItem | undefined;
 
+    // STEP 1: Try to find item in cache first (fast path)
     if (mode === 'serial') {
         if (!seri) {
           toast({ title: 'Ayrıştırma Hatası', description: `${stokKodu} seri takipli, ancak barkod seri no içermiyor.`, variant: 'destructive' });
           return;
         }
         item = findBySerial(stokKodu, seri);
+
+        // DEFENSIVE: If not found in cache, verify in Firestore before rejecting
         if (!item) {
-          toast({ title: 'Depoda Bulunamadı', description: `Seri No ${seri} bu laboratuvar stoğunda yok.`, variant: 'destructive' });
-          return;
+          urunKullanimLogger.info('Cache\'de bulunamadı, Firestore\'dan doğrulanıyor', { stokKodu, seri });
+          toast({ title: 'Doğrulanıyor...', description: 'Stok durumu kontrol ediliyor.' });
+
+          item = await verifyStockInFirestore(stokKodu, seri);
+
+          if (!item) {
+            toast({ title: 'Stokta Yok', description: `Seri No ${seri} bu laboratuvar stoğunda bulunamadı. Lütfen stok transferini kontrol edin.`, variant: 'destructive' });
+            playFeedback(true);
+            setScanStatus('error');
+            setTimeout(() => setScanStatus('idle'), 3000);
+            // Force cache refresh for next scan
+            invalidateDepoStok();
+            return;
+          }
+
+          urunKullanimLogger.info('Firestore\'dan bulundu, cache güncellenecek', { itemId: item.id });
+          toast({ title: 'Bulundu', description: 'Stok doğrulandı, işlem devam ediyor.' });
         }
     } else if (mode === 'lot_barcode') {
         if (!lot) {
@@ -428,33 +595,131 @@ export default function UrunKullanimPanel() {
           return;
         }
         item = findByLot(stokKodu, lot);
+
         if (!item) {
-          toast({ title: 'Depoda Bulunamadı', description: `${stokKodu} (Lot: ${lot}) için stok yok.`, variant: 'destructive' });
-          return;
+          urunKullanimLogger.info('Cache\'de bulunamadı, Firestore\'dan doğrulanıyor', { stokKodu, lot });
+          toast({ title: 'Doğrulanıyor...', description: 'Stok durumu kontrol ediliyor.' });
+
+          item = await verifyStockInFirestore(stokKodu, undefined, lot);
+
+          if (!item) {
+            toast({ title: 'Stokta Yok', description: `${stokKodu} (Lot: ${lot}) bu laboratuvar stoğunda bulunamadı.`, variant: 'destructive' });
+            playFeedback(true);
+            setScanStatus('error');
+            setTimeout(() => setScanStatus('idle'), 3000);
+            invalidateDepoStok();
+            return;
+          }
+
+          urunKullanimLogger.info('Firestore\'dan bulundu', { itemId: item.id });
+          toast({ title: 'Bulundu', description: 'Stok doğrulandı, işlem devam ediyor.' });
         }
-    } else { 
+    } else {
         item = findByRefOnly(stokKodu);
+
         if (!item) {
-          toast({ title: 'Depoda Bulunamadı', description: `${stokKodu} için stok yok.`, variant: 'destructive' });
-          return;
+          urunKullanimLogger.info('Cache\'de bulunamadı, Firestore\'dan doğrulanıyor', { stokKodu });
+          toast({ title: 'Doğrulanıyor...', description: 'Stok durumu kontrol ediliyor.' });
+
+          item = await verifyStockInFirestore(stokKodu);
+
+          if (!item) {
+            toast({ title: 'Stokta Yok', description: `${stokKodu} bu laboratuvar stoğunda bulunamadı.`, variant: 'destructive' });
+            playFeedback(true);
+            setScanStatus('error');
+            setTimeout(() => setScanStatus('idle'), 3000);
+            invalidateDepoStok();
+            return;
+          }
+
+          urunKullanimLogger.info('Firestore\'dan bulundu', { itemId: item.id });
+          toast({ title: 'Bulundu', description: 'Stok doğrulandı, işlem devam ediyor.' });
         }
     }
 
+    // STEP 2: Duplicate check - use Firestore for recent consumption (more reliable than cache)
     if (item.irsaliyeNumarasi !== 'İSTİSNA GİRİŞİ' && item.seriNumarasi) {
-        // Check by both stokKodu AND seriNumarasi since same serial can exist for different products
-        const alreadyConsumed = tuketimKayitlari.some(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
-        if (alreadyConsumed) {
+        // First check cache (fast)
+        const cachedDuplicate = tuketimKayitlari.some(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+
+        if (cachedDuplicate) {
             toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
             playFeedback(true);
             setScanStatus('error');
             setTimeout(() => setScanStatus('idle'), 3000);
             return;
         }
+
+        // DEFENSIVE: Also check Firestore for recent consumption (last 5 min) to catch race conditions
+        urunKullanimLogger.debug('Firestore\'dan duplicate kontrolü yapılıyor', { stokKodu, seri: item.seriNumarasi });
+        const recentlyConsumed = await checkRecentConsumption(stokKodu, item.seriNumarasi);
+
+        if (recentlyConsumed) {
+            urunKullanimLogger.warn('Firestore duplicate tespit edildi', { stokKodu, seri: item.seriNumarasi });
+            toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş (son 5 dk).`, variant: 'destructive' });
+            playFeedback(true);
+            setScanStatus('error');
+            setTimeout(() => setScanStatus('idle'), 3000);
+            // Refresh cache to reflect recent consumption
+            invalidateConsumption();
+            return;
+        }
     }
 
-    await recordConsumption(item!);
+    // STEP 3: Record consumption with retry on transient errors
+    const MAX_RETRIES = 2;
+    let lastError: any = null;
 
-  }, [selectedLabId, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari]);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const result = await recordConsumption(item!);
+        if (result) {
+          // Success!
+          return;
+        }
+        // If recordConsumption returns null, it already handled the error
+        return;
+      } catch (error: any) {
+        lastError = error;
+        urunKullanimLogger.warn(`Tüketim kaydı denemesi ${attempt + 1}/${MAX_RETRIES + 1} başarısız`, error, {
+          stokKodu,
+          seriNumarasi: item.seriNumarasi,
+          attempt: attempt + 1
+        });
+
+        // Check if it's a transient error (network, timeout)
+        const isTransient = error?.code === 'unavailable' ||
+                          error?.code === 'deadline-exceeded' ||
+                          error?.message?.includes('network') ||
+                          error?.message?.includes('timeout');
+
+        if (!isTransient || attempt === MAX_RETRIES) {
+          // Non-transient error or max retries reached
+          break;
+        }
+
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
+      }
+    }
+
+    // All retries failed
+    urunKullanimLogger.error('Tüketim kaydı tüm denemelerden sonra başarısız', lastError, {
+      stokKodu,
+      seriNumarasi: item.seriNumarasi,
+      maxRetries: MAX_RETRIES
+    });
+
+    setScanStatus('error');
+    toast({
+      title: 'Kayıt Hatası',
+      description: 'Tüketim kaydedilemedi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.',
+      variant: 'destructive'
+    });
+    playFeedback(true);
+    setTimeout(() => setScanStatus('idle'), 3000);
+
+  }, [selectedLabId, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari, verifyStockInFirestore, checkRecentConsumption, invalidateDepoStok, invalidateConsumption]);
   
   const onProcess = useCallback((barcode: string) => {
     if (isExpiryWarningModalOpen && lotReplaceTarget) {
