@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User } from '@/lib/types';
+import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy } from 'firebase/firestore';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
@@ -37,6 +37,16 @@ type OperationType =
   | 'qc_yenileme'
   | 'cv_calismasi'
   | 'diger';
+
+// İşlem Türü
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | '';
+
+// İşlem Türü Labels
+const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
+  '': 'Seçiniz',
+  rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
+  periyodik_bakim: 'Periyodik Bakım',
+};
 
 // Cihaz Durumu
 type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
@@ -109,6 +119,7 @@ export default function AplikasyonIslemFormuPage() {
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [aciklama, setAciklama] = useState('');
+  const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [history, setHistory] = useState<ActionFormRecord[]>([]);
@@ -141,6 +152,11 @@ export default function AplikasyonIslemFormuPage() {
   const [manualPartName, setManualPartName] = useState('');
   const [partQuantity, setPartQuantity] = useState(1);
   const [showManualEntry, setShowManualEntry] = useState(false);
+
+  // Maintenance plans for periyodik bakım
+  const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
+  const [selectedMaintenanceTasks, setSelectedMaintenanceTasks] = useState<string[]>([]);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -197,6 +213,44 @@ export default function AplikasyonIslemFormuPage() {
     })();
   }, []);
 
+  // Fetch maintenance plans and logs for this device (aplikasyon type)
+  useEffect(() => {
+    if (!deviceId) return;
+    (async () => {
+      try {
+        // Fetch aplikasyon maintenance plans for this device
+        const plansQuery = query(
+          collection(db, 'maintenancePlans'),
+          where('deviceId', '==', deviceId),
+          where('type', '==', 'aplikasyon')
+        );
+        const plansSnap = await getDocs(plansQuery);
+        const plans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan);
+        setMaintenancePlans(plans);
+
+        // Fetch maintenance logs for this device
+        const logsQuery = query(
+          collection(db, 'maintenanceLogs'),
+          where('deviceId', '==', deviceId),
+          orderBy('completedAt', 'desc')
+        );
+        const logsSnap = await getDocs(logsQuery);
+        const logs = logsSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            completedAt: data.completedAt?.toDate ? data.completedAt.toDate() : new Date(data.completedAt),
+            nextDueDate: data.nextDueDate?.toDate ? data.nextDueDate.toDate() : new Date(data.nextDueDate),
+          } as MaintenanceLog;
+        });
+        setMaintenanceLogs(logs);
+      } catch (err) {
+        console.error("Error fetching maintenance plans/logs:", err);
+      }
+    })();
+  }, [deviceId]);
+
   // Sorted users based on current user's role
   const sortedUsers = useMemo(() => {
     const currentRole = currentUserProfile?.role;
@@ -232,6 +286,50 @@ export default function AplikasyonIslemFormuPage() {
       p.stokAdi.toLowerCase().includes(q)
     );
   }, [spareParts, partSearchQuery]);
+
+  // Calculate maintenance status with remaining days
+  const maintenanceTasksWithStatus = useMemo(() => {
+    const periodUnitLabels: Record<string, string> = {
+      hafta: 'hafta',
+      ay: 'ay',
+      yil: 'yıl',
+    };
+
+    return maintenancePlans.map(plan => {
+      // Find the latest log for this plan
+      const latestLog = maintenanceLogs.find(log => log.planId === plan.id);
+
+      let daysRemaining: number | null = null;
+      let isOverdue = false;
+      let nextDueDate: Date | null = null;
+
+      if (latestLog && latestLog.nextDueDate) {
+        nextDueDate = latestLog.nextDueDate;
+        const now = new Date();
+        const diffTime = nextDueDate.getTime() - now.getTime();
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        isOverdue = daysRemaining < 0;
+      }
+
+      const periodLabel = `${plan.periodValue} ${periodUnitLabels[plan.periodUnit] || plan.periodUnit}`;
+
+      return {
+        plan,
+        latestLog,
+        daysRemaining,
+        isOverdue,
+        nextDueDate,
+        periodLabel,
+      };
+    });
+  }, [maintenancePlans, maintenanceLogs]);
+
+  // Toggle maintenance task selection
+  const toggleMaintenanceTask = (planId: string) => {
+    setSelectedMaintenanceTasks(prev =>
+      prev.includes(planId) ? prev.filter(id => id !== planId) : [...prev, planId]
+    );
+  };
 
   const openPartModal = () => {
     setPartSearchQuery('');
@@ -376,6 +474,11 @@ export default function AplikasyonIslemFormuPage() {
     setIsSignatureModalOpen(false);
 
     try {
+        // Get selected maintenance plan details for saving
+        const selectedMaintenancePlanDetails = maintenancePlans
+          .filter(p => selectedMaintenanceTasks.includes(p.id))
+          .map(p => ({ id: p.id, taskName: p.taskName }));
+
         const docRef = await addDoc(collection(db, 'aplikasyonActionForms'), {
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
@@ -383,6 +486,7 @@ export default function AplikasyonIslemFormuPage() {
             hospitalId: device?.hospitalId,
             labName: hospital?.name,
             actions,
+            islemTuru: islemTuru || null,
             aciklama: aciklama.trim(),
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
@@ -393,10 +497,50 @@ export default function AplikasyonIslemFormuPage() {
             createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
             createdByUid: currentUserProfile?.uid,
             formType: 'aplikasyon',
+            // Add selected maintenance tasks if periyodik_bakim
+            selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
         });
+
+        // Create maintenance logs for each selected maintenance task
+        if (islemTuru === 'periyodik_bakim' && selectedMaintenanceTasks.length > 0) {
+          const now = new Date();
+          for (const planId of selectedMaintenanceTasks) {
+            const plan = maintenancePlans.find(p => p.id === planId);
+            if (plan) {
+              // Calculate next due date based on plan period
+              const nextDueDate = new Date(now);
+              switch (plan.periodUnit) {
+                case 'hafta':
+                  nextDueDate.setDate(nextDueDate.getDate() + (plan.periodValue * 7));
+                  break;
+                case 'ay':
+                  nextDueDate.setMonth(nextDueDate.getMonth() + plan.periodValue);
+                  break;
+                case 'yil':
+                  nextDueDate.setFullYear(nextDueDate.getFullYear() + plan.periodValue);
+                  break;
+              }
+
+              await addDoc(collection(db, 'maintenanceLogs'), {
+                deviceId,
+                planId: plan.id,
+                taskName: plan.taskName,
+                completedAt: now,
+                completedByUid: currentUserProfile?.uid || '',
+                completedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                nextDueDate,
+                formId: docRef.id,
+                formType: 'aplikasyon',
+              });
+            }
+          }
+        }
+
         toast({title: 'Başarılı', description: `İşlem formu #${docRef.id.substring(0,6)}... kaydedildi.`});
         setActions([]);
         setAciklama('');
+        setIslemTuru('');
+        setSelectedMaintenanceTasks([]);
     } catch(err) {
         console.error("Error saving action form:", err);
         toast({ title: 'Hata', description: 'Form kaydedilemedi.', variant: 'destructive'});
@@ -472,6 +616,89 @@ export default function AplikasyonIslemFormuPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* İşlem Türü Seçici */}
+            <div className="p-4 border rounded-lg bg-muted/30">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <Cog className="h-4 w-4" />
+                  İşlem Türü
+                </Label>
+                <Select value={islemTuru} onValueChange={(v) => setIslemTuru(v as IslemTuru)}>
+                  <SelectTrigger className="w-full sm:w-64">
+                    <SelectValue placeholder="İşlem türü seçin (opsiyonel)..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="rutin_kurum_ziyareti">Rutin Kurum Ziyareti</SelectItem>
+                    <SelectItem value="periyodik_bakim">Periyodik Bakım</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  İşlem türünü belirtmek opsiyoneldir.
+                </p>
+              </div>
+            </div>
+
+            {/* Periyodik Bakım İş Listesi - only when periyodik_bakim selected */}
+            {islemTuru === 'periyodik_bakim' && (
+              <div className="p-4 border rounded-lg bg-muted/30">
+                <Label className="flex items-center gap-2 mb-4">
+                  <ClipboardList className="h-4 w-4" />
+                  Periyodik Bakım İş Listesi
+                </Label>
+                {maintenanceTasksWithStatus.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Bu cihaz için tanımlı aplikasyon periyodik bakım planı bulunmuyor.
+                    Cihaz tanımlama panelinden bakım planı ekleyebilirsiniz.
+                  </p>
+                ) : (
+                  <div className="border rounded-md">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12"></TableHead>
+                          <TableHead>İş Adı</TableHead>
+                          <TableHead className="w-24 text-center">Periyot</TableHead>
+                          <TableHead className="w-32 text-center">Kalan Gün</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
+                          <TableRow key={plan.id} className="cursor-pointer hover:bg-muted/50" onClick={() => toggleMaintenanceTask(plan.id)}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedMaintenanceTasks.includes(plan.id)}
+                                onCheckedChange={() => toggleMaintenanceTask(plan.id)}
+                              />
+                            </TableCell>
+                            <TableCell className="font-medium">{plan.taskName}</TableCell>
+                            <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
+                            <TableCell className="text-center">
+                              {daysRemaining === null ? (
+                                <span className="text-xs text-muted-foreground italic">Henüz yapılmadı</span>
+                              ) : isOverdue ? (
+                                <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                                  {Math.abs(daysRemaining)} gün gecikmiş
+                                </span>
+                              ) : (
+                                <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+                                  {daysRemaining} gün
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+                {selectedMaintenanceTasks.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {selectedMaintenanceTasks.length} bakım işi seçildi
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Açıklama Alanı (Zorunlu) */}
             <div className="p-4 border rounded-lg bg-muted/30">
               <div className="space-y-2">
