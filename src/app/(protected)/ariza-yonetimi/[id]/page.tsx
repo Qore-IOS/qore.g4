@@ -123,6 +123,10 @@ export default function FaultDetailPage() {
   const [isTestDialogOpen, setIsTestDialogOpen] = useState(false);
   const [pendingInterventionType, setPendingInterventionType] = useState<InterventionType | null>(null);
 
+  // Kit arızası için ürüne bağlı test bilgisi
+  const [productTestInfo, setProductTestInfo] = useState<string | null>(null);
+  const [isProductTestDialogOpen, setIsProductTestDialogOpen] = useState(false);
+
 
   useEffect(() => {
     if (!params?.id) return;
@@ -205,6 +209,39 @@ export default function FaultDetailPage() {
     fetchTests();
   }, [fault?.hospitalId]);
 
+  // Kit arızası için ürünün testAdi bilgisini çek
+  useEffect(() => {
+    const fetchProductTestInfo = async () => {
+      if (!fault?.isEjectedKitFault || !fault?.productStokKodu) {
+        setProductTestInfo(null);
+        return;
+      }
+
+      try {
+        // ProductCodes'dan stokKodu ile eşleşen ürünü bul
+        const productCodesSnap = await getDocs(
+          query(collection(db, 'productCodes'), where('stokKodu', '==', fault.productStokKodu))
+        );
+
+        if (!productCodesSnap.empty) {
+          const productData = productCodesSnap.docs[0].data();
+          if (productData.testAdi) {
+            setProductTestInfo(productData.testAdi);
+          } else {
+            setProductTestInfo(null);
+          }
+        } else {
+          setProductTestInfo(null);
+        }
+      } catch (e) {
+        console.error('Ürün test bilgisi alınamadı:', e);
+        setProductTestInfo(null);
+      }
+    };
+
+    fetchProductTestInfo();
+  }, [fault?.isEjectedKitFault, fault?.productStokKodu]);
+
   // Konum doğrulama durumunu kontrol et
   useEffect(() => {
     if (fault?.locationVerifiedAt) {
@@ -282,6 +319,7 @@ export default function FaultDetailPage() {
         description: interventionType === 'telefon' ? 'Telefonla destek başlatıldı.' : 'Kurumda müdahale başlatıldı.',
       });
       setIsTestDialogOpen(false);
+      setIsProductTestDialogOpen(false);
       setSelectedTests([]);
       setPendingInterventionType(null);
     } catch (e: any) {
@@ -341,7 +379,15 @@ export default function FaultDetailPage() {
   // Müdahale tipi seçimini aç
   const openInterventionDialog = (type: InterventionType) => {
     setPendingInterventionType(type);
-    if (availableTests.length > 0) {
+
+    // Kit arızası için ürüne bağlı test bilgisi modalını aç
+    if (fault?.isEjectedKitFault) {
+      setIsProductTestDialogOpen(true);
+      // Kit arızasında test bilgisi otomatik seçili olacak
+      if (productTestInfo) {
+        setSelectedTests([productTestInfo]);
+      }
+    } else if (availableTests.length > 0) {
       setIsTestDialogOpen(true);
     } else {
       // Test yoksa direkt müdahale başlat
@@ -913,6 +959,73 @@ export default function FaultDetailPage() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => {
               setIsTestDialogOpen(false);
+              setSelectedTests([]);
+              setPendingInterventionType(null);
+            }}>
+              İptal
+            </Button>
+            <Button
+              onClick={() => pendingInterventionType && handleStartIntervention(pendingInterventionType)}
+              disabled={isStartingIntervention}
+            >
+              {isStartingIntervention ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {pendingInterventionType === 'telefon' ? (
+                <><Phone className="h-4 w-4 mr-2" /> Telefonla Başlat</>
+              ) : (
+                <><MapPin className="h-4 w-4 mr-2" /> Kurumda Başlat</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Kit Arızası için Ürün Test Bilgisi Dialog */}
+      <Dialog open={isProductTestDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsProductTestDialogOpen(false);
+          setSelectedTests([]);
+          setPendingInterventionType(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {pendingInterventionType === 'telefon' ? 'Telefonla Destek' : 'Kurumda Müdahale'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            {/* Kit/Ürün Bilgisi */}
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-2">İlişkili Ürün</p>
+              <p className="font-medium">{fault?.productStokAdi}</p>
+              <p className="text-sm text-muted-foreground font-mono">{fault?.productStokKodu}</p>
+              {fault?.testCount && (
+                <p className="text-sm mt-1">Test Sayısı: {fault.testCount}</p>
+              )}
+            </div>
+
+            {/* Ürüne Bağlı Test Bilgisi */}
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">İlişkili Test</p>
+              {productTestInfo ? (
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-sm">
+                    {productTestInfo}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">(Otomatik seçildi)</span>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Bu ürün için test tanımı bulunmuyor.</p>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Bu bilgiler arıza istatistiklerinde kullanılacaktır.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => {
+              setIsProductTestDialogOpen(false);
               setSelectedTests([]);
               setPendingInterventionType(null);
             }}>
