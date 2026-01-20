@@ -614,7 +614,30 @@ export default function AplikasyonIslemFormuPage() {
         // Process part changes - update personal stock and create removed part entries
         const partChanges = actions.filter(a => a.type === 'part_change');
         for (const partChange of partChanges) {
-          // If this is from personal stock, mark as used
+          let removedStockRefId: string | null = null;
+
+          // Create new personal stock entry for removed part (from device) first
+          if (partChange.removedPartSerialNumber) {
+            const removedStockRef = doc(collection(db, 'personalStock'));
+            removedStockRefId = removedStockRef.id;
+            batch.set(removedStockRef, {
+              ownerUid: currentUserProfile?.uid || '',
+              ownerName: currentUserProfile?.name || '',
+              productCodeId: partChange.personalStockId ? partChange.action : null,
+              stokKodu: partChange.removedPartStokKodu || partChange.stokKodu,
+              stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
+              serialNumber: partChange.removedPartSerialNumber,
+              imageUrl: partChange.removedPartImageUrl || null,
+              source: 'device',
+              sourceDeviceId: deviceId,
+              sourceDeviceName: device?.cihazAdi || device?.model || '',
+              status: 'in_stock',
+              createdAt: Timestamp.fromDate(now),
+              replacedPartId: partChange.personalStockId || null,
+            });
+          }
+
+          // If this is from personal stock, mark as used (single update with all fields)
           if (partChange.personalStockId) {
             const stockRef = doc(db, 'personalStock', partChange.personalStockId);
             batch.update(stockRef, {
@@ -624,6 +647,7 @@ export default function AplikasyonIslemFormuPage() {
               usedOnDeviceName: device?.cihazAdi || device?.model || '',
               usedOnFormId: formRef.id,
               usedOnFormType: 'aplikasyon',
+              replacedPartId: removedStockRefId,
             });
 
             // Create log for using the part
@@ -642,32 +666,6 @@ export default function AplikasyonIslemFormuPage() {
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
             });
-          }
-
-          // Create new personal stock entry for removed part (from device)
-          if (partChange.removedPartSerialNumber) {
-            const removedStockRef = doc(collection(db, 'personalStock'));
-            batch.set(removedStockRef, {
-              ownerUid: currentUserProfile?.uid || '',
-              ownerName: currentUserProfile?.name || '',
-              productCodeId: partChange.action,
-              stokKodu: partChange.removedPartStokKodu || partChange.stokKodu,
-              stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
-              serialNumber: partChange.removedPartSerialNumber,
-              source: 'device',
-              sourceDeviceId: deviceId,
-              sourceDeviceName: device?.cihazAdi || device?.model || '',
-              status: 'in_stock',
-              createdAt: Timestamp.fromDate(now),
-              replacedPartId: partChange.personalStockId || null,
-            });
-
-            // Link the used part to the removed part
-            if (partChange.personalStockId) {
-              batch.update(doc(db, 'personalStock', partChange.personalStockId), {
-                replacedPartId: removedStockRef.id,
-              });
-            }
           }
         }
 
