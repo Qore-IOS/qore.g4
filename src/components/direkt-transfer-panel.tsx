@@ -42,7 +42,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle } from 'lucide-react';
+import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
@@ -943,6 +943,18 @@ export default function DirektTransferPanel() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <BackButton fallback="/siparisler" aria-label="Geri dön" />
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Yedek Parça Transfer - only for admin and lojistik_sorumlusu */}
+            {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu') && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
+                className="text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Package className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Yedek Parça Transfer</span>
+              </Button>
+            )}
             <AlertDialog>
                 <AlertDialogTrigger asChild>
                     <Button variant="outline" size="sm" disabled={!selectedDepotId} className="text-xs sm:text-sm">

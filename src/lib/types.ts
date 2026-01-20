@@ -553,6 +553,101 @@ export interface MaintenanceStatus {
   nextDueDate: Date | null;
 }
 
+// ==========================================
+// Yedek Parça Transfer ve Şahsi Stok Sistemi
+// ==========================================
+
+// Yedek parçanın kaynağı
+export type PersonalStockSource = 'depot' | 'device';
+
+// Şahsi stoktaki yedek parça durumu
+export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
+
+// Transfer log aksiyonları
+export type SparePartTransferAction =
+  | 'transfer_to_personnel'  // Depodan personele transfer
+  | 'use_on_device'          // Cihazda kullanıldı
+  | 'return_to_depot'        // Depoya iade edildi (yeni parça)
+  | 'submit_to_depot'        // Depoya teslim edildi (cihazdan çıkan)
+  | 'return_confirmed'       // Depo tarafından iade teslim alındı
+  | 'submit_confirmed';      // Depo tarafından teslim alındı
+
+// Personel şahsi stok item
+export interface PersonalStockItem {
+  id: string;
+  ownerUid: string;
+  ownerName: string;
+  productCodeId: string;       // ProductCode referansı
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber: string;        // Seri numarası
+  source: PersonalStockSource; // depot = yeni, device = cihazdan çıkan
+  sourceDeviceId?: string;     // Cihazdan çıktıysa device ID
+  sourceDeviceName?: string;   // Cihazdan çıktıysa device adı
+  status: PersonalStockStatus;
+  createdAt: Date;
+  transferredByUid?: string;   // Transfer eden kişi (lojistik)
+  transferredByName?: string;
+  usedAt?: Date;               // Kullanıldığı tarih
+  usedOnDeviceId?: string;     // Kullanıldığı cihaz
+  usedOnDeviceName?: string;
+  usedOnFormId?: string;       // Kullanıldığı form
+  usedOnFormType?: 'teknik_servis' | 'aplikasyon';
+  replacedPartId?: string;     // Değişilen parça (cihazdan çıkan) ID
+}
+
+// Transfer/kullanım/iade log kaydı
+export interface SparePartTransferLog {
+  id: string;
+  action: SparePartTransferAction;
+  personalStockId?: string;    // İlişkili PersonalStockItem
+  productCodeId?: string;
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber: string;
+  fromUid?: string;            // Kimden
+  fromName?: string;
+  toUid?: string;              // Kime
+  toName?: string;
+  deviceId?: string;           // İlgili cihaz
+  deviceName?: string;
+  formId?: string;             // İlgili form
+  formType?: 'teknik_servis' | 'aplikasyon';
+  createdAt: Date;
+  createdByUid: string;
+  createdByName: string;
+  notes?: string;
+}
+
+// Depoya iade/teslim bekleyen parça
+export interface PendingReturn {
+  id: string;
+  personalStockId: string;
+  ownerUid: string;
+  ownerName: string;
+  productCodeId: string;
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber: string;
+  source: PersonalStockSource; // Orijinal kaynak
+  returnType: 'return' | 'submit'; // return = iade (yeni parça), submit = teslim (cihazdan çıkan)
+  createdAt: Date;
+  confirmedAt?: Date;
+  confirmedByUid?: string;
+  confirmedByName?: string;
+}
+
+// Transfer row for spare part transfer panel
+export interface SparePartTransferRow {
+  id: string;                  // Geçici ID
+  productCodeId: string;
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber: string;
+  targetUid: string;
+  targetName: string;
+}
+
 export interface FirebaseConfig {
   apiKey: string;
   authDomain: string;

@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog } from '@/lib/types';
+import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -60,6 +60,13 @@ type ActionItem = {
   quantity: number;
   description?: string;
   isManualEntry?: boolean;
+  // Personal stock info for part changes
+  personalStockId?: string;
+  serialNumber?: string;
+  // Removed/replaced part info (from device)
+  removedPartStokKodu?: string;
+  removedPartStokAdi?: string;
+  removedPartSerialNumber?: string;
 };
 
 type ActionFormRecord = {
@@ -143,15 +150,20 @@ export default function AplikasyonIslemFormuPage() {
   const [selectedOperations, setSelectedOperations] = useState<OperationType[]>([]);
   const [digerAciklama, setDigerAciklama] = useState('');
 
-  // Part selection modal
+  // Part selection modal - now using personal stock
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
-  const [spareParts, setSpareParts] = useState<ProductCode[]>([]);
+  const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
   const [partSearchQuery, setPartSearchQuery] = useState('');
-  const [selectedPart, setSelectedPart] = useState<ProductCode | null>(null);
+  const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
   const [manualPartCode, setManualPartCode] = useState('');
   const [manualPartName, setManualPartName] = useState('');
+  const [manualSerialNumber, setManualSerialNumber] = useState('');
   const [partQuantity, setPartQuantity] = useState(1);
   const [showManualEntry, setShowManualEntry] = useState(false);
+  // Removed part info (cihazdan çıkan parça)
+  const [removedPartStokKodu, setRemovedPartStokKodu] = useState('');
+  const [removedPartStokAdi, setRemovedPartStokAdi] = useState('');
+  const [removedPartSerialNumber, setRemovedPartSerialNumber] = useState('');
 
   // Maintenance plans for periyodik bakım
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
@@ -187,18 +199,31 @@ export default function AplikasyonIslemFormuPage() {
     })();
   }, [deviceId, router, toast]);
 
-  // Fetch spare parts
+  // Fetch personal stock for current user
   useEffect(() => {
+    if (!currentUserProfile?.uid) return;
     (async () => {
       try {
-        const q = query(collection(db, 'productCodes'), where('urunGrubu', '==', 'yedek_parca'));
+        const q = query(
+          collection(db, 'personalStock'),
+          where('ownerUid', '==', currentUserProfile.uid),
+          where('status', '==', 'in_stock')
+        );
         const snap = await getDocs(q);
-        setSpareParts(snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode));
+        const items = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+          } as PersonalStockItem;
+        });
+        setPersonalStock(items);
       } catch (err) {
-        console.error("Error fetching spare parts:", err);
+        console.error("Error fetching personal stock:", err);
       }
     })();
-  }, []);
+  }, [currentUserProfile?.uid]);
 
   // Fetch users for accompanying personnel
   useEffect(() => {
@@ -277,15 +302,16 @@ export default function AplikasyonIslemFormuPage() {
     );
   }, [sortedUsers, personelSearchQuery]);
 
-  // Filtered spare parts
-  const filteredParts = useMemo(() => {
-    if (!partSearchQuery) return spareParts;
+  // Filtered personal stock
+  const filteredStock = useMemo(() => {
+    if (!partSearchQuery) return personalStock;
     const q = partSearchQuery.toLowerCase();
-    return spareParts.filter(p =>
+    return personalStock.filter(p =>
       p.stokKodu.toLowerCase().includes(q) ||
-      p.stokAdi.toLowerCase().includes(q)
+      p.stokAdi.toLowerCase().includes(q) ||
+      p.serialNumber.toLowerCase().includes(q)
     );
-  }, [spareParts, partSearchQuery]);
+  }, [personalStock, partSearchQuery]);
 
   // Calculate maintenance status with remaining days
   const maintenanceTasksWithStatus = useMemo(() => {
@@ -333,18 +359,28 @@ export default function AplikasyonIslemFormuPage() {
 
   const openPartModal = () => {
     setPartSearchQuery('');
-    setSelectedPart(null);
+    setSelectedStockItem(null);
     setManualPartCode('');
     setManualPartName('');
+    setManualSerialNumber('');
     setPartQuantity(1);
     setShowManualEntry(false);
+    setRemovedPartStokKodu('');
+    setRemovedPartStokAdi('');
+    setRemovedPartSerialNumber('');
     setIsPartModalOpen(true);
   };
 
   const addSelectedPart = () => {
+    // Validate removed part info is provided
+    if (!removedPartSerialNumber.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen cihazdan çıkan parçanın seri numarasını girin.', variant: 'destructive' });
+      return;
+    }
+
     if (showManualEntry) {
-      if (!manualPartCode.trim() || !manualPartName.trim()) {
-        toast({ title: 'Eksik Bilgi', description: 'Lütfen parça kodu ve adını girin.', variant: 'destructive' });
+      if (!manualPartCode.trim() || !manualPartName.trim() || !manualSerialNumber.trim()) {
+        toast({ title: 'Eksik Bilgi', description: 'Lütfen parça kodu, adı ve seri numarasını girin.', variant: 'destructive' });
         return;
       }
       const newItem: ActionItem = {
@@ -353,22 +389,36 @@ export default function AplikasyonIslemFormuPage() {
         action: 'manual_part',
         stokKodu: manualPartCode.trim(),
         stokAdi: manualPartName.trim(),
+        serialNumber: manualSerialNumber.trim(),
         quantity: partQuantity,
         isManualEntry: true,
+        removedPartStokKodu: removedPartStokKodu.trim() || manualPartCode.trim(),
+        removedPartStokAdi: removedPartStokAdi.trim() || manualPartName.trim(),
+        removedPartSerialNumber: removedPartSerialNumber.trim(),
       };
       setActions(prev => [newItem, ...prev]);
-    } else if (selectedPart) {
+    } else if (selectedStockItem) {
+      // Check if this stock item is already in the actions list
+      if (actions.some(a => a.personalStockId === selectedStockItem.id)) {
+        toast({ title: 'Uyarı', description: 'Bu parça zaten listeye eklendi.', variant: 'default' });
+        return;
+      }
       const newItem: ActionItem = {
         id: crypto.randomUUID(),
         type: 'part_change',
-        action: selectedPart.id,
-        stokKodu: selectedPart.stokKodu,
-        stokAdi: selectedPart.stokAdi,
-        quantity: partQuantity,
+        action: selectedStockItem.productCodeId,
+        stokKodu: selectedStockItem.stokKodu,
+        stokAdi: selectedStockItem.stokAdi,
+        serialNumber: selectedStockItem.serialNumber,
+        personalStockId: selectedStockItem.id,
+        quantity: 1, // Personal stock items are individual
+        removedPartStokKodu: removedPartStokKodu.trim() || selectedStockItem.stokKodu,
+        removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem.stokAdi,
+        removedPartSerialNumber: removedPartSerialNumber.trim(),
       };
       setActions(prev => [newItem, ...prev]);
     } else {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen bir parça seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen şahsi stokunuzdan bir parça seçin.', variant: 'destructive' });
       return;
     }
     setIsPartModalOpen(false);
@@ -474,12 +524,17 @@ export default function AplikasyonIslemFormuPage() {
     setIsSignatureModalOpen(false);
 
     try {
+        const now = new Date();
+        const batch = writeBatch(db);
+
         // Get selected maintenance plan details for saving
         const selectedMaintenancePlanDetails = maintenancePlans
           .filter(p => selectedMaintenanceTasks.includes(p.id))
           .map(p => ({ id: p.id, taskName: p.taskName }));
 
-        const docRef = await addDoc(collection(db, 'aplikasyonActionForms'), {
+        // Create form document
+        const formRef = doc(collection(db, 'aplikasyonActionForms'));
+        batch.set(formRef, {
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
             seriNumarasi: device?.seriNumarasi,
@@ -493,21 +548,78 @@ export default function AplikasyonIslemFormuPage() {
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
             personnelSignature: finalSignatures.personnel || null,
             technicianSignature: finalSignatures.technician || null,
-            createdAt: serverTimestamp(),
+            createdAt: Timestamp.fromDate(now),
             createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
             createdByUid: currentUserProfile?.uid,
             formType: 'aplikasyon',
-            // Add selected maintenance tasks if periyodik_bakim
             selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
         });
 
+        // Process part changes - update personal stock and create removed part entries
+        const partChanges = actions.filter(a => a.type === 'part_change');
+        for (const partChange of partChanges) {
+          // If this is from personal stock, mark as used
+          if (partChange.personalStockId) {
+            const stockRef = doc(db, 'personalStock', partChange.personalStockId);
+            batch.update(stockRef, {
+              status: 'used',
+              usedAt: Timestamp.fromDate(now),
+              usedOnDeviceId: deviceId,
+              usedOnDeviceName: device?.cihazAdi || device?.model || '',
+              usedOnFormId: formRef.id,
+              usedOnFormType: 'aplikasyon',
+            });
+
+            // Create log for using the part
+            const useLogRef = doc(collection(db, 'sparePartTransferLogs'));
+            batch.set(useLogRef, {
+              action: 'use_on_device',
+              personalStockId: partChange.personalStockId,
+              stokKodu: partChange.stokKodu,
+              stokAdi: partChange.stokAdi,
+              serialNumber: partChange.serialNumber,
+              deviceId,
+              deviceName: device?.cihazAdi || device?.model || '',
+              formId: formRef.id,
+              formType: 'aplikasyon',
+              createdAt: Timestamp.fromDate(now),
+              createdByUid: currentUserProfile?.uid || '',
+              createdByName: currentUserProfile?.name || '',
+            });
+          }
+
+          // Create new personal stock entry for removed part (from device)
+          if (partChange.removedPartSerialNumber) {
+            const removedStockRef = doc(collection(db, 'personalStock'));
+            batch.set(removedStockRef, {
+              ownerUid: currentUserProfile?.uid || '',
+              ownerName: currentUserProfile?.name || '',
+              productCodeId: partChange.action,
+              stokKodu: partChange.removedPartStokKodu || partChange.stokKodu,
+              stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
+              serialNumber: partChange.removedPartSerialNumber,
+              source: 'device',
+              sourceDeviceId: deviceId,
+              sourceDeviceName: device?.cihazAdi || device?.model || '',
+              status: 'in_stock',
+              createdAt: Timestamp.fromDate(now),
+              replacedPartId: partChange.personalStockId || null,
+            });
+
+            // Link the used part to the removed part
+            if (partChange.personalStockId) {
+              batch.update(doc(db, 'personalStock', partChange.personalStockId), {
+                replacedPartId: removedStockRef.id,
+              });
+            }
+          }
+        }
+
         // Create maintenance logs for each selected maintenance task
         if (islemTuru === 'periyodik_bakim' && selectedMaintenanceTasks.length > 0) {
-          const now = new Date();
           for (const planId of selectedMaintenanceTasks) {
             const plan = maintenancePlans.find(p => p.id === planId);
             if (plan) {
-              // Calculate next due date based on plan period
               const nextDueDate = new Date(now);
               switch (plan.periodUnit) {
                 case 'hafta':
@@ -521,26 +633,46 @@ export default function AplikasyonIslemFormuPage() {
                   break;
               }
 
-              await addDoc(collection(db, 'maintenanceLogs'), {
+              const maintenanceLogRef = doc(collection(db, 'maintenanceLogs'));
+              batch.set(maintenanceLogRef, {
                 deviceId,
                 planId: plan.id,
                 taskName: plan.taskName,
-                completedAt: now,
+                completedAt: Timestamp.fromDate(now),
                 completedByUid: currentUserProfile?.uid || '',
                 completedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-                nextDueDate,
-                formId: docRef.id,
+                nextDueDate: Timestamp.fromDate(nextDueDate),
+                formId: formRef.id,
                 formType: 'aplikasyon',
               });
             }
           }
         }
 
-        toast({title: 'Başarılı', description: `İşlem formu #${docRef.id.substring(0,6)}... kaydedildi.`});
+        await batch.commit();
+
+        toast({title: 'Başarılı', description: `İşlem formu #${formRef.id.substring(0,6)}... kaydedildi.`});
         setActions([]);
         setAciklama('');
         setIslemTuru('');
         setSelectedMaintenanceTasks([]);
+
+        // Refresh personal stock
+        const q = query(
+          collection(db, 'personalStock'),
+          where('ownerUid', '==', currentUserProfile?.uid),
+          where('status', '==', 'in_stock')
+        );
+        const snap = await getDocs(q);
+        const items = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+          } as PersonalStockItem;
+        });
+        setPersonalStock(items);
     } catch(err) {
         console.error("Error saving action form:", err);
         toast({ title: 'Hata', description: 'Form kaydedilemedi.', variant: 'destructive'});
@@ -732,10 +864,10 @@ export default function AplikasyonIslemFormuPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-24">Tür</TableHead>
+                    <TableHead className="w-20">Tür</TableHead>
                     <TableHead>İşlem/Parça</TableHead>
-                    <TableHead className="w-32">Kod</TableHead>
-                    <TableHead className="w-24">Adet</TableHead>
+                    <TableHead className="w-28">Kod</TableHead>
+                    <TableHead className="w-28">Seri No</TableHead>
                     <TableHead className="w-16"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -751,8 +883,15 @@ export default function AplikasyonIslemFormuPage() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <span className="font-medium">{getActionLabel(item)}</span>
-                          {item.isManualEntry && <span className="ml-2 text-xs text-muted-foreground">(Manuel)</span>}
+                          <div>
+                            <span className="font-medium">{getActionLabel(item)}</span>
+                            {item.isManualEntry && <span className="ml-2 text-xs text-muted-foreground">(Manuel)</span>}
+                            {item.type === 'part_change' && item.removedPartSerialNumber && (
+                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                                Çıkan: {item.removedPartStokAdi || item.stokAdi} ({item.removedPartSerialNumber})
+                              </p>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           {item.type === 'part_change' ? (
@@ -763,13 +902,7 @@ export default function AplikasyonIslemFormuPage() {
                         </TableCell>
                         <TableCell>
                           {item.type === 'part_change' ? (
-                            <Input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => updateActionQuantity(item.id, Number(e.target.value))}
-                              min="1"
-                              className="w-20"
-                            />
+                            <span className="font-mono text-xs">{item.serialNumber || '-'}</span>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
@@ -832,99 +965,175 @@ export default function AplikasyonIslemFormuPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Part Selection Modal */}
+      {/* Part Selection Modal - Personal Stock */}
       <Dialog open={isPartModalOpen} onOpenChange={setIsPartModalOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Değişen Parça Ekle</DialogTitle>
+            <DialogTitle>Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
           <div className="py-4 space-y-4">
-            {!showManualEntry ? (
-              <>
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Parça kodu veya adı ile arayın..."
-                    value={partSearchQuery}
-                    onChange={(e) => setPartSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                <ScrollArea className="h-48 border rounded-md">
-                  {filteredParts.length === 0 ? (
-                    <div className="p-4 text-center text-muted-foreground">
-                      {spareParts.length === 0 ? 'Yedek parça tanımlı değil.' : 'Sonuç bulunamadı.'}
+            {/* Section 1: Select part from personal stock */}
+            <div className="p-3 border rounded-lg bg-muted/30 space-y-3">
+              <Label className="font-semibold">1. Şahsi Stokunuzdan Parça Seçin</Label>
+              {!showManualEntry ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Parça kodu, adı veya seri no ile arayın..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-40 border rounded-md bg-background">
+                    {filteredStock.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {personalStock.length === 0
+                          ? 'Şahsi stokunuzda yedek parça bulunmuyor.'
+                          : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredStock.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => setSelectedStockItem(item)}
+                            className={`w-full text-left p-2 rounded-md transition-colors ${
+                              selectedStockItem?.id === item.id
+                                ? 'bg-primary/10 border-primary border'
+                                : 'hover:bg-muted'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.stokAdi}</p>
+                                <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono">{item.serialNumber}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {item.source === 'depot' ? 'Depodan' : 'Cihazdan'}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualEntry(true)}
+                    className="w-full text-xs"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Stokta yok, manuel ekle
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Parça Kodu <span className="text-destructive">*</span></Label>
+                      <Input
+                        placeholder="Kod..."
+                        value={manualPartCode}
+                        onChange={(e) => setManualPartCode(e.target.value)}
+                        className="h-9"
+                      />
                     </div>
-                  ) : (
-                    <div className="p-2 space-y-1">
-                      {filteredParts.map(part => (
-                        <button
-                          key={part.id}
-                          onClick={() => setSelectedPart(part)}
-                          className={`w-full text-left p-2 rounded-md transition-colors ${
-                            selectedPart?.id === part.id
-                              ? 'bg-primary/10 border-primary border'
-                              : 'hover:bg-muted'
-                          }`}
-                        >
-                          <p className="font-medium">{part.stokAdi}</p>
-                          <p className="text-xs text-muted-foreground font-mono">{part.stokKodu}</p>
-                        </button>
-                      ))}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Seri No <span className="text-destructive">*</span></Label>
+                      <Input
+                        placeholder="Seri No..."
+                        value={manualSerialNumber}
+                        onChange={(e) => setManualSerialNumber(e.target.value)}
+                        className="h-9"
+                      />
                     </div>
-                  )}
-                </ScrollArea>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowManualEntry(true)}
-                  className="w-full"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Listede yok, manuel ekle
-                </Button>
-              </>
-            ) : (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Parça Kodu <span className="text-destructive">*</span></Label>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Parça Adı <span className="text-destructive">*</span></Label>
+                    <Input
+                      placeholder="Parça adını girin..."
+                      value={manualPartName}
+                      onChange={(e) => setManualPartName(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualEntry(false)}
+                    className="text-xs"
+                  >
+                    Stoktan seç
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: Removed part info (from device) */}
+            <div className="p-3 border rounded-lg bg-amber-50 dark:bg-amber-950/20 space-y-3">
+              <Label className="font-semibold flex items-center gap-2">
+                2. Cihazdan Çıkan Parça Bilgisi
+                <span className="text-xs font-normal text-muted-foreground">(zorunlu)</span>
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Parça Kodu</Label>
                   <Input
-                    placeholder="Parça kodunu girin..."
-                    value={manualPartCode}
-                    onChange={(e) => setManualPartCode(e.target.value)}
+                    placeholder={selectedStockItem?.stokKodu || manualPartCode || 'Kod...'}
+                    value={removedPartStokKodu}
+                    onChange={(e) => setRemovedPartStokKodu(e.target.value)}
+                    className="h-9"
+                  />
+                  <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça kodu kullanılır</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Seri No <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="Çıkan parça seri no..."
+                    value={removedPartSerialNumber}
+                    onChange={(e) => setRemovedPartSerialNumber(e.target.value)}
+                    className="h-9"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Parça Adı <span className="text-destructive">*</span></Label>
-                  <Input
-                    placeholder="Parça adını girin..."
-                    value={manualPartName}
-                    onChange={(e) => setManualPartName(e.target.value)}
-                  />
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowManualEntry(false)}
-                >
-                  Listeden seç
-                </Button>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Parça Adı</Label>
+                <Input
+                  placeholder={selectedStockItem?.stokAdi || manualPartName || 'Parça adı...'}
+                  value={removedPartStokAdi}
+                  onChange={(e) => setRemovedPartStokAdi(e.target.value)}
+                  className="h-9"
+                />
+                <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça adı kullanılır</p>
+              </div>
+            </div>
+
+            {/* Selected item summary */}
+            {(selectedStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
+              <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg text-sm">
+                <p className="font-medium text-green-800 dark:text-green-200">
+                  Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber})
+                </p>
+                {removedPartSerialNumber && (
+                  <p className="text-green-700 dark:text-green-300">
+                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
+                  </p>
+                )}
               </div>
             )}
-            <div className="space-y-2">
-              <Label>Adet</Label>
-              <Input
-                type="number"
-                value={partQuantity}
-                onChange={(e) => setPartQuantity(Number(e.target.value))}
-                min="1"
-                className="w-24"
-              />
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
-            <Button onClick={addSelectedPart}>
+            <Button
+              onClick={addSelectedPart}
+              disabled={(!selectedStockItem && !(showManualEntry && manualPartCode && manualSerialNumber && manualPartName)) || !removedPartSerialNumber.trim()}
+            >
               Ekle
             </Button>
           </DialogFooter>
