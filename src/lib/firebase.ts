@@ -3,6 +3,7 @@ import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getFirestore, enableIndexedDbPersistence, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getAnalytics, type Analytics, isSupported } from "firebase/analytics";
 import { getFunctions } from "firebase/functions";
+import { getStorage } from "firebase/storage";
 
 // Config using environment variables
 export const firebaseConfig = {
@@ -46,6 +47,7 @@ if (typeof window !== 'undefined') {
 }
 
 const functions = getFunctions(app, "europe-west1");
+const storage = getStorage(app);
 
 let analytics: Analytics | null = null;
 
@@ -58,4 +60,4 @@ if (typeof window !== "undefined") {
   });
 }
 
-export { app, db, functions, analytics };
+export { app, db, functions, analytics, storage };
