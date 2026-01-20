@@ -630,8 +630,13 @@ export interface PendingReturn {
   stokAdi: string;
   serialNumber: string;
   source: PersonalStockSource; // Orijinal kaynak
-  returnType: 'return' | 'submit'; // return = iade (yeni parça), submit = teslim (cihazdan çıkan)
-  createdAt: Date;
+  sourceDeviceId?: string;
+  sourceDeviceName?: string;
+  returnType: 'return_to_depot' | 'submit_to_depot'; // return_to_depot = iade (yeni parça), submit_to_depot = teslim (cihazdan çıkan)
+  status: 'pending' | 'confirmed';
+  requestedAt: Date;
+  requestedByUid?: string;
+  requestedByName?: string;
   confirmedAt?: Date;
   confirmedByUid?: string;
   confirmedByName?: string;

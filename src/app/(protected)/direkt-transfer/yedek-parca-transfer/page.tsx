@@ -83,23 +83,24 @@ export default function YedekParcaTransferPage() {
 
     const fetchData = async () => {
       try {
-        // Fetch spare parts (productCodes where category is yedek_parca or similar)
-        const productsSnap = await getDocs(collection(db, 'productCodes'));
-        const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        // Filter for spare parts - assuming there's a category or type field
-        // If not, we'll use all products for now
-        setSpareParts(allProducts.filter(p => p.kategori === 'yedek_parca' || p.category === 'spare_part' || true));
+        // Fetch spare parts (productCodes where urunGrubu is 'yedek_parca')
+        const productsQuery = query(
+          collection(db, 'productCodes'),
+          where('urunGrubu', '==', 'yedek_parca')
+        );
+        const productsSnap = await getDocs(productsQuery);
+        const sparePartProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        setSpareParts(sparePartProducts);
 
         // Fetch technicians and application specialists
         const usersSnap = await getDocs(collection(db, 'users'));
         const allUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
         setUsers(allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
 
-        // Fetch pending returns
+        // Fetch pending returns (status === 'pending') - no orderBy to avoid index requirement
         const pendingQuery = query(
           collection(db, 'pendingReturns'),
-          where('confirmedAt', '==', null),
-          orderBy('createdAt', 'desc')
+          where('status', '==', 'pending')
         );
         const pendingSnap = await getDocs(pendingQuery);
         const pending = pendingSnap.docs.map(d => {
@@ -107,26 +108,27 @@ export default function YedekParcaTransferPage() {
           return {
             id: d.id,
             ...data,
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+            requestedAt: data.requestedAt?.toDate ? data.requestedAt.toDate() : new Date(),
           } as PendingReturn;
         });
+        // Sort by requestedAt in memory (newest first)
+        pending.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
         setPendingReturns(pending);
 
-        // Fetch recent transfer logs
-        const logsQuery = query(
-          collection(db, 'sparePartTransferLogs'),
-          orderBy('createdAt', 'desc')
-        );
-        const logsSnap = await getDocs(logsQuery);
-        const logs = logsSnap.docs.slice(0, 50).map(d => {
+        // Fetch recent transfer logs - no orderBy to avoid index requirement
+        const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
+        const logs = logsSnap.docs.map(d => {
           const data = d.data();
+          const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
           return {
             id: d.id,
             ...data,
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+            timestamp,
           };
         });
-        setTransferLogs(logs);
+        // Sort by timestamp in memory (newest first) and take first 50
+        logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setTransferLogs(logs.slice(0, 50));
       } catch (err) {
         console.error('Error fetching data:', err);
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -263,20 +265,18 @@ export default function YedekParcaTransferPage() {
       setTransferRows([]);
 
       // Refresh logs
-      const logsQuery = query(
-        collection(db, 'sparePartTransferLogs'),
-        orderBy('createdAt', 'desc')
-      );
-      const logsSnap = await getDocs(logsQuery);
-      const logs = logsSnap.docs.slice(0, 50).map(d => {
+      const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
+      const logs = logsSnap.docs.map(d => {
         const data = d.data();
+        const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
         return {
           id: d.id,
           ...data,
-          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+          timestamp,
         };
       });
-      setTransferLogs(logs);
+      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setTransferLogs(logs.slice(0, 50));
     } catch (err) {
       console.error('Error executing transfer:', err);
       toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
@@ -292,6 +292,7 @@ export default function YedekParcaTransferPage() {
 
       // Update pending return as confirmed
       await updateDoc(doc(db, 'pendingReturns', pendingReturn.id), {
+        status: 'confirmed',
         confirmedAt: Timestamp.fromDate(now),
         confirmedByUid: currentUserProfile?.uid || '',
         confirmedByName: currentUserProfile?.name || '',
@@ -304,7 +305,7 @@ export default function YedekParcaTransferPage() {
 
       // Create log entry
       await addDoc(collection(db, 'sparePartTransferLogs'), {
-        action: pendingReturn.returnType === 'return' ? 'return_confirmed' : 'submit_confirmed',
+        action: pendingReturn.returnType === 'return_to_depot' ? 'return_confirmed' : 'submit_confirmed',
         personalStockId: pendingReturn.personalStockId,
         stokKodu: pendingReturn.stokKodu,
         stokAdi: pendingReturn.stokAdi,
@@ -621,12 +622,12 @@ export default function YedekParcaTransferPage() {
                           <TableCell className="font-mono">{item.serialNumber}</TableCell>
                           <TableCell>{item.ownerName}</TableCell>
                           <TableCell>
-                            <Badge variant={item.returnType === 'return' ? 'secondary' : 'outline'}>
-                              {item.returnType === 'return' ? 'İade (Yeni)' : 'Teslim (Çıkma)'}
+                            <Badge variant={item.returnType === 'return_to_depot' ? 'secondary' : 'outline'}>
+                              {item.returnType === 'return_to_depot' ? 'İade (Yeni)' : 'Teslim (Çıkma)'}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            {format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                            {format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
                           </TableCell>
                           <TableCell>
                             <Button
@@ -670,7 +671,7 @@ export default function YedekParcaTransferPage() {
                         {transferLogs.map((log) => (
                           <TableRow key={log.id}>
                             <TableCell className="text-sm">
-                              {format(log.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                              {format(log.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr })}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline">{getActionLabel(log.action)}</Badge>
