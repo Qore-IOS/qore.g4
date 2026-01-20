@@ -425,7 +425,7 @@ export default function IslemFormuPage() {
     }
   };
 
-  // Upload removed part image to Firebase Storage
+  // Upload removed part image to Firebase Storage with timeout
   const uploadRemovedPartImage = async (): Promise<string | null> => {
     if (!removedPartImageFile) return null;
 
@@ -435,13 +435,24 @@ export default function IslemFormuPage() {
       const fileName = `removed-parts/${deviceId}/${timestamp}_${removedPartImageFile.name}`;
       const storageRef = ref(storage, fileName);
 
-      await uploadBytes(storageRef, removedPartImageFile);
+      // Upload with timeout (30 seconds)
+      const uploadPromise = uploadBytes(storageRef, removedPartImageFile);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timeout')), 30000)
+      );
+
+      await Promise.race([uploadPromise, timeoutPromise]);
       const downloadUrl = await getDownloadURL(storageRef);
 
       return downloadUrl;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error uploading image:', err);
-      toast({ title: 'Hata', description: 'Resim yüklenemedi.', variant: 'destructive' });
+      const errorMessage = err?.code === 'storage/unauthorized'
+        ? 'Yükleme yetkisi yok. Storage kurallarını kontrol edin.'
+        : err?.message === 'Upload timeout'
+        ? 'Yükleme zaman aşımına uğradı.'
+        : 'Resim yüklenemedi.';
+      toast({ title: 'Hata', description: errorMessage, variant: 'destructive' });
       return null;
     } finally {
       setIsUploadingImage(false);
