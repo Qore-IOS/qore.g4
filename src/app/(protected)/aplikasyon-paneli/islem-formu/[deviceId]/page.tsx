@@ -1,7 +1,8 @@
 'use client';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -14,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
@@ -67,6 +68,7 @@ type ActionItem = {
   removedPartStokKodu?: string;
   removedPartStokAdi?: string;
   removedPartSerialNumber?: string;
+  removedPartImageUrl?: string;
 };
 
 type ActionFormRecord = {
@@ -164,6 +166,11 @@ export default function AplikasyonIslemFormuPage() {
   const [removedPartStokKodu, setRemovedPartStokKodu] = useState('');
   const [removedPartStokAdi, setRemovedPartStokAdi] = useState('');
   const [removedPartSerialNumber, setRemovedPartSerialNumber] = useState('');
+  // Removed part image
+  const [removedPartImageFile, setRemovedPartImageFile] = useState<File | null>(null);
+  const [removedPartImagePreview, setRemovedPartImagePreview] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const removedPartImageInputRef = useRef<HTMLInputElement>(null);
 
   // Maintenance plans for periyodik bakım
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
@@ -368,14 +375,61 @@ export default function AplikasyonIslemFormuPage() {
     setRemovedPartStokKodu('');
     setRemovedPartStokAdi('');
     setRemovedPartSerialNumber('');
+    setRemovedPartImageFile(null);
+    setRemovedPartImagePreview(null);
     setIsPartModalOpen(true);
   };
 
-  const addSelectedPart = () => {
+  // Handle removed part image selection
+  const handleRemovedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setRemovedPartImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setRemovedPartImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Upload removed part image to Firebase Storage
+  const uploadRemovedPartImage = async (): Promise<string | null> => {
+    if (!removedPartImageFile) return null;
+
+    setIsUploadingImage(true);
+    try {
+      const timestamp = Date.now();
+      const fileName = `removed-parts/${deviceId}/${timestamp}_${removedPartImageFile.name}`;
+      const storageRef = ref(storage, fileName);
+
+      await uploadBytes(storageRef, removedPartImageFile);
+      const downloadUrl = await getDownloadURL(storageRef);
+
+      return downloadUrl;
+    } catch (err) {
+      console.error('Error uploading image:', err);
+      toast({ title: 'Hata', description: 'Resim yüklenemedi.', variant: 'destructive' });
+      return null;
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const addSelectedPart = async () => {
     // Validate removed part info is provided
     if (!removedPartSerialNumber.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen cihazdan çıkan parçanın seri numarasını girin.', variant: 'destructive' });
       return;
+    }
+
+    // Upload image if provided
+    let removedPartImageUrl: string | undefined = undefined;
+    if (removedPartImageFile) {
+      const uploadedUrl = await uploadRemovedPartImage();
+      if (uploadedUrl) {
+        removedPartImageUrl = uploadedUrl;
+      }
     }
 
     if (showManualEntry) {
@@ -395,6 +449,7 @@ export default function AplikasyonIslemFormuPage() {
         removedPartStokKodu: removedPartStokKodu.trim() || manualPartCode.trim(),
         removedPartStokAdi: removedPartStokAdi.trim() || manualPartName.trim(),
         removedPartSerialNumber: removedPartSerialNumber.trim(),
+        removedPartImageUrl,
       };
       setActions(prev => [newItem, ...prev]);
     } else if (selectedStockItem) {
@@ -415,6 +470,7 @@ export default function AplikasyonIslemFormuPage() {
         removedPartStokKodu: removedPartStokKodu.trim() || selectedStockItem.stokKodu,
         removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
+        removedPartImageUrl,
       };
       setActions(prev => [newItem, ...prev]);
     } else {
@@ -1112,6 +1168,56 @@ export default function AplikasyonIslemFormuPage() {
                 />
                 <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça adı kullanılır</p>
               </div>
+              {/* Removed part image upload */}
+              <div className="space-y-2 pt-2 border-t border-amber-200 dark:border-amber-800">
+                <Label className="text-xs flex items-center gap-1">
+                  <Camera className="h-3 w-3" />
+                  Parça Fotoğrafı (Opsiyonel)
+                </Label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  ref={removedPartImageInputRef}
+                  onChange={handleRemovedPartImageSelect}
+                  className="hidden"
+                />
+                {removedPartImagePreview ? (
+                  <div className="relative">
+                    <img
+                      src={removedPartImagePreview}
+                      alt="Çıkan parça"
+                      className="w-full h-32 object-cover rounded-md border"
+                    />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-1 right-1 h-6 w-6"
+                      onClick={() => {
+                        setRemovedPartImageFile(null);
+                        setRemovedPartImagePreview(null);
+                        if (removedPartImageInputRef.current) {
+                          removedPartImageInputRef.current.value = '';
+                        }
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full h-20 border-dashed flex flex-col gap-1"
+                    onClick={() => removedPartImageInputRef.current?.click()}
+                  >
+                    <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Fotoğraf Çek / Yükle</span>
+                  </Button>
+                )}
+              </div>
             </div>
 
             {/* Selected item summary */}
@@ -1132,9 +1238,9 @@ export default function AplikasyonIslemFormuPage() {
             <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
             <Button
               onClick={addSelectedPart}
-              disabled={(!selectedStockItem && !(showManualEntry && manualPartCode && manualSerialNumber && manualPartName)) || !removedPartSerialNumber.trim()}
+              disabled={(!selectedStockItem && !(showManualEntry && manualPartCode && manualSerialNumber && manualPartName)) || !removedPartSerialNumber.trim() || isUploadingImage}
             >
-              Ekle
+              {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Yükleniyor...</> : 'Ekle'}
             </Button>
           </DialogFooter>
         </DialogContent>
