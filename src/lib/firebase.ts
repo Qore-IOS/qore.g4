@@ -35,7 +35,8 @@ if (typeof window !== 'undefined') {
     db = initializeFirestore(app, {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager()
-      })
+      }),
+      ignoreUndefinedProperties: true, // Undefined değerleri yoksay - batch işlemlerde hata önler
     });
   } catch {
     // Zaten başlatılmışsa normal getFirestore kullan
