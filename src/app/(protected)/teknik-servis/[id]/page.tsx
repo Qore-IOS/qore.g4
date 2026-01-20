@@ -17,9 +17,16 @@ import {
   doc,
   getDocs,
   limit,
+  updateDoc,
+  addDoc,
+  serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Hospital, Device, DeviceFaultReport } from '@/lib/types';
+import type { Hospital, Device, DeviceFaultReport, PersonalStockItem } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
+import { Package, ArrowLeftRight, Warehouse } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -37,15 +44,22 @@ export default function TeknikServisDetayPage() {
   const hospitalId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const router = useRouter();
   const { toast } = useToast();
+  const { currentUser, currentUserProfile } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [faultIdForSelectedDevice, setFaultIdForSelectedDevice] = useState<string | null>(null);
   const [selectedDeviceFaultType, setSelectedDeviceFaultType] = useState<string | null>(null);
+
+  // Personal stock modal state
+  const [isPersonalStockModalOpen, setIsPersonalStockModalOpen] = useState(false);
+  const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
+  const [personalStockLoading, setPersonalStockLoading] = useState(false);
+  const [processingItemId, setProcessingItemId] = useState<string | null>(null);
 
 
   // --- Fetch hospital once ---
@@ -126,6 +140,143 @@ export default function TeknikServisDetayPage() {
     router.push(path);
   };
 
+  // Load personal stock when modal opens
+  const loadPersonalStock = useCallback(async () => {
+    if (!currentUser) return;
+    setPersonalStockLoading(true);
+    try {
+      const q = query(
+        collection(db, 'personalStock'),
+        where('ownerUid', '==', currentUser.uid),
+        where('status', '==', 'in_stock')
+      );
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        createdAt: d.data().createdAt?.toDate?.() || new Date(),
+      })) as PersonalStockItem[];
+      setPersonalStock(items.sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      ));
+    } catch (err) {
+      console.error('Error loading personal stock:', err);
+      toast({ title: 'Hata', description: 'Şahsi stok yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setPersonalStockLoading(false);
+    }
+  }, [currentUser, toast]);
+
+  const openPersonalStockModal = () => {
+    setIsPersonalStockModalOpen(true);
+    loadPersonalStock();
+  };
+
+  // Handle return to depot (for depot-sourced items)
+  const handleReturnToDepot = async (item: PersonalStockItem) => {
+    if (!currentUser || !currentUserProfile) return;
+    setProcessingItemId(item.id);
+    try {
+      // Update personal stock status
+      await updateDoc(doc(db, 'personalStock', item.id), {
+        status: 'pending_return',
+        returnRequestedAt: serverTimestamp(),
+      });
+
+      // Create pending return record
+      await addDoc(collection(db, 'pendingReturns'), {
+        personalStockId: item.id,
+        ownerUid: item.ownerUid,
+        ownerName: item.ownerName,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber,
+        source: item.source,
+        returnType: 'return_to_depot',
+        status: 'pending',
+        requestedAt: serverTimestamp(),
+        requestedByUid: currentUser.uid,
+        requestedByName: currentUserProfile.displayName || currentUser.email || '',
+      });
+
+      // Create log entry
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'return_to_depot',
+        personalStockId: item.id,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber,
+        performedByUid: currentUser.uid,
+        performedByName: currentUserProfile.displayName || currentUser.email || '',
+        timestamp: serverTimestamp(),
+        details: `${item.stokAdi} (${item.serialNumber}) depoya iade talebi oluşturuldu.`,
+      });
+
+      toast({ title: 'Başarılı', description: 'Depoya iade talebi oluşturuldu.' });
+      loadPersonalStock();
+    } catch (err) {
+      console.error('Error returning to depot:', err);
+      toast({ title: 'Hata', description: 'İade talebi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setProcessingItemId(null);
+    }
+  };
+
+  // Handle submit to depot (for device-sourced items - removed parts)
+  const handleSubmitToDepot = async (item: PersonalStockItem) => {
+    if (!currentUser || !currentUserProfile) return;
+    setProcessingItemId(item.id);
+    try {
+      // Update personal stock status
+      await updateDoc(doc(db, 'personalStock', item.id), {
+        status: 'pending_return',
+        returnRequestedAt: serverTimestamp(),
+      });
+
+      // Create pending return record
+      await addDoc(collection(db, 'pendingReturns'), {
+        personalStockId: item.id,
+        ownerUid: item.ownerUid,
+        ownerName: item.ownerName,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber,
+        source: item.source,
+        sourceDeviceId: item.sourceDeviceId,
+        sourceDeviceName: item.sourceDeviceName,
+        returnType: 'submit_to_depot',
+        status: 'pending',
+        requestedAt: serverTimestamp(),
+        requestedByUid: currentUser.uid,
+        requestedByName: currentUserProfile.displayName || currentUser.email || '',
+      });
+
+      // Create log entry
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'submit_to_depot',
+        personalStockId: item.id,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber,
+        performedByUid: currentUser.uid,
+        performedByName: currentUserProfile.displayName || currentUser.email || '',
+        timestamp: serverTimestamp(),
+        details: `${item.stokAdi} (${item.serialNumber}) depoya teslim talebi oluşturuldu. Kaynak cihaz: ${item.sourceDeviceName || 'Bilinmiyor'}`,
+      });
+
+      toast({ title: 'Başarılı', description: 'Depoya teslim talebi oluşturuldu.' });
+      loadPersonalStock();
+    } catch (err) {
+      console.error('Error submitting to depot:', err);
+      toast({ title: 'Hata', description: 'Teslim talebi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setProcessingItemId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -145,9 +296,20 @@ export default function TeknikServisDetayPage() {
       <div className="space-y-6 p-4 sm:p-6">
         <BackButton fallback="/teknik-servis" />
         <CardHeader className="px-0 sm:px-6">
-          <CardTitle className="text-2xl font-headline text-primary">
-            {hospital.name} - Cihaz Durumları
-          </CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-2xl font-headline text-primary">
+              {hospital.name} - Cihaz Durumları
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openPersonalStockModal}
+              className="flex items-center gap-2"
+            >
+              <Package className="h-4 w-4" />
+              <span className="hidden sm:inline">Şahsi Stoğum</span>
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
           {devicesByHospital.length === 0 ? (
@@ -286,6 +448,113 @@ export default function TeknikServisDetayPage() {
                   </Button>
                 </>
               )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Personal Stock Modal */}
+      <Dialog open={isPersonalStockModalOpen} onOpenChange={setIsPersonalStockModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Şahsi Stoğum
+            </DialogTitle>
+            <DialogDescription>
+              Size teslim edilen ve stoğunuzda bulunan yedek parçalar aşağıda listelenmektedir.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] pr-4">
+            {personalStockLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : personalStock.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Stoğunuzda yedek parça bulunmuyor.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {personalStock.map(item => (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      'p-3 border rounded-lg',
+                      item.source === 'depot'
+                        ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800'
+                        : 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800'
+                    )}
+                  >
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={cn(
+                            'text-xs font-medium px-2 py-0.5 rounded',
+                            item.source === 'depot'
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
+                          )}>
+                            {item.source === 'depot' ? 'Depodan' : 'Cihazdan'}
+                          </span>
+                        </div>
+                        <p className="font-medium">{item.stokAdi}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                        <p className="text-sm mt-1">
+                          Seri No: <span className="font-mono">{item.serialNumber}</span>
+                        </p>
+                        {item.source === 'device' && item.sourceDeviceName && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Kaynak: {item.sourceDeviceName}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0">
+                        {item.source === 'depot' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleReturnToDepot(item)}
+                            disabled={processingItemId === item.id}
+                            className="whitespace-nowrap"
+                          >
+                            {processingItemId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <ArrowLeftRight className="h-4 w-4 mr-1" />
+                                Depoya İade
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSubmitToDepot(item)}
+                            disabled={processingItemId === item.id}
+                            className="whitespace-nowrap"
+                          >
+                            {processingItemId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Warehouse className="h-4 w-4 mr-1" />
+                                Depoya Teslim
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPersonalStockModalOpen(false)}>
+              Kapat
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
