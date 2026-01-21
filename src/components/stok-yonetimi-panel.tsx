@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, where, writeBatch, doc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, writeBatch, doc, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AlertTriangle, PackageSearch, Search, Warehouse, Trash2, FileSpreadsheet, Loader2, Map as MapIcon, SlidersHorizontal, X, Building, ShoppingCart, Truck, ChevronUp, ChevronDown, History, Pencil, Save, XCircle, Filter, Nfc, ListChecks, Undo } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
@@ -174,7 +174,8 @@ export default function StokYonetimiPanel() {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [fullDepotStok, setFullDepotStok] = useState<DepoStokItem[]>([]);
+  const [isStockLoading, setIsStockLoading] = useState(false);
+  const [depotStock, setDepotStock] = useState<DepoStokItem[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
@@ -194,22 +195,21 @@ export default function StokYonetimiPanel() {
   const debouncedSearch = useCallback(debounce((term) => setDebouncedSearchTerm(term), 300), []);
   useEffect(() => { debouncedSearch(searchTerm); }, [searchTerm, debouncedSearch]);
 
-  const fetchInitialData = useCallback(async () => {
+  // Fetch master data (depots, products, addresses, hospitals) - runs once
+  const fetchMasterData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [depotsSnap, productsSnap, stockSnap, addressesSnap, hospitalsSnap] = await Promise.all([
+      const [depotsSnap, productsSnap, addressesSnap, hospitalsSnap] = await Promise.all([
         getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'depoStok')),
         getDocs(collection(db, 'addressDefinitions')),
         getDocs(collection(db, 'hospitals')),
       ]);
-      const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
+      const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
       setDepots(depotList);
-      setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
-      setFullDepotStok(stockSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)));
-      setAddressDefinitions(addressesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AddressDefinition)));
-      setHospitals(hospitalsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital)));
+      setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setAddressDefinitions(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
+      setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
 
       if (depotList.length > 0 && !selectedDepotId && depotList[0]?.id) {
         setSelectedDepotId(depotList[0].id);
@@ -222,8 +222,44 @@ export default function StokYonetimiPanel() {
   }, [toast, selectedDepotId]);
 
   useEffect(() => {
-    fetchInitialData();
-  }, [fetchInitialData]);
+    fetchMasterData();
+  }, [fetchMasterData]);
+
+  /**
+   * Fetch depot stock with server-side filtering
+   * Uses composite index: depotId + isShipped
+   */
+  const fetchDepotStock = useCallback(async (depotId: string) => {
+    if (!depotId) {
+      setDepotStock([]);
+      return;
+    }
+    setIsStockLoading(true);
+    try {
+      // Server-side query: only fetch unshipped items for selected depot
+      const stockQuery = query(
+        collection(db, 'depoStok'),
+        where('depotId', '==', depotId),
+        where('isShipped', '==', false)
+      );
+      const snapshot = await getDocs(stockQuery);
+      const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+      setDepotStock(items);
+    } catch (e) {
+      console.error('Depo stoğu yüklenemedi:', e);
+      toast({ title: 'Hata', description: 'Depo stoğu yüklenemedi.', variant: 'destructive' });
+      setDepotStock([]);
+    } finally {
+      setIsStockLoading(false);
+    }
+  }, [toast]);
+
+  // Fetch depot stock when depot changes
+  useEffect(() => {
+    if (selectedDepotId) {
+      fetchDepotStock(selectedDepotId);
+    }
+  }, [selectedDepotId, fetchDepotStock]);
 
   useEffect(() => {
     if (!selectedDepotId) return;
@@ -311,7 +347,7 @@ export default function StokYonetimiPanel() {
         }
       });
       toast({ title: 'Başarılı', description: `${group.stokAdi} adedi güncellendi.` });
-      await fetchInitialData(); // Refetch to get the latest state
+      await fetchDepotStock(selectedDepotId); // Refetch to get the latest state
     } catch (error) {
       toast({ title: "Hata", description: "Adet güncellenirken hata oluştu.", variant: "destructive" });
       console.error(error);
@@ -345,7 +381,8 @@ export default function StokYonetimiPanel() {
   }, [productCodes]);
 
   const filteredStock = useMemo(() => {
-    let items = fullDepotStok.filter(item => !item.isShipped && item.depotId === selectedDepotId);
+    // depotStock is already filtered by depotId and isShipped on server-side
+    let items = depotStock;
     if (activeFilters.length > 0) {
       const productCodeMap = new Map<string, ProductCode>(
         productCodes
@@ -374,7 +411,7 @@ export default function StokYonetimiPanel() {
       );
     }
     return items;
-  }, [fullDepotStok, selectedDepotId, activeFilters, debouncedSearchTerm, productCodes]);
+  }, [depotStock, activeFilters, debouncedSearchTerm, productCodes]);
 
   const sortedStock = useMemo(() => {
     return [...filteredStock].sort((a, b) => {
@@ -455,7 +492,21 @@ export default function StokYonetimiPanel() {
       .map(h => h.name)
       .filter((name): name is string => name !== undefined);
 
-    const stockForSelectedLabs = fullDepotStok.filter(item => item.isShipped && item.hedefKurum && labNames.includes(item.hedefKurum));
+    // Fetch shipped stock for selected labs (server-side query)
+    let stockForSelectedLabs: DepoStokItem[] = [];
+    try {
+      const shippedQuery = query(
+        collection(db, 'depoStok'),
+        where('isShipped', '==', true)
+      );
+      const shippedSnap = await getDocs(shippedQuery);
+      stockForSelectedLabs = shippedSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+        .filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
+    } catch (e) {
+      toast({ title: 'Hata', description: 'Laboratuvar stoğu yüklenemedi.', variant: 'destructive' });
+      return;
+    }
     const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
 
     stockForSelectedLabs.forEach(item => {
@@ -605,10 +656,10 @@ export default function StokYonetimiPanel() {
             </div>
           </div>
 
-          {isLoading ? (
+          {(isLoading || isStockLoading) ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <Loader2 className="h-10 w-10 animate-spin mb-2" />
-              <p>Yükleniyor...</p>
+              <p>{isLoading ? 'Veriler yükleniyor...' : 'Depo stoğu yükleniyor...'}</p>
             </div>
           ) : (
             <div className="q-table">
@@ -713,7 +764,7 @@ export default function StokYonetimiPanel() {
         onClose={() => setIsNfcQueryModalOpen(false)}
         productCodes={productCodes}
         deviceGroups={[]}
-        allStock={fullDepotStok}
+        allStock={depotStock}
       />
        <Dialog open={isLabCountModalOpen} onOpenChange={setIsLabCountModalOpen}>
         <DialogContent className="max-w-md">
