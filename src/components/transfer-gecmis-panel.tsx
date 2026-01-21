@@ -1,13 +1,15 @@
 /**
  * @fileoverview Transfer History Panel Component
- * @description Displays historical transfer records with filtering and pagination.
+ * @description Displays historical transfer records with server-side filtering and pagination.
  * @module components/transfer-gecmis-panel
- * @version 2.0.0
+ * @version 3.0.0
+ *
+ * @requires Firestore composite index: transfers (sourceDepotId ASC, timestamp DESC)
  */
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Accordion,
@@ -16,7 +18,18 @@ import {
 } from '@/components/ui/accordion';
 import { Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+  limit,
+  startAfter,
+  getDocsFromServer,
+  getCountFromServer,
+  type QueryDocumentSnapshot,
+} from 'firebase/firestore';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { Transfer, Depot } from '@/lib/types';
@@ -42,13 +55,17 @@ export default function TransferGecmisPanel() {
 
   const [depots, setDepots] = useState<Depot[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string>(depotIdFromUrl);
-  const [allTransfers, setAllTransfers] = useState<Transfer[]>([]);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalCount, setTotalCount] = useState<number>(0);
 
   // Pagination State
   const [rowsPerPage, setRowsPerPage] = useState<number>(20);
   const [page, setPage] = useState<number>(1);
-  
+
+  // Cursor stack for navigation (each entry is the last doc of that page)
+  const cursorStackRef = useRef<QueryDocumentSnapshot[]>([]);
+
   useRowFocus('focus');
 
   // Fetch depots once
@@ -63,14 +80,70 @@ export default function TransferGecmisPanel() {
     return () => unsub();
   }, [selectedDepotId]);
 
-  // Fetch ALL transfers once and listen for changes
-  useEffect(() => {
+  /**
+   * Fetch total count for the selected depot (server-side)
+   */
+  const fetchTotalCount = useCallback(async (depotId: string) => {
+    if (!depotId) {
+      setTotalCount(0);
+      return;
+    }
+    try {
+      const countQuery = query(
+        collection(db, 'transfers'),
+        where('sourceDepotId', '==', depotId)
+      );
+      const snapshot = await getCountFromServer(countQuery);
+      setTotalCount(snapshot.data().count);
+    } catch (error) {
+      transferGecmisLogger.error('Transfer sayısı alınamadı', error as Error, {
+        operation: 'fetchTotalCount',
+        depotId,
+      });
+      setTotalCount(0);
+    }
+  }, []);
+
+  /**
+   * Fetch transfers for the given page (server-side with cursor pagination)
+   */
+  const fetchTransfers = useCallback(async (
+    depotId: string,
+    pageNum: number,
+    pageSize: number,
+    cursors: QueryDocumentSnapshot[]
+  ) => {
+    if (!depotId) {
+      setTransfers([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
-    const q = query(
-      collection(db, 'transfers'),
-      orderBy('timestamp', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+
+    try {
+      // Build query with server-side filtering
+      // Requires composite index: sourceDepotId ASC + timestamp DESC
+      let q = query(
+        collection(db, 'transfers'),
+        where('sourceDepotId', '==', depotId),
+        orderBy('timestamp', 'desc'),
+        limit(pageSize)
+      );
+
+      // If not first page, use cursor from previous page
+      if (pageNum > 1 && cursors[pageNum - 2]) {
+        q = query(
+          collection(db, 'transfers'),
+          where('sourceDepotId', '==', depotId),
+          orderBy('timestamp', 'desc'),
+          startAfter(cursors[pageNum - 2]),
+          limit(pageSize)
+        );
+      }
+
+      const snapshot = await getDocsFromServer(q);
+
       const data = snapshot.docs.map(d => {
         const docData = d.data();
         return {
@@ -79,40 +152,47 @@ export default function TransferGecmisPanel() {
           timestamp: docData.timestamp?.toDate ? docData.timestamp.toDate() : new Date(),
         } as Transfer;
       });
-      setAllTransfers(data);
-      setLoading(false);
-    }, (error) => {
-      transferGecmisLogger.error('Transfer geçmişi yüklenemedi', error, {
+
+      // Store cursor for this page (last doc)
+      if (snapshot.docs.length > 0) {
+        const newCursors = [...cursors];
+        newCursors[pageNum - 1] = snapshot.docs[snapshot.docs.length - 1];
+        cursorStackRef.current = newCursors;
+      }
+
+      setTransfers(data);
+      transferGecmisLogger.info('Transfer geçmişi yüklendi (server-side)', {
+        depotId,
+        page: pageNum,
+        count: data.length,
+      });
+    } catch (error) {
+      transferGecmisLogger.error('Transfer geçmişi yüklenemedi', error as Error, {
         operation: 'fetchTransferHistory',
+        depotId,
       });
       toast({ title: 'Hata', description: 'Transfer geçmişi yüklenirken bir hata oluştu.', variant: 'destructive' });
+      setTransfers([]);
+    } finally {
       setLoading(false);
-    });
-
-    return () => unsubscribe();
+    }
   }, [toast]);
-  
-  const filteredTransfers = useMemo(() => {
-    if (!selectedDepotId) return [];
-    return allTransfers.filter(t => t.sourceDepotId === selectedDepotId);
-  }, [selectedDepotId, allTransfers]);
-  
-  const selectedDepotName = useMemo(() => 
-    depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo',
-    [depots, selectedDepotId]
-  );
-  
-  // Reset page when filters change
+
+  // Reset pagination when depot or page size changes
   useEffect(() => {
     setPage(1);
-  }, [selectedDepotId, rowsPerPage]);
+    cursorStackRef.current = [];
+    if (selectedDepotId) {
+      fetchTotalCount(selectedDepotId);
+    }
+  }, [selectedDepotId, rowsPerPage, fetchTotalCount]);
 
-  const totalPages = Math.ceil(filteredTransfers.length / rowsPerPage);
-  const paginatedTransfers = useMemo(() => {
-    const start = (page - 1) * rowsPerPage;
-    const end = start + rowsPerPage;
-    return filteredTransfers.slice(start, end);
-  }, [filteredTransfers, page, rowsPerPage]);
+  // Fetch transfers when page, depot, or page size changes
+  useEffect(() => {
+    fetchTransfers(selectedDepotId, page, rowsPerPage, cursorStackRef.current);
+  }, [selectedDepotId, page, rowsPerPage, fetchTransfers]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
 
   return (
     <div
@@ -124,7 +204,10 @@ export default function TransferGecmisPanel() {
       <Card>
         <CardHeader>
           <CardTitle id="transfer-history-title">Transfer Geçmişi</CardTitle>
-          <CardDescription>Depodan yapılan tüm direkt transfer işlemlerini görüntüleyin.</CardDescription>
+          <CardDescription>
+            Depodan yapılan tüm direkt transfer işlemlerini görüntüleyin.
+            {totalCount > 0 && <span className="ml-2 font-medium">({totalCount} kayıt)</span>}
+          </CardDescription>
         </CardHeader>
         <CardContent aria-labelledby="transfer-history-title">
           <div className="max-w-md mb-4">
@@ -156,12 +239,12 @@ export default function TransferGecmisPanel() {
              </div>
           ) : (
              <Accordion type="single" collapsible className="w-full">
-                {paginatedTransfers.length === 0 ? (
+                {transfers.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">Bu depo için transfer kaydı bulunamadı.</p>
                 ) : (
-                  paginatedTransfers.map(t => (
+                  transfers.map(t => (
                     <AccordionItem key={t.id} value={t.id} data-row-id={t.id}>
-                        <AccordionTrigger 
+                        <AccordionTrigger
                           className="flex justify-between items-center hover:no-underline p-4"
                           onClick={() => router.push(`/transfer-gecmis/${t.id}?depotId=${selectedDepotId}`)}
                         >
