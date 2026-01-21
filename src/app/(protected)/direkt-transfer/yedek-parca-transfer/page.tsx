@@ -39,7 +39,9 @@ import {
   Clock,
   ArrowLeftRight,
   History,
+  ImageIcon,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
@@ -57,6 +59,9 @@ export default function YedekParcaTransferPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [pendingReturns, setPendingReturns] = useState<PendingReturn[]>([]);
   const [transferLogs, setTransferLogs] = useState<any[]>([]);
+
+  // Image preview
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // Transfer form state
   const [transferRows, setTransferRows] = useState<SparePartTransferRow[]>([]);
@@ -607,7 +612,7 @@ export default function YedekParcaTransferPage() {
                         <TableHead>Personel</TableHead>
                         <TableHead>Tür</TableHead>
                         <TableHead>Tarih</TableHead>
-                        <TableHead className="w-32"></TableHead>
+                        <TableHead className="w-40"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -630,13 +635,24 @@ export default function YedekParcaTransferPage() {
                             {format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
                           </TableCell>
                           <TableCell>
-                            <Button
-                              size="sm"
-                              onClick={() => confirmPendingReturn(item)}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              Teslim Al
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              {item.imageUrl && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setPreviewImage(item.imageUrl!)}
+                                >
+                                  <ImageIcon className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                onClick={() => confirmPendingReturn(item)}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                Teslim Al
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -700,6 +716,27 @@ export default function YedekParcaTransferPage() {
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Image Preview Modal */}
+      <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ImageIcon className="h-5 w-5" />
+              Parça Fotoğrafı
+            </DialogTitle>
+          </DialogHeader>
+          {previewImage && (
+            <div className="relative">
+              <img
+                src={previewImage}
+                alt="Parça fotoğrafı"
+                className="w-full h-auto max-h-[70vh] object-contain rounded-md"
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

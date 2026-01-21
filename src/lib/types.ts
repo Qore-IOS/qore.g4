@@ -594,6 +594,7 @@ export interface PersonalStockItem {
   usedOnFormId?: string;       // Kullanıldığı form
   usedOnFormType?: 'teknik_servis' | 'aplikasyon';
   replacedPartId?: string;     // Değişilen parça (cihazdan çıkan) ID
+  imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
 }
 
 // Transfer/kullanım/iade log kaydı
@@ -640,6 +641,7 @@ export interface PendingReturn {
   confirmedAt?: Date;
   confirmedByUid?: string;
   confirmedByName?: string;
+  imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
 }
 
 // Transfer row for spare part transfer panel
