@@ -136,10 +136,6 @@ export default function IslemFormuPage() {
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
   const [aciklama, setAciklama] = useState('');
 
-  // History
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<ActionFormRecord[]>([]);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   // Signature modal
   const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
@@ -750,26 +746,6 @@ export default function IslemFormuPage() {
     }
   };
 
-  const openHistory = async () => {
-    if (!deviceId) return;
-    setIsHistoryLoading(true);
-    setIsHistoryOpen(true);
-    try {
-        const q = query(
-            collection(db, 'deviceActionForms'),
-            where('deviceId', '==', deviceId)
-        );
-        const snap = await getDocs(q);
-        const historyItems = snap.docs.map(d => ({id: d.id, ...d.data()}) as ActionFormRecord);
-        historyItems.sort((a,b) => b.createdAt.toDate().getTime() - a.createdAt.toDate().getTime());
-        setHistory(historyItems);
-    } catch(err) {
-        console.error("Error fetching history:", err);
-        toast({title: 'Hata', description: 'Geçmiş yüklenemedi.', variant: 'destructive'});
-    } finally {
-        setIsHistoryLoading(false);
-    }
-  };
 
   const getActionLabel = (item: ActionItem): string => {
     if (item.type === 'operation') {
@@ -806,7 +782,7 @@ export default function IslemFormuPage() {
                     <p className="text-sm"><strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
                   </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={openHistory}>
+                <Button variant="outline" size="sm" onClick={() => router.push(`/teknik-servis/gecmis/${deviceId}`)}>
                     <History className="h-4 w-4 mr-2" />
                     Geçmiş
                 </Button>
@@ -1261,70 +1237,6 @@ export default function IslemFormuPage() {
         </DialogContent>
       </Dialog>
 
-      {/* History Modal */}
-      <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-        <DialogContent className="max-w-4xl">
-            <DialogHeader>
-                <DialogTitle>Teknik Servis İşlem Geçmişi: {device.cihazAdi}</DialogTitle>
-            </DialogHeader>
-            <ScrollArea className="max-h-[60vh] mt-4">
-                {isHistoryLoading ? <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin"/></div> :
-                 history.length === 0 ? <p className="text-center text-muted-foreground p-8">Bu cihaz için geçmiş işlem formu bulunmuyor.</p> :
-                 (
-                    <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Tarih</TableHead>
-                            <TableHead>Kullanıcı</TableHead>
-                            <TableHead>Tip/Tür</TableHead>
-                            <TableHead>İşlemler</TableHead>
-                            <TableHead>Durum</TableHead>
-                            <TableHead className="text-right">Tutanak</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {history.map(rec => (
-                                <TableRow key={rec.id}>
-                                    <TableCell className="text-xs">{format(rec.createdAt.toDate(), 'dd.MM.yyyy HH:mm', {locale: tr})}</TableCell>
-                                    <TableCell>{rec.createdByName}</TableCell>
-                                    <TableCell className="text-xs">
-                                      {rec.islemTipi && <span className="block">{ISLEM_TIPI_LABELS[rec.islemTipi]}</span>}
-                                      {rec.islemTuru && <span className="text-muted-foreground">{ISLEM_TURU_LABELS[rec.islemTuru]}</span>}
-                                    </TableCell>
-                                    <TableCell>
-                                        <ul className="list-disc pl-4 text-sm">
-                                            {rec.actions.map(act => (
-                                                <li key={act.id}>
-                                                  <span className={`text-xs px-1 rounded mr-1 ${act.type === 'part_change' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
-                                                    {act.type === 'part_change' ? 'Parça' : 'İşlem'}
-                                                  </span>
-                                                  {act.type === 'part_change'
-                                                    ? `${act.stokAdi || act.action}: ${act.quantity} adet`
-                                                    : OPERATION_LABELS[act.action as OperationType] || act.action
-                                                  }
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </TableCell>
-                                    <TableCell className="text-xs">
-                                      {rec.cihazDurumu && CIHAZ_DURUMU_LABELS[rec.cihazDurumu]}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <TeknikServisTutanakPDFButton
-                                            device={device}
-                                            hospital={hospital}
-                                            actionRecord={rec}
-                                        />
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                 )
-                }
-            </ScrollArea>
-        </DialogContent>
-      </Dialog>
 
       {/* Pre-Signature & Signature Modal */}
       <Dialog open={isSignatureModalOpen} onOpenChange={setIsSignatureModalOpen}>
