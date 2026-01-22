@@ -38,6 +38,7 @@ import {
   UserPlus,
   Phone,
   Wrench,
+  Building2,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes } from 'date-fns';
@@ -290,7 +291,10 @@ export default function ArizaYonetimiPage() {
                       Sistemdeki tüm açık ve kapalı cihaz arıza kayıtlarının listesi.
                   </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button variant="outline" onClick={() => router.push('/ariza-yonetimi/diger-firma-gecmisi')}>
+                  <Building2 className="h-4 w-4 mr-2" /> Diğer Firma Geçmişi
+                </Button>
                 <Button variant="secondary" onClick={handleExportToExcel}>
                   <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel Dökümü Al
                 </Button>
