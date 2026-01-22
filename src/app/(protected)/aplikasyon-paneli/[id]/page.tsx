@@ -6,7 +6,7 @@ import { CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse, Building2 } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -33,6 +33,9 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
 
 export default function AplikasyonPaneliDetayPage() {
@@ -56,6 +59,13 @@ export default function AplikasyonPaneliDetayPage() {
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
   const [personalStockLoading, setPersonalStockLoading] = useState(false);
   const [processingItemId, setProcessingItemId] = useState<string | null>(null);
+
+  // Diğer Firma Arıza modal state
+  const [isDigerFirmaModalOpen, setIsDigerFirmaModalOpen] = useState(false);
+  const [digerFirmaAdi, setDigerFirmaAdi] = useState('');
+  const [tespitEdilenAriza, setTespitEdilenAriza] = useState('');
+  const [yapilanIslem, setYapilanIslem] = useState('');
+  const [isDigerFirmaSaving, setIsDigerFirmaSaving] = useState(false);
 
 
   // --- Fetch hospital once ---
@@ -270,6 +280,59 @@ export default function AplikasyonPaneliDetayPage() {
     }
   };
 
+  // Handle Diğer Firma Arıza form submission
+  const handleDigerFirmaSubmit = async () => {
+    // Validate all fields are filled
+    if (!digerFirmaAdi.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen diğer firma adını girin.', variant: 'destructive' });
+      return;
+    }
+    if (!tespitEdilenAriza.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tespit edilen arızayı girin.', variant: 'destructive' });
+      return;
+    }
+    if (!yapilanIslem.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen yapılan işlemi girin.', variant: 'destructive' });
+      return;
+    }
+
+    setIsDigerFirmaSaving(true);
+    try {
+      // Create a record for the other company fault
+      await addDoc(collection(db, 'digerFirmaArizalar'), {
+        hospitalId,
+        hospitalName: hospital?.name || '',
+        digerFirmaAdi: digerFirmaAdi.trim(),
+        tespitEdilenAriza: tespitEdilenAriza.trim(),
+        yapilanIslem: yapilanIslem.trim(),
+        createdAt: serverTimestamp(),
+        createdByUid: currentUser?.uid || '',
+        createdByName: currentUserProfile?.name || currentUserProfile?.displayName || '',
+        formType: 'aplikasyon',
+      });
+
+      toast({ title: 'Başarılı', description: 'Diğer firma arıza kaydı oluşturuldu.' });
+
+      // Reset form and close modal
+      setDigerFirmaAdi('');
+      setTespitEdilenAriza('');
+      setYapilanIslem('');
+      setIsDigerFirmaModalOpen(false);
+    } catch (err) {
+      console.error('Error saving diğer firma arıza:', err);
+      toast({ title: 'Hata', description: 'Kayıt oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsDigerFirmaSaving(false);
+    }
+  };
+
+  const openDigerFirmaModal = () => {
+    setDigerFirmaAdi('');
+    setTespitEdilenAriza('');
+    setYapilanIslem('');
+    setIsDigerFirmaModalOpen(true);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -292,15 +355,26 @@ export default function AplikasyonPaneliDetayPage() {
             <CardTitle className="text-2xl font-headline text-primary">
               {hospital.name} - Cihaz Durumları
             </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openPersonalStockModal}
-              className="flex items-center gap-2"
-            >
-              <Package className="h-4 w-4" />
-              <span className="hidden sm:inline">Şahsi Stoğum</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openDigerFirmaModal}
+                className="flex items-center gap-2"
+              >
+                <Building2 className="h-4 w-4" />
+                <span className="hidden sm:inline">Diğer Firma Arıza</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openPersonalStockModal}
+                className="flex items-center gap-2"
+              >
+                <Package className="h-4 w-4" />
+                <span className="hidden sm:inline">Şahsi Stoğum</span>
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
@@ -546,6 +620,72 @@ export default function AplikasyonPaneliDetayPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsPersonalStockModalOpen(false)}>
               Kapat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diğer Firma Arıza Modal */}
+      <Dialog open={isDigerFirmaModalOpen} onOpenChange={setIsDigerFirmaModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Diğer Firma Arıza Kaydı
+            </DialogTitle>
+            <DialogDescription>
+              Başka bir firma cihazıyla ilgili arıza kaydı oluşturun. Tüm alanlar zorunludur.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="digerFirmaAdi">
+                Diğer Firma Adı <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="digerFirmaAdi"
+                placeholder="Firma adını girin..."
+                value={digerFirmaAdi}
+                onChange={(e) => setDigerFirmaAdi(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tespitEdilenAriza">
+                Tespit Edilen Arıza <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="tespitEdilenAriza"
+                placeholder="Tespit edilen arızayı açıklayın..."
+                value={tespitEdilenAriza}
+                onChange={(e) => setTespitEdilenAriza(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="yapilanIslem">
+                Yapılan İşlem <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="yapilanIslem"
+                placeholder="Yapılan işlemi açıklayın..."
+                value={yapilanIslem}
+                onChange={(e) => setYapilanIslem(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDigerFirmaModalOpen(false)}>
+              İptal
+            </Button>
+            <Button
+              onClick={handleDigerFirmaSubmit}
+              disabled={isDigerFirmaSaving || !digerFirmaAdi.trim() || !tespitEdilenAriza.trim() || !yapilanIslem.trim()}
+            >
+              {isDigerFirmaSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Kaydet
             </Button>
           </DialogFooter>
         </DialogContent>
