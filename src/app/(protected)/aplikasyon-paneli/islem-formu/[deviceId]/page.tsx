@@ -40,13 +40,15 @@ type OperationType =
   | 'diger';
 
 // İşlem Türü
-type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | '';
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'alis' | 'roche_bilgisayar_arizasi' | '';
 
 // İşlem Türü Labels
 const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
   '': 'Seçiniz',
   rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
   periyodik_bakim: 'Periyodik Bakım',
+  alis: 'ALIS',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 // Cihaz Durumu
@@ -804,6 +806,8 @@ export default function AplikasyonIslemFormuPage() {
                   <SelectContent>
                     <SelectItem value="rutin_kurum_ziyareti">Rutin Kurum Ziyareti</SelectItem>
                     <SelectItem value="periyodik_bakim">Periyodik Bakım</SelectItem>
+                    <SelectItem value="alis">ALIS</SelectItem>
+                    <SelectItem value="roche_bilgisayar_arizasi">Roche Bilgisayar Arızası</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">

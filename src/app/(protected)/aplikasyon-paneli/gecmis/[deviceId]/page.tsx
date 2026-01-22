@@ -29,7 +29,7 @@ type OperationType =
   | 'cv_calismasi'
   | 'diger';
 
-type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | '';
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'alis' | 'roche_bilgisayar_arizasi' | '';
 type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
 
 type ActionItem = {
@@ -80,6 +80,8 @@ const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
   '': '-',
   rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
   periyodik_bakim: 'Periyodik Bakım',
+  alis: 'ALIS',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {

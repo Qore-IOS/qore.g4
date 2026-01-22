@@ -26,7 +26,7 @@ type OperationType =
   | 'pipetleme_transfer_ayarlari';
 
 type IslemTipi = 'cihaz' | 'ups' | 'su_sistemi' | '';
-type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'cihaz_kurulumu' | 'ariza' | 'sw_update' | '';
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'cihaz_kurulumu' | 'ariza' | 'sw_update' | 'alis' | 'roche_bilgisayar_arizasi' | '';
 type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
 
 type ActionItem = {
@@ -84,6 +84,8 @@ const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
   cihaz_kurulumu: 'Cihaz Kurulumu',
   ariza: 'Arıza',
   sw_update: 'SW Update',
+  alis: 'ALIS',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {

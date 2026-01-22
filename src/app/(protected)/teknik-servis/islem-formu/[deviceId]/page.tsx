@@ -40,7 +40,7 @@ type OperationType =
 type IslemTipi = 'cihaz' | 'ups' | 'su_sistemi' | '';
 
 // İşlem Türü
-type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'cihaz_kurulumu' | 'ariza' | 'sw_update' | '';
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'cihaz_kurulumu' | 'ariza' | 'sw_update' | 'alis' | 'roche_bilgisayar_arizasi' | '';
 
 // Cihaz Durumu
 type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
@@ -108,6 +108,8 @@ const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
   cihaz_kurulumu: 'Cihaz Kurulumu',
   ariza: 'Arıza',
   sw_update: 'SW Update',
+  alis: 'ALIS',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {
@@ -822,6 +824,8 @@ export default function IslemFormuPage() {
                     <SelectItem value="cihaz_kurulumu">Cihaz Kurulumu</SelectItem>
                     <SelectItem value="ariza">Arıza</SelectItem>
                     <SelectItem value="sw_update">SW Update</SelectItem>
+                    <SelectItem value="alis">ALIS</SelectItem>
+                    <SelectItem value="roche_bilgisayar_arizasi">Roche Bilgisayar Arızası</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
