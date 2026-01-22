@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -16,7 +16,7 @@ import {
   orderBy,
   doc,
   getDocs,
-  limit,
+  limit as firestoreLimit,
   updateDoc,
   addDoc,
   serverTimestamp,
@@ -26,6 +26,8 @@ import { db } from '@/lib/firebase';
 import type { Hospital, Device, DeviceFaultReport, PersonalStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { Package, ArrowLeftRight, Warehouse } from 'lucide-react';
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -71,6 +73,10 @@ export default function TeknikServisDetayPage() {
   const [yapilanIslem, setYapilanIslem] = useState('');
   const [isDigerFirmaSaving, setIsDigerFirmaSaving] = useState(false);
 
+  // Device fault history state
+  const [deviceFaultHistory, setDeviceFaultHistory] = useState<Record<string, { arizaAciklamasi: string; closedAt: Date }[]>>({});
+  const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set());
+
 
   // --- Fetch hospital once ---
   useEffect(() => {
@@ -112,7 +118,55 @@ export default function TeknikServisDetayPage() {
     );
     return () => unsub();
   }, [hospitalId, toast]);
-  
+
+  // Fetch fault history for all devices
+  useEffect(() => {
+    if (devicesByHospital.length === 0) return;
+
+    const fetchFaultHistory = async () => {
+      const historyMap: Record<string, { arizaAciklamasi: string; closedAt: Date }[]> = {};
+
+      for (const device of devicesByHospital) {
+        try {
+          const q = query(
+            collection(db, 'deviceFaultReports'),
+            where('deviceId', '==', device.id),
+            where('status', '==', 'closed'),
+            orderBy('closedAt', 'desc'),
+            firestoreLimit(10)
+          );
+          const snap = await getDocs(q);
+          historyMap[device.id] = snap.docs.map(d => {
+            const data = d.data();
+            return {
+              arizaAciklamasi: data.arizaAciklamasi || 'Açıklama yok',
+              closedAt: data.closedAt?.toDate?.() || new Date(),
+            };
+          });
+        } catch (err) {
+          console.error(`Error fetching fault history for device ${device.id}:`, err);
+          historyMap[device.id] = [];
+        }
+      }
+      setDeviceFaultHistory(historyMap);
+    };
+
+    fetchFaultHistory();
+  }, [devicesByHospital]);
+
+  const toggleDeviceExpand = (deviceId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedDevices(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(deviceId)) {
+        newSet.delete(deviceId);
+      } else {
+        newSet.add(deviceId);
+      }
+      return newSet;
+    });
+  };
+
   const handleDeviceClick = async (device: Device) => {
     // For teknik servis panel:
     // - If device has teknik_servis fault, show modal with options
@@ -467,6 +521,50 @@ export default function TeknikServisDetayPage() {
                         </p>
                       )}
                     </div>
+
+                    {/* Mini Fault History */}
+                    {deviceFaultHistory[device.id]?.length > 0 && (
+                      <div className="w-full mt-2 text-left" onClick={(e) => e.stopPropagation()}>
+                        <div className="border rounded-md p-2 bg-muted/30">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                            <History className="h-3 w-3" />
+                            <span className="font-medium">Son Arızalar</span>
+                          </div>
+                          <div className="space-y-1">
+                            {deviceFaultHistory[device.id]
+                              .slice(0, expandedDevices.has(device.id) ? 10 : 3)
+                              .map((fault, idx) => (
+                                <div key={idx} className="text-xs border-l-2 border-primary/30 pl-2 py-0.5">
+                                  <p className="text-muted-foreground truncate" title={fault.arizaAciklamasi}>
+                                    {fault.arizaAciklamasi}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground/70">
+                                    {format(fault.closedAt, 'dd.MM.yy', { locale: tr })}
+                                  </p>
+                                </div>
+                              ))}
+                          </div>
+                          {deviceFaultHistory[device.id].length > 3 && (
+                            <button
+                              onClick={(e) => toggleDeviceExpand(device.id, e)}
+                              className="w-full mt-1 text-xs text-primary hover:text-primary/80 flex items-center justify-center gap-1 py-1"
+                            >
+                              {expandedDevices.has(device.id) ? (
+                                <>
+                                  <ChevronUp className="h-3 w-3" />
+                                  Daha az göster
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown className="h-3 w-3" />
+                                  Daha fazla göster ({Math.min(deviceFaultHistory[device.id].length, 10) - 3})
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </button>
                 );
               })}
