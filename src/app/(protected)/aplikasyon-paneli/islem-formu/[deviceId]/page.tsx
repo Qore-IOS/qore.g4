@@ -677,6 +677,45 @@ export default function AplikasyonIslemFormuPage() {
               createdByName: currentUserProfile?.name || '',
             });
           }
+
+          // If this is a manual entry (borrowed part), create a borrowed spare part record
+          if (partChange.isManualEntry) {
+            const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
+            batch.set(borrowedRef, {
+              stokKodu: partChange.stokKodu,
+              stokAdi: partChange.stokAdi,
+              serialNumber: partChange.serialNumber,
+              deviceId,
+              deviceName: device?.cihazAdi || device?.model || '',
+              hospitalId: device?.hospitalId || '',
+              labName: hospital?.name || '',
+              formId: formRef.id,
+              formType: 'aplikasyon',
+              borrowedByUid: currentUserProfile?.uid || '',
+              borrowedByName: currentUserProfile?.name || '',
+              borrowedAt: Timestamp.fromDate(now),
+              status: 'pending', // pending, approved, rejected
+              approvedByUid: null,
+              approvedByName: null,
+              approvedAt: null,
+            });
+
+            // Create log for borrowed part
+            const borrowLogRef = doc(collection(db, 'sparePartTransferLogs'));
+            batch.set(borrowLogRef, {
+              action: 'borrowed_part',
+              stokKodu: partChange.stokKodu,
+              stokAdi: partChange.stokAdi,
+              serialNumber: partChange.serialNumber,
+              deviceId,
+              deviceName: device?.cihazAdi || device?.model || '',
+              formId: formRef.id,
+              formType: 'aplikasyon',
+              createdAt: Timestamp.fromDate(now),
+              createdByUid: currentUserProfile?.uid || '',
+              createdByName: currentUserProfile?.name || '',
+            });
+          }
         }
 
         // Create maintenance logs for each selected maintenance task
