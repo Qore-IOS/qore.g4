@@ -553,6 +553,60 @@ export interface MaintenanceStatus {
   nextDueDate: Date | null;
 }
 
+// ============================================
+// PERİYODİK PARÇA DEĞİŞİMİ SİSTEMİ
+// ============================================
+
+// Periyodik değişmesi gereken parça sorumluluğu
+export type PeriodicPartResponsibility = 'teknik_servis' | 'aplikasyon' | 'both';
+
+// Cihaza tanımlı periyodik parça değişimi planı
+export interface PeriodicPartChange {
+  id: string;
+  deviceId: string;
+  productCodeId: string;         // ProductCode referansı
+  stokKodu: string;              // Ürün stok kodu
+  stokAdi: string;               // Ürün adı
+  periodValue: number;           // Periyot değeri (örn: 2)
+  periodUnit: MaintenancePeriodUnit; // Periyot birimi (hafta/ay/yıl)
+  responsibilityType: PeriodicPartResponsibility; // Sorumluluk tipi
+  requiresOutgoingPartInfo: boolean; // Cihazdan çıkan parça bilgisi gerekli mi
+  requiresSerialTracking: boolean;   // Seri no takibi yapılacak mı
+  createdAt?: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}
+
+// Periyodik parça değişimi log kaydı - bir değişim yapıldığında oluşturulur
+export interface PeriodicPartChangeLog {
+  id: string;
+  deviceId: string;
+  periodicPartChangeId: string;  // İlişkili PeriodicPartChange ID
+  stokKodu: string;              // Değişen parça stok kodu
+  stokAdi: string;               // Değişen parça adı
+  completedAt: Date;             // Değişimin yapıldığı tarih
+  completedByUid: string;
+  completedByName: string;
+  nextDueDate: Date;             // Bir sonraki değişim tarihi
+  formId?: string;               // İlişkili form ID
+  formType?: 'teknik_servis' | 'aplikasyon';
+  // Takilen parça bilgileri
+  installedPartSerialNumber?: string;
+  installedPartFromStock?: boolean; // Şahsi stoktan mı?
+  // Cihazdan çıkan parça bilgileri (eğer requiresOutgoingPartInfo true ise)
+  removedPartSerialNumber?: string;
+  removedPartImageUrl?: string;
+}
+
+// Periyodik parça değişimi durumu hesaplaması için yardımcı tip
+export interface PeriodicPartChangeStatus {
+  partChange: PeriodicPartChange;
+  lastLog?: PeriodicPartChangeLog;
+  daysRemaining: number | null;  // null = hiç değişilmemiş
+  isOverdue: boolean;            // Süresi geçmiş mi
+  nextDueDate: Date | null;
+}
+
 // ==========================================
 // Yedek Parça Transfer ve Şahsi Stok Sistemi
 // ==========================================
