@@ -3,12 +3,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical } from 'lucide-react';
+import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/auth-context';
 
 const ModernButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button> & {icon?: React.ElementType}>(
   ({ className, children, icon: Icon, ...props }, ref) => (
@@ -37,6 +38,7 @@ export default function CihazYonetimiHost() {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const router = useRouter();
+  const { isAdmin } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -92,7 +94,7 @@ export default function CihazYonetimiHost() {
             Tüm Arızalar
           </ModernButton>
         </CardContent>
-        <div className="mt-12 flex justify-center space-x-4">
+        <div className="mt-12 flex flex-wrap justify-center gap-4">
             <Button variant="ghost" onClick={() => router.push('/cihaz-tanimlamalari')} className="text-muted-foreground hover:text-primary">
                 <Settings className="mr-2 h-5 w-5" />
                 Cihaz Modelleri
@@ -101,6 +103,12 @@ export default function CihazYonetimiHost() {
               <FileCode className="mr-2 h-5 w-5" />
               HTML Raporu
             </Button>
+            {isAdmin && (
+              <Button variant="ghost" onClick={() => router.push('/personel-izlem')} className="text-muted-foreground hover:text-primary">
+                <Users className="mr-2 h-5 w-5" />
+                Personel İzlem
+              </Button>
+            )}
         </div>
       </Card>
     </div>
