@@ -2,7 +2,7 @@
 
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { User } from '@/lib/types';
+import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device } from '@/lib/types';
 
 export interface PerformanceMetrics {
   // Raw metrics
@@ -19,6 +19,10 @@ export interface PerformanceMetrics {
   totalPeriodicMaintenanceForms: number;
   recurrenceCount: number;
 
+  // Overdue metrics
+  overdueMaintenanceTasks: number;
+  overduePeriodicParts: number;
+
   // Calculated scores (0-100 scale for each, then weighted)
   faultAssignmentScore: number; // max 20
   interventionTimeScore: number; // max 15
@@ -27,6 +31,7 @@ export interface PerformanceMetrics {
   onsiteRatioScore: number; // max 15
   maintenanceContributionScore: number; // max 20
   recurrencePenalty: number; // -10 to 0
+  overduePenalty: number; // -15 to 0
 
   // Final score
   totalScore: number;
@@ -61,16 +66,74 @@ function calculateResolutionTimeScore(avgMinutes: number): number {
 
 export async function calculateAllPerformances(): Promise<PersonnelPerformance[]> {
   // Fetch all required data
-  const [usersSnap, faultsSnap, teknikFormsSnap, aplikasyonFormsSnap] = await Promise.all([
+  const [
+    usersSnap,
+    faultsSnap,
+    teknikFormsSnap,
+    aplikasyonFormsSnap,
+    devicesSnap,
+    maintenancePlansSnap,
+    maintenanceLogsSnap,
+    periodicPartChangesSnap,
+    periodicPartChangeLogsSnap
+  ] = await Promise.all([
     getDocs(collection(db, 'users')),
     getDocs(collection(db, 'deviceFaultReports')),
     getDocs(collection(db, 'deviceActionForms')),
     getDocs(collection(db, 'aplikasyonActionForms')),
+    getDocs(collection(db, 'devices')),
+    getDocs(collection(db, 'maintenancePlans')),
+    getDocs(collection(db, 'maintenanceLogs')),
+    getDocs(collection(db, 'periodicPartChanges')),
+    getDocs(collection(db, 'periodicPartChangeLogs')),
   ]);
 
   // Parse data
   const allUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
   const technicians = allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon');
+
+  // Parse devices to get hospitalId mapping
+  const devices = devicesSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Device);
+  const deviceHospitalMap = new Map<string, string>();
+  devices.forEach(d => {
+    if (d.hospitalId) {
+      deviceHospitalMap.set(d.id, d.hospitalId);
+    }
+  });
+
+  // Parse maintenance plans
+  const maintenancePlans = maintenancePlansSnap.docs.map(d => ({
+    id: d.id,
+    ...d.data(),
+  })) as MaintenancePlan[];
+
+  // Parse maintenance logs
+  const maintenanceLogs = maintenanceLogsSnap.docs.map(d => {
+    const data = d.data();
+    return {
+      id: d.id,
+      ...data,
+      completedAt: data.completedAt?.toDate?.() || null,
+      nextDueDate: data.nextDueDate?.toDate?.() || null,
+    };
+  }) as MaintenanceLog[];
+
+  // Parse periodic part changes
+  const periodicPartChanges = periodicPartChangesSnap.docs.map(d => ({
+    id: d.id,
+    ...d.data(),
+  })) as PeriodicPartChange[];
+
+  // Parse periodic part change logs
+  const periodicPartChangeLogs = periodicPartChangeLogsSnap.docs.map(d => {
+    const data = d.data();
+    return {
+      id: d.id,
+      ...data,
+      completedAt: data.completedAt?.toDate?.() || null,
+      nextDueDate: data.nextDueDate?.toDate?.() || null,
+    };
+  }) as PeriodicPartChangeLog[];
 
   const allFaults = faultsSnap.docs.map(d => {
     const data = d.data();
@@ -136,12 +199,75 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
   const teknikServisFaults = allFaults.filter(f => f.faultType === 'teknik_servis');
   const aplikasyonFaults = allFaults.filter(f => f.faultType === 'aplikasyon');
 
+  // Helper function to calculate overdue status
+  const now = new Date();
+  const calculateOverdueItems = (
+    userPrimaryLabs: string[],
+    userRole: string
+  ): { overdueMaintenanceTasks: number; overduePeriodicParts: number } => {
+    const isAplikasyon = userRole === 'aplikasyon';
+    const maintenanceType = isAplikasyon ? 'aplikasyon' : 'teknik_servis';
+
+    // Get all devices in primary laboratories
+    const primaryLabDeviceIds = devices
+      .filter(d => d.hospitalId && userPrimaryLabs.includes(d.hospitalId))
+      .map(d => d.id);
+
+    // Calculate overdue maintenance tasks
+    let overdueMaintenanceTasks = 0;
+    const relevantPlans = maintenancePlans.filter(
+      p => primaryLabDeviceIds.includes(p.deviceId) && p.type === maintenanceType
+    );
+
+    for (const plan of relevantPlans) {
+      const latestLog = maintenanceLogs
+        .filter(l => l.planId === plan.id)
+        .sort((a, b) => (b.completedAt?.getTime() || 0) - (a.completedAt?.getTime() || 0))[0];
+
+      if (latestLog?.nextDueDate) {
+        if (latestLog.nextDueDate.getTime() < now.getTime()) {
+          overdueMaintenanceTasks++;
+        }
+      }
+    }
+
+    // Calculate overdue periodic parts
+    let overduePeriodicParts = 0;
+    const relevantPartChanges = periodicPartChanges.filter(p => {
+      if (!primaryLabDeviceIds.includes(p.deviceId)) return false;
+      return p.responsibilityType === userRole || p.responsibilityType === 'both';
+    });
+
+    for (const partChange of relevantPartChanges) {
+      const latestLog = periodicPartChangeLogs
+        .filter(l => l.periodicPartChangeId === partChange.id)
+        .sort((a, b) => (b.completedAt?.getTime() || 0) - (a.completedAt?.getTime() || 0))[0];
+
+      if (latestLog?.nextDueDate) {
+        if (latestLog.nextDueDate.getTime() < now.getTime()) {
+          overduePeriodicParts++;
+        }
+      }
+    }
+
+    return { overdueMaintenanceTasks, overduePeriodicParts };
+  };
+
   // Calculate performance for each technician
   const performances: PersonnelPerformance[] = [];
 
   for (const user of technicians) {
     const isAplikasyon = user.role === 'aplikasyon';
-    const relevantFaults = isAplikasyon ? aplikasyonFaults : teknikServisFaults;
+
+    // Use primaryLaboratories for performance calculation, fallback to empty array
+    const primaryLabs = user.primaryLaboratories || [];
+    const hasPrimaryLabs = primaryLabs.length > 0;
+
+    // Filter faults for primary laboratories only
+    const allRelevantFaults = isAplikasyon ? aplikasyonFaults : teknikServisFaults;
+    const relevantFaults = hasPrimaryLabs
+      ? allRelevantFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : allRelevantFaults;
 
     // 1. Fault Assignment Ratio (max 20 points)
     const faultsAssigned = relevantFaults.filter(f => f.assignedToUid === user.uid).length;
@@ -149,8 +275,11 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
     const faultAssignmentRatio = totalFaultsForRole > 0 ? faultsAssigned / totalFaultsForRole : 0;
     const faultAssignmentScore = Math.min(20, faultAssignmentRatio * 100); // Scale: 5% = 5pts, 20%+ = 20pts
 
-    // 2. Intervention Start Time (max 15 points)
-    const faultsWithIntervention = allFaults.filter(f =>
+    // 2. Intervention Start Time (max 15 points) - filter by primary labs
+    const faultsWithIntervention = (hasPrimaryLabs
+      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : allFaults
+    ).filter(f =>
       f.assignedToUid === user.uid &&
       f.assignedAt &&
       f.interventionStartedAt
@@ -165,8 +294,11 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
     }
     const interventionTimeScore = calculateInterventionTimeScore(avgInterventionStartTimeMinutes);
 
-    // 3. Resolution Time (max 15 points)
-    const resolvedFaults = allFaults.filter(f =>
+    // 3. Resolution Time (max 15 points) - filter by primary labs
+    const resolvedFaults = (hasPrimaryLabs
+      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : allFaults
+    ).filter(f =>
       f.closedByUid === user.uid &&
       f.interventionStartedAt &&
       f.closedAt
@@ -181,12 +313,19 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
     }
     const resolutionTimeScore = calculateResolutionTimeScore(avgResolutionTimeMinutes);
 
-    // 4. Institution Visit Frequency (max 15 points)
-    const userForms = allForms.filter(f => f.createdByUid === user.uid).length;
-    const onsiteInterventions = allFaults.filter(f =>
+    // 4. Institution Visit Frequency (max 15 points) - filter by primary labs
+    const relevantForms = hasPrimaryLabs
+      ? allForms.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : allForms;
+    const relevantFaultsForVisits = hasPrimaryLabs
+      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : allFaults;
+
+    const userForms = relevantForms.filter(f => f.createdByUid === user.uid).length;
+    const onsiteInterventions = relevantFaultsForVisits.filter(f =>
       f.assignedToUid === user.uid && f.interventionType === 'yerinde'
     ).length;
-    const phoneInterventions = allFaults.filter(f =>
+    const phoneInterventions = relevantFaultsForVisits.filter(f =>
       f.assignedToUid === user.uid && f.interventionType === 'telefonla'
     ).length;
     const institutionVisits = userForms + onsiteInterventions;
@@ -205,26 +344,30 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
       onsiteRatioScore = onsiteRatio * 15;
     }
 
-    // 6. Periodic Maintenance Contribution (max 20 points)
-    const userPeriodicForms = allForms.filter(f =>
-      f.createdByUid === user.uid && f.islemTuru === 'periyodik_bakim'
-    ).length;
+    // 6. Periodic Maintenance Contribution (max 20 points) - filter by primary labs
+    const relevantPeriodicForms = hasPrimaryLabs
+      ? relevantForms.filter(f => f.islemTuru === 'periyodik_bakim')
+      : allForms.filter(f => f.islemTuru === 'periyodik_bakim');
+    const totalRelevantPeriodicForms = relevantPeriodicForms.length;
+
+    const userPeriodicForms = relevantPeriodicForms.filter(f => f.createdByUid === user.uid).length;
     let maintenanceContributionScore = 0;
-    if (totalPeriodicMaintenanceForms > 0) {
-      const ratio = userPeriodicForms / totalPeriodicMaintenanceForms;
+    if (totalRelevantPeriodicForms > 0) {
+      const ratio = userPeriodicForms / totalRelevantPeriodicForms;
       maintenanceContributionScore = Math.min(20, ratio * 100); // 20% contribution = 20 pts
     }
 
-    // 7. Recurrence Penalty (-10 to 0 points)
+    // 7. Recurrence Penalty (-10 to 0 points) - filter by primary labs
     // Check if any fault recurred within 7 days after this user resolved it
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     let recurrenceCount = 0;
 
-    const userResolvedFaults = allFaults.filter(f =>
-      f.closedByUid === user.uid && f.status === 'closed' && f.closedAt
-    );
+    const userResolvedFaultsForRecurrence = (hasPrimaryLabs
+      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : allFaults
+    ).filter(f => f.closedByUid === user.uid && f.status === 'closed' && f.closedAt);
 
-    for (const resolved of userResolvedFaults) {
+    for (const resolved of userResolvedFaultsForRecurrence) {
       // Check if same device had a new fault within 7 days
       const hasRecurrence = allFaults.some(f =>
         f.id !== resolved.id &&
@@ -239,6 +382,17 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
 
     const recurrencePenalty = Math.max(-10, -recurrenceCount * 2);
 
+    // 8. Overdue Penalty (-15 to 0 points)
+    // Penalty for overdue maintenance tasks and periodic part changes in primary laboratories
+    const overdueData = hasPrimaryLabs
+      ? calculateOverdueItems(primaryLabs, user.role)
+      : { overdueMaintenanceTasks: 0, overduePeriodicParts: 0 };
+
+    const { overdueMaintenanceTasks, overduePeriodicParts } = overdueData;
+    const totalOverdue = overdueMaintenanceTasks + overduePeriodicParts;
+    // -3 points per overdue item, max -15
+    const overduePenalty = Math.max(-15, -totalOverdue * 3);
+
     // Calculate total score
     const totalScore = Math.max(0, Math.min(100,
       faultAssignmentScore +
@@ -247,7 +401,8 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
       visitFrequencyScore +
       onsiteRatioScore +
       maintenanceContributionScore +
-      recurrencePenalty
+      recurrencePenalty +
+      overduePenalty
     ));
 
     performances.push({
@@ -263,8 +418,10 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
         onsiteInterventions,
         phoneInterventions,
         periodicMaintenanceForms: userPeriodicForms,
-        totalPeriodicMaintenanceForms,
+        totalPeriodicMaintenanceForms: totalRelevantPeriodicForms,
         recurrenceCount,
+        overdueMaintenanceTasks,
+        overduePeriodicParts,
         faultAssignmentScore,
         interventionTimeScore,
         resolutionTimeScore,
@@ -272,6 +429,7 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
         onsiteRatioScore,
         maintenanceContributionScore,
         recurrencePenalty,
+        overduePenalty,
         totalScore,
       },
     });
