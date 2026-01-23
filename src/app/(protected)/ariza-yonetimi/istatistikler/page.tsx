@@ -58,8 +58,8 @@ export default function ArizaIstatistikleriPage() {
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   // Product statistics state
-  const [selectedBrand, setSelectedBrand] = useState<string>('');
-  const [selectedProductGroup, setSelectedProductGroup] = useState<string>('');
+  const [selectedBrand, setSelectedBrand] = useState<string>('all');
+  const [selectedProductGroup, setSelectedProductGroup] = useState<string>('all');
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [expandedLabs, setExpandedLabs] = useState<Set<string>>(new Set());
@@ -216,8 +216,8 @@ export default function ArizaIstatistikleriPage() {
   // Filter products based on selected brand and product group
   const filteredProducts = useMemo(() => {
     return productCodes.filter(p => {
-      const matchesBrand = !selectedBrand || p.marka === selectedBrand;
-      const matchesGroup = !selectedProductGroup || p.cihazGrubu === selectedProductGroup;
+      const matchesBrand = selectedBrand === 'all' || p.marka === selectedBrand;
+      const matchesGroup = selectedProductGroup === 'all' || p.cihazGrubu === selectedProductGroup;
       return matchesBrand && matchesGroup;
     });
   }, [productCodes, selectedBrand, selectedProductGroup]);
@@ -515,7 +515,7 @@ export default function ArizaIstatistikleriPage() {
                   <SelectValue placeholder="Marka seçin..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Tümü</SelectItem>
+                  <SelectItem value="all">Tümü</SelectItem>
                   {uniqueBrands.map(brand => (
                     <SelectItem key={brand} value={brand}>{brand}</SelectItem>
                   ))}
@@ -534,7 +534,7 @@ export default function ArizaIstatistikleriPage() {
                   <SelectValue placeholder="Ürün grubu seçin..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Tümü</SelectItem>
+                  <SelectItem value="all">Tümü</SelectItem>
                   {uniqueProductGroups.map(group => (
                     <SelectItem key={group} value={group}>{group}</SelectItem>
                   ))}
