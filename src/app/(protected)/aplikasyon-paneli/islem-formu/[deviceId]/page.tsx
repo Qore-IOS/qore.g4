@@ -141,6 +141,7 @@ export default function AplikasyonIslemFormuPage() {
   const personnelSignatureRef = useRef<SignaturePadRef>(null);
   const technicianSignatureRef = useRef<SignaturePadRef>(null);
   const [signatures, setSignatures] = useState<{ personnel?: string; technician?: string }>({});
+  const [technicianName, setTechnicianName] = useState('');
 
   // Pre-signature questions
   const [cihazDurumu, setCihazDurumu] = useState<CihazDurumu>('');
@@ -753,7 +754,7 @@ export default function AplikasyonIslemFormuPage() {
     setSignatureStep('personnel');
   };
 
-  const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }) => {
+  const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
     setIsSaving(true);
     setIsSignatureModalOpen(false);
 
@@ -782,6 +783,7 @@ export default function AplikasyonIslemFormuPage() {
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
             personnelSignature: finalSignatures.personnel || null,
             technicianSignature: finalSignatures.technician || null,
+            technicianName: finalTechnicianName || null,
             createdAt: Timestamp.fromDate(now),
             createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
             createdByUid: currentUserProfile?.uid,
@@ -1692,16 +1694,27 @@ export default function AplikasyonIslemFormuPage() {
 
           {/* Technician signature step */}
           {signatureStep === 'technician' && (
-            <div>
-              <p className="mb-2 text-sm text-muted-foreground">Aplikasyon Uzmanı</p>
-              <SignaturePad ref={technicianSignatureRef} />
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Teknisyen Adı Soyadı</label>
+                <Input
+                  value={technicianName}
+                  onChange={(e) => setTechnicianName(e.target.value)}
+                  placeholder="Ad Soyad giriniz..."
+                  className="mb-4"
+                />
+              </div>
+              <div>
+                <p className="mb-2 text-sm text-muted-foreground">İmza</p>
+                <SignaturePad ref={technicianSignatureRef} />
+              </div>
               <DialogFooter className="mt-4 gap-2">
                 <Button variant="outline" onClick={() => { technicianSignatureRef.current?.clear(); }}>Temizle</Button>
-                <Button onClick={() => handleSaveSignaturesAndFinish(signatures)}>Bu Adımı Atla</Button>
+                <Button onClick={() => handleSaveSignaturesAndFinish(signatures, technicianName)}>Bu Adımı Atla</Button>
                 <Button variant="secondary" onClick={() => setSignatureStep('personnel')}>Geri</Button>
                 <Button onClick={() => {
                   const techSig = technicianSignatureRef.current?.getSignature();
-                  handleSaveSignaturesAndFinish({ ...signatures, technician: techSig });
+                  handleSaveSignaturesAndFinish({ ...signatures, technician: techSig }, technicianName);
                 }}>
                   Tamamla ve Kaydet
                 </Button>

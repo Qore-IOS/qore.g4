@@ -89,6 +89,7 @@ type ActionFormRecord = {
     eslikEdenPersonel?: { uid: string; name: string; role: string }[];
     personnelSignature?: string;
     technicianSignature?: string;
+    technicianName?: string;
 };
 
 // Turkish labels - will use Turkish font if available
@@ -387,7 +388,7 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
 
       // --- ADD SIGNATURES ---
       const signatureY = finalY + 40;
-      if (signatureY < pageH - 120) {
+      if (signatureY < pageH - 140) {
           doc.setFont(FONT, 'bold');
           doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
           doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
@@ -396,16 +397,24 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
           doc.setFont(FONT, 'normal');
           doc.setFontSize(10);
 
+          // Personnel signature with name
           doc.text(txt('İşlemi Yapan Personel', useTurkish), padX, signatureY + 15);
-          doc.line(padX, signatureY + 20, padX + 150, signatureY + 20);
+          doc.setFont(FONT, 'bold');
+          doc.text(txt(actionRecord.createdByName, useTurkish), padX, signatureY + 28);
+          doc.setFont(FONT, 'normal');
+          doc.line(padX, signatureY + 32, padX + 150, signatureY + 32);
           if (actionRecord.personnelSignature) {
-            doc.addImage(actionRecord.personnelSignature, 'PNG', padX, signatureY + 25, 150, 40, undefined, 'FAST');
+            doc.addImage(actionRecord.personnelSignature, 'PNG', padX, signatureY + 37, 150, 40, undefined, 'FAST');
           }
 
+          // Technician signature with name
           doc.text('Teknisyen', pageW / 2 + 20, signatureY + 15);
-          doc.line(pageW / 2 + 20, signatureY + 20, pageW / 2 + 170, signatureY + 20);
+          doc.setFont(FONT, 'bold');
+          doc.text(txt(actionRecord.technicianName || '-', useTurkish), pageW / 2 + 20, signatureY + 28);
+          doc.setFont(FONT, 'normal');
+          doc.line(pageW / 2 + 20, signatureY + 32, pageW / 2 + 170, signatureY + 32);
           if (actionRecord.technicianSignature) {
-            doc.addImage(actionRecord.technicianSignature, 'PNG', pageW / 2 + 20, signatureY + 25, 150, 40, undefined, 'FAST');
+            doc.addImage(actionRecord.technicianSignature, 'PNG', pageW / 2 + 20, signatureY + 37, 150, 40, undefined, 'FAST');
           }
       }
 
