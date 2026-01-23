@@ -74,7 +74,7 @@ export default function TeknikServisDetayPage() {
   const [isDigerFirmaSaving, setIsDigerFirmaSaving] = useState(false);
 
   // Device fault history state
-  const [deviceFaultHistory, setDeviceFaultHistory] = useState<Record<string, { arizaAciklamasi: string; closedAt: Date }[]>>({});
+  const [deviceFaultHistory, setDeviceFaultHistory] = useState<Record<string, { description: string; closedAt: Date }[]>>({});
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set());
 
 
@@ -124,25 +124,27 @@ export default function TeknikServisDetayPage() {
     if (devicesByHospital.length === 0) return;
 
     const fetchFaultHistory = async () => {
-      const historyMap: Record<string, { arizaAciklamasi: string; closedAt: Date }[]> = {};
+      const historyMap: Record<string, { description: string; closedAt: Date }[]> = {};
 
       for (const device of devicesByHospital) {
         try {
+          // Query without orderBy to avoid composite index requirement
           const q = query(
             collection(db, 'deviceFaultReports'),
             where('deviceId', '==', device.id),
-            where('status', '==', 'closed'),
-            orderBy('closedAt', 'desc'),
-            firestoreLimit(10)
+            where('status', '==', 'closed')
           );
           const snap = await getDocs(q);
-          historyMap[device.id] = snap.docs.map(d => {
+          const faults = snap.docs.map(d => {
             const data = d.data();
             return {
-              arizaAciklamasi: data.arizaAciklamasi || 'Açıklama yok',
+              description: data.description || 'Açıklama yok',
               closedAt: data.closedAt?.toDate?.() || new Date(),
             };
           });
+          // Sort by closedAt descending and take top 10
+          faults.sort((a, b) => b.closedAt.getTime() - a.closedAt.getTime());
+          historyMap[device.id] = faults.slice(0, 10);
         } catch (err) {
           console.error(`Error fetching fault history for device ${device.id}:`, err);
           historyMap[device.id] = [];
@@ -535,8 +537,8 @@ export default function TeknikServisDetayPage() {
                               .slice(0, expandedDevices.has(device.id) ? 10 : 3)
                               .map((fault, idx) => (
                                 <div key={idx} className="text-xs border-l-2 border-primary/30 pl-2 py-0.5">
-                                  <p className="text-muted-foreground truncate" title={fault.arizaAciklamasi}>
-                                    {fault.arizaAciklamasi}
+                                  <p className="text-muted-foreground truncate" title={fault.description}>
+                                    {fault.description}
                                   </p>
                                   <p className="text-[10px] text-muted-foreground/70">
                                     {format(fault.closedAt, 'dd.MM.yy', { locale: tr })}
