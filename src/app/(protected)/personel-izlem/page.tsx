@@ -166,10 +166,12 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
               <MetricItem
                 icon={TrendingUp}
                 label="Arıza Üstlenme"
-                value={`${metrics.faultsAssigned} / ${metrics.totalFaultsForRole}`}
-                subValue={`%${metrics.totalFaultsForRole > 0 ? ((metrics.faultsAssigned / metrics.totalFaultsForRole) * 100).toFixed(1) : 0}`}
+                value={`${metrics.faultsAssigned} / ${metrics.expectedFaults.toFixed(1)}`}
+                subValue={metrics.expectedFaults > 0
+                  ? `%${((metrics.faultsAssigned / metrics.expectedFaults) * 100).toFixed(0)} beklenen`
+                  : 'beklenti yok'}
                 score={metrics.faultAssignmentScore}
-                tooltip="Kendi rolündeki toplam arızalardan üzerine aldığı oran. Yüksek oran = yüksek puan."
+                tooltip="Ana sorumlu olunan laboratuvarlara göre beklenen arıza sayısı ve gerçek üstlenilen. Beklenenin %100'ü = 20 puan."
               />
               <MetricItem
                 icon={Clock}
@@ -362,7 +364,7 @@ export default function PersonelIzlemPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
             <div className="p-3 rounded-lg bg-muted/30">
               <p className="font-semibold">Arıza Üstlenme (20 puan)</p>
-              <p className="text-muted-foreground">Kendi rolündeki toplam arızalardan üzerine aldığı oran</p>
+              <p className="text-muted-foreground">Ana sorumlu laboratuvarlara göre beklenen arıza payını karşılama oranı</p>
             </div>
             <div className="p-3 rounded-lg bg-muted/30">
               <p className="font-semibold">Müdahale Süresi (15 puan)</p>

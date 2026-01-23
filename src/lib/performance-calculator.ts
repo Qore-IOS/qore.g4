@@ -7,6 +7,7 @@ import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, Periodi
 export interface PerformanceMetrics {
   // Raw metrics
   totalFaultsForRole: number;
+  expectedFaults: number; // Expected fault share based on primary labs
   faultsAssigned: number;
   faultsResolved: number;
   avgInterventionStartTimeMinutes: number;
@@ -199,6 +200,46 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
   const teknikServisFaults = allFaults.filter(f => f.faultType === 'teknik_servis');
   const aplikasyonFaults = allFaults.filter(f => f.faultType === 'aplikasyon');
 
+  // Build map of lab -> personnel count (per role) for expected fault calculation
+  // This counts how many personnel have each lab as primary, grouped by role
+  const teknikPersonnelPerLab = new Map<string, number>();
+  const aplikasyonPersonnelPerLab = new Map<string, number>();
+
+  for (const user of technicians) {
+    const primaryLabs = user.primaryLaboratories || [];
+    const targetMap = user.role === 'aplikasyon' ? aplikasyonPersonnelPerLab : teknikPersonnelPerLab;
+
+    for (const labId of primaryLabs) {
+      targetMap.set(labId, (targetMap.get(labId) || 0) + 1);
+    }
+  }
+
+  // Helper function to calculate expected faults for a user based on primary labs
+  const calculateExpectedFaults = (
+    userPrimaryLabs: string[],
+    userRole: string,
+    faultsByType: typeof allFaults
+  ): number => {
+    if (userPrimaryLabs.length === 0) return 0;
+
+    const personnelPerLabMap = userRole === 'aplikasyon'
+      ? aplikasyonPersonnelPerLab
+      : teknikPersonnelPerLab;
+
+    let expectedTotal = 0;
+
+    for (const labId of userPrimaryLabs) {
+      // Count faults in this lab
+      const faultsInLab = faultsByType.filter(f => f.hospitalId === labId).length;
+      // Get number of personnel responsible for this lab
+      const personnelCount = personnelPerLabMap.get(labId) || 1;
+      // Add this user's expected share
+      expectedTotal += faultsInLab / personnelCount;
+    }
+
+    return expectedTotal;
+  };
+
   // Helper function to calculate overdue status
   const now = new Date();
   const calculateOverdueItems = (
@@ -269,11 +310,28 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
       ? allRelevantFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
       : allRelevantFaults;
 
-    // 1. Fault Assignment Ratio (max 20 points)
+    // 1. Fault Assignment Score (max 20 points)
+    // Calculate expected faults based on primary laboratories
+    // Each lab's faults are divided by the number of personnel who have that lab as primary
+    const faultsByType = isAplikasyon ? aplikasyonFaults : teknikServisFaults;
+    const expectedFaults = calculateExpectedFaults(primaryLabs, user.role, faultsByType);
+
+    // Count faults assigned to this user (from primary labs only)
     const faultsAssigned = relevantFaults.filter(f => f.assignedToUid === user.uid).length;
     const totalFaultsForRole = relevantFaults.length;
-    const faultAssignmentRatio = totalFaultsForRole > 0 ? faultsAssigned / totalFaultsForRole : 0;
-    const faultAssignmentScore = Math.min(20, faultAssignmentRatio * 100); // Scale: 5% = 5pts, 20%+ = 20pts
+
+    // Score based on meeting expected share
+    // If user meets or exceeds expected: full 20 points
+    // If user is below expected: proportional score
+    let faultAssignmentScore = 0;
+    if (expectedFaults > 0) {
+      const fulfillmentRatio = faultsAssigned / expectedFaults;
+      // Cap at 1.0 (meeting 100% of expectation = 20 points, 50% = 10 points)
+      faultAssignmentScore = Math.min(20, fulfillmentRatio * 20);
+    } else if (faultsAssigned > 0) {
+      // No expected faults but user still took some (bonus)
+      faultAssignmentScore = 20;
+    }
 
     // 2. Intervention Start Time (max 15 points) - filter by primary labs
     const faultsWithIntervention = (hasPrimaryLabs
@@ -409,6 +467,7 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
       user,
       metrics: {
         totalFaultsForRole,
+        expectedFaults,
         faultsAssigned,
         faultsResolved: resolvedFaults.length,
         avgInterventionStartTimeMinutes,
