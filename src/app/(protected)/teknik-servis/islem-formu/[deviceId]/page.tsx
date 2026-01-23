@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { db, storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem } from '@/lib/types';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { format } from 'date-fns';
@@ -62,6 +62,9 @@ type ActionItem = {
   removedPartStokAdi?: string;
   removedPartSerialNumber?: string;
   removedPartImageUrl?: string;
+  // Periodic part change info
+  periodicPartChangeId?: string;
+  isPeriodicPartChange?: boolean;
 };
 
 type ActionFormRecord = {
@@ -182,6 +185,11 @@ export default function IslemFormuPage() {
   const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
   const [selectedMaintenanceTasks, setSelectedMaintenanceTasks] = useState<string[]>([]);
 
+  // Periodic part changes for periyodik bakım
+  const [periodicPartChanges, setPeriodicPartChanges] = useState<PeriodicPartChange[]>([]);
+  const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
+  const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
+
   // Fetch device and hospital
   useEffect(() => {
     if (!deviceId) return;
@@ -289,6 +297,44 @@ export default function IslemFormuPage() {
     })();
   }, [deviceId]);
 
+  // Fetch periodic part changes and logs for this device
+  useEffect(() => {
+    if (!deviceId) return;
+    (async () => {
+      try {
+        // Fetch periodic part changes for teknik_servis or both
+        const partsQuery = query(
+          collection(db, 'periodicPartChanges'),
+          where('deviceId', '==', deviceId)
+        );
+        const partsSnap = await getDocs(partsQuery);
+        const allParts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange);
+        // Filter for teknik_servis or both responsibility
+        const filteredParts = allParts.filter(p => p.responsibilityType === 'teknik_servis' || p.responsibilityType === 'both');
+        setPeriodicPartChanges(filteredParts);
+
+        // Fetch periodic part change logs for this device
+        const logsQuery = query(
+          collection(db, 'periodicPartChangeLogs'),
+          where('deviceId', '==', deviceId)
+        );
+        const logsSnap = await getDocs(logsQuery);
+        const logs = logsSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            completedAt: data.completedAt?.toDate ? data.completedAt.toDate() : new Date(data.completedAt),
+            nextDueDate: data.nextDueDate?.toDate ? data.nextDueDate.toDate() : new Date(data.nextDueDate),
+          } as PeriodicPartChangeLog;
+        });
+        setPeriodicPartChangeLogs(logs);
+      } catch (err) {
+        console.error("Error fetching periodic part changes:", err);
+      }
+    })();
+  }, [deviceId]);
+
   // Sorted users based on current user's role
   const sortedUsers = useMemo(() => {
     const currentRole = currentUserProfile?.role;
@@ -363,11 +409,103 @@ export default function IslemFormuPage() {
     });
   }, [maintenancePlans, maintenanceLogs]);
 
+  // Calculate periodic part change status with remaining days
+  const periodicPartChangesWithStatus = useMemo(() => {
+    const periodUnitLabels: Record<string, string> = {
+      hafta: 'hafta',
+      ay: 'ay',
+      yil: 'yıl',
+    };
+
+    return periodicPartChanges.map(partChange => {
+      // Find the latest log for this part change
+      const latestLog = periodicPartChangeLogs.find(log => log.periodicPartChangeId === partChange.id);
+
+      let daysRemaining: number | null = null;
+      let isOverdue = false;
+      let nextDueDate: Date | null = null;
+
+      if (latestLog && latestLog.nextDueDate) {
+        nextDueDate = latestLog.nextDueDate;
+        const now = new Date();
+        const diffTime = nextDueDate.getTime() - now.getTime();
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        isOverdue = daysRemaining < 0;
+      }
+
+      const periodLabel = `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
+
+      return {
+        partChange,
+        latestLog,
+        daysRemaining,
+        isOverdue,
+        nextDueDate,
+        periodLabel,
+      };
+    });
+  }, [periodicPartChanges, periodicPartChangeLogs]);
+
   // Toggle maintenance task selection
   const toggleMaintenanceTask = (planId: string) => {
     setSelectedMaintenanceTasks(prev =>
       prev.includes(planId) ? prev.filter(id => id !== planId) : [...prev, planId]
     );
+  };
+
+  // Toggle periodic part selection and add to actions
+  const togglePeriodicPart = (partChangeId: string) => {
+    setSelectedPeriodicParts(prev => {
+      const newSelected = prev.includes(partChangeId)
+        ? prev.filter(id => id !== partChangeId)
+        : [...prev, partChangeId];
+
+      // If selecting, add to actions if not already there
+      if (!prev.includes(partChangeId)) {
+        const partChange = periodicPartChanges.find(p => p.id === partChangeId);
+        if (partChange) {
+          // Check if already in actions
+          const alreadyInActions = actions.some(a =>
+            a.periodicPartChangeId === partChangeId ||
+            (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
+          );
+
+          if (!alreadyInActions) {
+            // Find matching item in personal stock
+            const matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+
+            if (matchingStockItem) {
+              // Auto-add from personal stock
+              const newItem: ActionItem = {
+                id: crypto.randomUUID(),
+                type: 'part_change',
+                action: matchingStockItem.productCodeId,
+                stokKodu: matchingStockItem.stokKodu,
+                stokAdi: matchingStockItem.stokAdi,
+                serialNumber: matchingStockItem.serialNumber,
+                personalStockId: matchingStockItem.id,
+                quantity: 1,
+                periodicPartChangeId: partChangeId,
+                isPeriodicPartChange: true,
+              };
+              setActions(prevActions => [newItem, ...prevActions]);
+              toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
+            } else {
+              toast({
+                title: 'Dikkat',
+                description: `${partChange.stokAdi} şahsi stokunuzda bulunamadı. Manuel olarak ekleyebilirsiniz.`,
+                variant: 'default'
+              });
+            }
+          }
+        }
+      } else {
+        // If deselecting, remove from actions
+        setActions(prevActions => prevActions.filter(a => a.periodicPartChangeId !== partChangeId));
+      }
+
+      return newSelected;
+    });
   };
 
   const openOperationModal = () => {
@@ -478,6 +616,10 @@ export default function IslemFormuPage() {
         toast({ title: 'Eksik Bilgi', description: 'Lütfen parça kodu, adı ve seri numarasını girin.', variant: 'destructive' });
         return;
       }
+
+      // Check if this matches a periodic part change
+      const matchingPeriodic = periodicPartChanges.find(p => p.stokKodu === manualPartCode.trim());
+
       const newItem: ActionItem = {
         id: crypto.randomUUID(),
         type: 'part_change',
@@ -491,14 +633,29 @@ export default function IslemFormuPage() {
         removedPartStokAdi: removedPartStokAdi.trim() || manualPartName.trim(),
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
+        periodicPartChangeId: matchingPeriodic?.id,
+        isPeriodicPartChange: !!matchingPeriodic,
       };
       setActions(prev => [newItem, ...prev]);
+
+      // If it matches a periodic part, add to selected periodic parts
+      if (matchingPeriodic && !selectedPeriodicParts.includes(matchingPeriodic.id)) {
+        setSelectedPeriodicParts(prev => [...prev, matchingPeriodic.id]);
+        toast({
+          title: 'Periyodik Değişim Algılandı',
+          description: `${matchingPeriodic.stokAdi} periyodik değişim olarak kaydedilecek.`,
+        });
+      }
     } else if (selectedStockItem) {
       // Check if this stock item is already in the actions list
       if (actions.some(a => a.personalStockId === selectedStockItem.id)) {
         toast({ title: 'Uyarı', description: 'Bu parça zaten listeye eklendi.', variant: 'default' });
         return;
       }
+
+      // Check if this matches a periodic part change
+      const matchingPeriodic = periodicPartChanges.find(p => p.stokKodu === selectedStockItem.stokKodu);
+
       const newItem: ActionItem = {
         id: crypto.randomUUID(),
         type: 'part_change',
@@ -512,8 +669,19 @@ export default function IslemFormuPage() {
         removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
+        periodicPartChangeId: matchingPeriodic?.id,
+        isPeriodicPartChange: !!matchingPeriodic,
       };
       setActions(prev => [newItem, ...prev]);
+
+      // If it matches a periodic part, add to selected periodic parts
+      if (matchingPeriodic && !selectedPeriodicParts.includes(matchingPeriodic.id)) {
+        setSelectedPeriodicParts(prev => [...prev, matchingPeriodic.id]);
+        toast({
+          title: 'Periyodik Değişim Algılandı',
+          description: `${matchingPeriodic.stokAdi} periyodik değişim olarak kaydedilecek.`,
+        });
+      }
     } else {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen şahsi stokunuzdan bir parça seçin.', variant: 'destructive' });
       return;
@@ -754,6 +922,67 @@ export default function IslemFormuPage() {
           }
         }
 
+        // Create periodic part change logs for each part change (both selected periodic parts and matching parts)
+        const periodicPartChangeIds = new Set<string>();
+
+        // Add selected periodic parts
+        selectedPeriodicParts.forEach(id => periodicPartChangeIds.add(id));
+
+        // Also check if any part change matches a periodic part (even if not explicitly selected)
+        for (const partChange of partChanges) {
+          if (partChange.periodicPartChangeId) {
+            periodicPartChangeIds.add(partChange.periodicPartChangeId);
+          } else {
+            // Check if this part matches any periodic part change by stokKodu
+            const matchingPeriodic = periodicPartChanges.find(p => p.stokKodu === partChange.stokKodu);
+            if (matchingPeriodic) {
+              periodicPartChangeIds.add(matchingPeriodic.id);
+            }
+          }
+        }
+
+        // Create logs for all identified periodic part changes
+        for (const periodicId of periodicPartChangeIds) {
+          const periodic = periodicPartChanges.find(p => p.id === periodicId);
+          if (periodic) {
+            const nextDueDate = new Date(now);
+            switch (periodic.periodUnit) {
+              case 'hafta':
+                nextDueDate.setDate(nextDueDate.getDate() + (periodic.periodValue * 7));
+                break;
+              case 'ay':
+                nextDueDate.setMonth(nextDueDate.getMonth() + periodic.periodValue);
+                break;
+              case 'yil':
+                nextDueDate.setFullYear(nextDueDate.getFullYear() + periodic.periodValue);
+                break;
+            }
+
+            // Find the matching part change in actions
+            const matchingPartChange = partChanges.find(p =>
+              p.periodicPartChangeId === periodicId || p.stokKodu === periodic.stokKodu
+            );
+
+            const periodicLogRef = doc(collection(db, 'periodicPartChangeLogs'));
+            batch.set(periodicLogRef, {
+              deviceId,
+              periodicPartChangeId: periodic.id,
+              stokKodu: periodic.stokKodu,
+              stokAdi: periodic.stokAdi,
+              completedAt: Timestamp.fromDate(now),
+              completedByUid: currentUserProfile?.uid || '',
+              completedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+              nextDueDate: Timestamp.fromDate(nextDueDate),
+              formId: formRef.id,
+              formType: 'teknik_servis',
+              installedPartSerialNumber: matchingPartChange?.serialNumber || null,
+              installedPartFromStock: !!matchingPartChange?.personalStockId,
+              removedPartSerialNumber: matchingPartChange?.removedPartSerialNumber || null,
+              removedPartImageUrl: matchingPartChange?.removedPartImageUrl || null,
+            });
+          }
+        }
+
         await batch.commit();
 
         toast({title: 'Başarılı', description: `İşlem formu #${formRef.id.substring(0,6)}... kaydedildi.`});
@@ -762,6 +991,7 @@ export default function IslemFormuPage() {
         setIslemTuru('');
         setAciklama('');
         setSelectedMaintenanceTasks([]);
+        setSelectedPeriodicParts([]);
 
         // Refresh personal stock
         const q = query(
@@ -926,6 +1156,70 @@ export default function IslemFormuPage() {
                 {selectedMaintenanceTasks.length > 0 && (
                   <p className="text-xs text-muted-foreground mt-2">
                     {selectedMaintenanceTasks.length} bakım işi seçildi
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Periyodik Parça Değişimi Listesi - only when periyodik_bakim selected */}
+            {islemTuru === 'periyodik_bakim' && periodicPartChangesWithStatus.length > 0 && (
+              <div className="p-4 border rounded-lg bg-muted/30">
+                <Label className="flex items-center gap-2 mb-4">
+                  <Package className="h-4 w-4" />
+                  Periyodik Parça Değişimleri
+                </Label>
+                <div className="border rounded-md">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12"></TableHead>
+                        <TableHead>Ürün</TableHead>
+                        <TableHead className="w-24 text-center">Periyot</TableHead>
+                        <TableHead className="w-36 text-center">Kalan Gün</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
+                        <TableRow
+                          key={partChange.id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => togglePeriodicPart(partChange.id)}
+                        >
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedPeriodicParts.includes(partChange.id)}
+                              onCheckedChange={() => togglePeriodicPart(partChange.id)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{partChange.stokAdi}</p>
+                              <p className="text-xs text-muted-foreground font-mono">{partChange.stokKodu}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
+                          <TableCell className="text-center">
+                            {daysRemaining === null ? (
+                              <span className="text-xs text-muted-foreground italic">Henüz değişilmedi</span>
+                            ) : isOverdue ? (
+                              <span className="text-xs font-medium text-red-600 dark:text-red-400 flex items-center justify-center gap-1">
+                                <AlertTriangle className="h-3 w-3" />
+                                {Math.abs(daysRemaining)} gün gecikmiş
+                              </span>
+                            ) : (
+                              <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+                                {daysRemaining} gün kaldı
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {selectedPeriodicParts.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {selectedPeriodicParts.length} periyodik parça değişimi seçildi (otomatik olarak değişen parçalar listesine eklendi)
                   </p>
                 )}
               </div>
