@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar } from 'lucide-react';
+import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import {
   calculateAllPerformances,
@@ -223,6 +223,16 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
                   subValue="7 gün içinde"
                   score={metrics.recurrencePenalty}
                   tooltip="Çözümden sonra 7 gün içinde aynı cihazda tekrar arıza. Her tekrar -2 puan ceza."
+                />
+              )}
+              {(metrics.overdueMaintenanceTasks > 0 || metrics.overduePeriodicParts > 0) && (
+                <MetricItem
+                  icon={Timer}
+                  label="Gecikmiş Bakım"
+                  value={`${metrics.overdueMaintenanceTasks + metrics.overduePeriodicParts} adet`}
+                  subValue={`${metrics.overdueMaintenanceTasks} iş, ${metrics.overduePeriodicParts} parça`}
+                  score={metrics.overduePenalty}
+                  tooltip="Ana sorumluluk laboratuvarlarındaki gecikmiş periyodik bakım işleri ve parça değişimleri. Her gecikme -3 puan ceza."
                 />
               )}
             </div>

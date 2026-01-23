@@ -129,7 +129,8 @@ export interface User {
   phoneNumber?: string;
   createdAt?: Date;
   accessibleViews?: AppView[];
-  assignedLaboratories?: string[]; // Array of laboratory IDs
+  assignedLaboratories?: string[]; // Array of laboratory IDs - tüm yetkili laboratuvarlar
+  primaryLaboratories?: string[]; // Array of laboratory IDs - ana sorumluluk laboratuvarları (performans puanı için)
   assignedDepots?: string[]; // Array of depot IDs
   assignedBrands?: string[]; // Array of brand names
   notificationsEnabled?: boolean; // User notification preferences
