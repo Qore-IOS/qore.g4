@@ -40,6 +40,8 @@ import {
   ArrowLeftRight,
   History,
   ImageIcon,
+  HandCoins,
+  XCircle,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -58,6 +60,7 @@ export default function YedekParcaTransferPage() {
   const [spareParts, setSpareParts] = useState<ProductCode[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [pendingReturns, setPendingReturns] = useState<PendingReturn[]>([]);
+  const [borrowedParts, setBorrowedParts] = useState<any[]>([]);
   const [transferLogs, setTransferLogs] = useState<any[]>([]);
 
   // Image preview
@@ -119,6 +122,24 @@ export default function YedekParcaTransferPage() {
         // Sort by requestedAt in memory (newest first)
         pending.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
         setPendingReturns(pending);
+
+        // Fetch borrowed spare parts (status === 'pending')
+        const borrowedQuery = query(
+          collection(db, 'borrowedSpareParts'),
+          where('status', '==', 'pending')
+        );
+        const borrowedSnap = await getDocs(borrowedQuery);
+        const borrowed = borrowedSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            borrowedAt: data.borrowedAt?.toDate ? data.borrowedAt.toDate() : new Date(),
+          };
+        });
+        // Sort by borrowedAt in memory (newest first)
+        borrowed.sort((a, b) => new Date(b.borrowedAt).getTime() - new Date(a.borrowedAt).getTime());
+        setBorrowedParts(borrowed);
 
         // Fetch recent transfer logs - no orderBy to avoid index requirement
         const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
@@ -335,6 +356,88 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  // Approve borrowed part
+  const approveBorrowedPart = async (borrowed: any) => {
+    try {
+      const now = new Date();
+
+      // Update borrowed record as approved
+      await updateDoc(doc(db, 'borrowedSpareParts', borrowed.id), {
+        status: 'approved',
+        approvedAt: Timestamp.fromDate(now),
+        approvedByUid: currentUserProfile?.uid || '',
+        approvedByName: currentUserProfile?.name || '',
+      });
+
+      // Create log entry
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'borrowed_approved',
+        stokKodu: borrowed.stokKodu,
+        stokAdi: borrowed.stokAdi,
+        serialNumber: borrowed.serialNumber,
+        deviceId: borrowed.deviceId,
+        deviceName: borrowed.deviceName,
+        borrowedByUid: borrowed.borrowedByUid,
+        borrowedByName: borrowed.borrowedByName,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      toast({
+        title: 'Onaylandı',
+        description: `${borrowed.stokAdi} (${borrowed.serialNumber}) borç kaydı onaylandı.`,
+      });
+
+      // Refresh borrowed parts
+      setBorrowedParts(prev => prev.filter(b => b.id !== borrowed.id));
+    } catch (err) {
+      console.error('Error approving borrowed part:', err);
+      toast({ title: 'Hata', description: 'İşlem sırasında hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  // Reject borrowed part
+  const rejectBorrowedPart = async (borrowed: any) => {
+    try {
+      const now = new Date();
+
+      // Update borrowed record as rejected
+      await updateDoc(doc(db, 'borrowedSpareParts', borrowed.id), {
+        status: 'rejected',
+        rejectedAt: Timestamp.fromDate(now),
+        rejectedByUid: currentUserProfile?.uid || '',
+        rejectedByName: currentUserProfile?.name || '',
+      });
+
+      // Create log entry
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'borrowed_rejected',
+        stokKodu: borrowed.stokKodu,
+        stokAdi: borrowed.stokAdi,
+        serialNumber: borrowed.serialNumber,
+        deviceId: borrowed.deviceId,
+        deviceName: borrowed.deviceName,
+        borrowedByUid: borrowed.borrowedByUid,
+        borrowedByName: borrowed.borrowedByName,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      toast({
+        title: 'Reddedildi',
+        description: `${borrowed.stokAdi} (${borrowed.serialNumber}) borç kaydı reddedildi.`,
+      });
+
+      // Refresh borrowed parts
+      setBorrowedParts(prev => prev.filter(b => b.id !== borrowed.id));
+    } catch (err) {
+      console.error('Error rejecting borrowed part:', err);
+      toast({ title: 'Hata', description: 'İşlem sırasında hata oluştu.', variant: 'destructive' });
+    }
+  };
+
   // Action labels for logs
   const getActionLabel = (action: string) => {
     const labels: Record<string, string> = {
@@ -344,6 +447,9 @@ export default function YedekParcaTransferPage() {
       submit_to_depot: 'Depoya Teslim',
       return_confirmed: 'İade Teslim Alındı',
       submit_confirmed: 'Teslim Alındı',
+      borrowed_part: 'Borç Parça Kullanıldı',
+      borrowed_approved: 'Borç Onaylandı',
+      borrowed_rejected: 'Borç Reddedildi',
     };
     return labels[action] || action;
   };
@@ -387,10 +493,14 @@ export default function YedekParcaTransferPage() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="transfer">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="transfer">
                 <Send className="h-4 w-4 mr-2" />
                 Transfer
+              </TabsTrigger>
+              <TabsTrigger value="borrowed">
+                <HandCoins className="h-4 w-4 mr-2" />
+                Borç Alınan ({borrowedParts.length})
               </TabsTrigger>
               <TabsTrigger value="pending">
                 <Clock className="h-4 w-4 mr-2" />
@@ -591,6 +701,81 @@ export default function YedekParcaTransferPage() {
                   <ArrowLeftRight className="h-12 w-12 mx-auto mb-4 opacity-20" />
                   <p>Henüz transfer edilecek ürün eklenmedi.</p>
                   <p className="text-sm">Yukarıdaki formu kullanarak ürün ekleyin.</p>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Borrowed Parts Tab */}
+            <TabsContent value="borrowed" className="mt-4">
+              {borrowedParts.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <HandCoins className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                  <p>Onay bekleyen borç alınmış parça bulunmuyor.</p>
+                </div>
+              ) : (
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Ürün</TableHead>
+                        <TableHead>Seri No</TableHead>
+                        <TableHead>Cihaz / Lab</TableHead>
+                        <TableHead>Kullanan</TableHead>
+                        <TableHead>Tarih</TableHead>
+                        <TableHead className="w-48"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {borrowedParts.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{item.stokAdi}</p>
+                              <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono">{item.serialNumber}</TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="text-sm">{item.deviceName}</p>
+                              <p className="text-xs text-muted-foreground">{item.labName}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="text-sm">{item.borrowedByName}</p>
+                              <Badge variant="outline" className="text-xs">
+                                {item.formType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {format(item.borrowedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => approveBorrowedPart(item)}
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                Onayla
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => rejectBorrowedPart(item)}
+                              >
+                                <XCircle className="h-4 w-4 mr-1" />
+                                Reddet
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </TabsContent>
