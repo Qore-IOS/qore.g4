@@ -1009,3 +1009,20 @@ export interface RouteRequest {
   reviewedAt?: TimestampLike;
   rejectionReason?: string;
 }
+
+// ==========================================
+// Arıza Tanımlamaları Sistemi
+// ==========================================
+
+// Arıza tanımı tipi (teknik servis veya aplikasyon)
+export type FaultDefinitionType = 'teknik_servis' | 'aplikasyon';
+
+// Arıza tanımı
+export interface FaultDefinition {
+  id: string;
+  name: string;                    // Arıza adı
+  type: FaultDefinitionType;       // Teknik servis veya aplikasyon
+  createdAt?: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}

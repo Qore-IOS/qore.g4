@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { db, storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit } from '@/lib/types';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -40,13 +40,14 @@ type OperationType =
   | 'diger';
 
 // İşlem Türü
-type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'alis' | 'roche_bilgisayar_arizasi' | '';
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'ariza' | 'alis' | 'roche_bilgisayar_arizasi' | '';
 
 // İşlem Türü Labels
 const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
   '': 'Seçiniz',
   rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
   periyodik_bakim: 'Periyodik Bakım',
+  ariza: 'Arıza',
   alis: 'ALIS',
   roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
@@ -184,6 +185,10 @@ export default function AplikasyonIslemFormuPage() {
   const [periodicPartChanges, setPeriodicPartChanges] = useState<PeriodicPartChange[]>([]);
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
+
+  // Fault definitions for arıza işlem türü
+  const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
+  const [selectedFaultId, setSelectedFaultId] = useState<string>('');
 
   useEffect(() => {
     if (!deviceId) return;
@@ -328,6 +333,27 @@ export default function AplikasyonIslemFormuPage() {
       }
     })();
   }, [deviceId]);
+
+  // Fetch fault definitions for aplikasyon type
+  useEffect(() => {
+    (async () => {
+      try {
+        const q = query(
+          collection(db, 'faultDefinitions'),
+          where('type', '==', 'aplikasyon')
+        );
+        const snap = await getDocs(q);
+        const faults = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          createdAt: d.data().createdAt?.toDate?.() || null,
+        })) as FaultDefinition[];
+        setFaultDefinitions(faults);
+      } catch (err) {
+        console.error("Error fetching fault definitions:", err);
+      }
+    })();
+  }, []);
 
   // Sorted users based on current user's role
   const sortedUsers = useMemo(() => {
@@ -717,6 +743,12 @@ export default function AplikasyonIslemFormuPage() {
       return;
     }
 
+    // Validate fault selection when ariza is selected
+    if (islemTuru === 'ariza' && !selectedFaultId) {
+      toast({ title: 'Eksik Bilgi', description: 'Arıza işlem türü seçildiğinde arıza türünü belirtmeniz zorunludur.', variant: 'destructive' });
+      return;
+    }
+
     // Validate part changes have quantity
     const invalidPart = actions.find(a => a.type === 'part_change' && a.quantity <= 0);
     if (invalidPart) {
@@ -767,6 +799,9 @@ export default function AplikasyonIslemFormuPage() {
           .filter(p => selectedMaintenanceTasks.includes(p.id))
           .map(p => ({ id: p.id, taskName: p.taskName }));
 
+        // Get selected fault for ariza type
+        const selectedFault = islemTuru === 'ariza' ? faultDefinitions.find(f => f.id === selectedFaultId) : null;
+
         // Create form document
         const formRef = doc(collection(db, 'aplikasyonActionForms'));
         batch.set(formRef, {
@@ -789,7 +824,32 @@ export default function AplikasyonIslemFormuPage() {
             createdByUid: currentUserProfile?.uid,
             formType: 'aplikasyon',
             selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
+            // Fault info for ariza type
+            faultDefinitionId: selectedFault?.id || null,
+            faultName: selectedFault?.name || null,
         });
+
+        // Create closed fault report when ariza is selected
+        if (islemTuru === 'ariza' && selectedFault) {
+          const faultReportRef = doc(collection(db, 'deviceFaultReports'));
+          batch.set(faultReportRef, {
+            deviceId,
+            hospitalId: device?.hospitalId,
+            faultType: 'aplikasyon',
+            faultDefinitionId: selectedFault.id,
+            faultName: selectedFault.name,
+            status: 'closed',
+            reportedAt: Timestamp.fromDate(now),
+            reportedByUid: currentUserProfile?.uid || '',
+            reportedByName: currentUserProfile?.name || 'Bilinmeyen',
+            resolvedAt: Timestamp.fromDate(now),
+            resolvedByUid: currentUserProfile?.uid || '',
+            resolvedByName: currentUserProfile?.name || 'Bilinmeyen',
+            actionFormId: formRef.id,
+            actionFormType: 'aplikasyon',
+            resolutionNotes: aciklama.trim(),
+          });
+        }
 
         // Process part changes - update personal stock and create removed part entries
         const partChanges = actions.filter(a => a.type === 'part_change');
@@ -991,6 +1051,7 @@ export default function AplikasyonIslemFormuPage() {
         setIslemTuru('');
         setSelectedMaintenanceTasks([]);
         setSelectedPeriodicParts([]);
+        setSelectedFaultId('');
 
         // Refresh personal stock
         const q = query(
@@ -1070,13 +1131,17 @@ export default function AplikasyonIslemFormuPage() {
                   <Cog className="h-4 w-4" />
                   İşlem Türü
                 </Label>
-                <Select value={islemTuru} onValueChange={(v) => setIslemTuru(v as IslemTuru)}>
+                <Select value={islemTuru} onValueChange={(v) => {
+                  setIslemTuru(v as IslemTuru);
+                  if (v !== 'ariza') setSelectedFaultId('');
+                }}>
                   <SelectTrigger className="w-full sm:w-64">
                     <SelectValue placeholder="İşlem türü seçin (opsiyonel)..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="rutin_kurum_ziyareti">Rutin Kurum Ziyareti</SelectItem>
                     <SelectItem value="periyodik_bakim">Periyodik Bakım</SelectItem>
+                    <SelectItem value="ariza">Arıza</SelectItem>
                     <SelectItem value="alis">ALIS</SelectItem>
                     <SelectItem value="roche_bilgisayar_arizasi">Roche Bilgisayar Arızası</SelectItem>
                   </SelectContent>
@@ -1086,6 +1151,35 @@ export default function AplikasyonIslemFormuPage() {
                 </p>
               </div>
             </div>
+
+            {/* Arıza Seçimi - only when ariza selected */}
+            {islemTuru === 'ariza' && (
+              <div className="p-4 border rounded-lg bg-red-50/50 dark:bg-red-950/20">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                    Arıza Türü <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={selectedFaultId} onValueChange={setSelectedFaultId}>
+                    <SelectTrigger className="w-full sm:w-80">
+                      <SelectValue placeholder="Tespit edilen arızayı seçin..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {faultDefinitions.length === 0 ? (
+                        <SelectItem value="no-faults" disabled>Henüz arıza tanımı eklenmemiş</SelectItem>
+                      ) : (
+                        faultDefinitions.map(fault => (
+                          <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Arıza seçildiğinde form kaydedilirken otomatik olarak çözülmüş arıza kaydı oluşturulacaktır.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Periyodik Bakım İş Listesi - only when periyodik_bakim selected */}
             {islemTuru === 'periyodik_bakim' && (
