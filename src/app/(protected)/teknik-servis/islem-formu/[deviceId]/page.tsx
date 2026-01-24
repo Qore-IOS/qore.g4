@@ -195,6 +195,11 @@ export default function IslemFormuPage() {
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
   const [selectedFaultId, setSelectedFaultId] = useState<string>('');
 
+  // Test selection for arıza
+  const [availableTests, setAvailableTests] = useState<string[]>([]);
+  const [selectedTests, setSelectedTests] = useState<string[]>([]);
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+
   // Fetch device and hospital
   useEffect(() => {
     if (!deviceId) return;
@@ -270,6 +275,36 @@ export default function IslemFormuPage() {
       }
     })();
   }, []);
+
+  // Fetch available tests from hospital minMaxRules + productCodes
+  useEffect(() => {
+    if (!device?.hospitalId) return;
+    (async () => {
+      try {
+        // Get minMaxRules for this hospital
+        const minMaxSnap = await getDocs(
+          collection(db, 'hospitals', device.hospitalId, 'minMaxRules')
+        );
+        const stokKodulari = minMaxSnap.docs.map(d => d.id);
+
+        // Get all ProductCodes
+        const productCodesSnap = await getDocs(collection(db, 'productCodes'));
+        const testNames = new Set<string>();
+
+        // Match products with rules and extract testAdi
+        productCodesSnap.docs.forEach(d => {
+          const data = d.data();
+          if (stokKodulari.includes(data.stokKodu) && data.testAdi) {
+            testNames.add(data.testAdi);
+          }
+        });
+
+        setAvailableTests(Array.from(testNames).sort());
+      } catch (err) {
+        console.error("Error fetching available tests:", err);
+      }
+    })();
+  }, [device?.hospitalId]);
 
   // Fetch users for accompanying personnel
   useEffect(() => {
@@ -857,6 +892,7 @@ export default function IslemFormuPage() {
             resolvedFromFormId: formRef.id,
             resolvedFromFormType: 'teknik_servis',
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+            relatedTests: selectedTests.length > 0 ? selectedTests : null,
           });
         }
 
@@ -1062,6 +1098,7 @@ export default function IslemFormuPage() {
         setSelectedMaintenanceTasks([]);
         setSelectedPeriodicParts([]);
         setSelectedFaultId('');
+        setSelectedTests([]);
 
         // Refresh personal stock
         const q = query(
@@ -1172,30 +1209,76 @@ export default function IslemFormuPage() {
 
             {/* Arıza Seçimi - only when ariza selected */}
             {islemTuru === 'ariza' && (
-              <div className="p-4 border rounded-lg bg-red-50 dark:bg-red-950/20">
-                <Label className="flex items-center gap-2 mb-4">
-                  <AlertTriangle className="h-4 w-4 text-red-600" />
-                  Tespit Edilen Arıza <span className="text-destructive">*</span>
-                </Label>
-                {faultDefinitions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Teknik servis için tanımlı arıza bulunmuyor.
-                    Arıza tanımlamaları panelinden arıza ekleyebilirsiniz.
-                  </p>
-                ) : (
-                  <Select value={selectedFaultId} onValueChange={setSelectedFaultId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Arıza seçin..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {faultDefinitions.map(fault => (
-                        <SelectItem key={fault.id} value={fault.id}>
-                          {fault.name}
-                        </SelectItem>
+              <div className="p-4 border rounded-lg bg-red-50 dark:bg-red-950/20 space-y-4">
+                <div>
+                  <Label className="flex items-center gap-2 mb-4">
+                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                    Tespit Edilen Arıza <span className="text-destructive">*</span>
+                  </Label>
+                  {faultDefinitions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Teknik servis için tanımlı arıza bulunmuyor.
+                      Arıza tanımlamaları panelinden arıza ekleyebilirsiniz.
+                    </p>
+                  ) : (
+                    <Select value={selectedFaultId} onValueChange={setSelectedFaultId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Arıza seçin..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {faultDefinitions.map(fault => (
+                          <SelectItem key={fault.id} value={fault.id}>
+                            {fault.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                {/* İlişkili Test Seçimi */}
+                <div className="pt-3 border-t border-red-200 dark:border-red-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-sm">İlişkili Testler (Opsiyonel)</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsTestModalOpen(true)}
+                      disabled={availableTests.length === 0}
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Test Seç
+                    </Button>
+                  </div>
+                  {availableTests.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Bu laboratuvara tanımlı test bulunamadı.
+                    </p>
+                  ) : selectedTests.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedTests.map(test => (
+                        <span
+                          key={test}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs rounded-full"
+                        >
+                          {test}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}
+                            className="hover:text-red-600"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
                       ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Arızayla ilişkili test seçilmedi.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1826,6 +1909,52 @@ export default function IslemFormuPage() {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Test Selection Modal */}
+      <Dialog open={isTestModalOpen} onOpenChange={setIsTestModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>İlişkili Test Seç</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              Arızayla ilişkili testleri seçin. Bu bilgi arıza istatistiklerine yansıtılacaktır.
+            </p>
+            <ScrollArea className="h-64 border rounded-md">
+              <div className="p-2 space-y-1">
+                {availableTests.map(test => (
+                  <button
+                    key={test}
+                    onClick={() => {
+                      setSelectedTests(prev =>
+                        prev.includes(test)
+                          ? prev.filter(t => t !== test)
+                          : [...prev, test]
+                      );
+                    }}
+                    className={`w-full text-left p-2 rounded-md transition-colors flex items-center justify-between ${
+                      selectedTests.includes(test)
+                        ? 'bg-primary/10 border-primary border'
+                        : 'hover:bg-muted'
+                    }`}
+                  >
+                    <span className="font-medium">{test}</span>
+                    {selectedTests.includes(test) && (
+                      <span className="text-primary text-sm">Seçildi</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTestModalOpen(false)}>Kapat</Button>
+            <Button onClick={() => setIsTestModalOpen(false)}>
+              Tamam ({selectedTests.length} test)
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
