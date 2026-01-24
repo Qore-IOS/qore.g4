@@ -99,6 +99,10 @@ export default function CihazYonetimiHost() {
                 <Settings className="mr-2 h-5 w-5" />
                 Cihaz Modelleri
             </Button>
+            <Button variant="ghost" onClick={() => router.push('/ariza-tanimlamalari')} className="text-muted-foreground hover:text-primary">
+                <ShieldAlert className="mr-2 h-5 w-5" />
+                Arıza Tanımlamaları
+            </Button>
             <Button variant="ghost" onClick={() => window.open('/raporlama/ariza-raporu', '_blank')} className="text-muted-foreground hover:text-primary">
               <FileCode className="mr-2 h-5 w-5" />
               HTML Raporu

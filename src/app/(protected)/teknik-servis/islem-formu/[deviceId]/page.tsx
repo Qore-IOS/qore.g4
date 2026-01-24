@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { db, storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit } from '@/lib/types';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -191,6 +191,10 @@ export default function IslemFormuPage() {
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
 
+  // Fault definitions for arıza
+  const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
+  const [selectedFaultId, setSelectedFaultId] = useState<string>('');
+
   // Fetch device and hospital
   useEffect(() => {
     if (!deviceId) return;
@@ -246,6 +250,26 @@ export default function IslemFormuPage() {
       }
     })();
   }, [currentUserProfile?.uid]);
+
+  // Fetch fault definitions for teknik servis
+  useEffect(() => {
+    (async () => {
+      try {
+        const q = query(
+          collection(db, 'faultDefinitions'),
+          where('type', '==', 'teknik_servis')
+        );
+        const snap = await getDocs(q);
+        const faults = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+        })) as FaultDefinition[];
+        setFaultDefinitions(faults);
+      } catch (err) {
+        console.error("Error fetching fault definitions:", err);
+      }
+    })();
+  }, []);
 
   // Fetch users for accompanying personnel
   useEffect(() => {
@@ -719,6 +743,12 @@ export default function IslemFormuPage() {
       return;
     }
 
+    // Validate fault selection when ariza is selected
+    if (islemTuru === 'ariza' && !selectedFaultId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tespit edilen arızayı seçin.', variant: 'destructive' });
+      return;
+    }
+
     // Validate açıklama (zorunlu)
     if (!aciklama.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen açıklama alanını doldurun.', variant: 'destructive' });
@@ -768,6 +798,9 @@ export default function IslemFormuPage() {
           .filter(p => selectedMaintenanceTasks.includes(p.id))
           .map(p => ({ id: p.id, taskName: p.taskName }));
 
+        // Get selected fault info if ariza is selected
+        const selectedFault = islemTuru === 'ariza' ? faultDefinitions.find(f => f.id === selectedFaultId) : null;
+
         // Create form document
         const formRef = doc(collection(db, 'deviceActionForms'));
         batch.set(formRef, {
@@ -791,7 +824,41 @@ export default function IslemFormuPage() {
             createdByUid: currentUserProfile?.uid,
             formType: 'teknik_servis',
             selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
+            // Fault info when ariza is selected
+            selectedFaultId: selectedFault?.id || null,
+            selectedFaultName: selectedFault?.name || null,
         });
+
+        // Create closed fault report when ariza is selected
+        if (islemTuru === 'ariza' && selectedFault) {
+          const faultReportRef = doc(collection(db, 'deviceFaultReports'));
+          batch.set(faultReportRef, {
+            deviceId,
+            hospitalId: device?.hospitalId,
+            labName: hospital?.name,
+            deviceName: device?.cihazAdi || device?.model,
+            seriNumarasi: device?.seriNumarasi,
+            faultType: 'teknik_servis',
+            faultDefinitionId: selectedFault.id,
+            faultName: selectedFault.name,
+            description: aciklama.trim(),
+            status: 'closed',
+            openedAt: Timestamp.fromDate(now),
+            closedAt: Timestamp.fromDate(now),
+            openedByUid: currentUserProfile?.uid,
+            openedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            closedByUid: currentUserProfile?.uid,
+            closedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            assignedToUid: currentUserProfile?.uid,
+            assignedToName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            assignedAt: Timestamp.fromDate(now),
+            interventionStartedAt: Timestamp.fromDate(now),
+            interventionType: 'yerinde',
+            resolvedFromFormId: formRef.id,
+            resolvedFromFormType: 'teknik_servis',
+            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+          });
+        }
 
         // Process part changes - update personal stock and create removed part entries
         const partChanges = actions.filter(a => a.type === 'part_change');
@@ -994,6 +1061,7 @@ export default function IslemFormuPage() {
         setAciklama('');
         setSelectedMaintenanceTasks([]);
         setSelectedPeriodicParts([]);
+        setSelectedFaultId('');
 
         // Refresh personal stock
         const q = query(
@@ -1101,6 +1169,35 @@ export default function IslemFormuPage() {
                 </Select>
               </div>
             </div>
+
+            {/* Arıza Seçimi - only when ariza selected */}
+            {islemTuru === 'ariza' && (
+              <div className="p-4 border rounded-lg bg-red-50 dark:bg-red-950/20">
+                <Label className="flex items-center gap-2 mb-4">
+                  <AlertTriangle className="h-4 w-4 text-red-600" />
+                  Tespit Edilen Arıza <span className="text-destructive">*</span>
+                </Label>
+                {faultDefinitions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Teknik servis için tanımlı arıza bulunmuyor.
+                    Arıza tanımlamaları panelinden arıza ekleyebilirsiniz.
+                  </p>
+                ) : (
+                  <Select value={selectedFaultId} onValueChange={setSelectedFaultId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Arıza seçin..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {faultDefinitions.map(fault => (
+                        <SelectItem key={fault.id} value={fault.id}>
+                          {fault.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
 
             {/* Periyodik Bakım İş Listesi - only when periyodik_bakim selected */}
             {islemTuru === 'periyodik_bakim' && (
