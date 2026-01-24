@@ -56,6 +56,7 @@ type NewPeriodicPartRow = {
   responsibilityType: PeriodicPartResponsibility;
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
+  isPopoverOpen: boolean;
 };
 
 interface Props {
@@ -233,6 +234,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       responsibilityType: 'teknik_servis',
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
+      isPopoverOpen: false,
     };
     setNewPeriodicPartRows(prev => [...prev, newRow]);
   };
@@ -244,7 +246,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const selectProductForRow = (rowId: string, product: ProductCode) => {
     setNewPeriodicPartRows(prev => prev.map(row =>
       row.id === rowId
-        ? { ...row, productCodeId: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi }
+        ? { ...row, productCodeId: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, isPopoverOpen: false }
         : row
     ));
   };
@@ -721,7 +723,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                       <div key={row.id} className="border border-dashed rounded-md p-3 mb-2 space-y-3">
                         {/* İlk satır: Ürün seçici ve periyot */}
                         <div className="flex items-center gap-2">
-                          <Popover>
+                          <Popover open={row.isPopoverOpen} onOpenChange={(open) => updatePeriodicPartRow(row.id, 'isPopoverOpen', open)}>
                             <PopoverTrigger asChild>
                               <Button variant="outline" role="combobox" className="flex-1 justify-between">
                                 {row.stokAdi ? (
