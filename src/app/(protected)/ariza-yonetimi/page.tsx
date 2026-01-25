@@ -168,6 +168,8 @@ export default function ArizaYonetimiPage() {
             ...data,
             openedAt: data.openedAt ? (data.openedAt as Timestamp).toDate() : null,
             closedAt: data.closedAt ? (data.closedAt as Timestamp).toDate() : null,
+            assignedAt: data.assignedAt ? (data.assignedAt as Timestamp).toDate() : null,
+            interventionStartedAt: data.interventionStartedAt ? (data.interventionStartedAt as Timestamp).toDate() : null,
           } as DeviceFaultReport;
         });
         setReports(reportList);
@@ -247,30 +249,50 @@ export default function ArizaYonetimiPage() {
   };
 
   const handleExportToExcel = () => {
-    if (reports.length === 0) {
+    if (filteredReports.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
       return;
     }
-    const dataToExport = reports.map(r => {
+    const dataToExport = filteredReports.map(r => {
       const normalized = normalizeStatus(r.status);
       const statusConfig = STATUS_CONFIG[normalized];
+
+      // Süreleri dakika cinsine çevir
+      const atamaSuresiDk = r.atamaBekmeSuresi ? Math.round(r.atamaBekmeSuresi / 60000) : null;
+      const mudahaleSuresiDk = r.mudahaleBekmeSuresi ? Math.round(r.mudahaleBekmeSuresi / 60000) : null;
+      const cozumSuresiDk = r.cozumSuresi ? Math.round(r.cozumSuresi / 60000) : null;
+      const toplamSureDk = r.toplamCozumSuresi ? Math.round(r.toplamCozumSuresi / 60000) : null;
+
+      // Müdahale tipi etiketleri
+      const mudahaleTipiLabel = r.interventionType === 'telefon' ? 'Telefonla' :
+                               r.interventionType === 'kurum_ziyaret' ? 'Konumda (Kurum Ziyareti)' : '';
+
+      // Arıza tipi etiketleri
+      const arizaTipiLabel = r.faultType === 'teknik_servis' ? 'Teknik Servis' :
+                            r.faultType === 'aplikasyon' ? 'Aplikasyon' : r.faultType || '';
+
       return {
         'Rapor ID': r.id,
+        'Durum': statusConfig?.label || r.status,
         'Laboratuvar': r.labName || '',
         'Cihaz Adı': r.title || r.model || '',
         'Seri No': r.serial || '',
-        'Arıza Tipi': r.faultType || '',
-        'Açıklama': r.description || '',
+        'Arıza Tipi': arizaTipiLabel,
+        'Arıza Açıklaması': r.description || '',
         'Açan Personel': r.openedByName || '',
         'Açılış Tarihi': r.openedAt ? format(r.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
-        'Durum': statusConfig?.label || r.status,
         'Atanan Personel': r.assignedToName || '',
         'Atanma Tarihi': r.assignedAt ? format(r.assignedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
-        'Müdahale Tipi': r.interventionType === 'telefon' ? 'Telefonla' : r.interventionType === 'kurum_ziyaret' ? 'Kurumda' : '',
-        'Kapanış Tarihi': r.closedAt ? format(r.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
+        'Müdahale Türü': mudahaleTipiLabel,
+        'Müdahale Başlangıç': r.interventionStartedAt ? format(r.interventionStartedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
         'Kapatan Personel': r.closedByName || '',
+        'Kapanış Tarihi': r.closedAt ? format(r.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
         'Kapanış Açıklaması': r.closeDescription || '',
-        'Toplam Süre (dk)': r.toplamCozumSuresi ? Math.round(r.toplamCozumSuresi / 60000) : '',
+        'Atama Bekleme Süresi (dk)': atamaSuresiDk ?? '',
+        'Müdahale Bekleme Süresi (dk)': mudahaleSuresiDk ?? '',
+        'Çözüm Süresi (dk)': cozumSuresiDk ?? '',
+        'Toplam Süre (dk)': toplamSureDk ?? '',
+        'İlişkili Testler': r.relatedTests?.join(', ') || '',
       };
     });
     exportDataToExcel(dataToExport, 'Tum_Ariza_Kayitlari', 'Arızalar', toast);
