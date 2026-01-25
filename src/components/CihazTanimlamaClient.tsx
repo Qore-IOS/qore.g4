@@ -101,9 +101,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   useEffect(() => {
     const fetchProductCodes = async () => {
       try {
-        const q = query(collection(db, 'productCodes'), where('urunGrubu', '==', 'yedek_parca'));
-        const snap = await getDocs(q);
-        setProductCodes(snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode));
+        // Fetch all products and filter for yedek_parca client-side
+        // This is more robust in case of data inconsistencies
+        const snap = await getDocs(collection(db, 'productCodes'));
+        const allProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        // Filter for yedek_parca products
+        const spareParts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
+        setProductCodes(spareParts.length > 0 ? spareParts : allProducts);
       } catch (err) {
         console.error('Error fetching product codes:', err);
       }
@@ -723,7 +727,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                       <div key={row.id} className="border border-dashed rounded-md p-3 mb-2 space-y-3">
                         {/* İlk satır: Ürün seçici ve periyot */}
                         <div className="flex items-center gap-2">
-                          <Popover open={row.isPopoverOpen} onOpenChange={(open) => updatePeriodicPartRow(row.id, 'isPopoverOpen', open)}>
+                          <Popover modal={true} open={row.isPopoverOpen} onOpenChange={(open) => updatePeriodicPartRow(row.id, 'isPopoverOpen', open)}>
                             <PopoverTrigger asChild>
                               <Button variant="outline" role="combobox" className="flex-1 justify-between">
                                 {row.stokAdi ? (
@@ -734,7 +738,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[400px] p-0">
+                            <PopoverContent className="w-[400px] p-0" align="start" sideOffset={4}>
                               <Command>
                                 <CommandInput placeholder="Ürün kodu veya adı ara..." />
                                 <CommandList>
