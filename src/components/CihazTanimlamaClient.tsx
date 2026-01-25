@@ -727,7 +727,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                       <div key={row.id} className="border border-dashed rounded-md p-3 mb-2 space-y-3">
                         {/* İlk satır: Ürün seçici ve periyot */}
                         <div className="flex items-center gap-2">
-                          <Popover modal={true} open={row.isPopoverOpen} onOpenChange={(open) => updatePeriodicPartRow(row.id, 'isPopoverOpen', open)}>
+                          <Popover open={row.isPopoverOpen} onOpenChange={(open) => updatePeriodicPartRow(row.id, 'isPopoverOpen', open)}>
                             <PopoverTrigger asChild>
                               <Button variant="outline" role="combobox" className="flex-1 justify-between">
                                 {row.stokAdi ? (
@@ -738,9 +738,14 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[400px] p-0 z-[10000]" align="start" sideOffset={4}>
-                              <Command>
-                                <CommandInput placeholder="Ürün kodu veya adı ara..." />
+                            <PopoverContent
+                              className="w-[400px] p-0 z-[10000]"
+                              align="start"
+                              sideOffset={4}
+                              onOpenAutoFocus={(e) => e.preventDefault()}
+                            >
+                              <Command shouldFilter={true}>
+                                <CommandInput placeholder="Ürün kodu veya adı ara..." autoFocus />
                                 <CommandList>
                                   <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
                                   <CommandGroup>
