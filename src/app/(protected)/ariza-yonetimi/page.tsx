@@ -65,7 +65,15 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import PageShell from '@/components/responsive/PageShell.server';
-import { exportDataToExcel } from '@/lib/utils';
+import { exportDataToExcel, exportDataToPdf } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { FileText } from 'lucide-react';
 
 // Status tab değerleri
 type StatusTab = 'all' | 'atama_bekliyor' | 'mudahale_bekliyor' | 'mudahale_ediliyor' | 'cozuldu';
@@ -127,6 +135,8 @@ export default function ArizaYonetimiPage() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
 
   // Yeni 5 sekmeli filtre sistemi
   const [statusTab, setStatusTab] = useState<StatusTab>('all');
@@ -248,12 +258,8 @@ export default function ArizaYonetimiPage() {
     window.open('/ariza-yonetimi/html', '_blank');
   };
 
-  const handleExportToExcel = () => {
-    if (filteredReports.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
-      return;
-    }
-    const dataToExport = filteredReports.map(r => {
+  const getExportData = () => {
+    return filteredReports.map(r => {
       const normalized = normalizeStatus(r.status);
       const statusConfig = STATUS_CONFIG[normalized];
 
@@ -295,7 +301,31 @@ export default function ArizaYonetimiPage() {
         'İlişkili Testler': r.relatedTests?.join(', ') || '',
       };
     });
+  };
+
+  const handleExportToExcel = () => {
+    if (filteredReports.length === 0) {
+      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
+      return;
+    }
+    const dataToExport = getExportData();
     exportDataToExcel(dataToExport, 'Tum_Ariza_Kayitlari', 'Arızalar', toast);
+    setExportModalOpen(false);
+  };
+
+  const handleExportToPdf = async () => {
+    if (filteredReports.length === 0) {
+      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
+      return;
+    }
+    setExportLoading(true);
+    try {
+      const dataToExport = getExportData();
+      await exportDataToPdf(dataToExport, 'Tum_Ariza_Kayitlari', 'Tüm Arıza Kayıtları', toast);
+      setExportModalOpen(false);
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   return (
@@ -317,8 +347,8 @@ export default function ArizaYonetimiPage() {
                 <Button variant="outline" onClick={() => router.push('/ariza-yonetimi/diger-firma-gecmisi')}>
                   <Building2 className="h-4 w-4 mr-2" /> Diğer Firma Geçmişi
                 </Button>
-                <Button variant="secondary" onClick={handleExportToExcel}>
-                  <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel Dökümü Al
+                <Button variant="secondary" onClick={() => setExportModalOpen(true)}>
+                  <FileDown className="h-4 w-4 mr-2" /> Döküm Al
                 </Button>
                 <Button variant="secondary" onClick={handleOpenHtmlReport}>
                   <FileDown className="h-4 w-4 mr-2" /> HTML Raporu
@@ -548,6 +578,47 @@ export default function ArizaYonetimiPage() {
             </CardFooter>
           )}
         </Card>
+
+        {/* Export Modal */}
+        <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Döküm Formatı Seçin</DialogTitle>
+              <DialogDescription>
+                Arıza kayıtlarını hangi formatta dışa aktarmak istiyorsunuz?
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col gap-3 py-4">
+              <Button
+                variant="outline"
+                className="w-full justify-start h-14"
+                onClick={handleExportToExcel}
+              >
+                <FileSpreadsheet className="h-5 w-5 mr-3 text-green-600" />
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">Excel (.xlsx)</span>
+                  <span className="text-xs text-muted-foreground">Tablo formatında veri</span>
+                </div>
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full justify-start h-14"
+                onClick={handleExportToPdf}
+                disabled={exportLoading}
+              >
+                {exportLoading ? (
+                  <Loader2 className="h-5 w-5 mr-3 animate-spin" />
+                ) : (
+                  <FileText className="h-5 w-5 mr-3 text-red-600" />
+                )}
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">PDF (.pdf)</span>
+                  <span className="text-xs text-muted-foreground">Yatay sayfalarda tüm sütunlar</span>
+                </div>
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </PageShell>
   );

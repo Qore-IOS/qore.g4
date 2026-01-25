@@ -296,6 +296,190 @@ export function exportAllDataToJSON(data: Record<string, any[]>, fileName: strin
     }
 }
 
+// Turkish font cache for PDF export
+let turkishFontBase64ForPdf: string | null = null;
+
+async function loadTurkishFontForPdf(): Promise<string | null> {
+  if (turkishFontBase64ForPdf) return turkishFontBase64ForPdf;
+
+  try {
+    const fontUrl = 'https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf';
+    const response = await fetch(fontUrl);
+    if (!response.ok) return null;
+
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        turkishFontBase64ForPdf = result.split(',')[1];
+        resolve(turkishFontBase64ForPdf);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.error('Could not load Turkish font:', e);
+    return null;
+  }
+}
+
+function sanitizeTurkishForPdf(str: string | null | undefined): string {
+  if (!str) return '';
+  return str
+    .replace(/İ/g, 'I').replace(/ı/g, 'i')
+    .replace(/Ş/g, 'S').replace(/ş/g, 's')
+    .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
+    .replace(/Ü/g, 'U').replace(/ü/g, 'u')
+    .replace(/Ö/g, 'O').replace(/ö/g, 'o')
+    .replace(/Ç/g, 'C').replace(/ç/g, 'c');
+}
+
+function pdfText(str: string | null | undefined, useTurkish: boolean): string {
+  if (!str) return '';
+  return useTurkish ? str : sanitizeTurkishForPdf(str);
+}
+
+/**
+ * Export data to PDF in landscape orientation with all columns.
+ * Creates a plain white PDF with tabular data spanning multiple pages.
+ */
+export async function exportDataToPdf(
+  data: Record<string, any>[],
+  fileName: string,
+  title: string,
+  toastFn: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void
+): Promise<void> {
+  if (!data || data.length === 0) {
+    toastFn({ title: "Veri Yok", description: "Disa aktarilacak veri bulunamadi.", variant: "default" });
+    return;
+  }
+
+  try {
+    const [jsPDFModule, autoTableModule] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable')
+    ]);
+    const jsPDF = jsPDFModule.default;
+    const autoTable = autoTableModule.default;
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const padX = 30;
+    const padY = 30;
+
+    // Try to load Turkish font
+    const fontBase64 = await loadTurkishFontForPdf();
+    let useTurkish = false;
+    const FALLBACK_FONT = 'helvetica';
+    let FONT = FALLBACK_FONT;
+
+    if (fontBase64) {
+      try {
+        doc.addFileToVFS('NotoSans-Regular.ttf', fontBase64);
+        doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+        FONT = 'NotoSans';
+        useTurkish = true;
+      } catch (e) {
+        console.error('Could not setup Turkish font:', e);
+      }
+    }
+
+    doc.setFont(FONT);
+
+    // Get headers from first data object
+    const headers = Object.keys(data[0]);
+
+    // Convert data to rows
+    const rows = data.map(item =>
+      headers.map(header => {
+        const value = item[header];
+        if (value === null || value === undefined) return '';
+        return pdfText(String(value), useTurkish);
+      })
+    );
+
+    // Process headers for display
+    const displayHeaders = headers.map(h => pdfText(h, useTurkish));
+
+    // Calculate column widths based on content
+    const availableWidth = pageW - (padX * 2);
+    const numColumns = headers.length;
+
+    // Set base column width, but limit minimum width
+    const baseColWidth = Math.max(availableWidth / numColumns, 35);
+
+    autoTable(doc, {
+      head: [displayHeaders],
+      body: rows,
+      startY: padY + 25,
+      theme: 'grid',
+      styles: {
+        font: FONT,
+        fontSize: 6,
+        cellPadding: 3,
+        overflow: 'linebreak',
+        lineWidth: 0.5,
+      },
+      headStyles: {
+        fillColor: [60, 60, 60],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6,
+        halign: 'center',
+      },
+      bodyStyles: {
+        valign: 'middle',
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245],
+      },
+      margin: { left: padX, right: padX, top: padY + 25, bottom: padY },
+      tableWidth: 'auto',
+      didDrawPage: (data) => {
+        // Header on each page
+        doc.setFont(FONT, 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(0, 0, 0);
+        doc.text(pdfText(title, useTurkish), padX, padY + 10);
+
+        // Date on right
+        doc.setFont(FONT, 'normal');
+        doc.setFontSize(8);
+        const dateStr = new Date().toLocaleDateString('tr-TR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        doc.text(dateStr, pageW - padX, padY + 10, { align: 'right' });
+
+        // Page number at footer
+        const pageNumber = doc.getCurrentPageInfo().pageNumber;
+        const totalPages = doc.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.text(
+          `Sayfa ${pageNumber}`,
+          pageW / 2,
+          pageH - 15,
+          { align: 'center' }
+        );
+      },
+    });
+
+    const safeFileName = fileName.replace(/[^a-z0-9_]/gi, '_');
+    const dateStr = new Date().toLocaleDateString('tr-TR', {day:'2-digit', month: '2-digit', year:'numeric'}).replace(/\./g, '-');
+    doc.save(`${safeFileName}_${dateStr}.pdf`);
+
+    toastFn({ title: "Basarili", description: `${fileName} basariyla PDF olarak disari aktarildi.` });
+  } catch (error) {
+    console.error("PDF export error:", error);
+    toastFn({ title: "Hata", description: "PDF'e aktarilirken bir sorun olustu.", variant: "destructive" });
+  }
+}
+
 // Preloaded notification sound for instant playback
 let notificationAudio: HTMLAudioElement | null = null;
 
