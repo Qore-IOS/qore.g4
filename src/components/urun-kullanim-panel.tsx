@@ -10,11 +10,11 @@
 import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useParams } from 'next/navigation';
-import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup, TrashBinRecord } from '@/lib/types';
+import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup, TrashBinRecord, FaultDefinition } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut } from 'lucide-react';
+import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut, FlaskConical } from 'lucide-react';
 import { playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -131,6 +131,7 @@ export default function UrunKullanimPanel() {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [faultDescription, setFaultDescription] = useState('');
   const [isSavingFault, setIsSavingFault] = useState(false);
+  const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
   
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   const [isManualDeductionOpen, setIsManualDeductionOpen] = useState(false);
@@ -181,6 +182,24 @@ export default function UrunKullanimPanel() {
     };
     fetchDeviceGroups();
   }, [toast]);
+
+  // Fetch fault definitions for fault modal
+  useEffect(() => {
+    const fetchFaultDefinitions = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'faultDefinitions'));
+        const definitions = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+        })) as FaultDefinition[];
+        setFaultDefinitions(definitions);
+        urunKullanimLogger.debug('Arıza tanımlamaları yüklendi', { count: definitions.length });
+      } catch (e) {
+        urunKullanimLogger.error('Arıza tanımlamaları yüklenemedi', e);
+      }
+    };
+    fetchFaultDefinitions();
+  }, []);
 
   // Compute productTracking and productNames from products (useMemo instead of useEffect+state)
   const { productTracking, productNames } = useMemo(() => {
@@ -496,8 +515,19 @@ export default function UrunKullanimPanel() {
     (code: string, fallback: string) => productNames[code] || fallback || code,
     [productNames]
   );
-  
-  const handleFaultReport = useCallback(async (faultType: 'teknik_servis' | 'aplikasyon') => {
+
+  // Separate fault definitions by type
+  const teknikServisFaults = useMemo(() =>
+    faultDefinitions.filter(f => f.type === 'teknik_servis').sort((a, b) => a.name.localeCompare(b.name)),
+    [faultDefinitions]
+  );
+
+  const aplikasyonFaults = useMemo(() =>
+    faultDefinitions.filter(f => f.type === 'aplikasyon').sort((a, b) => a.name.localeCompare(b.name)),
+    [faultDefinitions]
+  );
+
+  const handleFaultReport = useCallback(async (faultDefinition: FaultDefinition) => {
     if (!selectedDevice) return;
     setIsSavingFault(true);
     try {
@@ -507,34 +537,38 @@ export default function UrunKullanimPanel() {
         deviceId: selectedDevice.id,
         model: selectedDevice.cihazAdi || selectedDevice.name || '',
         serial: selectedDevice.seriNumarasi || '',
-        faultType,
+        faultType: faultDefinition.type,
         openedByUid: currentUser?.uid || '',
         openedByName: currentUserProfile?.name || '',
-        openDescription: faultDescription,
+        openDescription: faultDescription || undefined,
+        faultDefinitionId: faultDefinition.id,
+        faultName: faultDefinition.name,
       });
 
       await emitFaultOpened({
         actor: { uid: currentUser?.uid || '', name: currentUserProfile?.name || '' },
         assignedDeviceId: selectedDevice.id,
         deviceName: selectedDevice.cihazAdi || selectedDevice.name || '',
-        faultType: faultType,
+        faultType: faultDefinition.type,
         hospitalId: selectedLabId ?? '',
         hospitalName: selectedLabName ?? '',
       });
-  
+
       urunKullanimLogger.info('Arıza kaydı oluşturuldu', {
         deviceId: selectedDevice.id,
         deviceName: selectedDevice.cihazAdi,
-        faultType,
+        faultType: faultDefinition.type,
+        faultName: faultDefinition.name,
       });
-      toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için arıza bildirildi.` });
+      toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için "${faultDefinition.name}" arızası bildirildi.` });
       setFaultModalOpen(false);
       setFaultDescription('');
       setSelectedDevice(null);
     } catch (err) {
       urunKullanimLogger.error('Arıza kaydı oluşturulamadı', err, {
         deviceId: selectedDevice?.id,
-        faultType,
+        faultType: faultDefinition.type,
+        faultName: faultDefinition.name,
       });
       toast({ title: 'Hata', description: 'Arıza kaydı oluşturulamadı.', variant: 'destructive' });
     } finally {
@@ -949,28 +983,109 @@ export default function UrunKullanimPanel() {
       </Dialog>
       
       <Dialog open={faultModalOpen} onOpenChange={setFaultModalOpen}>
-        <DialogContent aria-describedby="fault-dialog-description">
-          <DialogHeader>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" aria-describedby="fault-dialog-description">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Arıza Kaydı: {selectedDevice?.cihazAdi}</DialogTitle>
-            <DialogDescription id="fault-dialog-description">SN: {selectedDevice?.seriNumarasi}</DialogDescription>
+            <DialogDescription id="fault-dialog-description">SN: {selectedDevice?.seriNumarasi} • Arıza tipini seçin</DialogDescription>
           </DialogHeader>
-          <div className="py-4 space-y-4">
-            <Input
-              placeholder="Arıza açıklaması (opsiyonel)"
-              value={faultDescription}
-              onChange={(e) => setFaultDescription(e.target.value)}
-              aria-label="Arıza açıklaması"
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <Button variant="outline" onClick={() => handleFaultReport('teknik_servis')} disabled={isSavingFault} aria-label="Teknik servis arızası bildir">
-                {isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Wrench className="h-4 w-4" aria-hidden="true" />}
-                <span className="ml-2">Teknik Servis</span>
-              </Button>
-              <Button variant="outline" onClick={() => handleFaultReport('aplikasyon')} disabled={isSavingFault} aria-label="Aplikasyon arızası bildir">
-                {isSavingFault ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Wrench className="h-4 w-4" aria-hidden="true" />}
-                <span className="ml-2">Aplikasyon</span>
-              </Button>
-            </div>
+          <div className="flex-1 overflow-auto py-4">
+            {faultDefinitions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <AlertTriangle className="h-12 w-12 mb-4 opacity-50" />
+                <p className="text-lg font-medium">Arıza tanımı bulunamadı</p>
+                <p className="text-sm">Lütfen yöneticinize başvurun.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Teknik Servis Column */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-950/30 rounded-t-lg border border-blue-200 dark:border-blue-800">
+                    <Wrench className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    <h3 className="font-semibold text-blue-700 dark:text-blue-300">Teknik Servis</h3>
+                    <span className="ml-auto text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-full">
+                      {teknikServisFaults.length} tanım
+                    </span>
+                  </div>
+                  <ScrollArea className="h-[300px] border border-t-0 border-blue-200 dark:border-blue-800 rounded-b-lg">
+                    <div className="p-1">
+                      {teknikServisFaults.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground text-sm">
+                          Teknik servis arıza tanımı yok
+                        </div>
+                      ) : (
+                        teknikServisFaults.map((fault) => (
+                          <button
+                            key={fault.id}
+                            onClick={() => handleFaultReport(fault)}
+                            disabled={isSavingFault}
+                            className={cn(
+                              "w-full text-left px-3 py-2.5 rounded-md transition-all",
+                              "hover:bg-blue-100 dark:hover:bg-blue-900/40",
+                              "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1",
+                              "disabled:opacity-50 disabled:cursor-not-allowed",
+                              "border border-transparent hover:border-blue-300 dark:hover:border-blue-700"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              {isSavingFault ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                              ) : (
+                                <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0" />
+                              )}
+                              <span className="text-sm font-medium text-foreground">{fault.name}</span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </ScrollArea>
+                </div>
+
+                {/* Aplikasyon Column */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-purple-950/30 rounded-t-lg border border-purple-200 dark:border-purple-800">
+                    <FlaskConical className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                    <h3 className="font-semibold text-purple-700 dark:text-purple-300">Aplikasyon</h3>
+                    <span className="ml-auto text-xs text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/50 px-2 py-0.5 rounded-full">
+                      {aplikasyonFaults.length} tanım
+                    </span>
+                  </div>
+                  <ScrollArea className="h-[300px] border border-t-0 border-purple-200 dark:border-purple-800 rounded-b-lg">
+                    <div className="p-1">
+                      {aplikasyonFaults.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground text-sm">
+                          Aplikasyon arıza tanımı yok
+                        </div>
+                      ) : (
+                        aplikasyonFaults.map((fault) => (
+                          <button
+                            key={fault.id}
+                            onClick={() => handleFaultReport(fault)}
+                            disabled={isSavingFault}
+                            className={cn(
+                              "w-full text-left px-3 py-2.5 rounded-md transition-all",
+                              "hover:bg-purple-100 dark:hover:bg-purple-900/40",
+                              "focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1",
+                              "disabled:opacity-50 disabled:cursor-not-allowed",
+                              "border border-transparent hover:border-purple-300 dark:hover:border-purple-700"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              {isSavingFault ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
+                              ) : (
+                                <div className="h-2 w-2 rounded-full bg-purple-500 flex-shrink-0" />
+                              )}
+                              <span className="text-sm font-medium text-foreground">{fault.name}</span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
