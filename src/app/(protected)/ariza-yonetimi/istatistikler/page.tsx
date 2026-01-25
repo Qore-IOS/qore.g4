@@ -63,6 +63,7 @@ export default function ArizaIstatistikleriPage() {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [expandedLabs, setExpandedLabs] = useState<Set<string>>(new Set());
+  const [hospitalMinMaxRules, setHospitalMinMaxRules] = useState<Map<string, Set<string>>>(new Map()); // hospitalId -> Set<stokKodu>
 
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
 
@@ -124,7 +125,30 @@ export default function ArizaIstatistikleriPage() {
         unsubHospitals();
     };
   }, [toast]);
-  
+
+  // Fetch minMaxRules for all hospitals to determine which products are used in which labs
+  useEffect(() => {
+    if (hospitals.length === 0) return;
+
+    const fetchMinMaxRules = async () => {
+      const rulesMap = new Map<string, Set<string>>();
+
+      for (const hospital of hospitals) {
+        try {
+          const minMaxSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
+          const stokKodulari = new Set(minMaxSnap.docs.map(d => d.id));
+          rulesMap.set(hospital.id, stokKodulari);
+        } catch (err) {
+          console.error(`Error fetching minMaxRules for hospital ${hospital.id}:`, err);
+        }
+      }
+
+      setHospitalMinMaxRules(rulesMap);
+    };
+
+    fetchMinMaxRules();
+  }, [hospitals]);
+
   const filteredReports = useMemo(() => {
       let filtered = reports;
       if (selectedLabId !== 'all') {
@@ -209,7 +233,7 @@ export default function ArizaIstatistikleriPage() {
   }, [productCodes]);
 
   const uniqueProductGroups = useMemo(() => {
-    const groups = new Set(productCodes.map(p => p.cihazGrubu).filter(Boolean));
+    const groups = new Set(productCodes.map(p => p.urunGrubu).filter(Boolean));
     return Array.from(groups).sort() as string[];
   }, [productCodes]);
 
@@ -217,7 +241,7 @@ export default function ArizaIstatistikleriPage() {
   const filteredProducts = useMemo(() => {
     return productCodes.filter(p => {
       const matchesBrand = selectedBrand === 'all' || p.marka === selectedBrand;
-      const matchesGroup = selectedProductGroup === 'all' || p.cihazGrubu === selectedProductGroup;
+      const matchesGroup = selectedProductGroup === 'all' || p.urunGrubu === selectedProductGroup;
       return matchesBrand && matchesGroup;
     });
   }, [productCodes, selectedBrand, selectedProductGroup]);
@@ -231,24 +255,18 @@ export default function ArizaIstatistikleriPage() {
   const productLabStats = useMemo(() => {
     if (!selectedProduct) return [];
 
-    // Find devices that match this product (by cihazGrubu or model name)
-    const matchingDevices = devices.filter(d => {
-      // Match by cihazGrubu (product group)
-      if (selectedProduct.cihazGrubu && d.cihazGrubu === selectedProduct.cihazGrubu) return true;
-      // Match by model name containing product name
-      if (d.model && selectedProduct.stokAdi && d.model.toLowerCase().includes(selectedProduct.stokAdi.toLowerCase())) return true;
-      // Match by cihazAdi
-      if (d.cihazAdi && selectedProduct.stokAdi && d.cihazAdi.toLowerCase().includes(selectedProduct.stokAdi.toLowerCase())) return true;
-      return false;
-    });
+    // Find hospitals that have this product in their minMaxRules
+    const hospitalsWithProduct: string[] = [];
+    for (const [hospitalId, stokKodulari] of hospitalMinMaxRules) {
+      if (stokKodulari.has(selectedProduct.stokKodu)) {
+        hospitalsWithProduct.push(hospitalId);
+      }
+    }
 
-    // Also check if product is a test - find devices that run this test
-    const testDevices = selectedProduct.testAdi ? devices.filter(d => {
-      // If product has a testAdi, find devices that could run this test
-      return d.cihazGrubu === selectedProduct.cihazGrubu;
-    }) : [];
-
-    const allMatchingDevices = [...new Set([...matchingDevices, ...testDevices])];
+    // Get devices in those hospitals
+    const matchingDevices = devices.filter(d =>
+      d.hospitalId && hospitalsWithProduct.includes(d.hospitalId)
+    );
 
     // Group by hospital
     const labMap = new Map<string, {
@@ -264,26 +282,30 @@ export default function ArizaIstatistikleriPage() {
 
     const sixMonthsAgo = subMonths(new Date(), 6);
 
-    for (const device of allMatchingDevices) {
-      if (!device.hospitalId) continue;
-
-      const hospital = hospitals.find(h => h.id === device.hospitalId);
+    // First, create entries for all hospitals with the product
+    for (const hospitalId of hospitalsWithProduct) {
+      const hospital = hospitals.find(h => h.id === hospitalId);
       if (!hospital) continue;
 
-      if (!labMap.has(device.hospitalId)) {
-        labMap.set(device.hospitalId, {
-          hospitalId: device.hospitalId,
-          hospitalName: hospital.name || 'Bilinmeyen Lab.',
-          devices: [],
-          teknikServisFaults: 0,
-          aplikasyonFaults: 0,
-          openTeknikServis: 0,
-          openAplikasyon: 0,
-          last6MonthsFaults: [],
-        });
-      }
+      labMap.set(hospitalId, {
+        hospitalId: hospitalId,
+        hospitalName: hospital.name || 'Bilinmeyen Lab.',
+        devices: [],
+        teknikServisFaults: 0,
+        aplikasyonFaults: 0,
+        openTeknikServis: 0,
+        openAplikasyon: 0,
+        last6MonthsFaults: [],
+      });
+    }
 
-      const labData = labMap.get(device.hospitalId)!;
+    // Add devices and count faults
+    for (const device of matchingDevices) {
+      if (!device.hospitalId) continue;
+
+      const labData = labMap.get(device.hospitalId);
+      if (!labData) continue;
+
       labData.devices.push(device);
 
       // Count faults for this device
@@ -300,13 +322,46 @@ export default function ArizaIstatistikleriPage() {
       }
     }
 
+    // Also count faults that have relatedTests matching this product's testAdi
+    if (selectedProduct.testAdi) {
+      for (const [hospitalId, labData] of labMap) {
+        const testRelatedFaults = reports.filter(r =>
+          r.hospitalId === hospitalId &&
+          r.relatedTests &&
+          r.relatedTests.includes(selectedProduct.testAdi)
+        );
+
+        for (const fault of testRelatedFaults) {
+          // Avoid double counting if already counted via device
+          const alreadyCounted = labData.devices.some(d =>
+            reports.some(r => r.deviceId === d.id && r.id === fault.id)
+          );
+
+          if (!alreadyCounted) {
+            if (fault.faultType === 'teknik_servis') {
+              labData.teknikServisFaults++;
+              if (fault.status !== 'closed') labData.openTeknikServis++;
+            } else {
+              labData.aplikasyonFaults++;
+              if (fault.status !== 'closed') labData.openAplikasyon++;
+            }
+          }
+        }
+      }
+    }
+
     // Calculate 6 months history for each lab
     for (const [hospitalId, labData] of labMap) {
       const deviceIds = labData.devices.map(d => d.id);
+
+      // Get faults from devices OR related to this product's test
       const labFaults = reports.filter(r =>
-        deviceIds.includes(r.deviceId) &&
         r.openedAt &&
-        r.openedAt >= sixMonthsAgo
+        r.openedAt >= sixMonthsAgo &&
+        (
+          deviceIds.includes(r.deviceId) ||
+          (r.hospitalId === hospitalId && selectedProduct.testAdi && r.relatedTests?.includes(selectedProduct.testAdi))
+        )
       );
 
       // Group by month
@@ -335,7 +390,7 @@ export default function ArizaIstatistikleriPage() {
     return Array.from(labMap.values()).sort((a, b) =>
       (b.teknikServisFaults + b.aplikasyonFaults) - (a.teknikServisFaults + a.aplikasyonFaults)
     );
-  }, [selectedProduct, devices, hospitals, reports]);
+  }, [selectedProduct, devices, hospitals, reports, hospitalMinMaxRules]);
 
   const toggleLabExpand = (hospitalId: string) => {
     setExpandedLabs(prev => {
@@ -525,7 +580,7 @@ export default function ArizaIstatistikleriPage() {
 
             {/* Product Group Selector */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Ürün Grubu (Cihaz Grubu)</label>
+              <label className="text-sm font-medium">Ürün Grubu</label>
               <Select value={selectedProductGroup} onValueChange={(val) => {
                 setSelectedProductGroup(val);
                 setSelectedProductId('');
