@@ -22,12 +22,15 @@ export type OpenFaultInput = {
   openedByName: string;
   openDescription?: string | null; // Allow null
   title?: string; // optional custom title
+  faultDefinitionId?: string; // ID from faultDefinitions collection
+  faultName?: string; // Name from faultDefinitions (for statistics)
 };
 
 export async function openDeviceFaultReport(input: OpenFaultInput): Promise<string> {
   const {
     hospitalId, labName, deviceId, model, serial,
-    faultType, openedByUid, openedByName, openDescription, title
+    faultType, openedByUid, openedByName, openDescription, title,
+    faultDefinitionId, faultName
   } = input;
 
   // Corrected flat structure for Google Sheets extension
@@ -60,6 +63,9 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     interventionStartedAt: null,
     locationVerifiedAt: null,
     relatedTests: [],
+    // Fault definition fields (for statistics)
+    faultDefinitionId: faultDefinitionId ?? null,
+    faultName: faultName ?? null,
   };
 
   const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
