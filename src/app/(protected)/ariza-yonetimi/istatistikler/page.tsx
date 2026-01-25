@@ -22,10 +22,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, AlertTriangle, CheckCircle, BarChart, Server, Clock, ShieldCheck, RotateCcw, Building, ChevronsUpDown, Check as CheckIcon, Calendar, Package, ChevronDown, ChevronUp, Wrench, FlaskConical } from 'lucide-react';
+import { Loader2, AlertTriangle, CheckCircle, Server, Clock, ShieldCheck, RotateCcw, Building, ChevronsUpDown, Check as CheckIcon, Calendar, Package, ChevronDown, ChevronUp, Wrench, FlaskConical, Phone, MapPin, Timer, TrendingUp } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { differenceInMinutes, startOfDay, endOfDay, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -42,13 +41,43 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from 'recharts';
 
+// Fault definition type
+interface FaultDefinition {
+  id: string;
+  name: string;
+  type: 'teknik_servis' | 'aplikasyon';
+}
+
+// Chart colors
+const COLORS = {
+  teknik: '#3b82f6', // blue
+  aplikasyon: '#a855f7', // purple
+  kurum: '#22c55e', // green
+  telefon: '#f59e0b', // amber
+};
+
+const PIE_COLORS = ['#3b82f6', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#f97316', '#8b5cf6'];
 
 export default function ArizaIstatistikleriPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const { isAdmin } = useAuth();
@@ -57,13 +86,16 @@ export default function ArizaIstatistikleriPage() {
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
+  // Fault type filter for bar chart
+  const [selectedFaultType, setSelectedFaultType] = useState<'teknik_servis' | 'aplikasyon'>('teknik_servis');
+
   // Product statistics state
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
   const [selectedProductGroup, setSelectedProductGroup] = useState<string>('all');
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [expandedLabs, setExpandedLabs] = useState<Set<string>>(new Set());
-  const [hospitalMinMaxRules, setHospitalMinMaxRules] = useState<Map<string, Set<string>>>(new Map()); // hospitalId -> Set<stokKodu>
+  const [hospitalMinMaxRules, setHospitalMinMaxRules] = useState<Map<string, Set<string>>>(new Map());
 
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
 
@@ -71,8 +103,8 @@ export default function ArizaIstatistikleriPage() {
     const reportsQuery = query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'));
     const devicesQuery = query(collection(db, 'devices'));
     const hospitalsQuery = query(collection(db, 'hospitals'), orderBy('name', 'asc'));
-    
-    const unsubReports = onSnapshot(reportsQuery, 
+
+    const unsubReports = onSnapshot(reportsQuery,
         (snapshot) => {
             const reportList: any[] = snapshot.docs.map(d => {
                 const data = d.data();
@@ -83,7 +115,7 @@ export default function ArizaIstatistikleriPage() {
                 };
             });
             setReports(reportList);
-        }, 
+        },
         (error) => {
             console.error('Error fetching fault reports:', error);
             toast({ title: 'Hata', description: 'Arıza raporları yüklenemedi.', variant: 'destructive' });
@@ -119,6 +151,13 @@ export default function ArizaIstatistikleriPage() {
       console.error('Error fetching product codes:', err);
     });
 
+    // Fetch fault definitions
+    getDocs(collection(db, 'faultDefinitions')).then(snapshot => {
+      setFaultDefinitions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FaultDefinition)));
+    }).catch(err => {
+      console.error('Error fetching fault definitions:', err);
+    });
+
     return () => {
         unsubReports();
         unsubDevices();
@@ -126,7 +165,7 @@ export default function ArizaIstatistikleriPage() {
     };
   }, [toast]);
 
-  // Fetch minMaxRules for all hospitals to determine which products are used in which labs
+  // Fetch minMaxRules for all hospitals
   useEffect(() => {
     if (hospitals.length === 0) return;
 
@@ -165,9 +204,21 @@ export default function ArizaIstatistikleriPage() {
       return filtered;
   }, [reports, selectedLabId, dateRange]);
 
+  // Main statistics
   const stats = useMemo(() => {
     if (filteredReports.length === 0) {
-      return { topDevices: [], avgResolutionTime: 0, openFaults: 0, closedFaults: 0 };
+      return {
+        topDevices: [],
+        avgResolutionTime: 0,
+        openFaults: 0,
+        closedFaults: 0,
+        totalFaults: 0,
+        faultsExceedingTarget: 0,
+        teknikCount: 0,
+        aplikasyonCount: 0,
+        kurumCount: 0,
+        telefonCount: 0,
+      };
     }
 
     const faultCounts = filteredReports.reduce((acc, report) => {
@@ -190,23 +241,116 @@ export default function ArizaIstatistikleriPage() {
         };
       });
 
-    const closedReports = filteredReports.filter(r => r.status === 'closed' && r.openedAt && r.closedAt);
+    const closedReports = filteredReports.filter(r => (r.status === 'closed' || r.status === 'cozuldu') && r.openedAt && r.closedAt);
     const totalResolutionTime = closedReports.reduce((sum, r) => {
         return sum + differenceInMinutes(r.closedAt!, r.openedAt!);
     }, 0);
     const avgResolutionTime = closedReports.length > 0 ? totalResolutionTime / closedReports.length : 0;
 
-    const openFaults = filteredReports.filter(r => r.status === 'open').length;
-    const closedFaults = filteredReports.filter(r => r.status === 'closed').length;
+    const openFaults = filteredReports.filter(r => r.status !== 'closed' && r.status !== 'cozuldu').length;
+    const closedFaults = closedReports.length;
 
-    return { topDevices, avgResolutionTime, openFaults, closedFaults };
+    // Count faults exceeding target time
+    const faultsExceedingTarget = closedReports.filter(r => {
+      const resolutionTime = differenceInMinutes(r.closedAt!, r.openedAt!);
+      return resolutionTime > TARGET_RESOLUTION_TIME;
+    }).length;
+
+    // Count by fault type
+    const teknikCount = filteredReports.filter(r => r.faultType === 'teknik_servis').length;
+    const aplikasyonCount = filteredReports.filter(r => r.faultType === 'aplikasyon').length;
+
+    // Count by intervention type
+    const kurumCount = filteredReports.filter(r => r.interventionType === 'kurum_ziyaret').length;
+    const telefonCount = filteredReports.filter(r => r.interventionType === 'telefon').length;
+
+    return {
+      topDevices,
+      avgResolutionTime,
+      openFaults,
+      closedFaults,
+      totalFaults: filteredReports.length,
+      faultsExceedingTarget,
+      teknikCount,
+      aplikasyonCount,
+      kurumCount,
+      telefonCount,
+    };
   }, [filteredReports, devices, hospitals]);
 
-  const handleResetAverageTime = () => {
-    // This would typically trigger a Cloud Function or server-side process
-    // to clear the relevant fields on the fault reports.
-    alert("Bu özellik için sunucu tarafında bir işlem gereklidir.");
-  };
+  // Fault type pie chart data
+  const faultTypePieData = useMemo(() => {
+    if (stats.teknikCount === 0 && stats.aplikasyonCount === 0) return [];
+    return [
+      { name: 'Teknik Servis', value: stats.teknikCount, color: COLORS.teknik },
+      { name: 'Aplikasyon', value: stats.aplikasyonCount, color: COLORS.aplikasyon },
+    ];
+  }, [stats.teknikCount, stats.aplikasyonCount]);
+
+  // Intervention type pie chart data
+  const interventionTypePieData = useMemo(() => {
+    if (stats.kurumCount === 0 && stats.telefonCount === 0) return [];
+    return [
+      { name: 'Kurum Ziyareti', value: stats.kurumCount, color: COLORS.kurum },
+      { name: 'Telefonla', value: stats.telefonCount, color: COLORS.telefon },
+    ];
+  }, [stats.kurumCount, stats.telefonCount]);
+
+  // Fault definitions bar chart data
+  const faultDefinitionsBarData = useMemo(() => {
+    const relevantDefinitions = faultDefinitions.filter(fd => fd.type === selectedFaultType);
+
+    const countByTitle: Record<string, number> = {};
+
+    filteredReports
+      .filter(r => r.faultType === selectedFaultType)
+      .forEach(r => {
+        const title = r.title || 'Belirtilmemiş';
+        countByTitle[title] = (countByTitle[title] || 0) + 1;
+      });
+
+    return Object.entries(countByTitle)
+      .map(([name, count]) => ({ name: name.length > 20 ? name.substring(0, 20) + '...' : name, fullName: name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [filteredReports, faultDefinitions, selectedFaultType]);
+
+  // Faults exceeding target time list
+  const faultsExceedingTargetList = useMemo(() => {
+    const closedReports = filteredReports.filter(r =>
+      (r.status === 'closed' || r.status === 'cozuldu') && r.openedAt && r.closedAt
+    );
+
+    const exceeding = closedReports.filter(r => {
+      const resolutionTime = differenceInMinutes(r.closedAt!, r.openedAt!);
+      return resolutionTime > TARGET_RESOLUTION_TIME;
+    });
+
+    // Group by title
+    const byTitle: Record<string, { count: number; totalExceed: number }> = {};
+
+    exceeding.forEach(r => {
+      const title = r.title || 'Belirtilmemiş';
+      const resolutionTime = differenceInMinutes(r.closedAt!, r.openedAt!);
+      const exceedMinutes = resolutionTime - TARGET_RESOLUTION_TIME;
+
+      if (!byTitle[title]) {
+        byTitle[title] = { count: 0, totalExceed: 0 };
+      }
+      byTitle[title].count++;
+      byTitle[title].totalExceed += exceedMinutes;
+    });
+
+    return Object.entries(byTitle)
+      .map(([title, data]) => ({
+        title,
+        count: data.count,
+        avgExceedMinutes: Math.round(data.totalExceed / data.count),
+        avgExceedPercent: Math.round((data.totalExceed / data.count / TARGET_RESOLUTION_TIME) * 100),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [filteredReports]);
 
   const performanceData = useMemo(() => {
     const deviation = ((stats.avgResolutionTime - TARGET_RESOLUTION_TIME) / TARGET_RESOLUTION_TIME) * 100;
@@ -226,7 +370,7 @@ export default function ArizaIstatistikleriPage() {
     };
   }, [stats.avgResolutionTime]);
 
-  // Get unique brands and product groups
+  // Product statistics (keeping existing functionality)
   const uniqueBrands = useMemo(() => {
     const brands = new Set(productCodes.map(p => p.marka).filter(Boolean));
     return Array.from(brands).sort() as string[];
@@ -237,7 +381,6 @@ export default function ArizaIstatistikleriPage() {
     return Array.from(groups).sort() as string[];
   }, [productCodes]);
 
-  // Filter products based on selected brand and product group
   const filteredProducts = useMemo(() => {
     return productCodes.filter(p => {
       const matchesBrand = selectedBrand === 'all' || p.marka === selectedBrand;
@@ -246,16 +389,13 @@ export default function ArizaIstatistikleriPage() {
     });
   }, [productCodes, selectedBrand, selectedProductGroup]);
 
-  // Get selected product
   const selectedProduct = useMemo(() => {
     return productCodes.find(p => p.id === selectedProductId);
   }, [productCodes, selectedProductId]);
 
-  // Calculate product statistics per lab
   const productLabStats = useMemo(() => {
     if (!selectedProduct) return [];
 
-    // Find hospitals that have this product in their minMaxRules
     const hospitalsWithProduct: string[] = [];
     for (const [hospitalId, stokKodulari] of hospitalMinMaxRules) {
       if (stokKodulari.has(selectedProduct.stokKodu)) {
@@ -263,12 +403,10 @@ export default function ArizaIstatistikleriPage() {
       }
     }
 
-    // Get devices in those hospitals
     const matchingDevices = devices.filter(d =>
       d.hospitalId && hospitalsWithProduct.includes(d.hospitalId)
     );
 
-    // Group by hospital
     const labMap = new Map<string, {
       hospitalId: string;
       hospitalName: string;
@@ -282,7 +420,6 @@ export default function ArizaIstatistikleriPage() {
 
     const sixMonthsAgo = subMonths(new Date(), 6);
 
-    // First, create entries for all hospitals with the product
     for (const hospitalId of hospitalsWithProduct) {
       const hospital = hospitals.find(h => h.id === hospitalId);
       if (!hospital) continue;
@@ -299,7 +436,6 @@ export default function ArizaIstatistikleriPage() {
       });
     }
 
-    // Add devices and count faults
     for (const device of matchingDevices) {
       if (!device.hospitalId) continue;
 
@@ -308,21 +444,19 @@ export default function ArizaIstatistikleriPage() {
 
       labData.devices.push(device);
 
-      // Count faults for this device
       const deviceFaults = reports.filter(r => r.deviceId === device.id);
 
       for (const fault of deviceFaults) {
         if (fault.faultType === 'teknik_servis') {
           labData.teknikServisFaults++;
-          if (fault.status !== 'closed') labData.openTeknikServis++;
+          if (fault.status !== 'closed' && fault.status !== 'cozuldu') labData.openTeknikServis++;
         } else {
           labData.aplikasyonFaults++;
-          if (fault.status !== 'closed') labData.openAplikasyon++;
+          if (fault.status !== 'closed' && fault.status !== 'cozuldu') labData.openAplikasyon++;
         }
       }
     }
 
-    // Also count faults that have relatedTests matching this product's testAdi
     if (selectedProduct.testAdi) {
       for (const [hospitalId, labData] of labMap) {
         const testRelatedFaults = reports.filter(r =>
@@ -332,7 +466,6 @@ export default function ArizaIstatistikleriPage() {
         );
 
         for (const fault of testRelatedFaults) {
-          // Avoid double counting if already counted via device
           const alreadyCounted = labData.devices.some(d =>
             reports.some(r => r.deviceId === d.id && r.id === fault.id)
           );
@@ -340,21 +473,19 @@ export default function ArizaIstatistikleriPage() {
           if (!alreadyCounted) {
             if (fault.faultType === 'teknik_servis') {
               labData.teknikServisFaults++;
-              if (fault.status !== 'closed') labData.openTeknikServis++;
+              if (fault.status !== 'closed' && fault.status !== 'cozuldu') labData.openTeknikServis++;
             } else {
               labData.aplikasyonFaults++;
-              if (fault.status !== 'closed') labData.openAplikasyon++;
+              if (fault.status !== 'closed' && fault.status !== 'cozuldu') labData.openAplikasyon++;
             }
           }
         }
       }
     }
 
-    // Calculate 6 months history for each lab
     for (const [hospitalId, labData] of labMap) {
       const deviceIds = labData.devices.map(d => d.id);
 
-      // Get faults from devices OR related to this product's test
       const labFaults = reports.filter(r =>
         r.openedAt &&
         r.openedAt >= sixMonthsAgo &&
@@ -364,7 +495,6 @@ export default function ArizaIstatistikleriPage() {
         )
       );
 
-      // Group by month
       const monthCounts = new Map<string, number>();
       for (let i = 5; i >= 0; i--) {
         const monthDate = subMonths(new Date(), i);
@@ -404,6 +534,18 @@ export default function ArizaIstatistikleriPage() {
     });
   };
 
+  // Custom tooltip for bar chart
+  const CustomBarTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-popover border rounded-lg p-3 shadow-lg">
+          <p className="font-medium text-sm">{payload[0].payload.fullName}</p>
+          <p className="text-sm text-muted-foreground">{payload[0].value} arıza</p>
+        </div>
+      );
+    }
+    return null;
+  };
 
   if (loading) {
     return (
@@ -416,8 +558,9 @@ export default function ArizaIstatistikleriPage() {
 
   return (
     <div className="p-4 space-y-6">
+      {/* Header with filters */}
       <div className="flex justify-between items-center flex-wrap gap-4">
-        <BackButton fallback="/ariza-yonetimi" />
+        <BackButton fallback="/cihaz-yonetimi-ana" />
         <div className="flex items-center gap-2 flex-wrap">
           <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
             <PopoverTrigger asChild>
@@ -471,79 +614,301 @@ export default function ArizaIstatistikleriPage() {
           <DatePickerWithRange date={dateRange} setDate={setDateRange} />
         </div>
       </div>
+
+      {/* KPI Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="glass-card flex flex-col">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Server className="text-primary"/>En Çok Arıza Veren 5 Cihaz</CardTitle>
+        {/* Total Faults */}
+        <Card className="glass-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              Toplam Arıza Sayısı
+            </CardTitle>
           </CardHeader>
-          <CardContent className="flex-grow">
-            <ul className="space-y-2">
-                {stats.topDevices.map(d => (
-                    <li key={d.id} className="text-sm flex justify-between items-center">
-                        <div>
-                            <p className="font-medium">{d.name}</p>
-                            <p className="text-xs text-muted-foreground">{d.lab}</p>
-                        </div>
-                        <span className="font-bold text-lg text-destructive">{d.count as number}</span>
-                    </li>
-                ))}
-            </ul>
+          <CardContent>
+            <div className="text-4xl font-bold">{stats.totalFaults}</div>
+            <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                {stats.openFaults} açık
+              </span>
+              <span className="flex items-center gap-1">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                {stats.closedFaults} çözüldü
+              </span>
+            </div>
           </CardContent>
-           {isAdmin && (
-            <CardFooter>
-                <Button variant="secondary" size="sm" onClick={() => alert("Bu özellik için sunucu tarafında bir işlem gereklidir.")} className="w-full">
-                    <RotateCcw className="mr-2 h-4 w-4" /> İstatistikleri Sıfırla
-                </Button>
-            </CardFooter>
-          )}
         </Card>
-        <Card className="glass-card flex flex-col">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Clock className="text-primary"/>Ortalama Çözüm Süresi</CardTitle>
-             <CardDescription>Hedef: {TARGET_RESOLUTION_TIME} dakika</CardDescription>
+
+        {/* Average Resolution Time */}
+        <Card className="glass-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Clock className="h-5 w-5 text-primary" />
+              Ortalama Çözüm Süresi
+            </CardTitle>
+            <CardDescription>Hedef: {TARGET_RESOLUTION_TIME} dakika</CardDescription>
           </CardHeader>
-          <CardContent className="text-center flex-grow flex flex-col justify-center gap-4">
-            <div>
-              <p className="text-5xl font-bold">{stats.avgResolutionTime.toFixed(0)}</p>
-              <p className="text-muted-foreground">dakika</p>
+          <CardContent>
+            <div className="text-4xl font-bold">{stats.avgResolutionTime.toFixed(0)}</div>
+            <p className="text-sm text-muted-foreground">dakika</p>
+            <div className="relative h-2 w-full bg-muted rounded-full mt-2">
+              <div
+                className={cn("h-2 rounded-full transition-all duration-500", performanceData.colorClass)}
+                style={{ width: `${Math.min(100, (stats.avgResolutionTime / (TARGET_RESOLUTION_TIME * 1.5)) * 100)}%` }}
+              />
             </div>
-            <div className="relative h-4 w-full bg-muted rounded-full">
-                <div 
-                    className={cn("h-4 rounded-full transition-all duration-500", performanceData.colorClass)}
-                    style={{ width: `${Math.min(100, (stats.avgResolutionTime / (TARGET_RESOLUTION_TIME * 1.5)) * 100)}%` }}
-                />
-            </div>
-            <p className={cn("text-sm font-semibold", performanceData.isOver ? "text-red-500" : "text-green-500")}>
-              {performanceData.isOver 
+            <p className={cn("text-xs mt-1", performanceData.isOver ? "text-red-500" : "text-green-500")}>
+              {performanceData.isOver
                 ? `Hedefin %${performanceData.deviation.toFixed(1)} üzerinde`
                 : `Hedefin %${Math.abs(performanceData.deviation).toFixed(1)} altında`
               }
             </p>
           </CardContent>
-          {isAdmin && (
-            <CardFooter>
-              <Button variant="destructive" size="sm" onClick={handleResetAverageTime} className="w-full">
-                <RotateCcw className="mr-2 h-4 w-4" /> Süreyi Sıfırla
-              </Button>
-            </CardFooter>
-          )}
         </Card>
+
+        {/* Faults Exceeding Target */}
         <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><ShieldCheck className="text-primary"/>Arıza Durumları</CardTitle>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Timer className="h-5 w-5 text-destructive" />
+              Hedef Süreyi Aşan
+            </CardTitle>
+            <CardDescription>8 saati aşan arızalar</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between items-center text-lg">
-                <span className="flex items-center gap-2"><AlertTriangle className="text-destructive"/>Açık Arıza Sayısı</span>
-                <span className="font-bold text-destructive">{stats.openFaults}</span>
-            </div>
-            <div className="flex justify-between items-center text-lg">
-                <span className="flex items-center gap-2"><CheckCircle className="text-green-500"/>Giderilen Toplam Arıza</span>
-                <span className="font-bold text-green-500">{stats.closedFaults}</span>
-            </div>
+          <CardContent>
+            <div className="text-4xl font-bold text-destructive">{stats.faultsExceedingTarget}</div>
+            <p className="text-sm text-muted-foreground">
+              {stats.closedFaults > 0
+                ? `Çözülen arızaların %${((stats.faultsExceedingTarget / stats.closedFaults) * 100).toFixed(1)}'i`
+                : 'Henüz çözülen arıza yok'
+              }
+            </p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Fault Type Toggle */}
+      <div className="flex justify-center">
+        <div className="inline-flex rounded-lg p-1 bg-muted">
+          <Button
+            variant={selectedFaultType === 'teknik_servis' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setSelectedFaultType('teknik_servis')}
+            className="gap-2"
+          >
+            <Wrench className="h-4 w-4" />
+            Teknik Servis
+          </Button>
+          <Button
+            variant={selectedFaultType === 'aplikasyon' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setSelectedFaultType('aplikasyon')}
+            className="gap-2"
+          >
+            <FlaskConical className="h-4 w-4" />
+            Aplikasyon
+          </Button>
+        </div>
+      </div>
+
+      {/* Charts Row 1: Fault Type Pie + Fault Definitions Bar */}
+      <div className="grid grid-cols-10 gap-6">
+        {/* Fault Type Pie Chart - 30% */}
+        <Card className="col-span-10 md:col-span-3 glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              Arıza Tipi Dağılımı
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-64">
+            {faultTypePieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={faultTypePieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {faultTypePieData.map((entry, idx) => (
+                      <Cell key={idx} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => [`${value} arıza`, '']} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                Veri yok
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Fault Definitions Bar Chart - 70% */}
+        <Card className="col-span-10 md:col-span-7 glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              {selectedFaultType === 'teknik_servis' ? (
+                <Wrench className="h-5 w-5 text-blue-500" />
+              ) : (
+                <FlaskConical className="h-5 w-5 text-purple-500" />
+              )}
+              {selectedFaultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} Arıza Başlıkları
+            </CardTitle>
+            <CardDescription>En sık karşılaşılan arıza tanımlamaları</CardDescription>
+          </CardHeader>
+          <CardContent className="h-64">
+            {faultDefinitionsBarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={faultDefinitionsBarData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
+                  <XAxis type="number" />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={120}
+                    tick={{ fontSize: 11 }}
+                  />
+                  <Tooltip content={<CustomBarTooltip />} />
+                  <Bar
+                    dataKey="count"
+                    fill={selectedFaultType === 'teknik_servis' ? COLORS.teknik : COLORS.aplikasyon}
+                    radius={[0, 4, 4, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                Bu tipte arıza kaydı yok
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 2: Intervention Type Pie + Exceeding Target List */}
+      <div className="grid grid-cols-10 gap-6">
+        {/* Intervention Type Pie Chart - 30% */}
+        <Card className="col-span-10 md:col-span-3 glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapPin className="h-5 w-5 text-primary" />
+              Müdahale Tipi Dağılımı
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-64">
+            {interventionTypePieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={interventionTypePieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {interventionTypePieData.map((entry, idx) => (
+                      <Cell key={idx} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => [`${value} müdahale`, '']} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                Veri yok
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Faults Exceeding Target Table - 70% */}
+        <Card className="col-span-10 md:col-span-7 glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Hedef Sürede Çözülemeyen Arızalar
+            </CardTitle>
+            <CardDescription>8 saat hedef süresini aşan arıza başlıkları</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {faultsExceedingTargetList.length > 0 ? (
+              <ScrollArea className="h-56">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Arıza Başlığı</TableHead>
+                      <TableHead className="text-center">Adet</TableHead>
+                      <TableHead className="text-center">Ort. Aşım (dk)</TableHead>
+                      <TableHead className="text-center">Aşım Oranı</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {faultsExceedingTargetList.map((item, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-medium max-w-[200px] truncate" title={item.title}>
+                          {item.title}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="destructive">{item.count}</Badge>
+                        </TableCell>
+                        <TableCell className="text-center text-muted-foreground">
+                          +{item.avgExceedMinutes} dk
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-destructive font-medium">+%{item.avgExceedPercent}</span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            ) : (
+              <div className="flex items-center justify-center h-56 text-muted-foreground">
+                <CheckCircle className="h-8 w-8 mr-2 text-green-500" />
+                Tüm arızalar hedef sürede çözülmüş
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Top Devices Card */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Server className="text-primary" />
+            En Çok Arıza Veren 5 Cihaz
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {stats.topDevices.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              {stats.topDevices.map((d, idx) => (
+                <div key={d.id} className="p-4 rounded-lg bg-muted/50 text-center">
+                  <div className="text-3xl font-bold text-destructive">{d.count as number}</div>
+                  <p className="font-medium mt-1 text-sm">{d.name}</p>
+                  <p className="text-xs text-muted-foreground">{d.lab}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-center text-muted-foreground">Henüz arıza kaydı yok</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Product Statistics Section */}
       <Card className="glass-card">

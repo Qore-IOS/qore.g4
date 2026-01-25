@@ -30,7 +30,6 @@ import {
   ShieldAlert,
   AlertTriangle,
   CheckCircle,
-  BarChart,
   Trash2,
   FileDown,
   FileSpreadsheet,
@@ -352,9 +351,6 @@ export default function ArizaYonetimiPage() {
                 </Button>
                 <Button variant="secondary" onClick={handleOpenHtmlReport}>
                   <FileDown className="h-4 w-4 mr-2" /> HTML Raporu
-                </Button>
-                <Button variant="outline" onClick={() => router.push('/ariza-yonetimi/istatistikler')}>
-                    <BarChart className="h-4 w-4 mr-2" /> Arıza İstatistikleri
                 </Button>
               </div>
             </div>

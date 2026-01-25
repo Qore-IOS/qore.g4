@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical, Users } from 'lucide-react';
+import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical, Users, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import { collection, getDocs } from 'firebase/firestore';
@@ -102,6 +102,10 @@ export default function CihazYonetimiHost() {
             <Button variant="ghost" onClick={() => router.push('/ariza-tanimlamalari')} className="text-muted-foreground hover:text-primary">
                 <ShieldAlert className="mr-2 h-5 w-5" />
                 Arıza Tanımlamaları
+            </Button>
+            <Button variant="ghost" onClick={() => router.push('/ariza-yonetimi/istatistikler')} className="text-muted-foreground hover:text-primary">
+                <BarChart3 className="mr-2 h-5 w-5" />
+                Arıza İstatistikleri
             </Button>
             <Button variant="ghost" onClick={() => window.open('/raporlama/ariza-raporu', '_blank')} className="text-muted-foreground hover:text-primary">
               <FileCode className="mr-2 h-5 w-5" />
