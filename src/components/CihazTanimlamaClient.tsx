@@ -738,7 +738,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[400px] p-0" align="start" sideOffset={4}>
+                            <PopoverContent className="w-[400px] p-0 z-[10000]" align="start" sideOffset={4}>
                               <Command>
                                 <CommandInput placeholder="Ürün kodu veya adı ara..." />
                                 <CommandList>
