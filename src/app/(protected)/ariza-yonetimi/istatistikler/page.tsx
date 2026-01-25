@@ -296,26 +296,25 @@ export default function ArizaIstatistikleriPage() {
     ];
   }, [stats.kurumCount, stats.telefonCount]);
 
-  // Fault definitions bar chart data
+  // Fault definitions bar chart data - uses faultName field from fault definitions
   const faultDefinitionsBarData = useMemo(() => {
-    const relevantDefinitions = faultDefinitions.filter(fd => fd.type === selectedFaultType);
-
-    const countByTitle: Record<string, number> = {};
+    const countByFaultName: Record<string, number> = {};
 
     filteredReports
       .filter(r => r.faultType === selectedFaultType)
       .forEach(r => {
-        const title = r.title || 'Belirtilmemiş';
-        countByTitle[title] = (countByTitle[title] || 0) + 1;
+        // Use faultName (from faultDefinitions) instead of title (which includes lab/device info)
+        const faultName = r.faultName || 'Belirtilmemiş';
+        countByFaultName[faultName] = (countByFaultName[faultName] || 0) + 1;
       });
 
-    return Object.entries(countByTitle)
-      .map(([name, count]) => ({ name: name.length > 20 ? name.substring(0, 20) + '...' : name, fullName: name, count }))
+    return Object.entries(countByFaultName)
+      .map(([name, count]) => ({ name: name.length > 25 ? name.substring(0, 25) + '...' : name, fullName: name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
-  }, [filteredReports, faultDefinitions, selectedFaultType]);
+  }, [filteredReports, selectedFaultType]);
 
-  // Faults exceeding target time list
+  // Faults exceeding target time list - uses faultName field from fault definitions
   const faultsExceedingTargetList = useMemo(() => {
     const closedReports = filteredReports.filter(r =>
       (r.status === 'closed' || r.status === 'cozuldu') && r.openedAt && r.closedAt
@@ -326,22 +325,23 @@ export default function ArizaIstatistikleriPage() {
       return resolutionTime > TARGET_RESOLUTION_TIME;
     });
 
-    // Group by title
-    const byTitle: Record<string, { count: number; totalExceed: number }> = {};
+    // Group by faultName (from faultDefinitions) instead of title (which includes lab/device info)
+    const byFaultName: Record<string, { count: number; totalExceed: number }> = {};
 
     exceeding.forEach(r => {
-      const title = r.title || 'Belirtilmemiş';
+      // Use faultName (from faultDefinitions) instead of title
+      const faultName = r.faultName || 'Belirtilmemiş';
       const resolutionTime = differenceInMinutes(r.closedAt!, r.openedAt!);
       const exceedMinutes = resolutionTime - TARGET_RESOLUTION_TIME;
 
-      if (!byTitle[title]) {
-        byTitle[title] = { count: 0, totalExceed: 0 };
+      if (!byFaultName[faultName]) {
+        byFaultName[faultName] = { count: 0, totalExceed: 0 };
       }
-      byTitle[title].count++;
-      byTitle[title].totalExceed += exceedMinutes;
+      byFaultName[faultName].count++;
+      byFaultName[faultName].totalExceed += exceedMinutes;
     });
 
-    return Object.entries(byTitle)
+    return Object.entries(byFaultName)
       .map(([title, data]) => ({
         title,
         count: data.count,
