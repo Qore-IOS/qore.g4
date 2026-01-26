@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X } from 'lucide-react';
+import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X, UserCircle, ArrowUp, ArrowDown, Minus, GitCompare } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import {
   calculateAllPerformances,
@@ -264,6 +264,550 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
   );
 }
 
+// Large score circle component for detailed view
+function LargeScoreCircle({ score }: { score: number }) {
+  const colors = getScoreColor(score);
+  const circumference = 2 * Math.PI * 45;
+  const strokeDashoffset = circumference - (score / 100) * circumference;
+
+  return (
+    <div className="relative w-40 h-40">
+      {/* Neumorphic background */}
+      <div
+        className={cn(
+          "absolute inset-0 rounded-full",
+          "bg-gradient-to-br from-background to-muted",
+          "shadow-[inset_6px_6px_12px_rgba(0,0,0,0.1),inset_-6px_-6px_12px_rgba(255,255,255,0.1)]",
+          "dark:shadow-[inset_6px_6px_12px_rgba(0,0,0,0.3),inset_-6px_-6px_12px_rgba(255,255,255,0.05)]"
+        )}
+      />
+
+      {/* SVG Progress Ring */}
+      <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
+        {/* Background circle */}
+        <circle
+          cx="50"
+          cy="50"
+          r="45"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="6"
+          className="text-muted-foreground/20"
+        />
+        {/* Progress circle */}
+        <circle
+          cx="50"
+          cy="50"
+          r="45"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          className={colors.text}
+          style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
+        />
+      </svg>
+
+      {/* Score text */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className={cn("text-4xl font-bold", colors.text)}>
+          {Math.round(score)}
+        </span>
+        <span className="text-xs text-muted-foreground">PUAN</span>
+      </div>
+    </div>
+  );
+}
+
+// Detailed metric row for large KPI card
+function DetailedMetricRow({
+  icon: Icon,
+  label,
+  value,
+  subValue,
+  score,
+  maxScore,
+  tooltip,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string | number;
+  subValue?: string;
+  score: number;
+  maxScore: number;
+  tooltip?: string;
+}) {
+  const isNegative = score < 0;
+  const percentage = maxScore > 0 ? Math.max(0, (score / maxScore) * 100) : 0;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-4 p-4 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors cursor-help">
+            <div className={cn(
+              "p-3 rounded-xl",
+              isNegative ? "bg-red-100 dark:bg-red-950" : "bg-primary/10"
+            )}>
+              <Icon className={cn(
+                "h-6 w-6",
+                isNegative ? "text-red-600 dark:text-red-400" : "text-primary"
+              )} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-medium">{label}</p>
+                <Badge
+                  variant={isNegative ? 'destructive' : 'secondary'}
+                  className={cn(
+                    "text-sm font-bold",
+                    score >= maxScore * 0.7 && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+                    score >= maxScore * 0.4 && score < maxScore * 0.7 && "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+                    score > 0 && score < maxScore * 0.4 && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+                    score === 0 && "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                  )}
+                >
+                  {isNegative ? score : `+${score.toFixed(1)}`} / {maxScore}
+                </Badge>
+              </div>
+              <p className="text-xl font-bold">{value}</p>
+              {subValue && <p className="text-sm text-muted-foreground">{subValue}</p>}
+              {!isNegative && (
+                <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full transition-all duration-500", getScoreColor(percentage).bg)}
+                    style={{ width: `${percentage}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </TooltipTrigger>
+        {tooltip && (
+          <TooltipContent>
+            <p className="max-w-xs text-sm">{tooltip}</p>
+          </TooltipContent>
+        )}
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// Detailed KPI Card for single personnel view
+function DetailedKPICard({
+  performance,
+  onCompare,
+  showCompareButton = true
+}: {
+  performance: PersonnelPerformance;
+  onCompare?: () => void;
+  showCompareButton?: boolean;
+}) {
+  const { user, metrics } = performance;
+  const isAplikasyon = user.role === 'aplikasyon';
+
+  return (
+    <Card className={cn(
+      "overflow-hidden transition-all duration-200",
+      "border-l-4",
+      isAplikasyon ? "border-l-purple-500" : "border-l-blue-500"
+    )}>
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between">
+          <div>
+            <CardTitle className="text-2xl">{user.name || user.email}</CardTitle>
+            <div className="flex items-center gap-2 mt-2">
+              {isAplikasyon ? (
+                <Badge variant="outline" className="bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                  <FlaskConical className="h-3 w-3 mr-1" />
+                  Aplikasyon
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                  <Wrench className="h-3 w-3 mr-1" />
+                  Teknik Servis
+                </Badge>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {showCompareButton && onCompare && (
+              <Button onClick={onCompare} variant="outline" className="gap-2">
+                <GitCompare className="h-4 w-4" />
+                Karşılaştır
+              </Button>
+            )}
+            <LargeScoreCircle score={metrics.totalScore} />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <DetailedMetricRow
+            icon={TrendingUp}
+            label="Arıza Üstlenme"
+            value={`${metrics.faultsAssigned} / ${metrics.expectedFaults.toFixed(1)}`}
+            subValue={metrics.expectedFaults > 0
+              ? `Beklenen arıza sayısının %${((metrics.faultsAssigned / metrics.expectedFaults) * 100).toFixed(0)}'i karşılandı`
+              : 'Beklenen arıza yok'}
+            score={metrics.faultAssignmentScore}
+            maxScore={20}
+            tooltip="Ana sorumlu olunan laboratuvarlara göre beklenen arıza sayısı ve gerçek üstlenilen. Beklenenin %100'ü = 20 puan."
+          />
+          <DetailedMetricRow
+            icon={Clock}
+            label="Müdahale Başlatma Süresi"
+            value={formatDuration(metrics.avgInterventionStartTimeMinutes)}
+            subValue="Ortalama müdahale başlama süresi"
+            score={metrics.interventionTimeScore}
+            maxScore={15}
+            tooltip="Arıza atandıktan sonra müdahaleye başlama süresi. ≤30dk: 15pt, ≤1sa: 12pt, ≤2sa: 9pt, ≤4sa: 6pt"
+          />
+          <DetailedMetricRow
+            icon={CheckCircle}
+            label="Çözüm Süresi"
+            value={formatDuration(metrics.avgResolutionTimeMinutes)}
+            subValue={`Toplam ${metrics.faultsResolved} arıza çözüldü`}
+            score={metrics.resolutionTimeScore}
+            maxScore={15}
+            tooltip="Müdahaleden arıza çözümüne kadar geçen süre. ≤1sa: 15pt, ≤2sa: 12pt, ≤4sa: 9pt, ≤8sa: 6pt"
+          />
+          <DetailedMetricRow
+            icon={Building}
+            label="Kurum Ziyareti"
+            value={`${metrics.institutionVisits} ziyaret`}
+            subValue={`Ekip ortalaması: ${metrics.avgInstitutionVisits.toFixed(1)} ziyaret`}
+            score={metrics.visitFrequencyScore}
+            maxScore={15}
+            tooltip="Form oluşturma + kurumda müdahale sayısı. Ortalama üstü = yüksek puan."
+          />
+          <DetailedMetricRow
+            icon={Phone}
+            label="Kurumda Müdahale Oranı"
+            value={`${metrics.onsiteInterventions} / ${metrics.onsiteInterventions + metrics.phoneInterventions}`}
+            subValue={metrics.onsiteInterventions + metrics.phoneInterventions > 0
+              ? `Müdahalelerin %${((metrics.onsiteInterventions / (metrics.onsiteInterventions + metrics.phoneInterventions)) * 100).toFixed(0)}'i kurumda yapıldı`
+              : 'Müdahale verisi yok'}
+            score={metrics.onsiteRatioScore}
+            maxScore={15}
+            tooltip="Telefon vs kurumda müdahale oranı. Kurumda müdahale daha değerlidir."
+          />
+          <DetailedMetricRow
+            icon={Calendar}
+            label="Periyodik Bakım Katkısı"
+            value={`${metrics.periodicMaintenanceForms} / ${metrics.totalPeriodicMaintenanceForms}`}
+            subValue={metrics.totalPeriodicMaintenanceForms > 0
+              ? `Toplam bakımların %${((metrics.periodicMaintenanceForms / metrics.totalPeriodicMaintenanceForms) * 100).toFixed(1)}'i bu personel tarafından yapıldı`
+              : 'Periyodik bakım verisi yok'}
+            score={metrics.maintenanceContributionScore}
+            maxScore={20}
+            tooltip="Toplam periyodik bakım formlarındaki pay. Yüksek katkı = yüksek puan."
+          />
+          {(metrics.recurrenceCount > 0 || metrics.recurrencePenalty < 0) && (
+            <DetailedMetricRow
+              icon={AlertTriangle}
+              label="Tekrar Arıza Cezası"
+              value={`${metrics.recurrenceCount} adet`}
+              subValue="7 gün içinde aynı cihazda tekrar arıza"
+              score={metrics.recurrencePenalty}
+              maxScore={-10}
+              tooltip="Çözümden sonra 7 gün içinde aynı cihazda tekrar arıza. Her tekrar -2 puan ceza."
+            />
+          )}
+          {(metrics.overdueMaintenanceTasks > 0 || metrics.overduePeriodicParts > 0) && (
+            <DetailedMetricRow
+              icon={Timer}
+              label="Gecikmiş Bakım Cezası"
+              value={`${metrics.overdueMaintenanceTasks + metrics.overduePeriodicParts} adet`}
+              subValue={`${metrics.overdueMaintenanceTasks} bakım işi + ${metrics.overduePeriodicParts} parça değişimi gecikmiş`}
+              score={metrics.overduePenalty}
+              maxScore={-15}
+              tooltip="Ana sorumluluk laboratuvarlarındaki gecikmiş periyodik bakım işleri ve parça değişimleri. Her gecikme -3 puan ceza."
+            />
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Comparison arrow component
+function ComparisonArrow({ value1, value2, higherIsBetter = true }: { value1: number; value2: number; higherIsBetter?: boolean }) {
+  const diff = value1 - value2;
+
+  if (Math.abs(diff) < 0.01) {
+    return <Minus className="h-5 w-5 text-muted-foreground" />;
+  }
+
+  const isFirstBetter = higherIsBetter ? diff > 0 : diff < 0;
+
+  if (isFirstBetter) {
+    return <ArrowUp className="h-5 w-5 text-green-600" />;
+  } else {
+    return <ArrowDown className="h-5 w-5 text-red-600" />;
+  }
+}
+
+// Comparison metric row
+function ComparisonMetricRow({
+  icon: Icon,
+  label,
+  value1,
+  value2,
+  score1,
+  score2,
+  maxScore,
+  higherIsBetter = true,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value1: string | number;
+  value2: string | number;
+  score1: number;
+  score2: number;
+  maxScore: number;
+  higherIsBetter?: boolean;
+}) {
+  const isNegative = maxScore < 0;
+
+  return (
+    <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center p-4 rounded-xl bg-muted/30">
+      {/* Person 1 */}
+      <div className="text-right">
+        <p className="text-lg font-bold">{value1}</p>
+        <Badge
+          variant={isNegative ? 'destructive' : 'secondary'}
+          className={cn(
+            "text-xs",
+            !isNegative && score1 >= Math.abs(maxScore) * 0.7 && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+            !isNegative && score1 >= Math.abs(maxScore) * 0.4 && score1 < Math.abs(maxScore) * 0.7 && "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+          )}
+        >
+          {isNegative ? score1 : `+${score1.toFixed(1)}`}
+        </Badge>
+      </div>
+
+      {/* Center - label and arrow */}
+      <div className="flex flex-col items-center gap-1">
+        <div className="p-2 rounded-lg bg-primary/10">
+          <Icon className="h-5 w-5 text-primary" />
+        </div>
+        <p className="text-xs font-medium text-center text-muted-foreground">{label}</p>
+        <ComparisonArrow value1={score1} value2={score2} higherIsBetter={isNegative ? false : true} />
+      </div>
+
+      {/* Person 2 */}
+      <div className="text-left">
+        <p className="text-lg font-bold">{value2}</p>
+        <Badge
+          variant={isNegative ? 'destructive' : 'secondary'}
+          className={cn(
+            "text-xs",
+            !isNegative && score2 >= Math.abs(maxScore) * 0.7 && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+            !isNegative && score2 >= Math.abs(maxScore) * 0.4 && score2 < Math.abs(maxScore) * 0.7 && "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+          )}
+        >
+          {isNegative ? score2 : `+${score2.toFixed(1)}`}
+        </Badge>
+      </div>
+    </div>
+  );
+}
+
+// Comparison View Component
+function ComparisonView({
+  person1,
+  person2,
+  onClose,
+}: {
+  person1: PersonnelPerformance;
+  person2: PersonnelPerformance;
+  onClose: () => void;
+}) {
+  const m1 = person1.metrics;
+  const m2 = person2.metrics;
+
+  const isAplikasyon1 = person1.user.role === 'aplikasyon';
+  const isAplikasyon2 = person2.user.role === 'aplikasyon';
+
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <GitCompare className="h-6 w-6" />
+            Personel Karşılaştırması
+          </CardTitle>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            <X className="h-4 w-4 mr-1" />
+            Karşılaştırmayı Kapat
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {/* Header with names and scores */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          {/* Person 1 */}
+          <div className={cn(
+            "p-4 rounded-xl border-l-4 flex items-center gap-4",
+            isAplikasyon1 ? "border-l-purple-500 bg-purple-50/50 dark:bg-purple-950/20" : "border-l-blue-500 bg-blue-50/50 dark:bg-blue-950/20"
+          )}>
+            <LargeScoreCircle score={m1.totalScore} />
+            <div>
+              <h3 className="text-xl font-bold">{person1.user.name || person1.user.email}</h3>
+              {isAplikasyon1 ? (
+                <Badge variant="outline" className="bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                  <FlaskConical className="h-3 w-3 mr-1" />
+                  Aplikasyon
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                  <Wrench className="h-3 w-3 mr-1" />
+                  Teknik Servis
+                </Badge>
+              )}
+            </div>
+          </div>
+
+          {/* Person 2 */}
+          <div className={cn(
+            "p-4 rounded-xl border-l-4 flex items-center gap-4",
+            isAplikasyon2 ? "border-l-purple-500 bg-purple-50/50 dark:bg-purple-950/20" : "border-l-blue-500 bg-blue-50/50 dark:bg-blue-950/20"
+          )}>
+            <LargeScoreCircle score={m2.totalScore} />
+            <div>
+              <h3 className="text-xl font-bold">{person2.user.name || person2.user.email}</h3>
+              {isAplikasyon2 ? (
+                <Badge variant="outline" className="bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                  <FlaskConical className="h-3 w-3 mr-1" />
+                  Aplikasyon
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                  <Wrench className="h-3 w-3 mr-1" />
+                  Teknik Servis
+                </Badge>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Comparison metrics */}
+        <div className="space-y-3">
+          <ComparisonMetricRow
+            icon={TrendingUp}
+            label="Arıza Üstlenme"
+            value1={`${m1.faultsAssigned} / ${m1.expectedFaults.toFixed(1)}`}
+            value2={`${m2.faultsAssigned} / ${m2.expectedFaults.toFixed(1)}`}
+            score1={m1.faultAssignmentScore}
+            score2={m2.faultAssignmentScore}
+            maxScore={20}
+          />
+          <ComparisonMetricRow
+            icon={Clock}
+            label="Müdahale Başlatma"
+            value1={formatDuration(m1.avgInterventionStartTimeMinutes)}
+            value2={formatDuration(m2.avgInterventionStartTimeMinutes)}
+            score1={m1.interventionTimeScore}
+            score2={m2.interventionTimeScore}
+            maxScore={15}
+          />
+          <ComparisonMetricRow
+            icon={CheckCircle}
+            label="Çözüm Süresi"
+            value1={formatDuration(m1.avgResolutionTimeMinutes)}
+            value2={formatDuration(m2.avgResolutionTimeMinutes)}
+            score1={m1.resolutionTimeScore}
+            score2={m2.resolutionTimeScore}
+            maxScore={15}
+          />
+          <ComparisonMetricRow
+            icon={Building}
+            label="Kurum Ziyareti"
+            value1={`${m1.institutionVisits} ziyaret`}
+            value2={`${m2.institutionVisits} ziyaret`}
+            score1={m1.visitFrequencyScore}
+            score2={m2.visitFrequencyScore}
+            maxScore={15}
+          />
+          <ComparisonMetricRow
+            icon={Phone}
+            label="Kurumda Müdahale"
+            value1={`${m1.onsiteInterventions} / ${m1.onsiteInterventions + m1.phoneInterventions}`}
+            value2={`${m2.onsiteInterventions} / ${m2.onsiteInterventions + m2.phoneInterventions}`}
+            score1={m1.onsiteRatioScore}
+            score2={m2.onsiteRatioScore}
+            maxScore={15}
+          />
+          <ComparisonMetricRow
+            icon={Calendar}
+            label="Periyodik Bakım"
+            value1={`${m1.periodicMaintenanceForms} / ${m1.totalPeriodicMaintenanceForms}`}
+            value2={`${m2.periodicMaintenanceForms} / ${m2.totalPeriodicMaintenanceForms}`}
+            score1={m1.maintenanceContributionScore}
+            score2={m2.maintenanceContributionScore}
+            maxScore={20}
+          />
+          <ComparisonMetricRow
+            icon={AlertTriangle}
+            label="Tekrar Arıza Cezası"
+            value1={`${m1.recurrenceCount} adet`}
+            value2={`${m2.recurrenceCount} adet`}
+            score1={m1.recurrencePenalty}
+            score2={m2.recurrencePenalty}
+            maxScore={-10}
+            higherIsBetter={false}
+          />
+          <ComparisonMetricRow
+            icon={Timer}
+            label="Gecikmiş Bakım"
+            value1={`${m1.overdueMaintenanceTasks + m1.overduePeriodicParts} adet`}
+            value2={`${m2.overdueMaintenanceTasks + m2.overduePeriodicParts} adet`}
+            score1={m1.overduePenalty}
+            score2={m2.overduePenalty}
+            maxScore={-15}
+            higherIsBetter={false}
+          />
+        </div>
+
+        {/* Summary */}
+        <div className="mt-6 p-4 rounded-xl bg-muted/50">
+          <div className="grid grid-cols-2 gap-4 text-center">
+            <div>
+              <p className="text-3xl font-bold">{m1.totalScore.toFixed(1)}</p>
+              <p className="text-sm text-muted-foreground">Toplam Puan</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold">{m2.totalScore.toFixed(1)}</p>
+              <p className="text-sm text-muted-foreground">Toplam Puan</p>
+            </div>
+          </div>
+          <div className="mt-4 text-center">
+            {Math.abs(m1.totalScore - m2.totalScore) < 0.5 ? (
+              <Badge variant="secondary" className="text-lg px-4 py-1">
+                <Minus className="h-4 w-4 mr-2" />
+                Performanslar Eşit
+              </Badge>
+            ) : m1.totalScore > m2.totalScore ? (
+              <Badge className="bg-green-600 text-white text-lg px-4 py-1">
+                <ArrowUp className="h-4 w-4 mr-2" />
+                {person1.user.name || person1.user.email} {(m1.totalScore - m2.totalScore).toFixed(1)} puan önde
+              </Badge>
+            ) : (
+              <Badge className="bg-green-600 text-white text-lg px-4 py-1">
+                <ArrowUp className="h-4 w-4 mr-2" />
+                {person2.user.name || person2.user.email} {(m2.totalScore - m1.totalScore).toFixed(1)} puan önde
+              </Badge>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function PersonelIzlemPage() {
   const router = useRouter();
   const { currentUserProfile, isAdmin } = useAuth();
@@ -275,7 +819,23 @@ export default function PersonelIzlemPage() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [selectedLabId, setSelectedLabId] = useState<string>('');
+  const [selectedPersonnelId, setSelectedPersonnelId] = useState<string>('');
   const [isFiltering, setIsFiltering] = useState(false);
+
+  // Comparison states
+  const [isCompareMode, setIsCompareMode] = useState(false);
+  const [comparePersonnelId, setComparePersonnelId] = useState<string>('');
+
+  // Selected personnel objects
+  const selectedPersonnel = useMemo(() => {
+    if (!selectedPersonnelId || selectedPersonnelId === 'all') return null;
+    return performances.find(p => p.user.uid === selectedPersonnelId) || null;
+  }, [selectedPersonnelId, performances]);
+
+  const comparePersonnel = useMemo(() => {
+    if (!comparePersonnelId || comparePersonnelId === 'all') return null;
+    return performances.find(p => p.user.uid === comparePersonnelId) || null;
+  }, [comparePersonnelId, performances]);
 
   // Load hospitals for the dropdown
   useEffect(() => {
@@ -329,12 +889,15 @@ export default function PersonelIzlemPage() {
     setStartDate('');
     setEndDate('');
     setSelectedLabId('');
+    setSelectedPersonnelId('');
+    setIsCompareMode(false);
+    setComparePersonnelId('');
     setIsFiltering(true);
     await loadPerformanceData();
     setIsFiltering(false);
   };
 
-  const hasActiveFilters = startDate || endDate || (selectedLabId && selectedLabId !== 'all');
+  const hasActiveFilters = startDate || endDate || (selectedLabId && selectedLabId !== 'all') || (selectedPersonnelId && selectedPersonnelId !== 'all');
 
   if (loading) {
     return (
@@ -388,7 +951,7 @@ export default function PersonelIzlemPage() {
                 <Badge variant="secondary" className="text-xs">Aktif</Badge>
               )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="startDate" className="text-xs">Başlangıç Tarihi</Label>
                 <Input
@@ -425,6 +988,47 @@ export default function PersonelIzlemPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="personnel" className="text-xs">Personel</Label>
+                <Select
+                  value={selectedPersonnelId}
+                  onValueChange={(value) => {
+                    setSelectedPersonnelId(value);
+                    if (value === 'all' || !value) {
+                      setIsCompareMode(false);
+                      setComparePersonnelId('');
+                    }
+                  }}
+                >
+                  <SelectTrigger id="personnel" className="h-9">
+                    <SelectValue placeholder="Tümü">
+                      {selectedPersonnelId && selectedPersonnelId !== 'all' ? (
+                        <span className="flex items-center gap-1">
+                          <UserCircle className="h-3 w-3" />
+                          {performances.find(p => p.user.uid === selectedPersonnelId)?.user.name || 'Seçili'}
+                        </span>
+                      ) : (
+                        'Tümü'
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tümü</SelectItem>
+                    {performances.map((p) => (
+                      <SelectItem key={p.user.uid} value={p.user.uid}>
+                        <span className="flex items-center gap-2">
+                          {p.user.role === 'aplikasyon' ? (
+                            <FlaskConical className="h-3 w-3 text-purple-600" />
+                          ) : (
+                            <Wrench className="h-3 w-3 text-blue-600" />
+                          )}
+                          {p.user.name || p.user.email}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex items-end gap-2">
                 <Button
                   onClick={handleApplyFilters}
@@ -450,41 +1054,109 @@ export default function PersonelIzlemPage() {
                 )}
               </div>
             </div>
-            {hasActiveFilters && (
+
+            {/* Compare mode selector */}
+            {selectedPersonnel && isCompareMode && (
+              <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <GitCompare className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Karşılaştırılacak personeli seçin:</span>
+                  </div>
+                  <Select
+                    value={comparePersonnelId}
+                    onValueChange={setComparePersonnelId}
+                  >
+                    <SelectTrigger className="h-9 w-64">
+                      <SelectValue placeholder="Personel seçin..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {performances
+                        .filter(p => p.user.uid !== selectedPersonnelId)
+                        .map((p) => (
+                          <SelectItem key={p.user.uid} value={p.user.uid}>
+                            <span className="flex items-center gap-2">
+                              {p.user.role === 'aplikasyon' ? (
+                                <FlaskConical className="h-3 w-3 text-purple-600" />
+                              ) : (
+                                <Wrench className="h-3 w-3 text-blue-600" />
+                              )}
+                              {p.user.name || p.user.email}
+                              <span className="text-muted-foreground">({p.metrics.totalScore.toFixed(0)} puan)</span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setIsCompareMode(false);
+                      setComparePersonnelId('');
+                    }}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            {hasActiveFilters && !isCompareMode && (
               <p className="text-xs text-muted-foreground mt-2">
-                {selectedLabId && selectedLabId !== 'all' && `Sadece "${hospitals.find(h => h.id === selectedLabId)?.name}" laboratuvarının ana sorumluları gösteriliyor.`}
-                {(startDate || endDate) && ` Tarih aralığı: ${startDate || '∞'} - ${endDate || '∞'}`}
+                {selectedPersonnelId && selectedPersonnelId !== 'all' && `${performances.find(p => p.user.uid === selectedPersonnelId)?.user.name || 'Seçili personel'} detaylı görünümde. `}
+                {selectedLabId && selectedLabId !== 'all' && `Sadece "${hospitals.find(h => h.id === selectedLabId)?.name}" laboratuvarının ana sorumluları gösteriliyor. `}
+                {(startDate || endDate) && `Tarih aralığı: ${startDate || '∞'} - ${endDate || '∞'}`}
               </p>
             )}
           </div>
 
-          {/* Summary stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="p-4 rounded-lg bg-muted/50 text-center">
-              <p className="text-3xl font-bold">{performances.length}</p>
-              <p className="text-sm text-muted-foreground">Toplam Personel</p>
+          {/* Summary stats - only show when no single personnel selected */}
+          {!selectedPersonnel && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="p-4 rounded-lg bg-muted/50 text-center">
+                <p className="text-3xl font-bold">{performances.length}</p>
+                <p className="text-sm text-muted-foreground">Toplam Personel</p>
+              </div>
+              <div className="p-4 rounded-lg bg-muted/50 text-center">
+                <p className="text-3xl font-bold">{avgScore.toFixed(1)}</p>
+                <p className="text-sm text-muted-foreground">Ortalama Puan</p>
+              </div>
+              <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/30 text-center">
+                <p className="text-3xl font-bold text-blue-600">{teknikPersonel.length}</p>
+                <p className="text-sm text-muted-foreground">Teknik Servis</p>
+              </div>
+              <div className="p-4 rounded-lg bg-purple-50 dark:bg-purple-950/30 text-center">
+                <p className="text-3xl font-bold text-purple-600">{aplikasyonPersonel.length}</p>
+                <p className="text-sm text-muted-foreground">Aplikasyon</p>
+              </div>
             </div>
-            <div className="p-4 rounded-lg bg-muted/50 text-center">
-              <p className="text-3xl font-bold">{avgScore.toFixed(1)}</p>
-              <p className="text-sm text-muted-foreground">Ortalama Puan</p>
-            </div>
-            <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/30 text-center">
-              <p className="text-3xl font-bold text-blue-600">{teknikPersonel.length}</p>
-              <p className="text-sm text-muted-foreground">Teknik Servis</p>
-            </div>
-            <div className="p-4 rounded-lg bg-purple-50 dark:bg-purple-950/30 text-center">
-              <p className="text-3xl font-bold text-purple-600">{aplikasyonPersonel.length}</p>
-              <p className="text-sm text-muted-foreground">Aplikasyon</p>
-            </div>
-          </div>
+          )}
 
-          {/* Personnel cards grid */}
+          {/* Content area - changes based on selection */}
           {performances.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Users className="h-12 w-12 mx-auto mb-4 opacity-20" />
               <p>Henüz personel verisi bulunamadı.</p>
             </div>
+          ) : selectedPersonnel && comparePersonnel ? (
+            // Comparison view - two personnel selected
+            <ComparisonView
+              person1={selectedPersonnel}
+              person2={comparePersonnel}
+              onClose={() => {
+                setIsCompareMode(false);
+                setComparePersonnelId('');
+              }}
+            />
+          ) : selectedPersonnel ? (
+            // Single personnel detailed view
+            <DetailedKPICard
+              performance={selectedPersonnel}
+              onCompare={() => setIsCompareMode(true)}
+              showCompareButton={!isCompareMode}
+            />
           ) : (
+            // All personnel grid view
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {performances.map((performance) => (
                 <PersonnelCard key={performance.user.uid} performance={performance} />
