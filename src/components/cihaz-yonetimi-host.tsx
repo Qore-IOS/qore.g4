@@ -3,13 +3,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical, Users, BarChart3 } from 'lucide-react';
+import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical, Users, BarChart3, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
+import QoreAIPanel from '@/components/QoreAIPanel';
 
 const ModernButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button> & {icon?: React.ElementType}>(
   ({ className, children, icon: Icon, ...props }, ref) => (
@@ -36,6 +37,7 @@ ModernButton.displayName = "ModernButton";
 export default function CihazYonetimiHost() {
   const [subView, setSubView] = useState<CihazYonetimiSubView>('ana');
   const [isLoading, setIsLoading] = useState(true);
+  const [isQoreAIPanelOpen, setIsQoreAIPanelOpen] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
   const { isAdmin } = useAuth();
@@ -78,8 +80,17 @@ export default function CihazYonetimiHost() {
      <div className="flex flex-col items-center justify-center min-h-full p-4 sm:p-8">
       <Card className={cn(
         "w-full max-w-4xl p-6 sm:p-10 rounded-3xl",
-        "shadow-2xl"
+        "shadow-2xl relative"
       )}>
+        {/* Qore AI Button - Top Right */}
+        <Button
+          variant="outline"
+          onClick={() => setIsQoreAIPanelOpen(true)}
+          className="absolute top-4 right-4 gap-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 hover:from-purple-500/20 hover:to-blue-500/20 border-purple-500/30"
+        >
+          <Sparkles className="h-4 w-4 text-purple-500" />
+          Qore AI
+        </Button>
         <CardHeader className="text-center mb-8">
           <CardTitle className="text-3xl sm:text-4xl font-headline text-primary">Cihaz Yönetim Merkezi</CardTitle>
         </CardHeader>
@@ -122,5 +133,10 @@ export default function CihazYonetimiHost() {
     </div>
   );
 
-  return <MainMenu />;
+  return (
+    <>
+      <MainMenu />
+      <QoreAIPanel open={isQoreAIPanelOpen} onClose={() => setIsQoreAIPanelOpen(false)} />
+    </>
+  );
 }
