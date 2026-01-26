@@ -742,11 +742,17 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                               className="w-[400px] p-0 z-[10000]"
                               align="start"
                               sideOffset={4}
-                              onOpenAutoFocus={(e) => e.preventDefault()}
+                              onOpenAutoFocus={(e) => {
+                                e.preventDefault();
+                                const input = e.currentTarget.querySelector('input');
+                                if (input) {
+                                  setTimeout(() => input.focus(), 0);
+                                }
+                              }}
                               onInteractOutside={(e) => e.preventDefault()}
                             >
                               <Command shouldFilter={true}>
-                                <CommandInput placeholder="Ürün kodu veya adı ara..." autoFocus />
+                                <CommandInput placeholder="Ürün kodu veya adı ara..." />
                                 <CommandList>
                                   <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
                                   <CommandGroup>
