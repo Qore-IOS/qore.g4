@@ -1,17 +1,21 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import {
   calculateAllPerformances,
   getScoreColor,
   formatDuration,
   type PersonnelPerformance,
+  type PerformanceFilters,
 } from '@/lib/performance-calculator';
 import { cn } from '@/lib/utils';
 import {
@@ -20,6 +24,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import type { Hospital } from '@/lib/types';
 
 // Neumorphic score circle component
 function ScoreCircle({ score }: { score: number }) {
@@ -255,6 +269,39 @@ export default function PersonelIzlemPage() {
   const { currentUserProfile, isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [performances, setPerformances] = useState<PersonnelPerformance[]>([]);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+
+  // Filter states
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [selectedLabId, setSelectedLabId] = useState<string>('');
+  const [isFiltering, setIsFiltering] = useState(false);
+
+  // Load hospitals for the dropdown
+  useEffect(() => {
+    const loadHospitals = async () => {
+      try {
+        const hospitalsSnap = await getDocs(collection(db, 'hospitals'));
+        const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Hospital);
+        setHospitals(hospitalsData.sort((a, b) => a.name.localeCompare(b.name, 'tr')));
+      } catch (err) {
+        console.error('Error loading hospitals:', err);
+      }
+    };
+    loadHospitals();
+  }, []);
+
+  const loadPerformanceData = async (filters?: PerformanceFilters) => {
+    setLoading(true);
+    try {
+      const data = await calculateAllPerformances(filters);
+      setPerformances(data);
+    } catch (err) {
+      console.error('Error loading performance data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin) {
@@ -262,19 +309,32 @@ export default function PersonelIzlemPage() {
       return;
     }
 
-    const loadData = async () => {
-      try {
-        const data = await calculateAllPerformances();
-        setPerformances(data);
-      } catch (err) {
-        console.error('Error loading performance data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
+    loadPerformanceData();
   }, [isAdmin]);
+
+  const handleApplyFilters = async () => {
+    setIsFiltering(true);
+    const filters: PerformanceFilters = {
+      dateRange: {
+        start: startDate ? new Date(startDate) : null,
+        end: endDate ? new Date(endDate) : null,
+      },
+      selectedLaboratoryId: selectedLabId && selectedLabId !== 'all' ? selectedLabId : null,
+    };
+    await loadPerformanceData(filters);
+    setIsFiltering(false);
+  };
+
+  const handleClearFilters = async () => {
+    setStartDate('');
+    setEndDate('');
+    setSelectedLabId('');
+    setIsFiltering(true);
+    await loadPerformanceData();
+    setIsFiltering(false);
+  };
+
+  const hasActiveFilters = startDate || endDate || (selectedLabId && selectedLabId !== 'all');
 
   if (loading) {
     return (
@@ -319,6 +379,85 @@ export default function PersonelIzlemPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Filters */}
+          <div className="mb-6 p-4 rounded-lg border bg-muted/30">
+            <div className="flex items-center gap-2 mb-3">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Filtreler</span>
+              {hasActiveFilters && (
+                <Badge variant="secondary" className="text-xs">Aktif</Badge>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="startDate" className="text-xs">Başlangıç Tarihi</Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="endDate" className="text-xs">Bitiş Tarihi</Label>
+                <Input
+                  id="endDate"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="laboratory" className="text-xs">Laboratuvar</Label>
+                <Select value={selectedLabId} onValueChange={setSelectedLabId}>
+                  <SelectTrigger id="laboratory" className="h-9">
+                    <SelectValue placeholder="Tümü" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tümü</SelectItem>
+                    {hospitals.map((hospital) => (
+                      <SelectItem key={hospital.id} value={hospital.id}>
+                        {hospital.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end gap-2">
+                <Button
+                  onClick={handleApplyFilters}
+                  disabled={isFiltering || loading}
+                  className="h-9 flex-1"
+                >
+                  {isFiltering ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                  ) : (
+                    <Filter className="h-4 w-4 mr-1" />
+                  )}
+                  Uygula
+                </Button>
+                {hasActiveFilters && (
+                  <Button
+                    variant="outline"
+                    onClick={handleClearFilters}
+                    disabled={isFiltering || loading}
+                    className="h-9"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+            {hasActiveFilters && (
+              <p className="text-xs text-muted-foreground mt-2">
+                {selectedLabId && selectedLabId !== 'all' && `Sadece "${hospitals.find(h => h.id === selectedLabId)?.name}" laboratuvarının ana sorumluları gösteriliyor.`}
+                {(startDate || endDate) && ` Tarih aralığı: ${startDate || '∞'} - ${endDate || '∞'}`}
+              </p>
+            )}
+          </div>
+
           {/* Summary stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="p-4 rounded-lg bg-muted/50 text-center">

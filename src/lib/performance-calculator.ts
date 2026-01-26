@@ -65,7 +65,15 @@ function calculateResolutionTimeScore(avgMinutes: number): number {
   return 0;
 }
 
-export async function calculateAllPerformances(): Promise<PersonnelPerformance[]> {
+export interface PerformanceFilters {
+  dateRange?: { start: Date | null; end: Date | null };
+  selectedLaboratoryId?: string | null;
+}
+
+export async function calculateAllPerformances(filters?: PerformanceFilters): Promise<PersonnelPerformance[]> {
+  const { dateRange, selectedLaboratoryId } = filters || {};
+  const hasDateFilter = dateRange?.start || dateRange?.end;
+  const hasLabFilter = !!selectedLaboratoryId;
   // Fetch all required data
   const [
     usersSnap,
@@ -91,7 +99,14 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
 
   // Parse data
   const allUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
-  const technicians = allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon');
+  let technicians = allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon');
+
+  // Filter technicians by selected laboratory (only those who have it as primary)
+  if (hasLabFilter) {
+    technicians = technicians.filter(u =>
+      u.primaryLaboratories && u.primaryLaboratories.includes(selectedLaboratoryId!)
+    );
+  }
 
   // Parse devices to get hospitalId mapping
   const devices = devicesSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Device);
@@ -179,15 +194,50 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
     };
   });
 
-  const allForms = [...teknikForms, ...aplikasyonForms];
+  let allForms = [...teknikForms, ...aplikasyonForms];
+
+  // Helper function to check if a date is within range
+  const isWithinDateRange = (date: Date | null): boolean => {
+    if (!hasDateFilter || !date) return true;
+    if (dateRange?.start && date < dateRange.start) return false;
+    if (dateRange?.end) {
+      // Include the entire end day
+      const endOfDay = new Date(dateRange.end);
+      endOfDay.setHours(23, 59, 59, 999);
+      if (date > endOfDay) return false;
+    }
+    return true;
+  };
+
+  // Apply date and laboratory filters to faults
+  let filteredFaults = allFaults;
+  if (hasDateFilter) {
+    filteredFaults = filteredFaults.filter(f => isWithinDateRange(f.openedAt));
+  }
+  if (hasLabFilter) {
+    filteredFaults = filteredFaults.filter(f => f.hospitalId === selectedLaboratoryId);
+  }
+
+  // Apply date and laboratory filters to forms
+  let filteredForms = allForms;
+  if (hasDateFilter) {
+    filteredForms = filteredForms.filter(f => isWithinDateRange(f.createdAt));
+  }
+  if (hasLabFilter) {
+    filteredForms = filteredForms.filter(f => f.hospitalId === selectedLaboratoryId);
+  }
+
+  // Use filtered data for calculations when filters are applied
+  const faultsForCalculation = (hasDateFilter || hasLabFilter) ? filteredFaults : allFaults;
+  const formsForCalculation = (hasDateFilter || hasLabFilter) ? filteredForms : allForms;
 
   // Calculate total periodic maintenance forms
-  const totalPeriodicMaintenanceForms = allForms.filter(f => f.islemTuru === 'periyodik_bakim').length;
+  const totalPeriodicMaintenanceForms = formsForCalculation.filter(f => f.islemTuru === 'periyodik_bakim').length;
 
   // Calculate average institution visits
   const visitCounts = technicians.map(user => {
-    const userForms = allForms.filter(f => f.createdByUid === user.uid).length;
-    const userOnsiteInterventions = allFaults.filter(f =>
+    const userForms = formsForCalculation.filter(f => f.createdByUid === user.uid).length;
+    const userOnsiteInterventions = faultsForCalculation.filter(f =>
       f.assignedToUid === user.uid && f.interventionType === 'yerinde'
     ).length;
     return userForms + userOnsiteInterventions;
@@ -197,8 +247,8 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
     : 0;
 
   // Count faults by type
-  const teknikServisFaults = allFaults.filter(f => f.faultType === 'teknik_servis');
-  const aplikasyonFaults = allFaults.filter(f => f.faultType === 'aplikasyon');
+  const teknikServisFaults = faultsForCalculation.filter(f => f.faultType === 'teknik_servis');
+  const aplikasyonFaults = faultsForCalculation.filter(f => f.faultType === 'aplikasyon');
 
   // Build map of lab -> personnel count (per role) for expected fault calculation
   // This counts how many personnel have each lab as primary, grouped by role
@@ -335,8 +385,8 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
 
     // 2. Intervention Start Time (max 15 points) - filter by primary labs
     const faultsWithIntervention = (hasPrimaryLabs
-      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
-      : allFaults
+      ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : faultsForCalculation
     ).filter(f =>
       f.assignedToUid === user.uid &&
       f.assignedAt &&
@@ -354,8 +404,8 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
 
     // 3. Resolution Time (max 15 points) - filter by primary labs
     const resolvedFaults = (hasPrimaryLabs
-      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
-      : allFaults
+      ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : faultsForCalculation
     ).filter(f =>
       f.closedByUid === user.uid &&
       f.interventionStartedAt &&
@@ -373,11 +423,11 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
 
     // 4. Institution Visit Frequency (max 15 points) - filter by primary labs
     const relevantForms = hasPrimaryLabs
-      ? allForms.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
-      : allForms;
+      ? formsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : formsForCalculation;
     const relevantFaultsForVisits = hasPrimaryLabs
-      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
-      : allFaults;
+      ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : faultsForCalculation;
 
     const userForms = relevantForms.filter(f => f.createdByUid === user.uid).length;
     const onsiteInterventions = relevantFaultsForVisits.filter(f =>
@@ -405,7 +455,7 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
     // 6. Periodic Maintenance Contribution (max 20 points) - filter by primary labs
     const relevantPeriodicForms = hasPrimaryLabs
       ? relevantForms.filter(f => f.islemTuru === 'periyodik_bakim')
-      : allForms.filter(f => f.islemTuru === 'periyodik_bakim');
+      : formsForCalculation.filter(f => f.islemTuru === 'periyodik_bakim');
     const totalRelevantPeriodicForms = relevantPeriodicForms.length;
 
     const userPeriodicForms = relevantPeriodicForms.filter(f => f.createdByUid === user.uid).length;
@@ -421,13 +471,13 @@ export async function calculateAllPerformances(): Promise<PersonnelPerformance[]
     let recurrenceCount = 0;
 
     const userResolvedFaultsForRecurrence = (hasPrimaryLabs
-      ? allFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
-      : allFaults
+      ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : faultsForCalculation
     ).filter(f => f.closedByUid === user.uid && f.status === 'closed' && f.closedAt);
 
     for (const resolved of userResolvedFaultsForRecurrence) {
       // Check if same device had a new fault within 7 days
-      const hasRecurrence = allFaults.some(f =>
+      const hasRecurrence = faultsForCalculation.some(f =>
         f.id !== resolved.id &&
         f.deviceId === resolved.deviceId &&
         f.openedAt &&
