@@ -132,6 +132,12 @@ export default function UrunKullanimPanel() {
   const [faultDescription, setFaultDescription] = useState('');
   const [isSavingFault, setIsSavingFault] = useState(false);
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
+
+  // Custom "Diğer" fault modal states
+  const [customFaultModalOpen, setCustomFaultModalOpen] = useState(false);
+  const [customFaultType, setCustomFaultType] = useState<'teknik_servis' | 'aplikasyon'>('teknik_servis');
+  const [customFaultTitle, setCustomFaultTitle] = useState('');
+  const [customFaultDescription, setCustomFaultDescription] = useState('');
   
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   const [isManualDeductionOpen, setIsManualDeductionOpen] = useState(false);
@@ -576,6 +582,66 @@ export default function UrunKullanimPanel() {
     }
   }, [selectedDevice, faultDescription, currentUser, currentUserProfile, selectedLabId, selectedLabName, toast]);
 
+  // Handler to open custom fault modal
+  const handleOpenCustomFault = useCallback((type: 'teknik_servis' | 'aplikasyon') => {
+    setCustomFaultType(type);
+    setCustomFaultTitle('');
+    setCustomFaultDescription('');
+    setCustomFaultModalOpen(true);
+  }, []);
+
+  // Handler to submit custom fault
+  const handleCustomFaultSubmit = useCallback(async () => {
+    if (!selectedDevice || !customFaultTitle.trim() || !customFaultDescription.trim()) return;
+    setIsSavingFault(true);
+    try {
+      await openDeviceFaultReport({
+        hospitalId: selectedLabId ?? '',
+        labName: selectedLabName ?? '',
+        deviceId: selectedDevice.id,
+        model: selectedDevice.cihazAdi || selectedDevice.name || '',
+        serial: selectedDevice.seriNumarasi || '',
+        faultType: customFaultType,
+        openedByUid: currentUser?.uid || '',
+        openedByName: currentUserProfile?.name || '',
+        openDescription: customFaultDescription,
+        faultDefinitionId: undefined,
+        faultName: customFaultTitle.trim(),
+      });
+
+      await emitFaultOpened({
+        actor: { uid: currentUser?.uid || '', name: currentUserProfile?.name || '' },
+        assignedDeviceId: selectedDevice.id,
+        deviceName: selectedDevice.cihazAdi || selectedDevice.name || '',
+        faultType: customFaultType,
+        hospitalId: selectedLabId ?? '',
+        hospitalName: selectedLabName ?? '',
+      });
+
+      urunKullanimLogger.info('Özel arıza kaydı oluşturuldu', {
+        deviceId: selectedDevice.id,
+        deviceName: selectedDevice.cihazAdi,
+        faultType: customFaultType,
+        faultName: customFaultTitle,
+      });
+      toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için "${customFaultTitle}" arızası bildirildi.` });
+      setCustomFaultModalOpen(false);
+      setFaultModalOpen(false);
+      setCustomFaultTitle('');
+      setCustomFaultDescription('');
+      setSelectedDevice(null);
+    } catch (err) {
+      urunKullanimLogger.error('Özel arıza kaydı oluşturulamadı', err, {
+        deviceId: selectedDevice?.id,
+        faultType: customFaultType,
+        faultName: customFaultTitle,
+      });
+      toast({ title: 'Hata', description: 'Arıza kaydı oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsSavingFault(false);
+    }
+  }, [selectedDevice, customFaultType, customFaultTitle, customFaultDescription, currentUser, currentUserProfile, selectedLabId, selectedLabName, toast]);
+
   const manualDeductionAvailableProducts = useMemo(() => {
     return Array.from(new Set(labStock.map(item => item.stokKodu)))
         .map(code => products.find(p => p.stokKodu === code))
@@ -1008,9 +1074,28 @@ export default function UrunKullanimPanel() {
                   </div>
                   <ScrollArea className="h-[300px] border border-t-0 border-blue-200 dark:border-blue-800 rounded-b-lg">
                     <div className="p-1">
+                      {/* Diğer - Custom fault option */}
+                      <button
+                        onClick={() => handleOpenCustomFault('teknik_servis')}
+                        disabled={isSavingFault}
+                        className={cn(
+                          "w-full text-left px-3 py-2.5 rounded-md transition-all mb-1",
+                          "bg-blue-50 dark:bg-blue-950/50",
+                          "hover:bg-blue-100 dark:hover:bg-blue-900/40",
+                          "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1",
+                          "disabled:opacity-50 disabled:cursor-not-allowed",
+                          "border border-blue-200 dark:border-blue-700 hover:border-blue-300 dark:hover:border-blue-600"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <ClipboardPlus className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <span className="text-sm font-medium text-blue-700 dark:text-blue-300">Diğer</span>
+                          <span className="ml-auto text-xs text-blue-500 dark:text-blue-400">(Özel arıza)</span>
+                        </div>
+                      </button>
                       {teknikServisFaults.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground text-sm">
-                          Teknik servis arıza tanımı yok
+                        <div className="text-center py-6 text-muted-foreground text-sm">
+                          Tanımlı arıza yok
                         </div>
                       ) : (
                         teknikServisFaults.map((fault) => (
@@ -1052,9 +1137,28 @@ export default function UrunKullanimPanel() {
                   </div>
                   <ScrollArea className="h-[300px] border border-t-0 border-purple-200 dark:border-purple-800 rounded-b-lg">
                     <div className="p-1">
+                      {/* Diğer - Custom fault option */}
+                      <button
+                        onClick={() => handleOpenCustomFault('aplikasyon')}
+                        disabled={isSavingFault}
+                        className={cn(
+                          "w-full text-left px-3 py-2.5 rounded-md transition-all mb-1",
+                          "bg-purple-50 dark:bg-purple-950/50",
+                          "hover:bg-purple-100 dark:hover:bg-purple-900/40",
+                          "focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1",
+                          "disabled:opacity-50 disabled:cursor-not-allowed",
+                          "border border-purple-200 dark:border-purple-700 hover:border-purple-300 dark:hover:border-purple-600"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <ClipboardPlus className="h-4 w-4 text-purple-600 dark:text-purple-400 flex-shrink-0" />
+                          <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Diğer</span>
+                          <span className="ml-auto text-xs text-purple-500 dark:text-purple-400">(Özel arıza)</span>
+                        </div>
+                      </button>
                       {aplikasyonFaults.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground text-sm">
-                          Aplikasyon arıza tanımı yok
+                        <div className="text-center py-6 text-muted-foreground text-sm">
+                          Tanımlı arıza yok
                         </div>
                       ) : (
                         aplikasyonFaults.map((fault) => (
@@ -1087,6 +1191,85 @@ export default function UrunKullanimPanel() {
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom Fault Entry Modal */}
+      <Dialog open={customFaultModalOpen} onOpenChange={setCustomFaultModalOpen}>
+        <DialogContent className="max-w-md" aria-describedby="custom-fault-dialog-description">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {customFaultType === 'teknik_servis' ? (
+                <>
+                  <Wrench className="h-5 w-5 text-blue-600" />
+                  <span>Özel Teknik Servis Arızası</span>
+                </>
+              ) : (
+                <>
+                  <FlaskConical className="h-5 w-5 text-purple-600" />
+                  <span>Özel Aplikasyon Arızası</span>
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription id="custom-fault-dialog-description">
+              {selectedDevice?.cihazAdi} cihazı için özel arıza kaydı oluşturun.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="customFaultTitle" className="text-sm font-medium">
+                Arıza Başlığı <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="customFaultTitle"
+                value={customFaultTitle}
+                onChange={(e) => setCustomFaultTitle(e.target.value)}
+                placeholder="Arıza başlığını girin..."
+                className="w-full"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customFaultDescription" className="text-sm font-medium">
+                Arıza Açıklaması <span className="text-destructive">*</span>
+              </Label>
+              <textarea
+                id="customFaultDescription"
+                value={customFaultDescription}
+                onChange={(e) => setCustomFaultDescription(e.target.value)}
+                placeholder="Arızayı detaylı olarak açıklayın..."
+                rows={4}
+                className={cn(
+                  "w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+                  "placeholder:text-muted-foreground",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  "disabled:cursor-not-allowed disabled:opacity-50"
+                )}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCustomFaultModalOpen(false)}
+              disabled={isSavingFault}
+            >
+              İptal
+            </Button>
+            <Button
+              onClick={handleCustomFaultSubmit}
+              disabled={isSavingFault || !customFaultTitle.trim() || !customFaultDescription.trim()}
+              className={customFaultType === 'teknik_servis' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'}
+            >
+              {isSavingFault ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Kaydediliyor...
+                </>
+              ) : (
+                'Arıza Kaydı Oluştur'
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
