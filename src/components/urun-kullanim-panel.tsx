@@ -28,6 +28,7 @@ import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import Image from 'next/image';
 import { Label } from '@/components/ui/label';
+import { useTheme } from 'next-themes';
 import { useUsageRouteSync } from '@/hooks/useUsageRouteSync';
 import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
 import { TrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
@@ -66,7 +67,8 @@ const logSerialHistory = async (seriNo: string, type: string, details: Record<st
 };
 
 export default function UrunKullanimPanel() {
-  const { currentUser, currentUserProfile, logout } = useAuth();
+  const { currentUser, currentUserProfile, logout, wallpaper } = useAuth();
+  const { theme } = useTheme();
   const { suppressGlobalLoading } = useLoading();
   const { toast } = useToast();
   const router = useRouter();
@@ -1021,8 +1023,32 @@ export default function UrunKullanimPanel() {
     }
   };
 
+  const activeWallpaper = theme === 'dark' ? wallpaper.dark : wallpaper.light;
+
   return (
-    <div className="flex flex-col min-h-[calc(100vh-100px)] p-4 gap-4">
+    <div className="relative flex flex-col min-h-[calc(100vh-100px)] p-4 gap-4">
+      {/* Wallpaper with fade effect */}
+      {activeWallpaper && (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-0"
+          style={{ height: '50vh' }}
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage: `url(${activeWallpaper})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center bottom',
+              backgroundRepeat: 'no-repeat',
+              maskImage: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.03) 65%, rgba(0,0,0,0) 80%)',
+              WebkitMaskImage: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.03) 65%, rgba(0,0,0,0) 80%)',
+              opacity: theme === 'dark' ? 0.4 : 0.25,
+              filter: 'blur(1px) saturate(0.6)',
+            }}
+          />
+        </div>
+      )}
+
       {/* Header with user name and action buttons */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="flex items-center gap-3">
