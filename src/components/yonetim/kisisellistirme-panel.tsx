@@ -1,14 +1,30 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Palette, Image, Layout, Settings2, MousePointer2, Droplets, Check } from 'lucide-react';
+import { Palette, Image, Layout, Settings2, MousePointer2, Droplets, Check, Sun, Moon, X, ImageIcon } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import BackButton from '@/components/BackButton';
 import { cn } from '@/lib/utils';
+import NextImage from 'next/image';
+
+const PUBLIC_IMAGES = [
+  '234724.png', '235016.png', '236209.png', '236609.png',
+  '303.png', '303 nw.png', '503.png',
+  '634404.png', '634503.png', '634602.png', '635305.png', '636800.png',
+  '703.png', '703 kit.png', '703kit.png', '703nw.png',
+  '801.png', '801 kit.png',
+  'A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+  'Başlıksız-2.png', 'Başlıksız-3.png',
+  'ChatGPT Image 6 Ağu 2025 09_10_30.png',
+  'IFS.png', 'QORE-INV_LOGO.PNG',
+  'alkim kartuş.png', 'blk.png', 'e411.png',
+  'invitrolab_LOGO__-_Kopya__1_-removebg.png',
+  'lab.png', 'lab_diorama.png', 'newlogoblk.png', 'newlogowh.png', 'wt.png',
+];
 
 export default function KisisellistirmePanel() {
-  const { isAdmin, dockStyle, setDockStyle } = useAuth();
+  const { isAdmin, dockStyle, setDockStyle, wallpaper, setWallpaper } = useAuth();
 
   if (!isAdmin) {
     return (
@@ -150,6 +166,121 @@ export default function KisisellistirmePanel() {
               <p className="text-sm text-blue-600 dark:text-blue-400">
                 <strong>Liquid Glass Aktif:</strong> Dock&apos;un üzerine geldiğinizde cam efektli seçici görünecek
                 ve ikonlar arasında akışkan bir şekilde hareket edecektir.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Wallpaper Settings */}
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-lg font-headline flex items-center gap-2">
+            <ImageIcon className="h-5 w-5 text-primary" />
+            Ürün Kullanım Paneli Duvar Kağıdı
+          </CardTitle>
+          <CardDescription>
+            Ürün kullanım panelinin arka planında gösterilecek görseli açık ve koyu mod için ayrı ayrı seçebilirsiniz.
+            Görsel ekranın altından başlayıp yukarı doğru soluklaşarak kaybolur.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Light Mode Wallpaper */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Sun className="h-4 w-4 text-amber-500" />
+              <span className="font-medium text-sm">Açık Mod Duvar Kağıdı</span>
+              {wallpaper.light && (
+                <button
+                  onClick={() => setWallpaper('light', null)}
+                  className="ml-auto flex items-center gap-1 text-xs text-destructive hover:underline"
+                >
+                  <X className="h-3 w-3" /> Kaldır
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+              {PUBLIC_IMAGES.map((img) => (
+                <button
+                  key={`light-${img}`}
+                  onClick={() => setWallpaper('light', `/${img}`)}
+                  className={cn(
+                    "relative aspect-square rounded-lg border-2 overflow-hidden transition-all duration-200 hover:scale-105",
+                    wallpaper.light === `/${img}`
+                      ? "border-amber-500 ring-2 ring-amber-500/30 shadow-md"
+                      : "border-border hover:border-amber-500/50"
+                  )}
+                >
+                  <NextImage
+                    src={`/${img}`}
+                    alt={img}
+                    fill
+                    className="object-cover"
+                    sizes="100px"
+                  />
+                  {wallpaper.light === `/${img}` && (
+                    <div className="absolute inset-0 bg-amber-500/20 flex items-center justify-center">
+                      <div className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Dark Mode Wallpaper */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Moon className="h-4 w-4 text-blue-400" />
+              <span className="font-medium text-sm">Koyu Mod Duvar Kağıdı</span>
+              {wallpaper.dark && (
+                <button
+                  onClick={() => setWallpaper('dark', null)}
+                  className="ml-auto flex items-center gap-1 text-xs text-destructive hover:underline"
+                >
+                  <X className="h-3 w-3" /> Kaldır
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+              {PUBLIC_IMAGES.map((img) => (
+                <button
+                  key={`dark-${img}`}
+                  onClick={() => setWallpaper('dark', `/${img}`)}
+                  className={cn(
+                    "relative aspect-square rounded-lg border-2 overflow-hidden transition-all duration-200 hover:scale-105",
+                    wallpaper.dark === `/${img}`
+                      ? "border-blue-500 ring-2 ring-blue-500/30 shadow-md"
+                      : "border-border hover:border-blue-500/50"
+                  )}
+                >
+                  <NextImage
+                    src={`/${img}`}
+                    alt={img}
+                    fill
+                    className="object-cover"
+                    sizes="100px"
+                  />
+                  {wallpaper.dark === `/${img}` && (
+                    <div className="absolute inset-0 bg-blue-500/20 flex items-center justify-center">
+                      <div className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Preview */}
+          {(wallpaper.light || wallpaper.dark) && (
+            <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-amber-500/10 to-blue-500/10 border border-primary/20">
+              <p className="text-sm text-muted-foreground">
+                <strong>Duvar kağıdı aktif:</strong> Seçilen görseller ürün kullanım panelinde
+                ekranın altından başlayıp yukarı doğru soft bir geçişle soluklaşarak kaybolacaktır.
               </p>
             </div>
           )}

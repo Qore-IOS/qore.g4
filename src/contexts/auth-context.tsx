@@ -20,6 +20,11 @@ type NavMode = 'dock' | 'sidebar';
 
 type DockStyle = 'hover' | 'liquid';
 
+interface WallpaperSettings {
+  light: string | null;
+  dark: string | null;
+}
+
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   currentUserProfile: User | null;
@@ -34,6 +39,8 @@ interface AuthContextType {
   setDockStyle: (style: DockStyle) => void;
   themePreference: ThemePreference;
   setUserTheme: (theme: ThemePreference) => Promise<void>;
+  wallpaper: WallpaperSettings;
+  setWallpaper: (mode: 'light' | 'dark', path: string | null) => void;
   login: (email: string, pass: string) => Promise<FirebaseUser | null>;
   loginWithGoogle: () => Promise<FirebaseUser | null>;
   loginAnonymously: () => Promise<FirebaseUser | null>;
@@ -56,6 +63,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [navMode, setNavMode] = useState<NavMode>('dock');
   const [dockStyle, setDockStyleState] = useState<DockStyle>('hover');
   const [themePreference, setThemePreference] = useState<ThemePreference>('dark');
+  const [wallpaper, setWallpaperState] = useState<WallpaperSettings>({ light: null, dark: null });
   const router = useRouter();
   const auth = getAuth(app);
   const { setTheme, theme } = useTheme();
@@ -69,6 +77,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const savedDockStyle = localStorage.getItem('dock_style') as DockStyle | null;
     setDockStyleState(savedDockStyle || 'hover');
+
+    const savedWallpaper = localStorage.getItem('wallpaper_settings');
+    if (savedWallpaper) {
+      try {
+        setWallpaperState(JSON.parse(savedWallpaper));
+      } catch { /* ignore parse errors */ }
+    }
   }, []);
 
   const toggleOrbAnimation = () => {
@@ -90,6 +105,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const setDockStyle = (style: DockStyle) => {
     setDockStyleState(style);
     localStorage.setItem('dock_style', style);
+  };
+
+  const setWallpaper = (mode: 'light' | 'dark', path: string | null) => {
+    setWallpaperState(prev => {
+      const next = { ...prev, [mode]: path };
+      localStorage.setItem('wallpaper_settings', JSON.stringify(next));
+      return next;
+    });
   };
 
   // Save theme preference to Firestore and apply it
@@ -365,6 +388,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setDockStyle,
     themePreference,
     setUserTheme,
+    wallpaper,
+    setWallpaper,
     login,
     signup,
     logout,
