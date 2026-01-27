@@ -19,7 +19,9 @@ import { tr } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
-import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode } from '@/lib/types';
+import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User } from '@/lib/types';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import {
@@ -126,6 +128,11 @@ export default function FaultDetailPage() {
   // Kit arızası için ürüne bağlı test bilgisi
   const [productTestInfo, setProductTestInfo] = useState<string | null>(null);
   const [isProductTestDialogOpen, setIsProductTestDialogOpen] = useState(false);
+
+  // Destek personeli seçimi (arıza kapatılırken)
+  const [allPersonnel, setAllPersonnel] = useState<User[]>([]);
+  const [selectedSupportPersonnelUid, setSelectedSupportPersonnelUid] = useState<string>('');
+  const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
 
 
   useEffect(() => {
@@ -241,6 +248,21 @@ export default function FaultDetailPage() {
 
     fetchProductTestInfo();
   }, [fault?.isEjectedKitFault, fault?.productStokKodu]);
+
+  // Fetch personnel for support personnel selector
+  useEffect(() => {
+    (async () => {
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as User));
+        // Filter to teknik_servis and aplikasyon roles
+        const personnel = users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon');
+        setAllPersonnel(personnel);
+      } catch (e) {
+        console.error('Personel listesi alınamadı:', e);
+      }
+    })();
+  }, []);
 
   // Konum doğrulama durumunu kontrol et
   useEffect(() => {
@@ -398,19 +420,25 @@ export default function FaultDetailPage() {
   const handleClose = useCallback(async () => {
     if (!fault) return;
     try {
+      const supportPerson = selectedSupportPersonnelUid
+        ? allPersonnel.find(p => p.uid === selectedSupportPersonnelUid)
+        : null;
+
       await closeDeviceFaultReport(fault.id, {
         closedByUid: currentUser?.uid || '',
         closedByName: currentUserProfile?.name || '',
         closeDescription,
+        supportPersonnel: supportPerson ? { uid: supportPerson.uid, name: supportPerson.name || '' } : null,
       });
       setIsCloseDialogOpen(false);
       setCloseDescription('');
+      setSelectedSupportPersonnelUid('');
       toast({ title: 'Arıza Kapatıldı', description: `#${fault.id} kapatıldı.` });
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Arıza kapatılamadı.', variant: 'destructive' });
     }
-  }, [fault, closeDescription, currentUser, currentUserProfile, toast]);
+  }, [fault, closeDescription, currentUser, currentUserProfile, toast, selectedSupportPersonnelUid, allPersonnel]);
 
   const handleKitResolution = async (resolution: 'imha' | 'tekrar_kullanim') => {
     if (!fault) return;
@@ -857,12 +885,54 @@ export default function FaultDetailPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={isCloseDialogOpen} onOpenChange={setIsCloseDialogOpen}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => {
+        setIsCloseDialogOpen(open);
+        if (!open) {
+          setSelectedSupportPersonnelUid('');
+          setPersonnelSearchQuery('');
+        }
+      }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Arızayı Kapat</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <label className="text-sm font-medium">Kapanış Açıklaması</label>
-            <Textarea value={closeDescription} onChange={(e) => setCloseDescription(e.target.value)} placeholder="Yapılan işlem / değişen parça vb." />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Kapanış Açıklaması</label>
+              <Textarea value={closeDescription} onChange={(e) => setCloseDescription(e.target.value)} placeholder="Yapılan işlem / değişen parça vb." />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Destek Personeli (İsteğe Bağlı)</label>
+              <p className="text-xs text-muted-foreground">
+                Arıza çözümünde destek veren personeli seçebilirsiniz. Seçilen personele destek puanı verilecektir.
+              </p>
+              <Select value={selectedSupportPersonnelUid} onValueChange={setSelectedSupportPersonnelUid}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Destek personeli seçin..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <div className="p-2">
+                    <Input
+                      placeholder="Personel ara..."
+                      value={personnelSearchQuery}
+                      onChange={(e) => setPersonnelSearchQuery(e.target.value)}
+                      className="mb-2"
+                    />
+                  </div>
+                  <SelectItem value="none">Seçim Yok</SelectItem>
+                  {allPersonnel
+                    .filter(p => p.uid !== currentUser?.uid) // Kendisini gösterme
+                    .filter(p => {
+                      if (!personnelSearchQuery) return true;
+                      const q = personnelSearchQuery.toLowerCase();
+                      return (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q);
+                    })
+                    .map(p => (
+                      <SelectItem key={p.uid} value={p.uid}>
+                        {p.name || p.email} ({p.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsCloseDialogOpen(false)}>Vazgeç</Button>

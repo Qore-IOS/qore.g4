@@ -464,6 +464,11 @@ export interface DeviceFaultReport {
   // Additional fields
   title?: string;
   closeDescription?: string;
+
+  // Destek personeli (arıza kapatılırken seçilen eşlik eden personel)
+  supportPersonnelUid?: string;
+  supportPersonnelName?: string;
+  isCustomFault?: boolean;
 }
 
 
