@@ -189,6 +189,7 @@ export default function AplikasyonIslemFormuPage() {
   // Fault definitions for arıza işlem türü
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
   const [selectedFaultId, setSelectedFaultId] = useState<string>('');
+  const [customFaultName, setCustomFaultName] = useState<string>('');
 
   // Test selection for arıza
   const [availableTests, setAvailableTests] = useState<string[]>([]);
@@ -783,6 +784,10 @@ export default function AplikasyonIslemFormuPage() {
       toast({ title: 'Eksik Bilgi', description: 'Arıza işlem türü seçildiğinde arıza türünü belirtmeniz zorunludur.', variant: 'destructive' });
       return;
     }
+    if (islemTuru === 'ariza' && selectedFaultId === 'diger' && !customFaultName.trim()) {
+      toast({ title: 'Eksik Bilgi', description: '"Diğer" arıza seçeneği için açıklama zorunludur.', variant: 'destructive' });
+      return;
+    }
 
     // Validate part changes have quantity
     const invalidPart = actions.find(a => a.type === 'part_change' && a.quantity <= 0);
@@ -835,7 +840,10 @@ export default function AplikasyonIslemFormuPage() {
           .map(p => ({ id: p.id, taskName: p.taskName }));
 
         // Get selected fault for ariza type
-        const selectedFault = islemTuru === 'ariza' ? faultDefinitions.find(f => f.id === selectedFaultId) : null;
+        const isCustomFault = selectedFaultId === 'diger';
+        const selectedFault = islemTuru === 'ariza' && !isCustomFault ? faultDefinitions.find(f => f.id === selectedFaultId) : null;
+        const resolvedFaultName = isCustomFault ? customFaultName.trim() : (selectedFault?.name || null);
+        const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
         // Create form document
         const formRef = doc(collection(db, 'aplikasyonActionForms'));
@@ -860,19 +868,21 @@ export default function AplikasyonIslemFormuPage() {
             formType: 'aplikasyon',
             selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
             // Fault info for ariza type
-            faultDefinitionId: selectedFault?.id || null,
-            faultName: selectedFault?.name || null,
+            faultDefinitionId: resolvedFaultId,
+            faultName: resolvedFaultName,
+            isCustomFault: isCustomFault || false,
         });
 
         // Create closed fault report when ariza is selected
-        if (islemTuru === 'ariza' && selectedFault) {
+        if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
           const faultReportRef = doc(collection(db, 'deviceFaultReports'));
           batch.set(faultReportRef, {
             deviceId,
             hospitalId: device?.hospitalId,
             faultType: 'aplikasyon',
-            faultDefinitionId: selectedFault.id,
-            faultName: selectedFault.name,
+            faultDefinitionId: resolvedFaultId,
+            faultName: resolvedFaultName,
+            isCustomFault: isCustomFault || false,
             status: 'closed',
             reportedAt: Timestamp.fromDate(now),
             reportedByUid: currentUserProfile?.uid || '',
@@ -1197,20 +1207,27 @@ export default function AplikasyonIslemFormuPage() {
                     <AlertTriangle className="h-4 w-4 text-red-600" />
                     Arıza Türü <span className="text-destructive">*</span>
                   </Label>
-                  <Select value={selectedFaultId} onValueChange={setSelectedFaultId}>
+                  <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
                     <SelectTrigger className="w-full sm:w-80">
                       <SelectValue placeholder="Tespit edilen arızayı seçin..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {faultDefinitions.length === 0 ? (
-                        <SelectItem value="no-faults" disabled>Henüz arıza tanımı eklenmemiş</SelectItem>
-                      ) : (
-                        faultDefinitions.map(fault => (
-                          <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
-                        ))
-                      )}
+                      {faultDefinitions.map(fault => (
+                        <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
+                      ))}
+                      <SelectItem value="diger">Diğer (Özel Arıza)</SelectItem>
                     </SelectContent>
                   </Select>
+                  {selectedFaultId === 'diger' && (
+                    <div className="mt-2">
+                      <Input
+                        placeholder="Arıza açıklamasını girin... (zorunlu)"
+                        value={customFaultName}
+                        onChange={(e) => setCustomFaultName(e.target.value)}
+                        className="border-red-300 dark:border-red-700"
+                      />
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Arıza seçildiğinde form kaydedilirken otomatik olarak çözülmüş arıza kaydı oluşturulacaktır.
                   </p>

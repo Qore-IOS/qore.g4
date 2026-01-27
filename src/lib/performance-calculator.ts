@@ -19,6 +19,7 @@ export interface PerformanceMetrics {
   periodicMaintenanceForms: number;
   totalPeriodicMaintenanceForms: number;
   recurrenceCount: number;
+  supportCount: number; // Destek verilen arıza sayısı
 
   // Overdue metrics
   overdueMaintenanceTasks: number;
@@ -31,6 +32,7 @@ export interface PerformanceMetrics {
   visitFrequencyScore: number; // max 15
   onsiteRatioScore: number; // max 15
   maintenanceContributionScore: number; // max 20
+  supportScore: number; // max 10 - destek puanı
   recurrencePenalty: number; // -10 to 0
   overduePenalty: number; // -15 to 0
 
@@ -167,6 +169,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
       interventionType: data.interventionType || null,
       deviceId: data.deviceId,
       hospitalId: data.hospitalId,
+      supportPersonnelUid: data.supportPersonnelUid || null,
     };
   });
 
@@ -501,6 +504,16 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     // -3 points per overdue item, max -15
     const overduePenalty = Math.max(-15, -totalOverdue * 3);
 
+    // 9. Support Score (max 10 points)
+    // Count how many times this user was selected as support personnel during fault resolution
+    const supportCount = faultsForCalculation.filter(f =>
+      f.supportPersonnelUid === user.uid &&
+      (f.status === 'cozuldu' || f.status === 'closed')
+    ).length;
+
+    // 2 points per support, max 10
+    const supportScore = Math.min(10, supportCount * 2);
+
     // Calculate total score
     const totalScore = Math.max(0, Math.min(100,
       faultAssignmentScore +
@@ -509,6 +522,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
       visitFrequencyScore +
       onsiteRatioScore +
       maintenanceContributionScore +
+      supportScore +
       recurrencePenalty +
       overduePenalty
     ));
@@ -529,6 +543,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
         periodicMaintenanceForms: userPeriodicForms,
         totalPeriodicMaintenanceForms: totalRelevantPeriodicForms,
         recurrenceCount,
+        supportCount,
         overdueMaintenanceTasks,
         overduePeriodicParts,
         faultAssignmentScore,
@@ -537,6 +552,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
         visitFrequencyScore,
         onsiteRatioScore,
         maintenanceContributionScore,
+        supportScore,
         recurrencePenalty,
         overduePenalty,
         totalScore,

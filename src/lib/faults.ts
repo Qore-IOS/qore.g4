@@ -108,9 +108,10 @@ export async function closeDeviceFaultReport(
     closedByUid: string;
     closedByName: string;
     closeDescription?: string;
+    supportPersonnel?: { uid: string; name: string } | null;
   }
 ) {
-  const { closedByUid, closedByName, closeDescription } = params;
+  const { closedByUid, closedByName, closeDescription, supportPersonnel } = params;
   const reportRef = doc(db, 'deviceFaultReports', reportId);
 
   const reportSnap = await getDoc(reportRef);
@@ -130,7 +131,7 @@ export async function closeDeviceFaultReport(
   const batch = writeBatch(db);
 
   // 1. Update the fault report
-  batch.update(reportRef, {
+  const updateData: Record<string, any> = {
     status: 'cozuldu' as DeviceFaultStatus, // Yeni status
     closedByUid,
     closedByName,
@@ -138,7 +139,15 @@ export async function closeDeviceFaultReport(
     closeDescription: closeDescription ?? '',
     cozumSuresi, // Müdahaleden çözüme süre
     toplamCozumSuresi, // Toplam süre
-  });
+  };
+
+  // Destek personeli bilgisi
+  if (supportPersonnel) {
+    updateData.supportPersonnelUid = supportPersonnel.uid;
+    updateData.supportPersonnelName = supportPersonnel.name;
+  }
+
+  batch.update(reportRef, updateData);
 
   // 2. Update the main device document ONLY if a deviceId exists
   if (deviceId) {
@@ -151,13 +160,21 @@ export async function closeDeviceFaultReport(
 
   // 3. Add the history event for closing
   const historyRef = doc(collection(db, 'deviceFaultReports', reportId, 'history'));
-  batch.set(historyRef, {
+  const historyData: Record<string, any> = {
     type: 'closed' as DeviceFaultEventType,
     actorUid: closedByUid,
     actorName: closedByName,
     description: closeDescription ?? 'Arıza giderildi.',
     timestamp: serverTimestamp(),
-  });
+  };
+
+  if (supportPersonnel) {
+    historyData.supportPersonnelUid = supportPersonnel.uid;
+    historyData.supportPersonnelName = supportPersonnel.name;
+    historyData.description = `${closeDescription ?? 'Arıza giderildi.'} (Destek: ${supportPersonnel.name})`;
+  }
+
+  batch.set(historyRef, historyData);
 
   // Commit all writes
   await batch.commit();

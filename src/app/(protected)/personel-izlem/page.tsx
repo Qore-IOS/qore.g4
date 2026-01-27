@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X, UserCircle, ArrowUp, ArrowDown, Minus, GitCompare, FileDown } from 'lucide-react';
+import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X, UserCircle, ArrowUp, ArrowDown, Minus, GitCompare, FileDown, HeartHandshake } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import {
   calculateAllPerformances,
@@ -232,6 +232,16 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
                 score={metrics.maintenanceContributionScore}
                 tooltip="Toplam periyodik bakım formlarındaki pay. Yüksek katkı = yüksek puan."
               />
+              {metrics.supportCount > 0 && (
+                <MetricItem
+                  icon={HeartHandshake}
+                  label="Destek Puanı"
+                  value={`${metrics.supportCount} destek`}
+                  subValue="arıza çözümünde"
+                  score={metrics.supportScore}
+                  tooltip="Arıza çözümünde destek personeli olarak seçilme sayısı. Her destek +2 puan, maks 10."
+                />
+              )}
               {metrics.recurrenceCount > 0 && (
                 <MetricItem
                   icon={AlertTriangle}
@@ -506,6 +516,17 @@ function DetailedKPICard({
             maxScore={20}
             tooltip="Toplam periyodik bakım formlarındaki pay. Yüksek katkı = yüksek puan."
           />
+          <DetailedMetricRow
+            icon={HeartHandshake}
+            label="Destek Puanı"
+            value={`${metrics.supportCount} destek`}
+            subValue={metrics.supportCount > 0
+              ? `Arıza çözümünde ${metrics.supportCount} kez destek verildi`
+              : 'Henüz destek kaydı yok'}
+            score={metrics.supportScore}
+            maxScore={10}
+            tooltip="Arıza kapatılırken destek personeli olarak seçilme sayısı. Her destek +2 puan, maksimum 10 puan."
+          />
           {(metrics.recurrenceCount > 0 || metrics.recurrencePenalty < 0) && (
             <DetailedMetricRow
               icon={AlertTriangle}
@@ -752,6 +773,15 @@ function ComparisonView({
             maxScore={20}
           />
           <ComparisonMetricRow
+            icon={HeartHandshake}
+            label="Destek Puanı"
+            value1={`${m1.supportCount} destek`}
+            value2={`${m2.supportCount} destek`}
+            score1={m1.supportScore}
+            score2={m2.supportScore}
+            maxScore={10}
+          />
+          <ComparisonMetricRow
             icon={AlertTriangle}
             label="Tekrar Arıza Cezası"
             value1={`${m1.recurrenceCount} adet`}
@@ -949,6 +979,12 @@ export default function PersonelIzlemPage() {
             value: `${p.metrics.periodicMaintenanceForms} / ${p.metrics.totalPeriodicMaintenanceForms}`,
             score: `+${p.metrics.maintenanceContributionScore.toFixed(1)}`,
             maxScore: '20',
+          },
+          {
+            label: 'Destek Puanı',
+            value: `${p.metrics.supportCount} destek`,
+            score: `+${p.metrics.supportScore.toFixed(1)}`,
+            maxScore: '10',
           },
           {
             label: 'Tekrar Arıza Cezası',
