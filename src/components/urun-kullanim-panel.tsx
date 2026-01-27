@@ -1031,7 +1031,7 @@ export default function UrunKullanimPanel() {
       {activeWallpaper && (
         <div
           className="pointer-events-none fixed inset-x-0 bottom-0 z-0"
-          style={{ height: '50vh' }}
+          style={{ height: '60vh' }}
         >
           <div
             className="absolute inset-0"
@@ -1040,10 +1040,10 @@ export default function UrunKullanimPanel() {
               backgroundSize: 'cover',
               backgroundPosition: 'center bottom',
               backgroundRepeat: 'no-repeat',
-              maskImage: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.03) 65%, rgba(0,0,0,0) 80%)',
-              WebkitMaskImage: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.03) 65%, rgba(0,0,0,0) 80%)',
-              opacity: theme === 'dark' ? 0.4 : 0.25,
-              filter: 'blur(1px) saturate(0.6)',
+              maskImage: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 30%, rgba(0,0,0,0.7) 45%, rgba(0,0,0,0.3) 55%, rgba(0,0,0,0.08) 70%, rgba(0,0,0,0) 85%)',
+              WebkitMaskImage: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 30%, rgba(0,0,0,0.7) 45%, rgba(0,0,0,0.3) 55%, rgba(0,0,0,0.08) 70%, rgba(0,0,0,0) 85%)',
+              opacity: theme === 'dark' ? 0.5 : 0.35,
+              filter: 'blur(0.5px) saturate(0.7)',
             }}
           />
         </div>
