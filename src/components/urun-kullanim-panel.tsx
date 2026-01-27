@@ -546,7 +546,7 @@ export default function UrunKullanimPanel() {
         faultType: faultDefinition.type,
         openedByUid: currentUser?.uid || '',
         openedByName: currentUserProfile?.name || '',
-        openDescription: faultDescription || undefined,
+        openDescription: faultDescription || faultDefinition.name,
         faultDefinitionId: faultDefinition.id,
         faultName: faultDefinition.name,
       });
