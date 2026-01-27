@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X, UserCircle, ArrowUp, ArrowDown, Minus, GitCompare } from 'lucide-react';
+import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X, UserCircle, ArrowUp, ArrowDown, Minus, GitCompare, FileDown } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import {
   calculateAllPerformances,
@@ -17,7 +17,8 @@ import {
   type PersonnelPerformance,
   type PerformanceFilters,
 } from '@/lib/performance-calculator';
-import { cn } from '@/lib/utils';
+import { cn, exportPersonnelToPdf } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 import {
   Tooltip,
   TooltipContent,
@@ -811,8 +812,10 @@ function ComparisonView({
 export default function PersonelIzlemPage() {
   const router = useRouter();
   const { currentUserProfile, isAdmin } = useAuth();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [performances, setPerformances] = useState<PersonnelPerformance[]>([]);
+  const [exportLoading, setExportLoading] = useState(false);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
 
   // Filter states
@@ -899,6 +902,75 @@ export default function PersonelIzlemPage() {
 
   const hasActiveFilters = startDate || endDate || (selectedLabId && selectedLabId !== 'all') || (selectedPersonnelId && selectedPersonnelId !== 'all');
 
+  const handleExportPersonnelPdf = async () => {
+    if (performances.length === 0) {
+      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak personel verisi yok.', variant: 'default' });
+      return;
+    }
+    setExportLoading(true);
+    try {
+      const personnelData = performances.map(p => ({
+        name: p.user.name || p.user.email,
+        role: p.user.role === 'aplikasyon' ? 'Aplikasyon' : 'Teknik Servis',
+        totalScore: Math.round(p.metrics.totalScore),
+        metrics: [
+          {
+            label: 'Arıza Üstlenme',
+            value: `${p.metrics.faultsAssigned} / ${p.metrics.expectedFaults.toFixed(1)}`,
+            score: `+${p.metrics.faultAssignmentScore.toFixed(1)}`,
+            maxScore: '20',
+          },
+          {
+            label: 'Müdahale Başlatma Süresi',
+            value: formatDuration(p.metrics.avgInterventionStartTimeMinutes),
+            score: `+${p.metrics.interventionTimeScore.toFixed(1)}`,
+            maxScore: '15',
+          },
+          {
+            label: 'Çözüm Süresi',
+            value: `${formatDuration(p.metrics.avgResolutionTimeMinutes)} (${p.metrics.faultsResolved} arıza çözüldü)`,
+            score: `+${p.metrics.resolutionTimeScore.toFixed(1)}`,
+            maxScore: '15',
+          },
+          {
+            label: 'Kurum Ziyareti',
+            value: `${p.metrics.institutionVisits} ziyaret (ort: ${p.metrics.avgInstitutionVisits.toFixed(1)})`,
+            score: `+${p.metrics.visitFrequencyScore.toFixed(1)}`,
+            maxScore: '15',
+          },
+          {
+            label: 'Kurumda Müdahale Oranı',
+            value: `${p.metrics.onsiteInterventions} / ${p.metrics.onsiteInterventions + p.metrics.phoneInterventions}`,
+            score: `+${p.metrics.onsiteRatioScore.toFixed(1)}`,
+            maxScore: '15',
+          },
+          {
+            label: 'Periyodik Bakım Katkısı',
+            value: `${p.metrics.periodicMaintenanceForms} / ${p.metrics.totalPeriodicMaintenanceForms}`,
+            score: `+${p.metrics.maintenanceContributionScore.toFixed(1)}`,
+            maxScore: '20',
+          },
+          {
+            label: 'Tekrar Arıza Cezası',
+            value: `${p.metrics.recurrenceCount} adet`,
+            score: `${p.metrics.recurrencePenalty}`,
+            maxScore: '-10',
+          },
+          {
+            label: 'Gecikmiş Bakım Cezası',
+            value: `${p.metrics.overdueMaintenanceTasks + p.metrics.overduePeriodicParts} adet`,
+            score: `${p.metrics.overduePenalty}`,
+            maxScore: '-15',
+          },
+        ],
+      }));
+
+      await exportPersonnelToPdf(personnelData, 'Personel_Performans', 'Personel Performans Raporu', toast);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full p-8">
@@ -933,13 +1005,29 @@ export default function PersonelIzlemPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-6 w-6" />
-            Personel Performans İzleme
-          </CardTitle>
-          <CardDescription>
-            Teknik servis ve aplikasyon personelinin performans metrikleri ve puanları
-          </CardDescription>
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-6 w-6" />
+                Personel Performans İzleme
+              </CardTitle>
+              <CardDescription>
+                Teknik servis ve aplikasyon personelinin performans metrikleri ve puanları
+              </CardDescription>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={handleExportPersonnelPdf}
+              disabled={exportLoading || performances.length === 0}
+            >
+              {exportLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4 mr-2" />
+              )}
+              PDF Döküm
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {/* Filters */}

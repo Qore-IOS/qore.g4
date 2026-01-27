@@ -21,11 +21,11 @@ import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
+import { cn, exportDevicesToPdf } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
@@ -88,6 +88,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [newPeriodicPartRows, setNewPeriodicPartRows] = useState<NewPeriodicPartRow[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [showPeriodicPartSection, setShowPeriodicPartSection] = useState(false);
+  const [exportPdfLoading, setExportPdfLoading] = useState(false);
 
   const fetchDevices = async () => {
     setLoading(true);
@@ -356,6 +357,59 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const teknikPlans = existingPlans.filter(p => p.type === 'teknik_servis');
   const aplikasyonPlans = existingPlans.filter(p => p.type === 'aplikasyon');
 
+  const handleExportDevicesPdf = async () => {
+    if (devices.length === 0) {
+      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak cihaz verisi yok.', variant: 'default' });
+      return;
+    }
+    setExportPdfLoading(true);
+    try {
+      // Fetch all maintenance plans and periodic parts for all devices
+      const [allPlansSnap, allPartsSnap] = await Promise.all([
+        getDocs(collection(db, 'maintenancePlans')),
+        getDocs(collection(db, 'periodicPartChanges')),
+      ]);
+      const allPlans = allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan);
+      const allParts = allPartsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange);
+
+      const devicesData = devices.map(dev => {
+        const hospitalName = hospitals.find(h => h.id === dev.hospitalId)?.name || '';
+        const devicePlans = allPlans.filter(p => p.deviceId === dev.id);
+        const deviceParts = allParts.filter(p => p.deviceId === dev.id);
+
+        return {
+          name: `${dev.brand} ${dev.model}${dev.cihazAdi ? ` - ${dev.cihazAdi}` : ''}`,
+          info: [
+            { label: 'Marka', value: dev.brand || '' },
+            { label: 'Model', value: dev.model || '' },
+            { label: 'Cihaz Adı', value: dev.cihazAdi || '' },
+            { label: 'Seri Numarası', value: dev.seriNumarasi || '' },
+            { label: 'Laboratuvar', value: hospitalName },
+            { label: 'Dizilim Sırası', value: String(dev.order || '') },
+          ],
+          maintenancePlans: devicePlans.map(p => ({
+            taskName: p.taskName,
+            period: `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
+            type: p.type === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon',
+          })),
+          periodicParts: deviceParts.map(p => ({
+            partName: p.stokAdi,
+            partCode: p.stokKodu,
+            period: `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
+            responsibility: RESPONSIBILITY_LABELS[p.responsibilityType],
+          })),
+        };
+      });
+
+      await exportDevicesToPdf(devicesData, 'Cihaz_Tanimlamalari', 'Cihaz Tanımlamaları Raporu', toast);
+    } catch (err) {
+      console.error('PDF export error:', err);
+      toast({ title: 'Hata', description: 'PDF oluşturulurken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setExportPdfLoading(false);
+    }
+  };
+
   const effectiveImageUrl = current.imageUrl || customPath;
 
   return (
@@ -363,9 +417,23 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       <BackButton fallback="/cihaz-yonetimi-ana"/>
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-headline">Cihaz Tanımlamaları</h1>
-        <Button onClick={() => { setCurrent({}); setCustomPath(''); setModalOpen(true); }}>
-          + Yeni Cihaz
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={handleExportDevicesPdf}
+            disabled={exportPdfLoading || devices.length === 0}
+          >
+            {exportPdfLoading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            PDF Döküm
+          </Button>
+          <Button onClick={() => { setCurrent({}); setCustomPath(''); setModalOpen(true); }}>
+            + Yeni Cihaz
+          </Button>
+        </div>
       </div>
 
       <ScrollArea className="h-[70vh]">

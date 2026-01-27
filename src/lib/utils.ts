@@ -480,6 +480,326 @@ export async function exportDataToPdf(
   }
 }
 
+/**
+ * Export personnel performance data to PDF - one person per landscape page.
+ * Each page contains the person's name, role, all metrics and scores.
+ */
+export async function exportPersonnelToPdf(
+  personnelData: Array<{
+    name: string;
+    role: string;
+    totalScore: number;
+    metrics: Array<{ label: string; value: string; score: string; maxScore: string }>;
+  }>,
+  fileName: string,
+  title: string,
+  toastFn: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void
+): Promise<void> {
+  if (!personnelData || personnelData.length === 0) {
+    toastFn({ title: "Veri Yok", description: "Dışa aktarılacak personel verisi bulunamadı.", variant: "default" });
+    return;
+  }
+
+  try {
+    const [jsPDFModule, autoTableModule] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable')
+    ]);
+    const jsPDF = jsPDFModule.default;
+    const autoTable = autoTableModule.default;
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const padX = 30;
+    const padY = 30;
+
+    const fontBase64 = await loadTurkishFontForPdf();
+    let useTurkish = false;
+    const FALLBACK_FONT = 'helvetica';
+    let FONT = FALLBACK_FONT;
+
+    if (fontBase64) {
+      try {
+        doc.addFileToVFS('NotoSans-Regular.ttf', fontBase64);
+        doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+        FONT = 'NotoSans';
+        useTurkish = true;
+      } catch (e) {
+        console.error('Could not setup Turkish font:', e);
+      }
+    }
+
+    personnelData.forEach((person, index) => {
+      if (index > 0) doc.addPage();
+
+      // Title bar
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text(pdfText(title, useTurkish), padX, padY + 10);
+
+      // Date
+      doc.setFont(FONT, 'normal');
+      doc.setFontSize(8);
+      const dateStr = new Date().toLocaleDateString('tr-TR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+      doc.text(dateStr, pageW - padX, padY + 10, { align: 'right' });
+
+      // Person name and role
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(16);
+      doc.text(pdfText(person.name, useTurkish), padX, padY + 40);
+
+      doc.setFont(FONT, 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(pdfText(`Rol: ${person.role}`, useTurkish), padX, padY + 55);
+
+      // Total score
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      doc.text(pdfText(`Toplam Puan: ${person.totalScore}`, useTurkish), pageW - padX, padY + 45, { align: 'right' });
+
+      // Metrics table
+      const headers = [
+        pdfText('Metrik', useTurkish),
+        pdfText('Değer', useTurkish),
+        pdfText('Puan', useTurkish),
+        pdfText('Maks. Puan', useTurkish),
+      ];
+
+      const rows = person.metrics.map(m => [
+        pdfText(m.label, useTurkish),
+        pdfText(m.value, useTurkish),
+        pdfText(m.score, useTurkish),
+        pdfText(m.maxScore, useTurkish),
+      ]);
+
+      autoTable(doc, {
+        head: [headers],
+        body: rows,
+        startY: padY + 70,
+        theme: 'grid',
+        styles: {
+          font: FONT,
+          fontSize: 9,
+          cellPadding: 6,
+          overflow: 'linebreak',
+          lineWidth: 0.5,
+        },
+        headStyles: {
+          fillColor: [60, 60, 60],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 9,
+          halign: 'center',
+        },
+        bodyStyles: { valign: 'middle' },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        columnStyles: {
+          0: { cellWidth: 200 },
+          1: { cellWidth: 200 },
+          2: { halign: 'center', cellWidth: 100 },
+          3: { halign: 'center', cellWidth: 100 },
+        },
+        margin: { left: padX, right: padX },
+      });
+
+      // Page number
+      const pageNumber = doc.getCurrentPageInfo().pageNumber;
+      doc.setFont(FONT, 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`Sayfa ${pageNumber} / ${personnelData.length}`, pageW / 2, pageH - 15, { align: 'center' });
+    });
+
+    const safeFileName = fileName.replace(/[^a-z0-9_]/gi, '_');
+    const fileDateStr = new Date().toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '-');
+    doc.save(`${safeFileName}_${fileDateStr}.pdf`);
+
+    toastFn({ title: "Başarılı", description: `${fileName} başarıyla PDF olarak dışa aktarıldı.` });
+  } catch (error) {
+    console.error("PDF export error:", error);
+    toastFn({ title: "Hata", description: "PDF'e aktarılırken bir sorun oluştu.", variant: "destructive" });
+  }
+}
+
+/**
+ * Export device models data to PDF - one device per landscape page with all info.
+ */
+export async function exportDevicesToPdf(
+  devicesData: Array<{
+    name: string;
+    info: Array<{ label: string; value: string }>;
+    maintenancePlans?: Array<{ taskName: string; period: string; type: string }>;
+    periodicParts?: Array<{ partName: string; partCode: string; period: string; responsibility: string }>;
+  }>,
+  fileName: string,
+  title: string,
+  toastFn: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void
+): Promise<void> {
+  if (!devicesData || devicesData.length === 0) {
+    toastFn({ title: "Veri Yok", description: "Dışa aktarılacak cihaz verisi bulunamadı.", variant: "default" });
+    return;
+  }
+
+  try {
+    const [jsPDFModule, autoTableModule] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable')
+    ]);
+    const jsPDF = jsPDFModule.default;
+    const autoTable = autoTableModule.default;
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const padX = 30;
+    const padY = 30;
+
+    const fontBase64 = await loadTurkishFontForPdf();
+    let useTurkish = false;
+    const FALLBACK_FONT = 'helvetica';
+    let FONT = FALLBACK_FONT;
+
+    if (fontBase64) {
+      try {
+        doc.addFileToVFS('NotoSans-Regular.ttf', fontBase64);
+        doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+        FONT = 'NotoSans';
+        useTurkish = true;
+      } catch (e) {
+        console.error('Could not setup Turkish font:', e);
+      }
+    }
+
+    devicesData.forEach((device, index) => {
+      if (index > 0) doc.addPage();
+
+      // Title bar
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text(pdfText(title, useTurkish), padX, padY + 10);
+
+      // Date
+      doc.setFont(FONT, 'normal');
+      doc.setFontSize(8);
+      const dateStr = new Date().toLocaleDateString('tr-TR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+      doc.text(dateStr, pageW - padX, padY + 10, { align: 'right' });
+
+      // Device name
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(16);
+      doc.text(pdfText(device.name, useTurkish), padX, padY + 40);
+
+      let currentY = padY + 55;
+
+      // Device info table
+      if (device.info.length > 0) {
+        doc.setFont(FONT, 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(60, 60, 60);
+        doc.text(pdfText('Cihaz Bilgileri', useTurkish), padX, currentY);
+        currentY += 5;
+
+        autoTable(doc, {
+          head: [[pdfText('Özellik', useTurkish), pdfText('Değer', useTurkish)]],
+          body: device.info.map(i => [pdfText(i.label, useTurkish), pdfText(i.value, useTurkish)]),
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 9, cellPadding: 5, lineWidth: 0.5 },
+          headStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+          columnStyles: { 0: { cellWidth: 180, fontStyle: 'bold' } },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
+
+      // Maintenance plans table
+      if (device.maintenancePlans && device.maintenancePlans.length > 0) {
+        doc.setFont(FONT, 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(60, 60, 60);
+        doc.text(pdfText('Periyodik Bakım Planları', useTurkish), padX, currentY);
+        currentY += 5;
+
+        autoTable(doc, {
+          head: [[pdfText('İş Adı', useTurkish), pdfText('Periyot', useTurkish), pdfText('Tip', useTurkish)]],
+          body: device.maintenancePlans.map(p => [
+            pdfText(p.taskName, useTurkish),
+            pdfText(p.period, useTurkish),
+            pdfText(p.type, useTurkish),
+          ]),
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 9, cellPadding: 5, lineWidth: 0.5 },
+          headStyles: { fillColor: [40, 80, 120], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+          alternateRowStyles: { fillColor: [240, 245, 250] },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
+
+      // Periodic parts table
+      if (device.periodicParts && device.periodicParts.length > 0) {
+        doc.setFont(FONT, 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(60, 60, 60);
+        doc.text(pdfText('Periyodik Parça Değişimleri', useTurkish), padX, currentY);
+        currentY += 5;
+
+        autoTable(doc, {
+          head: [[
+            pdfText('Parça Adı', useTurkish),
+            pdfText('Stok Kodu', useTurkish),
+            pdfText('Periyot', useTurkish),
+            pdfText('Sorumluluk', useTurkish),
+          ]],
+          body: device.periodicParts.map(p => [
+            pdfText(p.partName, useTurkish),
+            pdfText(p.partCode, useTurkish),
+            pdfText(p.period, useTurkish),
+            pdfText(p.responsibility, useTurkish),
+          ]),
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 9, cellPadding: 5, lineWidth: 0.5 },
+          headStyles: { fillColor: [80, 40, 100], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+          alternateRowStyles: { fillColor: [248, 243, 250] },
+          margin: { left: padX, right: padX },
+        });
+      }
+
+      // Page number
+      const pageNumber = doc.getCurrentPageInfo().pageNumber;
+      doc.setFont(FONT, 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`Sayfa ${pageNumber} / ${devicesData.length}`, pageW / 2, pageH - 15, { align: 'center' });
+    });
+
+    const safeFileName = fileName.replace(/[^a-z0-9_]/gi, '_');
+    const fileDateStr = new Date().toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '-');
+    doc.save(`${safeFileName}_${fileDateStr}.pdf`);
+
+    toastFn({ title: "Başarılı", description: `${fileName} başarıyla PDF olarak dışa aktarıldı.` });
+  } catch (error) {
+    console.error("PDF export error:", error);
+    toastFn({ title: "Hata", description: "PDF'e aktarılırken bir sorun oluştu.", variant: "destructive" });
+  }
+}
+
 // Preloaded notification sound for instant playback
 let notificationAudio: HTMLAudioElement | null = null;
 
