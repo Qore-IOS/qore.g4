@@ -1114,28 +1114,31 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                                 }
                               }}
                               onInteractOutside={(e) => e.preventDefault()}
+                              onCloseAutoFocus={(e) => e.preventDefault()}
                             >
-                              <Command shouldFilter={true}>
-                                <CommandInput placeholder="Ürün kodu veya adı ara..." />
-                                <CommandList>
-                                  <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                                  <CommandGroup>
-                                    {productCodes.slice(0, 50).map(product => (
-                                      <CommandItem
-                                        key={product.id}
-                                        value={`${product.stokKodu} ${product.stokAdi}`}
-                                        onSelect={() => selectProductForRow(row.id, product)}
-                                      >
-                                        <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
-                                        <div className="flex flex-col">
-                                          <span className="font-medium">{product.stokKodu}</span>
-                                          <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
-                                        </div>
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
+                              <div onKeyDown={(e) => e.stopPropagation()}>
+                                <Command shouldFilter={true}>
+                                  <CommandInput placeholder="Ürün kodu veya adı ara..." />
+                                  <CommandList>
+                                    <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                                    <CommandGroup>
+                                      {productCodes.slice(0, 50).map(product => (
+                                        <CommandItem
+                                          key={product.id}
+                                          value={`${product.stokKodu} ${product.stokAdi}`}
+                                          onSelect={() => selectProductForRow(row.id, product)}
+                                        >
+                                          <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
+                                          <div className="flex flex-col">
+                                            <span className="font-medium">{product.stokKodu}</span>
+                                            <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
+                                          </div>
+                                        </CommandItem>
+                                      ))}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </div>
                             </PopoverContent>
                           </Popover>
                           <Input
@@ -1390,28 +1393,31 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                               }
                             }}
                             onInteractOutside={(e) => e.preventDefault()}
+                            onCloseAutoFocus={(e) => e.preventDefault()}
                           >
-                            <Command shouldFilter={true}>
-                              <CommandInput placeholder="Ürün kodu veya adı ara..." />
-                              <CommandList>
-                                <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                                <CommandGroup>
-                                  {productCodes.slice(0, 50).map(product => (
-                                    <CommandItem
-                                      key={product.id}
-                                      value={`${product.stokKodu} ${product.stokAdi}`}
-                                      onSelect={() => selectBulkProductForRow(row.id, product)}
-                                    >
-                                      <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
-                                      <div className="flex flex-col">
-                                        <span className="font-medium">{product.stokKodu}</span>
-                                        <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
-                                      </div>
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
+                            <div onKeyDown={(e) => e.stopPropagation()}>
+                              <Command shouldFilter={true}>
+                                <CommandInput placeholder="Ürün kodu veya adı ara..." />
+                                <CommandList>
+                                  <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                                  <CommandGroup>
+                                    {productCodes.slice(0, 50).map(product => (
+                                      <CommandItem
+                                        key={product.id}
+                                        value={`${product.stokKodu} ${product.stokAdi}`}
+                                        onSelect={() => selectBulkProductForRow(row.id, product)}
+                                      >
+                                        <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
+                                        <div className="flex flex-col">
+                                          <span className="font-medium">{product.stokKodu}</span>
+                                          <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
+                                        </div>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </div>
                           </PopoverContent>
                         </Popover>
                         <Button variant="ghost" size="icon" onClick={() => removeBulkPeriodicPartRow(row.id)}>
