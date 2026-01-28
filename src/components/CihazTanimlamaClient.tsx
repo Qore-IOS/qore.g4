@@ -21,7 +21,7 @@ import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -59,6 +59,56 @@ type NewPeriodicPartRow = {
   isPopoverOpen: boolean;
 };
 
+// Toplu bakım planı - periyodik zamanlama tipi
+type BulkScheduleType = 'her_haftanin' | 'her_ayin' | 'her_yilin';
+
+const BULK_SCHEDULE_LABELS: Record<BulkScheduleType, string> = {
+  her_haftanin: 'Her Haftanın',
+  her_ayin: 'Her Ayın',
+  her_yilin: 'Her Yılın',
+};
+
+const WEEKDAYS = [
+  { value: 1, label: 'Pazartesi' },
+  { value: 2, label: 'Salı' },
+  { value: 3, label: 'Çarşamba' },
+  { value: 4, label: 'Perşembe' },
+  { value: 5, label: 'Cuma' },
+  { value: 6, label: 'Cumartesi' },
+  { value: 7, label: 'Pazar' },
+];
+
+const MONTHS = [
+  { value: 1, label: 'Ocak' },
+  { value: 2, label: 'Şubat' },
+  { value: 3, label: 'Mart' },
+  { value: 4, label: 'Nisan' },
+  { value: 5, label: 'Mayıs' },
+  { value: 6, label: 'Haziran' },
+  { value: 7, label: 'Temmuz' },
+  { value: 8, label: 'Ağustos' },
+  { value: 9, label: 'Eylül' },
+  { value: 10, label: 'Ekim' },
+  { value: 11, label: 'Kasım' },
+  { value: 12, label: 'Aralık' },
+];
+
+const MONTH_DAYS = Array.from({ length: 30 }, (_, i) => ({ value: i + 1, label: `${i + 1}` }));
+
+// Toplu bakım planı - yedek parça satırı tipi
+type BulkPeriodicPartRow = {
+  id: string;
+  productCodeId: string;
+  stokKodu: string;
+  stokAdi: string;
+  scheduleType: BulkScheduleType;
+  scheduleDay: number; // hafta: 1-7, ay: 1-30, yıl: 1-12
+  responsibilityType: PeriodicPartResponsibility;
+  requiresOutgoingPartInfo: boolean;
+  requiresSerialTracking: boolean;
+  isPopoverOpen: boolean;
+};
+
 interface Props {
   images: string[];
   hospitals: Hospital[];
@@ -89,6 +139,20 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [showPeriodicPartSection, setShowPeriodicPartSection] = useState(false);
   const [exportPdfLoading, setExportPdfLoading] = useState(false);
+
+  // Toplu Bakım Planı State'leri
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkMaintenanceTab, setBulkMaintenanceTab] = useState<MaintenanceType>('teknik_servis');
+  const [bulkTeknikRows, setBulkTeknikRows] = useState<NewPlanRow[]>([]);
+  const [bulkAplikasyonRows, setBulkAplikasyonRows] = useState<NewPlanRow[]>([]);
+  const [bulkPeriodicPartRows, setBulkPeriodicPartRows] = useState<BulkPeriodicPartRow[]>([]);
+  const [bulkShowPeriodicParts, setBulkShowPeriodicParts] = useState(false);
+  const [isSavingBulk, setIsSavingBulk] = useState(false);
+
+  // Laboratuvar seçimi state'leri
+  const [labSelectionModalOpen, setLabSelectionModalOpen] = useState(false);
+  const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
+  const [labsWithDevices, setLabsWithDevices] = useState<Hospital[]>([]);
 
   const fetchDevices = async () => {
     setLoading(true);
@@ -280,6 +344,231 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     both: 'Her İkisi',
   };
 
+  // Toplu Bakım Planı Fonksiyonları
+  const openBulkModal = () => {
+    setBulkMaintenanceTab('teknik_servis');
+    setBulkTeknikRows([]);
+    setBulkAplikasyonRows([]);
+    setBulkPeriodicPartRows([]);
+    setBulkShowPeriodicParts(false);
+    setBulkModalOpen(true);
+  };
+
+  const addBulkRow = (type: MaintenanceType) => {
+    const newRow: NewPlanRow = {
+      id: crypto.randomUUID(),
+      taskName: '',
+      periodValue: 1,
+      periodUnit: 'ay',
+    };
+    if (type === 'teknik_servis') {
+      setBulkTeknikRows(prev => [...prev, newRow]);
+    } else {
+      setBulkAplikasyonRows(prev => [...prev, newRow]);
+    }
+  };
+
+  const updateBulkRow = (type: MaintenanceType, id: string, field: keyof NewPlanRow, value: any) => {
+    const setter = type === 'teknik_servis' ? setBulkTeknikRows : setBulkAplikasyonRows;
+    setter(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
+  };
+
+  const removeBulkRow = (type: MaintenanceType, id: string) => {
+    const setter = type === 'teknik_servis' ? setBulkTeknikRows : setBulkAplikasyonRows;
+    setter(prev => prev.filter(row => row.id !== id));
+  };
+
+  const addBulkPeriodicPartRow = () => {
+    const newRow: BulkPeriodicPartRow = {
+      id: crypto.randomUUID(),
+      productCodeId: '',
+      stokKodu: '',
+      stokAdi: '',
+      scheduleType: 'her_ayin',
+      scheduleDay: 1,
+      responsibilityType: 'teknik_servis',
+      requiresOutgoingPartInfo: false,
+      requiresSerialTracking: true,
+      isPopoverOpen: false,
+    };
+    setBulkPeriodicPartRows(prev => [...prev, newRow]);
+  };
+
+  const updateBulkPeriodicPartRow = (id: string, field: keyof BulkPeriodicPartRow, value: any) => {
+    setBulkPeriodicPartRows(prev => prev.map(row => {
+      if (row.id !== id) return row;
+      const updated = { ...row, [field]: value };
+      // scheduleType değiştiğinde scheduleDay'i sıfırla
+      if (field === 'scheduleType') {
+        updated.scheduleDay = 1;
+      }
+      return updated;
+    }));
+  };
+
+  const selectBulkProductForRow = (rowId: string, product: ProductCode) => {
+    setBulkPeriodicPartRows(prev => prev.map(row =>
+      row.id === rowId
+        ? { ...row, productCodeId: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, isPopoverOpen: false }
+        : row
+    ));
+  };
+
+  const removeBulkPeriodicPartRow = (id: string) => {
+    setBulkPeriodicPartRows(prev => prev.filter(row => row.id !== id));
+  };
+
+  const getScheduleDayLabel = (scheduleType: BulkScheduleType, scheduleDay: number): string => {
+    if (scheduleType === 'her_haftanin') {
+      return WEEKDAYS.find(d => d.value === scheduleDay)?.label || '';
+    } else if (scheduleType === 'her_ayin') {
+      return `${scheduleDay}. gün`;
+    } else {
+      return MONTHS.find(m => m.value === scheduleDay)?.label || '';
+    }
+  };
+
+  const getScheduleDescription = (scheduleType: BulkScheduleType, scheduleDay: number): string => {
+    if (scheduleType === 'her_haftanin') {
+      const dayLabel = WEEKDAYS.find(d => d.value === scheduleDay)?.label || '';
+      return `Her ${dayLabel} değişmeli`;
+    } else if (scheduleType === 'her_ayin') {
+      return `Her ayın ${scheduleDay}'inde değişmeli`;
+    } else {
+      const monthLabel = MONTHS.find(m => m.value === scheduleDay)?.label || '';
+      return `Her yılın ${monthLabel} ayında değişmeli`;
+    }
+  };
+
+  // Toplu bakım planı kaydetme - 1. adım: doğrulama ve lab seçimine geç
+  const handleBulkSaveClick = () => {
+    const allBulkRows = [
+      ...bulkTeknikRows.map(r => ({ ...r, type: 'teknik_servis' as MaintenanceType })),
+      ...bulkAplikasyonRows.map(r => ({ ...r, type: 'aplikasyon' as MaintenanceType })),
+    ];
+
+    const invalidRow = allBulkRows.find(r => !r.taskName.trim());
+    if (invalidRow) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm iş adlarını doldurun.', variant: 'destructive' });
+      return;
+    }
+
+    const invalidPartRow = bulkPeriodicPartRows.find(r => !r.productCodeId);
+    if (invalidPartRow) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün seçin.', variant: 'destructive' });
+      return;
+    }
+
+    if (allBulkRows.length === 0 && bulkPeriodicPartRows.length === 0) {
+      toast({ title: 'Boş Plan', description: 'Lütfen en az bir iş veya yedek parça ekleyin.', variant: 'destructive' });
+      return;
+    }
+
+    // Cihazı olan laboratuvarları bul
+    const labIdsWithDevices = new Set(devices.map(d => d.hospitalId).filter(Boolean));
+    const filteredLabs = hospitals.filter(h => labIdsWithDevices.has(h.id));
+    setLabsWithDevices(filteredLabs);
+    setSelectedLabIds([]);
+    setLabSelectionModalOpen(true);
+  };
+
+  // Toplu bakım planı kaydetme - 2. adım: seçilen laboratuvarlara kaydet
+  const saveBulkMaintenancePlans = async () => {
+    if (selectedLabIds.length === 0) {
+      toast({ title: 'Laboratuvar Seçin', description: 'Lütfen en az bir laboratuvar seçin.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingBulk(true);
+
+    try {
+      // Seçilen laboratuvarlardaki cihazları bul
+      const targetDevices = devices.filter(d => selectedLabIds.includes(d.hospitalId || ''));
+
+      if (targetDevices.length === 0) {
+        toast({ title: 'Cihaz Bulunamadı', description: 'Seçilen laboratuvarlarda cihaz bulunamadı.', variant: 'destructive' });
+        setIsSavingBulk(false);
+        return;
+      }
+
+      const allBulkRows = [
+        ...bulkTeknikRows.map(r => ({ ...r, type: 'teknik_servis' as MaintenanceType })),
+        ...bulkAplikasyonRows.map(r => ({ ...r, type: 'aplikasyon' as MaintenanceType })),
+      ];
+
+      let totalSaved = 0;
+
+      for (const device of targetDevices) {
+        // Bakım planlarını kaydet
+        for (const row of allBulkRows) {
+          await addDoc(collection(db, 'maintenancePlans'), {
+            deviceId: device.id,
+            taskName: row.taskName.trim(),
+            periodValue: row.periodValue,
+            periodUnit: row.periodUnit,
+            type: row.type,
+            createdAt: serverTimestamp(),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          });
+          totalSaved++;
+        }
+
+        // Periyodik parça değişimlerini kaydet
+        for (const row of bulkPeriodicPartRows) {
+          // scheduleType'dan periodUnit'e dönüştür
+          const periodUnit: MaintenancePeriodUnit =
+            row.scheduleType === 'her_haftanin' ? 'hafta' :
+            row.scheduleType === 'her_ayin' ? 'ay' : 'yil';
+
+          await addDoc(collection(db, 'periodicPartChanges'), {
+            deviceId: device.id,
+            productCodeId: row.productCodeId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            periodValue: 1,
+            periodUnit: periodUnit,
+            scheduleType: row.scheduleType,
+            scheduleDay: row.scheduleDay,
+            responsibilityType: row.responsibilityType,
+            requiresOutgoingPartInfo: row.requiresOutgoingPartInfo,
+            requiresSerialTracking: row.requiresSerialTracking,
+            createdAt: serverTimestamp(),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          });
+          totalSaved++;
+        }
+      }
+
+      toast({
+        title: 'Başarılı',
+        description: `${targetDevices.length} cihaza toplam ${totalSaved} kayıt eklendi.`,
+      });
+      setLabSelectionModalOpen(false);
+      setBulkModalOpen(false);
+    } catch (err) {
+      console.error('Toplu bakım planı kaydedilemedi:', err);
+      toast({ title: 'Hata', description: 'Toplu bakım planı kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingBulk(false);
+    }
+  };
+
+  const toggleLabSelection = (labId: string) => {
+    setSelectedLabIds(prev =>
+      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
+    );
+  };
+
+  const toggleAllLabs = () => {
+    if (selectedLabIds.length === labsWithDevices.length) {
+      setSelectedLabIds([]);
+    } else {
+      setSelectedLabIds(labsWithDevices.map(l => l.id));
+    }
+  };
+
   const saveMaintenancePlans = async () => {
     if (!maintenanceDevice) return;
 
@@ -418,6 +707,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-headline">Cihaz Tanımlamaları</h1>
         <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={openBulkModal}
+          >
+            <ClipboardList className="h-4 w-4 mr-2" />
+            Toplu Bakım Planı Ata
+          </Button>
           <Button
             variant="secondary"
             onClick={handleExportDevicesPdf}
@@ -929,6 +1225,381 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             <Button onClick={saveMaintenancePlans} disabled={isSavingPlans || (newTeknikRows.length === 0 && newAplikasyonRows.length === 0 && newPeriodicPartRows.length === 0)}>
               {isSavingPlans ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Kaydet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Toplu Bakım Planı Modal */}
+      <Dialog open={bulkModalOpen} onOpenChange={setBulkModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5" />
+              Toplu Bakım Planı Ata
+            </DialogTitle>
+          </DialogHeader>
+
+          <Tabs value={bulkMaintenanceTab} onValueChange={(v) => setBulkMaintenanceTab(v as MaintenanceType)}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="teknik_servis" className="flex items-center gap-2">
+                <Wrench className="h-4 w-4" /> Teknik Servis ({bulkTeknikRows.length})
+              </TabsTrigger>
+              <TabsTrigger value="aplikasyon" className="flex items-center gap-2">
+                <FlaskConical className="h-4 w-4" /> Aplikasyon ({bulkAplikasyonRows.length})
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="teknik_servis" className="space-y-4 mt-4">
+              <ScrollArea className="h-64 border rounded-md p-3">
+                {bulkTeknikRows.map(row => (
+                  <div key={row.id} className="flex items-center gap-2 p-2 border border-dashed rounded-md mb-2">
+                    <Input
+                      placeholder="İş adı..."
+                      value={row.taskName}
+                      onChange={(e) => updateBulkRow('teknik_servis', row.id, 'taskName', e.target.value)}
+                      className="flex-1"
+                    />
+                    <Input
+                      type="number"
+                      min="1"
+                      value={row.periodValue}
+                      onChange={(e) => updateBulkRow('teknik_servis', row.id, 'periodValue', Number(e.target.value))}
+                      className="w-20"
+                    />
+                    <Select
+                      value={row.periodUnit}
+                      onValueChange={(v) => updateBulkRow('teknik_servis', row.id, 'periodUnit', v)}
+                    >
+                      <SelectTrigger className="w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hafta">Hafta</SelectItem>
+                        <SelectItem value="ay">Ay</SelectItem>
+                        <SelectItem value="yil">Yıl</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button variant="ghost" size="icon" onClick={() => removeBulkRow('teknik_servis', row.id)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+                {bulkTeknikRows.length === 0 && (
+                  <p className="text-center text-muted-foreground py-4">
+                    Henüz teknik servis bakım planı eklenmemiş.
+                  </p>
+                )}
+              </ScrollArea>
+              <Button variant="outline" className="w-full" onClick={() => addBulkRow('teknik_servis')}>
+                <Plus className="h-4 w-4 mr-2" /> Yeni İş Ekle
+              </Button>
+            </TabsContent>
+
+            <TabsContent value="aplikasyon" className="space-y-4 mt-4">
+              <ScrollArea className="h-64 border rounded-md p-3">
+                {bulkAplikasyonRows.map(row => (
+                  <div key={row.id} className="flex items-center gap-2 p-2 border border-dashed rounded-md mb-2">
+                    <Input
+                      placeholder="İş adı..."
+                      value={row.taskName}
+                      onChange={(e) => updateBulkRow('aplikasyon', row.id, 'taskName', e.target.value)}
+                      className="flex-1"
+                    />
+                    <Input
+                      type="number"
+                      min="1"
+                      value={row.periodValue}
+                      onChange={(e) => updateBulkRow('aplikasyon', row.id, 'periodValue', Number(e.target.value))}
+                      className="w-20"
+                    />
+                    <Select
+                      value={row.periodUnit}
+                      onValueChange={(v) => updateBulkRow('aplikasyon', row.id, 'periodUnit', v)}
+                    >
+                      <SelectTrigger className="w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hafta">Hafta</SelectItem>
+                        <SelectItem value="ay">Ay</SelectItem>
+                        <SelectItem value="yil">Yıl</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button variant="ghost" size="icon" onClick={() => removeBulkRow('aplikasyon', row.id)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+                {bulkAplikasyonRows.length === 0 && (
+                  <p className="text-center text-muted-foreground py-4">
+                    Henüz aplikasyon bakım planı eklenmemiş.
+                  </p>
+                )}
+              </ScrollArea>
+              <Button variant="outline" className="w-full" onClick={() => addBulkRow('aplikasyon')}>
+                <Plus className="h-4 w-4 mr-2" /> Yeni İş Ekle
+              </Button>
+            </TabsContent>
+          </Tabs>
+
+          {/* Yedek Parça Değişimi Bölümü */}
+          <div className="border-t pt-4 mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <Label className="flex items-center gap-2 font-semibold">
+                <Package className="h-4 w-4" />
+                Yedek Parça Değişimleri ({bulkPeriodicPartRows.length})
+              </Label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkShowPeriodicParts(!bulkShowPeriodicParts)}
+              >
+                {bulkShowPeriodicParts ? 'Gizle' : 'Göster'}
+              </Button>
+            </div>
+
+            {bulkShowPeriodicParts && (
+              <div className="space-y-4">
+                <ScrollArea className="max-h-80 border rounded-md p-3">
+                  {bulkPeriodicPartRows.map(row => (
+                    <div key={row.id} className="border border-dashed rounded-md p-3 mb-3 space-y-3">
+                      {/* Ürün seçici */}
+                      <div className="flex items-center gap-2">
+                        <Popover modal={true} open={row.isPopoverOpen} onOpenChange={(open) => updateBulkPeriodicPartRow(row.id, 'isPopoverOpen', open)}>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" role="combobox" className="flex-1 justify-between">
+                              {row.stokAdi ? (
+                                <span className="truncate">{row.stokKodu} - {row.stokAdi.substring(0, 30)}...</span>
+                              ) : (
+                                <span className="text-muted-foreground">Ürün seçin...</span>
+                              )}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-[400px] p-0"
+                            style={{ zIndex: 99999 }}
+                            align="start"
+                            sideOffset={4}
+                            onOpenAutoFocus={(e) => {
+                              e.preventDefault();
+                              const input = e.currentTarget.querySelector('input');
+                              if (input) {
+                                setTimeout(() => input.focus(), 50);
+                              }
+                            }}
+                            onInteractOutside={(e) => e.preventDefault()}
+                          >
+                            <Command shouldFilter={true}>
+                              <CommandInput placeholder="Ürün kodu veya adı ara..." />
+                              <CommandList>
+                                <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                                <CommandGroup>
+                                  {productCodes.slice(0, 50).map(product => (
+                                    <CommandItem
+                                      key={product.id}
+                                      value={`${product.stokKodu} ${product.stokAdi}`}
+                                      onSelect={() => selectBulkProductForRow(row.id, product)}
+                                    >
+                                      <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
+                                      <div className="flex flex-col">
+                                        <span className="font-medium">{product.stokKodu}</span>
+                                        <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <Button variant="ghost" size="icon" onClick={() => removeBulkPeriodicPartRow(row.id)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+
+                      {/* Periyot seçimi: Her Haftanın / Her Ayın / Her Yılın */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select
+                          value={row.scheduleType}
+                          onValueChange={(v) => updateBulkPeriodicPartRow(row.id, 'scheduleType', v as BulkScheduleType)}
+                        >
+                          <SelectTrigger className="w-40">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="her_haftanin">Her Haftanın</SelectItem>
+                            <SelectItem value="her_ayin">Her Ayın</SelectItem>
+                            <SelectItem value="her_yilin">Her Yılın</SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        {/* Alt seçenek: gün / ay seçimi */}
+                        <Select
+                          value={String(row.scheduleDay)}
+                          onValueChange={(v) => updateBulkPeriodicPartRow(row.id, 'scheduleDay', Number(v))}
+                        >
+                          <SelectTrigger className="w-44">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {row.scheduleType === 'her_haftanin' && WEEKDAYS.map(day => (
+                              <SelectItem key={day.value} value={String(day.value)}>{day.label}</SelectItem>
+                            ))}
+                            {row.scheduleType === 'her_ayin' && MONTH_DAYS.map(day => (
+                              <SelectItem key={day.value} value={String(day.value)}>{day.label}. gün</SelectItem>
+                            ))}
+                            {row.scheduleType === 'her_yilin' && MONTHS.map(month => (
+                              <SelectItem key={month.value} value={String(month.value)}>{month.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Açıklama */}
+                      <p className="text-xs text-muted-foreground italic">
+                        {getScheduleDescription(row.scheduleType, row.scheduleDay)}
+                      </p>
+
+                      {/* Sorumluluk ve takip seçenekleri */}
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs text-muted-foreground">Sorumluluk:</Label>
+                          <Select
+                            value={row.responsibilityType}
+                            onValueChange={(v) => updateBulkPeriodicPartRow(row.id, 'responsibilityType', v as PeriodicPartResponsibility)}
+                          >
+                            <SelectTrigger className="w-32 h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
+                              <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
+                              <SelectItem value="both">Her İkisi</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={`bulk-serial-${row.id}`}
+                            checked={row.requiresSerialTracking}
+                            onCheckedChange={(checked) => updateBulkPeriodicPartRow(row.id, 'requiresSerialTracking', checked)}
+                          />
+                          <Label htmlFor={`bulk-serial-${row.id}`} className="text-xs cursor-pointer">
+                            Seri No Takibi
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={`bulk-outgoing-${row.id}`}
+                            checked={row.requiresOutgoingPartInfo}
+                            onCheckedChange={(checked) => updateBulkPeriodicPartRow(row.id, 'requiresOutgoingPartInfo', checked)}
+                          />
+                          <Label htmlFor={`bulk-outgoing-${row.id}`} className="text-xs cursor-pointer">
+                            Çıkan Parça Bilgisi
+                          </Label>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {bulkPeriodicPartRows.length === 0 && (
+                    <p className="text-center text-muted-foreground py-4">
+                      Henüz yedek parça değişimi eklenmemiş.
+                    </p>
+                  )}
+                </ScrollArea>
+
+                <Button variant="outline" className="w-full" onClick={addBulkPeriodicPartRow}>
+                  <Plus className="h-4 w-4 mr-2" /> Yedek Parça Değişimi Ekle
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setBulkModalOpen(false)}>Kapat</Button>
+            <Button
+              onClick={handleBulkSaveClick}
+              disabled={bulkTeknikRows.length === 0 && bulkAplikasyonRows.length === 0 && bulkPeriodicPartRows.length === 0}
+            >
+              Kaydet ve Laboratuvar Seç
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Laboratuvar Seçimi Modal */}
+      <Dialog open={labSelectionModalOpen} onOpenChange={setLabSelectionModalOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Laboratuvar Seçimi
+            </DialogTitle>
+          </DialogHeader>
+
+          <p className="text-sm text-muted-foreground">
+            Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir.
+          </p>
+
+          <div className="flex items-center gap-2 border-b pb-3 mb-3">
+            <Checkbox
+              id="select-all-labs"
+              checked={selectedLabIds.length === labsWithDevices.length && labsWithDevices.length > 0}
+              onCheckedChange={toggleAllLabs}
+            />
+            <Label htmlFor="select-all-labs" className="text-sm font-medium cursor-pointer">
+              Tümünü Seç ({labsWithDevices.length} laboratuvar)
+            </Label>
+          </div>
+
+          <ScrollArea className="max-h-[40vh]">
+            <div className="space-y-2">
+              {labsWithDevices.map(lab => {
+                const deviceCount = devices.filter(d => d.hospitalId === lab.id).length;
+                return (
+                  <div
+                    key={lab.id}
+                    className={cn(
+                      "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors",
+                      selectedLabIds.includes(lab.id) ? "bg-primary/10 border-primary" : "hover:bg-muted/50"
+                    )}
+                    onClick={() => toggleLabSelection(lab.id)}
+                  >
+                    <Checkbox
+                      checked={selectedLabIds.includes(lab.id)}
+                      onCheckedChange={() => toggleLabSelection(lab.id)}
+                    />
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{lab.name}</p>
+                      <p className="text-xs text-muted-foreground">{deviceCount} cihaz</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollArea>
+
+          {selectedLabIds.length > 0 && (
+            <div className="bg-muted/50 rounded-md p-3 text-sm">
+              <p className="font-medium">Özet:</p>
+              <p className="text-muted-foreground">
+                {selectedLabIds.length} laboratuvar seçildi &middot;{' '}
+                {devices.filter(d => selectedLabIds.includes(d.hospitalId || '')).length} cihaza uygulanacak
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setLabSelectionModalOpen(false)}>Geri</Button>
+            <Button
+              onClick={saveBulkMaintenancePlans}
+              disabled={isSavingBulk || selectedLabIds.length === 0}
+            >
+              {isSavingBulk ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Kaydet ({selectedLabIds.length} laboratuvar)
             </Button>
           </DialogFooter>
         </DialogContent>
