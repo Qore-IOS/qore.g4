@@ -831,46 +831,46 @@
   isolation: isolate;
 }
 
-/* Light mode: Buzlu cam efekti - aydınlık ve yarı saydam */
+/* Light mode: Buzlu cam efekti - %20 daha saydam */
 .frosted-glass-card {
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.45);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.4);
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.08),
     0 2px 8px rgba(0, 0, 0, 0.04),
-    inset 0 1px 1px rgba(255, 255, 255, 0.8);
+    inset 0 1px 1px rgba(255, 255, 255, 0.6);
 }
 
 /* Light mode hover */
 .frosted-glass-card:hover {
-  background: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.55);
   box-shadow:
     0 12px 40px rgba(0, 0, 0, 0.1),
     0 4px 12px rgba(0, 0, 0, 0.06),
-    inset 0 1px 1px rgba(255, 255, 255, 0.9);
+    inset 0 1px 1px rgba(255, 255, 255, 0.7);
 }
 
-/* Dark mode: Karartılmış buzlu cam efekti */
+/* Dark mode: Karartılmış buzlu cam efekti - %20 daha saydam */
 .dark .frosted-glass-card {
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(20px) saturate(150%) brightness(0.9);
   -webkit-backdrop-filter: blur(20px) saturate(150%) brightness(0.9);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.4),
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    inset 0 1px 1px rgba(255, 255, 255, 0.08);
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.06);
 }
 
 /* Dark mode hover */
 .dark .frosted-glass-card:hover {
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.35);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.5),
-    0 4px 12px rgba(0, 0, 0, 0.35),
-    inset 0 1px 1px rgba(255, 255, 255, 0.12);
+    0 12px 40px rgba(0, 0, 0, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1);
 }
 
 /* Frosted glass card içindeki başlıklar için */

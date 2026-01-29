@@ -1038,10 +1038,10 @@ export default function UrunKullanimPanel() {
   const timeBasedBackground = isDayTime ? '/dayclear.png' : '/night%20clear.png';
 
   return (
-    <div className="relative min-h-screen">
-      {/* Full-screen time-based background */}
+    <div className="relative min-h-screen overflow-x-hidden">
+      {/* Full-screen time-based background - fixed to viewport */}
       <div
-        className="absolute inset-0 z-0"
+        className="fixed inset-0 z-0"
         style={{
           backgroundImage: `url(${timeBasedBackground})`,
           backgroundSize: 'cover',
