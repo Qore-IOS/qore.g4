@@ -888,15 +888,7 @@
   padding: 16px;
 }
 
-/* Time-based background panel */
-.usage-panel-background {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
+/* Time-based background panel - now handled via inline styles */
 
 /* Frosted glass button stillerini ayrı tutuyoruz */
 .frosted-glass-btn {
