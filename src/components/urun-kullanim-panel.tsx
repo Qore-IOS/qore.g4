@@ -1035,15 +1035,18 @@ export default function UrunKullanimPanel() {
   }, []);
 
   const isDayTime = currentHour >= 8 && currentHour < 16;
-  const timeBasedBackground = isDayTime ? '/dayclear.png' : '/night clear.png';
+  const timeBasedBackground = isDayTime ? '/dayclear.png' : '/night%20clear.png';
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="relative min-h-screen">
       {/* Full-screen time-based background */}
       <div
-        className="usage-panel-background"
+        className="absolute inset-0 z-0"
         style={{
           backgroundImage: `url(${timeBasedBackground})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
         }}
       />
 
