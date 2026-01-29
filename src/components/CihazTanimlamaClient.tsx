@@ -21,7 +21,7 @@ import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2 } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -57,6 +57,7 @@ type NewPeriodicPartRow = {
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
   isPopoverOpen: boolean;
+  searchText: string;
 };
 
 // Toplu bakım planı - periyodik zamanlama tipi
@@ -107,6 +108,7 @@ type BulkPeriodicPartRow = {
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
   isPopoverOpen: boolean;
+  searchText: string;
 };
 
 interface Props {
@@ -167,12 +169,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const fetchProductCodes = async () => {
       try {
         // Fetch all products and filter for yedek_parca client-side
-        // This is more robust in case of data inconsistencies
         const snap = await getDocs(collection(db, 'productCodes'));
         const allProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        // Filter for yedek_parca products
+        // Filter for yedek_parca products - only show products that are explicitly marked as spare parts
         const spareParts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
-        setProductCodes(spareParts.length > 0 ? spareParts : allProducts);
+        // Always use spare parts only, don't fall back to all products
+        setProductCodes(spareParts);
+        console.log(`Loaded ${spareParts.length} spare parts from ${allProducts.length} total products`);
       } catch (err) {
         console.error('Error fetching product codes:', err);
       }
@@ -304,6 +307,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
       isPopoverOpen: false,
+      searchText: '',
     };
     setNewPeriodicPartRows(prev => [...prev, newRow]);
   };
@@ -315,7 +319,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const selectProductForRow = (rowId: string, product: ProductCode) => {
     setNewPeriodicPartRows(prev => prev.map(row =>
       row.id === rowId
-        ? { ...row, productCodeId: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, isPopoverOpen: false }
+        ? { ...row, productCodeId: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, isPopoverOpen: false, searchText: '' }
         : row
     ));
   };
@@ -390,6 +394,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
       isPopoverOpen: false,
+      searchText: '',
     };
     setBulkPeriodicPartRows(prev => [...prev, newRow]);
   };
@@ -409,7 +414,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const selectBulkProductForRow = (rowId: string, product: ProductCode) => {
     setBulkPeriodicPartRows(prev => prev.map(row =>
       row.id === rowId
-        ? { ...row, productCodeId: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, isPopoverOpen: false }
+        ? { ...row, productCodeId: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, isPopoverOpen: false, searchText: '' }
         : row
     ));
   };
@@ -1091,56 +1096,59 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                       <div key={row.id} className="border border-dashed rounded-md p-3 mb-2 space-y-3">
                         {/* İlk satır: Ürün seçici ve periyot */}
                         <div className="flex items-center gap-2">
-                          <Popover modal={true} open={row.isPopoverOpen} onOpenChange={(open) => updatePeriodicPartRow(row.id, 'isPopoverOpen', open)}>
-                            <PopoverTrigger asChild>
-                              <Button variant="outline" role="combobox" className="flex-1 justify-between">
-                                {row.stokAdi ? (
-                                  <span className="truncate">{row.stokKodu} - {row.stokAdi.substring(0, 30)}...</span>
-                                ) : (
-                                  <span className="text-muted-foreground">Ürün seçin...</span>
-                                )}
-                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="w-[400px] p-0 z-[10000]"
-                              align="start"
-                              sideOffset={4}
-                              onOpenAutoFocus={(e) => {
-                                e.preventDefault();
-                                const input = e.currentTarget.querySelector('input');
-                                if (input) {
-                                  setTimeout(() => input.focus(), 0);
-                                }
-                              }}
-                              onInteractOutside={(e) => e.preventDefault()}
-                              onCloseAutoFocus={(e) => e.preventDefault()}
+                          <div className="flex-1 relative">
+                            <Button
+                              variant="outline"
+                              className="w-full justify-between"
+                              onClick={() => updatePeriodicPartRow(row.id, 'isPopoverOpen', !row.isPopoverOpen)}
                             >
-                              <div onKeyDown={(e) => e.stopPropagation()}>
-                                <Command shouldFilter={true}>
-                                  <CommandInput placeholder="Ürün kodu veya adı ara..." />
-                                  <CommandList>
-                                    <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                                    <CommandGroup>
-                                      {productCodes.slice(0, 50).map(product => (
-                                        <CommandItem
-                                          key={product.id}
-                                          value={`${product.stokKodu} ${product.stokAdi}`}
-                                          onSelect={() => selectProductForRow(row.id, product)}
-                                        >
-                                          <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
-                                          <div className="flex flex-col">
-                                            <span className="font-medium">{product.stokKodu}</span>
-                                            <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
-                                          </div>
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  </CommandList>
-                                </Command>
+                              {row.stokAdi ? (
+                                <span className="truncate">{row.stokKodu} - {row.stokAdi.substring(0, 30)}...</span>
+                              ) : (
+                                <span className="text-muted-foreground">Ürün seçin...</span>
+                              )}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                            {row.isPopoverOpen && (
+                              <div className="absolute left-0 top-full mt-1 w-full min-w-[400px] bg-popover border rounded-md shadow-lg z-50">
+                                <div className="flex items-center border-b px-3">
+                                  <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                                  <input
+                                    type="text"
+                                    className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                                    placeholder="Ürün kodu veya adı ara..."
+                                    value={row.searchText}
+                                    onChange={(e) => updatePeriodicPartRow(row.id, 'searchText', e.target.value)}
+                                    autoFocus
+                                  />
+                                </div>
+                                <div className="max-h-[200px] overflow-y-auto p-1">
+                                  {(() => {
+                                    const searchLower = row.searchText.toLowerCase();
+                                    const filtered = productCodes.filter(p =>
+                                      !searchLower || p.stokKodu.toLowerCase().includes(searchLower) || p.stokAdi.toLowerCase().includes(searchLower)
+                                    );
+                                    if (filtered.length === 0) {
+                                      return <p className="py-6 text-center text-sm text-muted-foreground">Ürün bulunamadı.</p>;
+                                    }
+                                    return filtered.map(product => (
+                                      <div
+                                        key={product.id}
+                                        className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                        onClick={() => selectProductForRow(row.id, product)}
+                                      >
+                                        <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
+                                        <div className="flex flex-col">
+                                          <span className="font-medium">{product.stokKodu}</span>
+                                          <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
+                                        </div>
+                                      </div>
+                                    ));
+                                  })()}
+                                </div>
                               </div>
-                            </PopoverContent>
-                          </Popover>
+                            )}
+                          </div>
                           <Input
                             type="number"
                             min="1"
@@ -1369,57 +1377,59 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                     <div key={row.id} className="border border-dashed rounded-md p-3 mb-3 space-y-3">
                       {/* Ürün seçici */}
                       <div className="flex items-center gap-2">
-                        <Popover modal={true} open={row.isPopoverOpen} onOpenChange={(open) => updateBulkPeriodicPartRow(row.id, 'isPopoverOpen', open)}>
-                          <PopoverTrigger asChild>
-                            <Button variant="outline" role="combobox" className="flex-1 justify-between">
-                              {row.stokAdi ? (
-                                <span className="truncate">{row.stokKodu} - {row.stokAdi.substring(0, 30)}...</span>
-                              ) : (
-                                <span className="text-muted-foreground">Ürün seçin...</span>
-                              )}
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent
-                            className="w-[400px] p-0"
-                            style={{ zIndex: 99999 }}
-                            align="start"
-                            sideOffset={4}
-                            onOpenAutoFocus={(e) => {
-                              e.preventDefault();
-                              const input = e.currentTarget.querySelector('input');
-                              if (input) {
-                                setTimeout(() => input.focus(), 50);
-                              }
-                            }}
-                            onInteractOutside={(e) => e.preventDefault()}
-                            onCloseAutoFocus={(e) => e.preventDefault()}
+                        <div className="flex-1 relative">
+                          <Button
+                            variant="outline"
+                            className="w-full justify-between"
+                            onClick={() => updateBulkPeriodicPartRow(row.id, 'isPopoverOpen', !row.isPopoverOpen)}
                           >
-                            <div onKeyDown={(e) => e.stopPropagation()}>
-                              <Command shouldFilter={true}>
-                                <CommandInput placeholder="Ürün kodu veya adı ara..." />
-                                <CommandList>
-                                  <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                                  <CommandGroup>
-                                    {productCodes.slice(0, 50).map(product => (
-                                      <CommandItem
-                                        key={product.id}
-                                        value={`${product.stokKodu} ${product.stokAdi}`}
-                                        onSelect={() => selectBulkProductForRow(row.id, product)}
-                                      >
-                                        <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
-                                        <div className="flex flex-col">
-                                          <span className="font-medium">{product.stokKodu}</span>
-                                          <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
-                                        </div>
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
+                            {row.stokAdi ? (
+                              <span className="truncate">{row.stokKodu} - {row.stokAdi.substring(0, 30)}...</span>
+                            ) : (
+                              <span className="text-muted-foreground">Ürün seçin...</span>
+                            )}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                          {row.isPopoverOpen && (
+                            <div className="absolute left-0 top-full mt-1 w-full min-w-[400px] bg-popover border rounded-md shadow-lg z-50">
+                              <div className="flex items-center border-b px-3">
+                                <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                                <input
+                                  type="text"
+                                  className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                                  placeholder="Ürün kodu veya adı ara..."
+                                  value={row.searchText}
+                                  onChange={(e) => updateBulkPeriodicPartRow(row.id, 'searchText', e.target.value)}
+                                  autoFocus
+                                />
+                              </div>
+                              <div className="max-h-[200px] overflow-y-auto p-1">
+                                {(() => {
+                                  const searchLower = row.searchText.toLowerCase();
+                                  const filtered = productCodes.filter(p =>
+                                    !searchLower || p.stokKodu.toLowerCase().includes(searchLower) || p.stokAdi.toLowerCase().includes(searchLower)
+                                  );
+                                  if (filtered.length === 0) {
+                                    return <p className="py-6 text-center text-sm text-muted-foreground">Ürün bulunamadı.</p>;
+                                  }
+                                  return filtered.map(product => (
+                                    <div
+                                      key={product.id}
+                                      className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                      onClick={() => selectBulkProductForRow(row.id, product)}
+                                    >
+                                      <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
+                                      <div className="flex flex-col">
+                                        <span className="font-medium">{product.stokKodu}</span>
+                                        <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
+                                      </div>
+                                    </div>
+                                  ));
+                                })()}
+                              </div>
                             </div>
-                          </PopoverContent>
-                        </Popover>
+                          )}
+                        </div>
                         <Button variant="ghost" size="icon" onClick={() => removeBulkPeriodicPartRow(row.id)}>
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
