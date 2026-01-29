@@ -67,7 +67,7 @@ import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { LiquidGlass } from './ui/LiquidGlass';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
-import { Loader2, PlusCircle, Trash2, Download, Upload, Check, FileSpreadsheet, Camera, History, Calculator, Info, ChevronsUpDown, AlertTriangle, Undo } from 'lucide-react';
+import { Loader2, PlusCircle, Trash2, Download, Upload, Check, FileSpreadsheet, Camera, History, Calculator, Info, ChevronsUpDown, AlertTriangle, Undo, ClipboardPlus } from 'lucide-react';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from '@/contexts/auth-context';
 import { Checkbox } from './ui/checkbox';
@@ -464,6 +464,13 @@ export default function SiparislerPanel(): JSX.Element {
                     </Select>
                 </div>
                 <nav className="flex items-end gap-2" aria-label="Hızlı işlemler">
+                    <Button
+                      onClick={() => router.push('/urun-talep')}
+                      variant="outline"
+                      aria-label="Ürün talep işlemlerine git"
+                    >
+                        <ClipboardPlus className="mr-2 h-4 w-4" aria-hidden="true"/> Ürün Talep
+                    </Button>
                     <Button
                       onClick={() => router.push(`/siparis-gecmis?depotId=${selectedDepotId}`)}
                       variant="outline"
