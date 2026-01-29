@@ -27,6 +27,12 @@ export default function AutoRedirectOnLogin() {
       return;
     }
 
+    // Redirect 'user' role to /urun-kullanim
+    if (userRole === 'user' && pathname === '/dashboard') {
+      router.replace('/urun-kullanim');
+      return;
+    }
+
     // Redirect users with only product usage permission
     if (pathname !== '/urun-kullanim' && hasOnlyProductUsagePermission(currentUserProfile?.accessibleViews)) {
       router.replace('/urun-kullanim');
