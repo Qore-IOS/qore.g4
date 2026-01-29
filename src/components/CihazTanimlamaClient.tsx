@@ -169,12 +169,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const fetchProductCodes = async () => {
       try {
         // Fetch all products and filter for yedek_parca client-side
-        // This is more robust in case of data inconsistencies
         const snap = await getDocs(collection(db, 'productCodes'));
         const allProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        // Filter for yedek_parca products
+        // Filter for yedek_parca products - only show products that are explicitly marked as spare parts
         const spareParts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
-        setProductCodes(spareParts.length > 0 ? spareParts : allProducts);
+        // Always use spare parts only, don't fall back to all products
+        setProductCodes(spareParts);
+        console.log(`Loaded ${spareParts.length} spare parts from ${allProducts.length} total products`);
       } catch (err) {
         console.error('Error fetching product codes:', err);
       }
@@ -1126,7 +1127,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                                     const searchLower = row.searchText.toLowerCase();
                                     const filtered = productCodes.filter(p =>
                                       !searchLower || p.stokKodu.toLowerCase().includes(searchLower) || p.stokAdi.toLowerCase().includes(searchLower)
-                                    ).slice(0, 50);
+                                    );
                                     if (filtered.length === 0) {
                                       return <p className="py-6 text-center text-sm text-muted-foreground">Ürün bulunamadı.</p>;
                                     }
@@ -1407,7 +1408,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                                   const searchLower = row.searchText.toLowerCase();
                                   const filtered = productCodes.filter(p =>
                                     !searchLower || p.stokKodu.toLowerCase().includes(searchLower) || p.stokAdi.toLowerCase().includes(searchLower)
-                                  ).slice(0, 50);
+                                  );
                                   if (filtered.length === 0) {
                                     return <p className="py-6 text-center text-sm text-muted-foreground">Ürün bulunamadı.</p>;
                                   }
