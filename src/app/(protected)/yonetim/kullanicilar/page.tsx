@@ -100,10 +100,11 @@ export default function KullaniciPanel() {
     if (user) {
       setCurrentUser({
         ...user,
+        primaryLaboratories: user.primaryLaboratories || [],
         notificationPreferences: (user.notificationPreferences || []) as NotificationTypeUI[],
       });
     } else {
-      setCurrentUser({ notificationsEnabled: false, notificationPreferences: [] });
+      setCurrentUser({ notificationsEnabled: false, notificationPreferences: [], primaryLaboratories: [] });
     }
     setPassword('');
     setIsModalOpen(true);
@@ -114,12 +115,18 @@ export default function KullaniciPanel() {
       toast({ title: 'Hata', description: 'E-posta boş olamaz.', variant: 'destructive' });
       return;
     }
+    // Primary laboratories should be a subset of assigned laboratories
+    const validPrimaryLabs = (currentUser.primaryLaboratories || []).filter(
+      labId => currentUser.assignedLaboratories?.includes(labId)
+    );
+
     const userData: Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }> = {
       name: currentUser.name,
       role: currentUser.role || 'user',
       nfcId: (currentUser.nfcId || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase(),
       accessibleViews: currentUser.accessibleViews,
       assignedLaboratories: currentUser.assignedLaboratories,
+      primaryLaboratories: validPrimaryLabs,
       assignedDepots: currentUser.assignedDepots,
       assignedBrands: currentUser.assignedBrands,
       phoneNumber: currentUser.phoneNumber || '',
@@ -338,10 +345,10 @@ export default function KullaniciPanel() {
                         </div>
                     ))}
                 </ScrollArea>
-                <div className="flex flex-col gap-4">
-                    <ScrollArea className="h-1/2 border rounded-md p-2">
+                <div className="flex flex-col gap-4 h-[calc(70vh-100px)]">
+                    <ScrollArea className="flex-1 min-h-0 border rounded-md p-2">
                         <h4 className="font-medium text-sm mb-2">Atanan Laboratuvarlar</h4>
-                        {hospitals.map(h => (
+                        {hospitals.filter(h => h.id).map(h => (
                             <div key={h.id} className="flex items-center space-x-2 mb-1">
                                 <Checkbox
                                     id={`lab-${h.id}`}
@@ -349,16 +356,46 @@ export default function KullaniciPanel() {
                                     onCheckedChange={(checked) => {
                                         const currentLabs = currentUser.assignedLaboratories || [];
                                         const newLabs = checked ? [...currentLabs, h.id] : currentLabs.filter(id => id !== h.id);
-                                        setCurrentUser({...currentUser, assignedLaboratories: newLabs});
+                                        // Also remove from primaryLaboratories if unchecked
+                                        const currentPrimaryLabs = currentUser.primaryLaboratories || [];
+                                        const newPrimaryLabs = checked ? currentPrimaryLabs : currentPrimaryLabs.filter(id => id !== h.id);
+                                        setCurrentUser({...currentUser, assignedLaboratories: newLabs, primaryLaboratories: newPrimaryLabs});
                                     }}
                                 />
                                 <label htmlFor={`lab-${h.id}`} className="text-sm">{h.name}</label>
                             </div>
                         ))}
                     </ScrollArea>
-                    <ScrollArea className="h-1/2 border rounded-md p-2">
+                    {/* Ana Sorumluluk Laboratuvarları - sadece teknik_servis ve aplikasyon için */}
+                    {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon') && (
+                        <ScrollArea className="flex-1 min-h-0 border rounded-md p-2 bg-blue-50/50 dark:bg-blue-950/20">
+                            <h4 className="font-medium text-sm mb-2 text-blue-700 dark:text-blue-400">
+                                Ana Sorumluluk Laboratuvarları
+                                <span className="text-xs text-muted-foreground ml-1">(Performans puanı için)</span>
+                            </h4>
+                            {(currentUser.assignedLaboratories || []).length === 0 ? (
+                                <p className="text-xs text-muted-foreground italic">Önce atanan laboratuvarları seçin</p>
+                            ) : (
+                                hospitals.filter(h => currentUser.assignedLaboratories?.includes(h.id)).map(h => (
+                                    <div key={h.id} className="flex items-center space-x-2 mb-1">
+                                        <Checkbox
+                                            id={`primary-lab-${h.id}`}
+                                            checked={currentUser.primaryLaboratories?.includes(h.id)}
+                                            onCheckedChange={(checked) => {
+                                                const currentPrimaryLabs = currentUser.primaryLaboratories || [];
+                                                const newPrimaryLabs = checked ? [...currentPrimaryLabs, h.id] : currentPrimaryLabs.filter(id => id !== h.id);
+                                                setCurrentUser({...currentUser, primaryLaboratories: newPrimaryLabs});
+                                            }}
+                                        />
+                                        <label htmlFor={`primary-lab-${h.id}`} className="text-sm">{h.name}</label>
+                                    </div>
+                                ))
+                            )}
+                        </ScrollArea>
+                    )}
+                    <ScrollArea className="flex-1 min-h-0 border rounded-md p-2">
                         <h4 className="font-medium text-sm mb-2">Atanan Depolar</h4>
-                        {depots.map(d => (
+                        {depots.filter(d => d.id).map(d => (
                             <div key={d.id} className="flex items-center space-x-2 mb-1">
                                 <Checkbox
                                     id={`depot-${d.id}`}
