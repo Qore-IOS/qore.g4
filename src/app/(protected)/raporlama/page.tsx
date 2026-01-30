@@ -32,6 +32,7 @@ import {
   Trash2,
   Package,
   TrendingUp,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -247,6 +248,9 @@ export default function RaporlamaPanel() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
+            <Button variant="outline" onClick={() => handleStokIslemleriNavigation('/raporlama/transfer-raporu')}>
+              <ArrowLeftRight className="h-4 w-4 mr-2" /> Transfer Raporu
+            </Button>
             <Button variant="outline" onClick={() => handleStokIslemleriNavigation('/raporlama/imha-edilen-kitler')}>
               <Trash2 className="h-4 w-4 mr-2" /> İmha Edilen Kitler
             </Button>
