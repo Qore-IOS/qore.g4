@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle, Clock } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { format } from 'date-fns';
@@ -140,6 +140,10 @@ export default function IslemFormuPage() {
   const [islemTipi, setIslemTipi] = useState<IslemTipi>('');
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
   const [aciklama, setAciklama] = useState('');
+
+  // Başlangıç ve Bitiş Saatleri (Zorunlu)
+  const [baslangicSaati, setBaslangicSaati] = useState<string>('');
+  const [bitisSaati, setBitisSaati] = useState<string>('');
 
 
   // Signature modal
@@ -769,6 +773,16 @@ export default function IslemFormuPage() {
   };
 
   const startSaveProcess = () => {
+    // Validate başlangıç ve bitiş saatleri (zorunlu)
+    if (!baslangicSaati) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen başlangıç saatini seçin.', variant: 'destructive' });
+      return;
+    }
+    if (!bitisSaati) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen bitiş saatini seçin.', variant: 'destructive' });
+      return;
+    }
+
     // Validate işlem tipi and türü
     if (!islemTipi) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen işlem tipini seçin.', variant: 'destructive' });
@@ -845,7 +859,7 @@ export default function IslemFormuPage() {
         const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
         // Create form document
-        const formRef = doc(collection(db, 'deviceActionForms'));
+        const formRef = doc(collection(db, 'teknikServisActionForms'));
         batch.set(formRef, {
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
@@ -856,6 +870,8 @@ export default function IslemFormuPage() {
             islemTipi,
             islemTuru,
             aciklama: aciklama.trim(),
+            baslangicSaati,
+            bitisSaati,
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -1105,6 +1121,8 @@ export default function IslemFormuPage() {
         setIslemTipi('');
         setIslemTuru('');
         setAciklama('');
+        setBaslangicSaati('');
+        setBitisSaati('');
         setSelectedMaintenanceTasks([]);
         setSelectedPeriodicParts([]);
         setSelectedFaultId('');
@@ -1420,6 +1438,39 @@ export default function IslemFormuPage() {
                 )}
               </div>
             )}
+
+            {/* Başlangıç ve Bitiş Saatleri (Zorunlu) */}
+            <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
+              <Label className="flex items-center gap-2 mb-4">
+                <Clock className="h-4 w-4" />
+                İşlem Saatleri <span className="text-destructive">*</span>
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="baslangicSaati" className="text-sm">Başlangıç Saati <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="baslangicSaati"
+                    type="time"
+                    value={baslangicSaati}
+                    onChange={(e) => setBaslangicSaati(e.target.value)}
+                    className={!baslangicSaati ? 'border-amber-500/50' : ''}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bitisSaati" className="text-sm">Bitiş Saati <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="bitisSaati"
+                    type="time"
+                    value={bitisSaati}
+                    onChange={(e) => setBitisSaati(e.target.value)}
+                    className={!bitisSaati ? 'border-amber-500/50' : ''}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                İşleme başladığınız ve bitirdiğiniz saatleri giriniz. Bu alanlar zorunludur.
+              </p>
+            </div>
 
             {/* Açıklama Alanı (Zorunlu) */}
             <div className="p-4 border rounded-lg bg-muted/30">
