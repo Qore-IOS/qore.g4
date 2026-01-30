@@ -1,10 +1,8 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, onSnapshot, orderBy, query, Timestamp, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import type { DeviceFaultReport, DeviceFaultStatus } from '@/lib/types';
 import {
   Card,
@@ -38,6 +36,7 @@ import {
   Phone,
   Wrench,
   Building2,
+  RefreshCw,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes } from 'date-fns';
@@ -128,12 +127,14 @@ function normalizeStatus(status: string): DeviceFaultStatus {
 export default function ArizaYonetimiPage() {
   const [reports, setReports] = useState<DeviceFaultReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
   const { isAdmin } = useAuth();
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [totalPages, setTotalPages] = useState(1);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
 
@@ -143,113 +144,101 @@ export default function ArizaYonetimiPage() {
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
   const [openerFilter, setOpenerFilter] = useState<string>('all');
 
-  // Her sekme için kayıt sayıları
-  const statusCounts = useMemo(() => {
-    const counts = {
-      all: reports.length,
-      atama_bekliyor: 0,
-      mudahale_bekliyor: 0,
-      mudahale_ediliyor: 0,
-      cozuldu: 0,
-    };
+  // Server'dan gelen veriler
+  const [statusCounts, setStatusCounts] = useState({
+    all: 0,
+    atama_bekliyor: 0,
+    mudahale_bekliyor: 0,
+    mudahale_ediliyor: 0,
+    cozuldu: 0,
+  });
+  const [uniqueLabs, setUniqueLabs] = useState<string[]>([]);
+  const [uniqueDevices, setUniqueDevices] = useState<string[]>([]);
+  const [uniqueOpeners, setUniqueOpeners] = useState<string[]>([]);
 
-    reports.forEach(r => {
-      const normalized = normalizeStatus(r.status);
-      if (normalized === 'atama_bekliyor') counts.atama_bekliyor++;
-      else if (normalized === 'mudahale_bekliyor') counts.mudahale_bekliyor++;
-      else if (normalized === 'mudahale_ediliyor') counts.mudahale_ediliyor++;
-      else if (normalized === 'cozuldu') counts.cozuldu++;
-    });
-
-    return counts;
-  }, [reports]);
-
-  useEffect(() => {
-    const q = query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const reportList: DeviceFaultReport[] = snapshot.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            ...data,
-            openedAt: data.openedAt ? (data.openedAt as Timestamp).toDate() : null,
-            closedAt: data.closedAt ? (data.closedAt as Timestamp).toDate() : null,
-            assignedAt: data.assignedAt ? (data.assignedAt as Timestamp).toDate() : null,
-            interventionStartedAt: data.interventionStartedAt ? (data.interventionStartedAt as Timestamp).toDate() : null,
-          } as DeviceFaultReport;
-        });
-        setReports(reportList);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching fault reports:', error);
-        toast({
-          title: 'Hata',
-          description: 'Arıza geçmişi yüklenemedi.',
-          variant: 'destructive',
-        });
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [toast]);
-  
-  const uniqueLabs = useMemo(() => {
-    const labs = new Set(reports.map(r => r.labName));
-    return Array.from(labs).filter(Boolean) as string[];
-  }, [reports]);
-
-  const uniqueDevices = useMemo(() => {
-    const devices = new Set(reports.map(r => r.serial));
-    return Array.from(devices).filter(Boolean) as string[];
-  }, [reports]);
-
-  const uniqueOpeners = useMemo(() => {
-    const openers = new Set(reports.map(r => r.openedByName));
-    return Array.from(openers).filter(Boolean) as string[];
-  }, [reports]);
-
-
-  const filteredReports = useMemo(() => {
-    return reports.filter(report => {
-      // Status tab filtresi
-      const normalized = normalizeStatus(report.status);
-      const statusMatch = statusTab === 'all' || normalized === statusTab;
-      const labMatch = labFilter === 'all' || report.labName === labFilter;
-      const deviceMatch = deviceFilter === 'all' || report.serial === deviceFilter;
-      const openerMatch = openerFilter === 'all' || report.openedByName === openerFilter;
-      return statusMatch && labMatch && deviceMatch && openerMatch;
-    });
-  }, [reports, statusTab, labFilter, deviceFilter, openerFilter]);
-
-  const paginatedReports = useMemo(() => {
-    const startIndex = (currentPage - 1) * rowsPerPage;
-    return filteredReports.slice(startIndex, startIndex + rowsPerPage);
-  }, [filteredReports, currentPage, rowsPerPage]);
-
-  const totalPages = Math.ceil(filteredReports.length / rowsPerPage);
-
-  useEffect(() => {
-    if (currentPage > totalPages && totalPages > 0) {
-      setCurrentPage(totalPages);
+  // API'den veri çekme
+  const fetchReports = useCallback(async (isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
     }
-  }, [currentPage, totalPages]);
-  
+
+    try {
+      const params = new URLSearchParams({
+        status: statusTab,
+        lab: labFilter,
+        device: deviceFilter,
+        opener: openerFilter,
+        page: currentPage.toString(),
+        limit: rowsPerPage.toString(),
+      });
+
+      const response = await fetch(`/api/ariza-yonetimi?${params}`);
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Veri alınamadı');
+      }
+
+      // Tarihleri Date objelerine çevir
+      const reportList: DeviceFaultReport[] = result.data.map((r: any) => ({
+        ...r,
+        openedAt: r.openedAt ? new Date(r.openedAt) : null,
+        closedAt: r.closedAt ? new Date(r.closedAt) : null,
+        assignedAt: r.assignedAt ? new Date(r.assignedAt) : null,
+        interventionStartedAt: r.interventionStartedAt ? new Date(r.interventionStartedAt) : null,
+      }));
+
+      setReports(reportList);
+      setStatusCounts(result.statusCounts);
+      setTotalPages(result.pagination.totalPages);
+      setUniqueLabs(result.filterOptions.labs);
+      setUniqueDevices(result.filterOptions.devices);
+      setUniqueOpeners(result.filterOptions.openers);
+    } catch (error: any) {
+      console.error('Error fetching fault reports:', error);
+      toast({
+        title: 'Hata',
+        description: error.message || 'Arıza geçmişi yüklenemedi.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [statusTab, labFilter, deviceFilter, openerFilter, currentPage, rowsPerPage, toast]);
+
+  // İlk yükleme ve filtre değişikliklerinde veri çek
+  useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
+
+  // Filtre değiştiğinde sayfa 1'e dön
   useEffect(() => {
     setCurrentPage(1);
   }, [statusTab, labFilter, deviceFilter, openerFilter, rowsPerPage]);
 
+  // Artık client-side filtreleme yok, API zaten filtrelenmiş veri döndürüyor
+  const paginatedReports = reports;
+
   const handleDeleteReport = async (reportId: string) => {
     try {
-      await deleteDoc(doc(db, 'deviceFaultReports', reportId));
+      const response = await fetch(`/api/ariza-yonetimi?id=${reportId}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Silme işlemi başarısız');
+      }
+
       toast({ title: 'Başarılı', description: `Arıza kaydı #${reportId.substring(0, 6)}... silindi.` });
-    } catch (error) {
+      // Listeyi yenile
+      fetchReports(true);
+    } catch (error: any) {
       console.error("Error deleting fault report:", error);
-      toast({ title: 'Hata', description: 'Arıza kaydı silinemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', description: error.message || 'Arıza kaydı silinemedi.', variant: 'destructive' });
     }
   };
 
@@ -258,7 +247,7 @@ export default function ArizaYonetimiPage() {
   };
 
   const getExportData = () => {
-    return filteredReports.map(r => {
+    return reports.map(r => {
       const normalized = normalizeStatus(r.status);
       const statusConfig = STATUS_CONFIG[normalized];
 
@@ -303,7 +292,7 @@ export default function ArizaYonetimiPage() {
   };
 
   const handleExportToExcel = () => {
-    if (filteredReports.length === 0) {
+    if (reports.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
       return;
     }
@@ -313,7 +302,7 @@ export default function ArizaYonetimiPage() {
   };
 
   const handleExportToPdf = async () => {
-    if (filteredReports.length === 0) {
+    if (reports.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
       return;
     }
@@ -343,6 +332,15 @@ export default function ArizaYonetimiPage() {
                   </CardDescription>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => fetchReports(true)}
+                  disabled={refreshing}
+                  title="Yenile"
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                </Button>
                 <Button variant="outline" onClick={() => router.push('/ariza-yonetimi/diger-firma-gecmisi')}>
                   <Building2 className="h-4 w-4 mr-2" /> Diğer Firma Geçmişi
                 </Button>
@@ -528,7 +526,7 @@ export default function ArizaYonetimiPage() {
               </div>
             )}
           </CardContent>
-          {totalPages > 1 && (
+          {totalPages > 0 && (
             <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t">
               <div className="flex items-center space-x-2 text-sm">
                 <span>Satır/sayfa:</span>
@@ -560,12 +558,12 @@ export default function ArizaYonetimiPage() {
                   Önceki
                 </Button>
                 <span className="text-sm">
-                  Sayfa {currentPage} / {totalPages}
+                  Sayfa {currentPage} / {totalPages || 1}
                 </span>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages || 1, p + 1))}
                   disabled={currentPage >= totalPages}
                 >
                   Sonraki
