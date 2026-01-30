@@ -509,6 +509,7 @@ export type AppView =
   | 'miad-uyarilari'
   | 'verimlilik'
   | 'numune-arsivi'
+  | 'nobet-yonetimi'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
@@ -1030,4 +1031,45 @@ export interface FaultDefinition {
   createdAt?: Date;
   createdByUid?: string;
   createdByName?: string;
+}
+
+// ==========================================
+// Nöbet Vardiyası Sistemi
+// ==========================================
+
+// Nöbet personel tipi
+export type ShiftPersonnelType = 'teknik_servis' | 'aplikasyon';
+
+// Nöbet tarih aralığı
+export interface ShiftDateRange {
+  startDate: string;    // ISO date string (YYYY-MM-DD)
+  endDate: string;      // ISO date string (YYYY-MM-DD)
+}
+
+// Nöbet kaydı
+export interface ShiftSchedule {
+  id: string;
+  personnelUid: string;           // Personel UID
+  personnelName: string;          // Personel adı
+  personnelType: ShiftPersonnelType; // Teknik servis veya aplikasyon
+  laboratoryIds: string[];        // Hangi laboratuvarlarda geçerli
+  laboratoryNames: string[];      // Laboratuvar isimleri (denormalize)
+  dateRanges: ShiftDateRange[];   // Nöbet tarih aralıkları
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  updatedAt?: TimestampLike;
+  updatedByUid?: string;
+  updatedByName?: string;
+  isActive: boolean;              // Aktif mi (soft delete için)
+}
+
+// Nöbet oluşturma satırı (UI için)
+export interface ShiftScheduleRow {
+  id: string;                     // Geçici ID (UUID)
+  personnelUid: string;
+  personnelName: string;
+  laboratoryIds: string[];
+  laboratoryNames: string[];
+  dateRanges: ShiftDateRange[];
 }
