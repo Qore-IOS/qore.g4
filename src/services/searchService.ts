@@ -10,6 +10,16 @@ import {
 } from 'firebase/firestore';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer } from '@/lib/types';
 
+// İşlem tipi
+export type IslemTipi =
+  | 'Mal Kabul'
+  | 'Karşılanan Sipariş'
+  | 'Direkt Transfer'
+  | 'Kullanım'
+  | 'İmha'
+  | 'Sayımdan Düşüm'
+  | 'Laboratuvardan İade';
+
 // Consolidated row type for the ledger
 export interface LedgerRow {
   id: string;
@@ -17,7 +27,7 @@ export interface LedgerRow {
   stokAdi: string;
   lotNumarasi?: string;
   miad?: string;
-  islemTipi: 'Mal Kabul' | 'Karşılanan Sipariş' | 'Direkt Transfer' | 'Kullanım';
+  islemTipi: IslemTipi;
   actor?: string;
   tarih: Date;
   adet: number;
@@ -194,10 +204,11 @@ export async function searchProductLedger(
     return { ledgerRows: [], stockSummary: [], searchType };
   }
 
-  // Fetch shipments and transfers
-  const [shipmentsSnap, transfersSnap] = await Promise.all([
+  // Fetch shipments, transfers, and destroyedKits
+  const [shipmentsSnap, transfersSnap, destroyedKitsSnap] = await Promise.all([
     getDocs(collection(db, 'shipments')),
     getDocs(collection(db, 'transfers')),
+    getDocs(collection(db, 'destroyedKitsReports')),
   ]);
 
   // Process fetched data
@@ -205,6 +216,16 @@ export async function searchProductLedger(
   const allShipments: Shipment[] = shipmentsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
   const allTransfers: Transfer[] = transfersSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
   const consumptionRecords: ConsumptionRecord[] = consumptionSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+  const allDestroyedKits: any[] = destroyedKitsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+
+  // Fetch transfer items from subcollection for each transfer
+  const transfersWithItems: (Transfer & { items: any[] })[] = await Promise.all(
+    allTransfers.map(async (tr) => {
+      const itemsSnap = await getDocs(collection(db, 'transfers', tr.id, 'items'));
+      const items = itemsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      return { ...tr, items };
+    })
+  );
 
   // Filter shipments by stock code/lot/serial
   const filteredShipments = allShipments.filter(sh => {
@@ -220,8 +241,8 @@ export async function searchProductLedger(
     });
   });
 
-  // Filter transfers by stock code/lot/serial
-  const filteredTransfers = allTransfers.filter(tr => {
+  // Filter transfers by stock code/lot/serial (using transfersWithItems that has items loaded)
+  const filteredTransfers = transfersWithItems.filter(tr => {
     if (!tr.items || tr.items.length === 0) return false;
     return tr.items.some((it: any) => {
       if (searchType === 'serial') {
@@ -234,15 +255,26 @@ export async function searchProductLedger(
     });
   });
 
+  // Filter destroyed kits by stock code/lot/serial
+  const filteredDestroyedKits = allDestroyedKits.filter(kit => {
+    if (searchType === 'serial') {
+      return (kit.seriNumarasi || '').toLowerCase() === needle;
+    } else if (searchType === 'lot') {
+      return (kit.lotNumarasi || '').toLowerCase() === needle;
+    } else {
+      return uniqueStockCodes.includes(kit.stokKodu);
+    }
+  });
+
   // --- Build Ledger Rows based on search type ---
   const ledgerRows: LedgerRow[] = [];
 
   if (searchType === 'serial') {
     // SERIAL SEARCH: Show individual items
-    buildSerialSearchRows(ledgerRows, depoStok, filteredShipments, filteredTransfers, consumptionRecords, needle);
+    buildSerialSearchRows(ledgerRows, depoStok, filteredShipments, filteredTransfers, consumptionRecords, filteredDestroyedKits, needle);
   } else {
     // PRODUCT/LOT SEARCH: Group by session
-    buildGroupedSearchRows(ledgerRows, depoStok, filteredShipments, filteredTransfers, consumptionRecords, uniqueStockCodes, searchType, needle);
+    buildGroupedSearchRows(ledgerRows, depoStok, filteredShipments, filteredTransfers, consumptionRecords, filteredDestroyedKits, uniqueStockCodes, searchType, needle);
   }
 
   // Sort by date descending
@@ -327,6 +359,20 @@ export async function searchProductLedger(
   return { ledgerRows, stockSummary, searchType };
 }
 
+// Helper to determine işlem tipi from consumptionType
+function getConsumptionIslemTipi(consumptionType?: string): IslemTipi {
+  switch (consumptionType) {
+    case 'sayimdan_dusum':
+      return 'Sayımdan Düşüm';
+    case 'imha_dogrulama_sonrasi_dusum':
+      return 'İmha';
+    case 'lab_to_depot_return':
+      return 'Laboratuvardan İade';
+    default:
+      return 'Kullanım';
+  }
+}
+
 /**
  * Build rows for serial number search - individual items
  */
@@ -334,8 +380,9 @@ function buildSerialSearchRows(
   ledgerRows: LedgerRow[],
   depoStok: DepoStokItem[],
   shipments: Shipment[],
-  transfers: Transfer[],
+  transfers: (Transfer & { items: any[] })[],
   consumptions: ConsumptionRecord[],
+  destroyedKits: any[],
   needle: string
 ) {
   // Calculate running totals for postAdet
@@ -377,6 +424,13 @@ function buildSerialSearchRows(
   // Add consumption events
   consumptions.forEach(rec => {
     events.push({ tarih: normDate(rec.consumptionTimestamp), type: 'consumption', data: rec });
+  });
+
+  // Add destroyed kit events
+  destroyedKits.forEach(kit => {
+    if ((kit.seriNumarasi || '').toLowerCase() === needle) {
+      events.push({ tarih: normDate(kit.resolvedAt || kit.timestamp || kit.createdAt), type: 'destroyed', data: kit });
+    }
   });
 
   // Sort by date
@@ -462,12 +516,31 @@ function buildSerialSearchRows(
         stokAdi: rec.stokAdi,
         lotNumarasi: rec.lotNumarasi,
         miad: formatMiad(rec.miad),
-        islemTipi: 'Kullanım',
+        islemTipi: getConsumptionIslemTipi((rec as any).consumptionType),
         actor: rec.userName || '-',
         tarih: ev.tarih,
         adet: 1,
         seriNolar: rec.seriNumarasi ? [rec.seriNumarasi] : [],
         konum: rec.laboratoryName || 'Laboratuvar',
+        postAdetHedef: Math.max(0, stockByLocationLot[labKey] || 0),
+      });
+    } else if (ev.type === 'destroyed') {
+      const kit = ev.data;
+      const labKey = getKey(kit.laboratoryName || 'Laboratuvar', kit.stokKodu, kit.lotNumarasi);
+      stockByLocationLot[labKey] = (stockByLocationLot[labKey] || 0) - 1;
+
+      ledgerRows.push({
+        id: `imha_${kit.id}`,
+        stokKodu: kit.stokKodu,
+        stokAdi: kit.stokAdi,
+        lotNumarasi: kit.lotNumarasi,
+        miad: formatMiad(kit.miad),
+        islemTipi: 'İmha',
+        actor: kit.userName || kit.resolvedByName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: kit.seriNumarasi ? [kit.seriNumarasi] : [],
+        konum: kit.laboratoryName || 'Laboratuvar',
         postAdetHedef: Math.max(0, stockByLocationLot[labKey] || 0),
       });
     }
@@ -481,8 +554,9 @@ function buildGroupedSearchRows(
   ledgerRows: LedgerRow[],
   depoStok: DepoStokItem[],
   shipments: Shipment[],
-  transfers: Transfer[],
+  transfers: (Transfer & { items: any[] })[],
   consumptions: ConsumptionRecord[],
+  destroyedKits: any[],
   stockCodes: string[],
   searchType: 'product' | 'lot',
   needle: string
@@ -591,6 +665,17 @@ function buildGroupedSearchRows(
     });
   });
 
+  // Destroyed kits
+  destroyedKits.forEach(kit => {
+    if (!filterItem(kit)) return;
+    events.push({
+      tarih: normDate(kit.resolvedAt || kit.timestamp || kit.createdAt),
+      type: 'destroyed',
+      data: kit,
+      groupKey: `imha|${kit.id}`
+    });
+  });
+
   // Sort by date
   events.sort((a, b) => a.tarih.getTime() - b.tarih.getTime());
 
@@ -687,12 +772,31 @@ function buildGroupedSearchRows(
         stokAdi: rec.stokAdi,
         lotNumarasi: rec.lotNumarasi,
         miad: formatMiad(rec.miad),
-        islemTipi: 'Kullanım',
+        islemTipi: getConsumptionIslemTipi((rec as any).consumptionType),
         actor: rec.userName || '-',
         tarih: ev.tarih,
         adet: 1,
         seriNolar: rec.seriNumarasi ? [rec.seriNumarasi] : [],
         konum: rec.laboratoryName || 'Laboratuvar',
+        postAdetHedef: Math.max(0, stockByLocationLot[labKey] || 0),
+      });
+    } else if (ev.type === 'destroyed') {
+      const kit = ev.data;
+      const labKey = getKey(kit.laboratoryName || 'Laboratuvar', kit.stokKodu, kit.lotNumarasi);
+      stockByLocationLot[labKey] = (stockByLocationLot[labKey] || 0) - 1;
+
+      ledgerRows.push({
+        id: `imha_${kit.id}`,
+        stokKodu: kit.stokKodu,
+        stokAdi: kit.stokAdi,
+        lotNumarasi: kit.lotNumarasi,
+        miad: formatMiad(kit.miad),
+        islemTipi: 'İmha',
+        actor: kit.userName || kit.resolvedByName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: kit.seriNumarasi ? [kit.seriNumarasi] : [],
+        konum: kit.laboratoryName || 'Laboratuvar',
         postAdetHedef: Math.max(0, stockByLocationLot[labKey] || 0),
       });
     }
