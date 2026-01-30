@@ -152,6 +152,7 @@ export async function searchProductLedger(
   let targetLotNumarasi: string | undefined;
 
   if (searchType === 'serial') {
+    // Try to find product info from depoStok first
     const productFromSerialSnap = await getDocs(
       query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal), limit(1))
     );
@@ -159,6 +160,16 @@ export async function searchProductLedger(
       const data = productFromSerialSnap.docs[0].data();
       stockCodesToSearch.push(data.stokKodu);
       targetLotNumarasi = data.lotNumarasi;
+    } else {
+      // If not found in depoStok, try tuketimKayitlari (for consumed items)
+      const productFromConsumptionSnap = await getDocs(
+        query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal), limit(1))
+      );
+      if (!productFromConsumptionSnap.empty) {
+        const data = productFromConsumptionSnap.docs[0].data();
+        stockCodesToSearch.push(data.stokKodu);
+        targetLotNumarasi = data.lotNumarasi;
+      }
     }
   } else if (searchType === 'lot') {
     targetLotNumarasi = needleOriginal;
@@ -186,10 +197,30 @@ export async function searchProductLedger(
   let consumptionSnap: any;
 
   if (searchType === 'serial') {
-    [depoStokSnap, consumptionSnap] = await Promise.all([
+    // First, get consumption records and depoStok by serial
+    const [depoStokBySerial, consumptionBySerial] = await Promise.all([
       getDocs(query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal))),
       getDocs(query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal))),
     ]);
+
+    consumptionSnap = consumptionBySerial;
+
+    // If depoStok has the serial, use it directly
+    if (!depoStokBySerial.empty) {
+      depoStokSnap = depoStokBySerial;
+    } else if (targetLotNumarasi && uniqueStockCodes.length > 0) {
+      // If not found by serial but we have stokKodu and lotNumarasi from consumption,
+      // fetch depoStok by stokKodu and lotNumarasi to show mal kabul records
+      depoStokSnap = await getDocs(
+        query(
+          collection(db, 'depoStok'),
+          where('stokKodu', '==', uniqueStockCodes[0]),
+          where('lotNumarasi', '==', targetLotNumarasi)
+        )
+      );
+    } else {
+      depoStokSnap = depoStokBySerial; // Empty but valid structure
+    }
   } else if (searchType === 'lot') {
     [depoStokSnap, consumptionSnap] = await Promise.all([
       getDocs(query(collection(db, 'depoStok'), where('lotNumarasi', '==', needleOriginal))),
