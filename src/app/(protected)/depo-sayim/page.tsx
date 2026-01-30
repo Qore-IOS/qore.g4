@@ -284,24 +284,82 @@ export default function DepoSayimPage() {
 
         // Ürün tanımlı ama sayım listesinde yok
         if (groupIndex === -1) {
-            playFeedback(true);
             const product = parsed.product as ProductCode;
-            // Dialog aç ve kullanıcıya ekleme seçeneği sun
-            openAddDialog({
-                stokKodu: parsed.stokKodu || '',
-                stokAdi: product.stokAdi || '',
-                lotNumarasi: parsed.lotNumarasi || '',
-                miad: parsed.miad || '',
-                adet: 1,
-                seriNumarasi: parsed.seriNumarasi || '',
-                trackingMode: resolveDefaultTrackingMode(product as any),
-                isUnknownProduct: false,
-                rawBarcode: barcode,
+
+            // Marka kontrolü - sadece seçilen markaya ait ürünler eklenebilir
+            if (product.marka !== brandForCount) {
+                playFeedback(true);
+                toast({
+                    title: 'Farklı Marka',
+                    description: `Bu ürün ${product.marka} markasına ait. Sadece ${brandForCount} markasındaki ürünler eklenebilir.`,
+                    variant: 'destructive'
+                });
+                return;
+            }
+
+            // Kategori kontrolü (opsiyonel - eğer kategori seçildiyse)
+            if (categoryForCount && product.urunGrubu !== categoryForCount) {
+                playFeedback(true);
+                toast({
+                    title: 'Farklı Kategori',
+                    description: `Bu ürün ${product.urunGrubu === 'kit' ? 'Kit' : 'Sarf'} kategorisine ait. Sadece ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'} kategorisindeki ürünler eklenebilir.`,
+                    variant: 'destructive'
+                });
+                return;
+            }
+
+            // Otomatik olarak listeye ekle (dialog olmadan)
+            const key = `${parsed.stokKodu}-${parsed.lotNumarasi || ''}-${parsed.miad || ''}`;
+            const trackingMode = resolveDefaultTrackingMode(product as any);
+
+            setBrandCountItems(prev => {
+                // Aynı grup var mı kontrol et (aynı lot farklı okutma olabilir)
+                const existingIndex = prev.findIndex(g => g.id === key);
+
+                if (existingIndex !== -1) {
+                    // Varsa, scannedAdet'i artır
+                    const newItems = [...prev];
+                    const group = { ...newItems[existingIndex] };
+
+                    if (trackingMode === 'serial' && parsed.seriNumarasi) {
+                        if (group.scannedSerials.has(parsed.seriNumarasi)) {
+                            playFeedback(true);
+                            toast({ title: 'Tekrar', description: 'Bu seri numarası zaten okutuldu.', variant: 'default' });
+                            return prev;
+                        }
+                        group.scannedSerials = new Set(group.scannedSerials).add(parsed.seriNumarasi);
+                        group.scannedAdet = group.scannedSerials.size;
+                    } else {
+                        group.scannedAdet++;
+                    }
+
+                    newItems[existingIndex] = group;
+                    return newItems;
+                }
+
+                // Yoksa yeni grup oluştur
+                const newGroup: CountGroup = {
+                    id: key,
+                    stokKodu: parsed.stokKodu || '',
+                    stokAdi: product.stokAdi || '',
+                    lotNumarasi: parsed.lotNumarasi || '',
+                    miad: parsed.miad || '',
+                    trackingMode,
+                    expectedSerials: [],
+                    expectedAdet: 0, // Sistemde yok, beklenen 0
+                    scannedSerials: parsed.seriNumarasi ? new Set([parsed.seriNumarasi]) : new Set(),
+                    scannedAdet: trackingMode === 'serial' ? (parsed.seriNumarasi ? 1 : 0) : 1,
+                    items: [],
+                    isNewFound: true,
+                };
+
+                return [...prev, newGroup].sort((a, b) => a.stokAdi.localeCompare(b.stokAdi));
             });
-            const categoryText = categoryForCount ? ` ve ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'} kategorisinin` : '';
+
+            playFeedback();
             toast({
-                title: 'Listede Yok',
-                description: `Bu ürün sayım listesinde yok. Depoda bulunuyorsa ekleyebilirsiniz.`
+                title: 'Yeni Ürün Eklendi',
+                description: `${product.stokAdi} (${parsed.lotNumarasi || 'Lot yok'}) sayım listesine otomatik eklendi.`
             });
             return;
         }
@@ -335,7 +393,7 @@ export default function DepoSayimPage() {
             return newItems;
         });
 
-    }, [brandCountItems, productCodes, parseAuto, toast, categoryForCount, openAddDialog]);
+    }, [brandCountItems, productCodes, parseAuto, toast, categoryForCount, brandForCount, openAddDialog]);
     
     const handleManualVerifyGroup = useCallback((groupId: string) => {
         setBrandCountItems(prevItems => {
