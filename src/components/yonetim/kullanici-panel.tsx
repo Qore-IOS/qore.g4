@@ -337,8 +337,8 @@ export default function KullaniciPanel() {
                         </div>
                     ))}
                 </ScrollArea>
-                <div className="flex flex-col gap-4">
-                    <ScrollArea className={(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon') ? "h-1/3 border rounded-md p-2" : "h-1/2 border rounded-md p-2"}>
+                <div className="flex flex-col gap-4 h-[calc(70vh-100px)]">
+                    <ScrollArea className="flex-1 min-h-0 border rounded-md p-2">
                         <h4 className="font-medium text-sm mb-2">Atanan Laboratuvarlar</h4>
                         {hospitals.filter(h => h.id).map(h => (
                             <div key={h.id} className="flex items-center space-x-2 mb-1">
@@ -360,7 +360,7 @@ export default function KullaniciPanel() {
                     </ScrollArea>
                     {/* Ana Sorumluluk Laboratuvarları - sadece teknik_servis ve aplikasyon için */}
                     {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon') && (
-                        <ScrollArea className="h-1/3 border rounded-md p-2 bg-blue-50/50 dark:bg-blue-950/20">
+                        <ScrollArea className="flex-1 min-h-0 border rounded-md p-2 bg-blue-50/50 dark:bg-blue-950/20">
                             <h4 className="font-medium text-sm mb-2 text-blue-700 dark:text-blue-400">
                                 Ana Sorumluluk Laboratuvarları
                                 <span className="text-xs text-muted-foreground ml-1">(Performans puanı için)</span>
@@ -385,7 +385,7 @@ export default function KullaniciPanel() {
                             )}
                         </ScrollArea>
                     )}
-                    <ScrollArea className={(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon') ? "h-1/3 border rounded-md p-2" : "h-1/2 border rounded-md p-2"}>
+                    <ScrollArea className="flex-1 min-h-0 border rounded-md p-2">
                         <h4 className="font-medium text-sm mb-2">Atanan Depolar</h4>
                         {depots.filter(d => d.id).map(d => (
                             <div key={d.id} className="flex items-center space-x-2 mb-1">
