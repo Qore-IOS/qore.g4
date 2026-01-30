@@ -1,9 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getDocs, collection } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { exportAllDataToJSON, exportAllDataToCSV } from '@/lib/utils';
+import { exportAllDataToJSON } from '@/lib/utils';
 import {
   Card,
   CardHeader,
@@ -45,36 +43,58 @@ export default function RaporlamaPanel() {
   const [isCihazUstuModalOpen, setIsCihazUstuModalOpen] = useState(false);
   const [isStokIslemleriModalOpen, setIsStokIslemleriModalOpen] = useState(false);
 
-  const handleExport = async (format: 'json' | 'csv') => {
+  const handleExport = async (format: 'json' | 'xlsx') => {
     setIsExporting(true);
-    toast({ title: "Dışa Aktarma Başlatıldı", description: "Tüm sistem verileri toplanıyor. Bu işlem biraz zaman alabilir..." });
-    try {
-      const collectionsToExport = [
-        'users', 'hospitals', 'depots', 'borcDepots', 'devices', 
-        'hospitalDeviceAssignments', 'productCodes', 'addressDefinitions', 
-        'depoStok', 'orders', 'shipments', 'transfers', 
-        'tuketimKayitlari', 'efficiencyDataRecords', 
-        'depotStockCountSessions', 'laboratoryStockCountSessions', 'kumulatifRaporlar'
-      ];
-      
-      const promises = collectionsToExport.map(c => getDocs(collection(db, c)));
-      const snapshots = await Promise.all(promises);
+    toast({
+      title: "Dışa Aktarma Başlatıldı",
+      description: "Sunucu üzerinden veriler toplanıyor. Bu işlem biraz zaman alabilir..."
+    });
 
-      const data: Record<string, any[]> = {};
-      snapshots.forEach((snap, index) => {
-        const collName = collectionsToExport[index];
-        data[collName] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    try {
+      const response = await fetch('/api/raporlama/export', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ format }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Sunucu hatası');
+      }
 
-      if (format === 'json') {
-        exportAllDataToJSON(data, 'invitrolab_tum_veriler', toast);
+      if (format === 'xlsx') {
+        // Excel formatında doğrudan blob olarak indir
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `invitrolab_tum_veriler_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast({
+          title: 'Başarılı',
+          description: 'Excel dosyası indirildi.'
+        });
       } else {
-        exportAllDataToCSV(data, 'invitrolab_tum_veriler', toast);
+        // JSON formatı
+        const result = await response.json();
+        if (result.success && result.data) {
+          exportAllDataToJSON(result.data, 'invitrolab_tum_veriler', toast);
+        } else {
+          throw new Error(result.error || 'Veri alınamadı');
+        }
       }
     } catch (error: any) {
       console.error('Export error:', error);
-      toast({ title: 'Hata', description: 'Veriler dışa aktarılırken bir sorun oluştu.', variant: 'destructive' });
+      toast({
+        title: 'Hata',
+        description: error.message || 'Veriler dışa aktarılırken bir sorun oluştu.',
+        variant: 'destructive'
+      });
     } finally {
       setIsExporting(false);
     }
@@ -162,7 +182,7 @@ export default function RaporlamaPanel() {
               {isExporting ? <Loader2 className="animate-spin mr-2" /> : <FileJson className="mr-2 h-4 w-4" />}
               JSON Olarak Dışa Aktar
             </Button>
-            <Button onClick={() => handleExport('csv')} disabled={isExporting}>
+            <Button onClick={() => handleExport('xlsx')} disabled={isExporting}>
               {isExporting ? <Loader2 className="animate-spin mr-2" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
               Excel Olarak Dışa Aktar
             </Button>
