@@ -91,9 +91,9 @@ export default function TransferRaporuPanel() {
   // Selected filters
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
-  const [selectedMarka, setSelectedMarka] = useState<string>('');
-  const [selectedUrunGrubu, setSelectedUrunGrubu] = useState<string>('');
-  const [selectedStokKodu, setSelectedStokKodu] = useState<string>('');
+  const [selectedMarka, setSelectedMarka] = useState<string>('__all__');
+  const [selectedUrunGrubu, setSelectedUrunGrubu] = useState<string>('__all__');
+  const [selectedStokKodu, setSelectedStokKodu] = useState<string>('__all__');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
@@ -212,9 +212,9 @@ export default function TransferRaporuPanel() {
           targetLabIds: selectedLabIds,
           startDate: startDate || undefined,
           endDate: endDate || undefined,
-          marka: selectedMarka || undefined,
-          urunGrubu: selectedUrunGrubu || undefined,
-          stokKodu: selectedStokKodu || undefined,
+          marka: selectedMarka === '__all__' ? undefined : selectedMarka,
+          urunGrubu: selectedUrunGrubu === '__all__' ? undefined : selectedUrunGrubu,
+          stokKodu: selectedStokKodu === '__all__' ? undefined : selectedStokKodu,
         }),
       });
 
@@ -451,7 +451,7 @@ export default function TransferRaporuPanel() {
                     <SelectValue placeholder="Tum markalar" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Tum markalar</SelectItem>
+                    <SelectItem value="__all__">Tum markalar</SelectItem>
                     {filterOptions?.brands.map(brand => (
                       <SelectItem key={brand} value={brand}>
                         {brand}
@@ -468,7 +468,7 @@ export default function TransferRaporuPanel() {
                     <SelectValue placeholder="Tum gruplar" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Tum gruplar</SelectItem>
+                    <SelectItem value="__all__">Tum gruplar</SelectItem>
                     {filterOptions?.productGroups.map(group => (
                       <SelectItem key={group} value={group}>
                         {URUN_GRUBU_LABELS[group] || group}
@@ -493,7 +493,7 @@ export default function TransferRaporuPanel() {
                         className="h-8"
                       />
                     </div>
-                    <SelectItem value="">Tum urunler</SelectItem>
+                    <SelectItem value="__all__">Tum urunler</SelectItem>
                     {filteredProducts.map(product => (
                       <SelectItem key={product.stokKodu} value={product.stokKodu}>
                         {product.stokKodu} - {product.stokAdi}
