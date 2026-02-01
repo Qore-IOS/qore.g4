@@ -3,10 +3,11 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CalendarClock, Plus, History, ArrowLeft } from 'lucide-react';
+import { CalendarClock, Plus, History, ArrowLeft, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import CreateShiftPanel from './CreateShiftPanel';
 import ShiftHistoryPanel from './ShiftHistoryPanel';
+import ActiveShiftsPanel from './ActiveShiftsPanel';
 import type { Hospital, User } from '@/lib/types';
 
 interface ShiftSchedulePanelProps {
@@ -15,7 +16,7 @@ interface ShiftSchedulePanelProps {
   onBack?: () => void;
 }
 
-type ViewMode = 'main' | 'create' | 'history';
+type ViewMode = 'main' | 'create' | 'history' | 'active';
 
 const ModernButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button> & { icon?: React.ElementType }>(
   ({ className, children, icon: Icon, ...props }, ref) => (
@@ -70,6 +71,16 @@ export default function ShiftSchedulePanel({ hospitals, users, onBack }: ShiftSc
     );
   }
 
+  if (viewMode === 'active') {
+    return (
+      <ActiveShiftsPanel
+        hospitals={hospitals}
+        users={users}
+        onBack={() => setViewMode('main')}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center min-h-full p-4 sm:p-8">
       <Card className={cn(
@@ -92,9 +103,12 @@ export default function ShiftSchedulePanel({ hospitals, users, onBack }: ShiftSc
             Nöbet Vardiyası Yönetimi
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-10">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
           <ModernButton onClick={() => setViewMode('create')} icon={Plus}>
             Vardiya Oluştur
+          </ModernButton>
+          <ModernButton onClick={() => setViewMode('active')} icon={Calendar}>
+            Aktif Vardiyalar
           </ModernButton>
           <ModernButton onClick={() => setViewMode('history')} icon={History}>
             Geçmiş
