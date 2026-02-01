@@ -912,3 +912,20 @@
 .dark .frosted-glass-btn:hover {
   background: rgba(0, 0, 0, 0.5);
 }
+
+/* Flicker Clock Animation */
+@keyframes flip {
+  0% {
+    transform: perspective(400px) rotateX(0deg);
+  }
+  50% {
+    transform: perspective(400px) rotateX(-90deg);
+  }
+  100% {
+    transform: perspective(400px) rotateX(0deg);
+  }
+}
+
+.animate-flip {
+  animation: flip 0.3s ease-in-out;
+}
