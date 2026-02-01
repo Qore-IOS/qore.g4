@@ -38,7 +38,8 @@ import { openDeviceFaultReport } from '@/lib/faults';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useLightDashboardData } from './dashboard/useDashboardData';
-import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices } from '@/hooks/useFirebaseQueries';
+import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices, useUsers } from '@/hooks/useFirebaseQueries';
+import { FlickerClock } from './ui/FlickerClock';
 import { incrementTodayStats } from '@/lib/dailyConsumptionStats';
 import { urunKullanimLogger } from '@/lib/logger';
 
@@ -46,6 +47,45 @@ const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-ba
   ssr: false,
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>,
 });
+
+/**
+ * DutyInfo Component - Shows on-duty technician and application personnel
+ */
+function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
+  const { data: users = [] } = useUsers();
+
+  // Find users assigned to this lab with teknik_servis or aplikasyon role
+  const dutyPersonnel = useMemo(() => {
+    if (!selectedLabId || !users.length) return { teknikServis: null, aplikasyon: null };
+
+    const labUsers = users.filter(user =>
+      user.assignedLaboratories?.includes(selectedLabId) ||
+      user.primaryLaboratories?.includes(selectedLabId)
+    );
+
+    const teknikServis = labUsers.find(u => u.role === 'teknik_servis');
+    const aplikasyon = labUsers.find(u => u.role === 'aplikasyon');
+
+    return { teknikServis, aplikasyon };
+  }, [selectedLabId, users]);
+
+  if (!selectedLabId) return null;
+
+  return (
+    <div className="hidden md:flex items-center gap-2 text-[10px] text-muted-foreground">
+      <span className="text-[9px] opacity-70">Nöbetçi:</span>
+      <div className="flex items-center gap-1">
+        <Wrench className="h-3 w-3 text-blue-500" />
+        <span className="truncate max-w-[80px]">{dutyPersonnel.teknikServis?.name || '-'}</span>
+      </div>
+      <span className="opacity-50">|</span>
+      <div className="flex items-center gap-1">
+        <FlaskConical className="h-3 w-3 text-purple-500" />
+        <span className="truncate max-w-[80px]">{dutyPersonnel.aplikasyon?.name || '-'}</span>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Logs serial number history to Firestore
@@ -1058,30 +1098,38 @@ export default function UrunKullanimPanel() {
         {/* Right content area - 45% with cards */}
         <div className="w-full lg:w-[45%] min-h-screen p-4 flex flex-col gap-3">
 
-          {/* Card 1: Header - User info, Lab selector, Action buttons */}
+          {/* Card 1: Compact Header - User info, Clock, Duty info, Lab selector */}
           <div className="frosted-glass-card">
-            <div className="p-4">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                {/* User info */}
-                <div className="flex items-center gap-3">
-                  <div>
-                    <h2 className="text-xl font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
-                    <p className="text-xs text-muted-foreground">{selectedLabName || 'Laboratuvar seçilmedi'}</p>
+            <div className="px-4 py-2">
+              <div className="flex items-center justify-between gap-2">
+                {/* Left: User info */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-bold font-headline text-gradient-primary truncate">{currentUserProfile?.name || 'Kullanıcı'}</h2>
+                    <p className="text-[10px] text-muted-foreground truncate">Ürün Kullanım Kaydı</p>
                   </div>
                   {currentUserProfile?.role === 'teknisyen' && (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={logout}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-6 w-6 p-0"
                     >
-                      <LogOut className="h-4 w-4" />
+                      <LogOut className="h-3 w-3" />
                     </Button>
                   )}
                 </div>
 
-                {/* Action buttons */}
-                <div className="flex items-center gap-2 flex-wrap">
+                {/* Center: Flicker Clock */}
+                <div className="flex-shrink-0">
+                  <FlickerClock />
+                </div>
+
+                {/* Right: Duty info + Lab selector */}
+                <div className="flex items-center gap-3 min-w-0">
+                  {/* Duty info */}
+                  <DutyInfo selectedLabId={selectedLabId} />
+
                   {/* Lab selector */}
                   <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
                     <PopoverTrigger asChild>
@@ -1089,13 +1137,15 @@ export default function UrunKullanimPanel() {
                         variant="outline"
                         role="combobox"
                         aria-expanded={isLabPopoverOpen}
-                        className="w-[180px] justify-between font-normal h-9 text-sm frosted-glass-btn"
+                        className="w-[140px] justify-between font-normal h-8 text-xs frosted-glass-btn"
                         disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
                       >
-                        {selectedLabId
-                          ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
-                          : "Laboratuvar seçin..."}
-                        <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                        <span className="truncate">
+                          {selectedLabId
+                            ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
+                            : "Lab seçin..."}
+                        </span>
+                        <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[200px] p-0">
@@ -1124,54 +1174,7 @@ export default function UrunKullanimPanel() {
                       </Command>
                     </PopoverContent>
                   </Popover>
-
-                  <Button
-                    onClick={() => setIsCameraScannerOpen(true)}
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 frosted-glass-btn"
-                    title="Kamera ile Tara"
-                    aria-label="Kamera ile barkod tara"
-                    disabled={!selectedLabId}
-                  >
-                    <Camera className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-
-                  {selectedLab?.manualDeductionEnabled && (
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 frosted-glass-btn"
-                      title="Manuel Düşüm"
-                      aria-label="Manuel stok düşümü yap"
-                      disabled={!selectedLabId}
-                      onClick={() => setIsManualDeductionOpen(true)}
-                    >
-                      <Pencil className="h-4 w-4" aria-hidden="true" />
-                    </Button>
-                  )}
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push(`/cop-kutusu/${selectedLabId}`)}
-                    disabled={!selectedLabId}
-                    className="h-9 frosted-glass-btn"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Çöp Kutusu
-                  </Button>
                 </div>
-              </div>
-
-              {/* Barcode info line */}
-              <div className="mt-3 pt-3 border-t border-white/20 dark:border-white/10 flex items-center gap-2">
-                <PackageMinus className="h-4 w-4 text-primary" aria-hidden="true" />
-                <span className="text-sm font-medium">Ürün Kullanım Kaydı</span>
-                <span className="text-xs text-muted-foreground ml-auto">
-                  <Info className="inline h-3 w-3 mr-1 text-primary"/>
-                  Barkod okuyucu aktif
-                </span>
               </div>
             </div>
           </div>
@@ -1187,7 +1190,7 @@ export default function UrunKullanimPanel() {
             aria-live="polite"
             aria-label="Son okutulan ürün bilgisi"
           >
-            <div className="frosted-header flex items-center gap-2">
+            <div className="frosted-header flex items-center justify-between gap-2">
               <div className={cn(
                 "flex items-center gap-2",
                 scanStatus === 'success' && 'text-green-500',
@@ -1195,6 +1198,46 @@ export default function UrunKullanimPanel() {
               )}>
                 {scanStatus === 'success' ? <CheckCircle className="w-5 h-5" aria-hidden="true" /> : scanStatus === 'error' ? <XCircle className="w-5 h-5" aria-hidden="true" /> : <Barcode className="w-5 h-5" aria-hidden="true" />}
                 <span className="font-semibold text-sm">Son Okutulan Ürün</span>
+              </div>
+              {/* Action buttons moved here */}
+              <div className="flex items-center gap-1">
+                <Button
+                  onClick={() => setIsCameraScannerOpen(true)}
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="Kamera ile Tara"
+                  aria-label="Kamera ile barkod tara"
+                  disabled={!selectedLabId}
+                >
+                  <Camera className="h-4 w-4" aria-hidden="true" />
+                </Button>
+
+                {selectedLab?.manualDeductionEnabled && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="Manuel Düşüm"
+                    aria-label="Manuel stok düşümü yap"
+                    disabled={!selectedLabId}
+                    onClick={() => setIsManualDeductionOpen(true)}
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                )}
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => router.push(`/cop-kutusu/${selectedLabId}`)}
+                  disabled={!selectedLabId}
+                  title="Çöp Kutusu"
+                  aria-label="Çöp kutusuna git"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                </Button>
               </div>
             </div>
             <div className="frosted-content">
