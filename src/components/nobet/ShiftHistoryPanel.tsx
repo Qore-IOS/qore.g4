@@ -31,7 +31,6 @@ interface ShiftHistoryPanelProps {
   onBack: () => void;
 }
 
-type FilterType = 'all' | 'active' | 'past' | 'future';
 type PersonnelFilter = 'all' | 'teknik_servis' | 'aplikasyon';
 
 export default function ShiftHistoryPanel({
@@ -44,7 +43,6 @@ export default function ShiftHistoryPanel({
 
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filterType, setFilterType] = useState<FilterType>('all');
   const [personnelFilter, setPersonnelFilter] = useState<PersonnelFilter>('all');
   const [selectedShift, setSelectedShift] = useState<ShiftSchedule | null>(null);
   const [deleteConfirmShift, setDeleteConfirmShift] = useState<ShiftSchedule | null>(null);
@@ -117,7 +115,7 @@ export default function ShiftHistoryPanel({
     }, 0);
   };
 
-  // Filter shifts
+  // Filter shifts - only show past shifts
   const filteredShifts = useMemo(() => {
     return shifts.filter(shift => {
       // Personnel type filter
@@ -125,17 +123,15 @@ export default function ShiftHistoryPanel({
         return false;
       }
 
-      // Status filter
-      if (filterType !== 'all') {
-        const status = getShiftStatus(shift);
-        if (status !== filterType) {
-          return false;
-        }
+      // Only show past shifts
+      const status = getShiftStatus(shift);
+      if (status !== 'past') {
+        return false;
       }
 
       return true;
     });
-  }, [shifts, filterType, personnelFilter]);
+  }, [shifts, personnelFilter]);
 
   // Delete (soft delete) a shift
   const handleDelete = async () => {
@@ -230,7 +226,7 @@ export default function ShiftHistoryPanel({
           </Button>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <History className="h-6 w-6" />
-            Nöbet Geçmişi
+            Geçmiş Vardiyalar
           </h1>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -244,17 +240,6 @@ export default function ShiftHistoryPanel({
               <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={filterType} onValueChange={(v) => setFilterType(v as FilterType)}>
-            <SelectTrigger className="w-[130px]">
-              <SelectValue placeholder="Durum" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tümü</SelectItem>
-              <SelectItem value="active">Aktif</SelectItem>
-              <SelectItem value="future">Yaklaşan</SelectItem>
-              <SelectItem value="past">Geçmiş</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
@@ -265,29 +250,28 @@ export default function ShiftHistoryPanel({
             <Card className="p-8 text-center">
               <div className="flex flex-col items-center gap-3 text-muted-foreground">
                 <Calendar className="h-12 w-12" />
-                <p className="text-lg">Nöbet kaydı bulunamadı.</p>
-                <p className="text-sm">Filtreleri değiştirmeyi veya yeni bir vardiya oluşturmayı deneyin.</p>
+                <p className="text-lg">Geçmiş nöbet kaydı bulunamadı.</p>
+                <p className="text-sm">Tarihi geçmiş vardiyalar burada görüntülenecektir.</p>
               </div>
             </Card>
           ) : (
             <div className="space-y-4">
               {filteredShifts.map(shift => {
-                const status = getShiftStatus(shift);
                 const totalDays = getTotalDays(shift.dateRanges);
                 const createdAt = toDateFromAny(shift.createdAt);
 
                 return (
-                  <Card key={shift.id} className={cn(
-                    "transition-colors",
-                    status === 'active' && "border-green-500/50"
-                  )}>
+                  <Card key={shift.id} className="transition-colors">
                     <CardContent className="p-4">
                       <div className="flex flex-col lg:flex-row lg:items-center gap-4">
                         {/* Left: Main info */}
                         <div className="flex-1 space-y-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <TypeBadge type={shift.personnelType} />
-                            <StatusBadge status={status} />
+                            <Badge variant="outline" className="text-muted-foreground">
+                              <XCircle className="h-3 w-3 mr-1" />
+                              Geçmiş
+                            </Badge>
                             <Badge variant="outline">
                               {totalDays} gün
                             </Badge>

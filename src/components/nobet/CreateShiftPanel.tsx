@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ArrowLeft, Plus, Trash2, Wrench, FlaskConical, User, Building2, CalendarDays, Save, Loader2, Check, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Wrench, FlaskConical, User, Building2, CalendarDays, Save, Loader2, Check, ChevronDown, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -27,6 +27,12 @@ interface CreateShiftPanelProps {
   onSuccess: () => void;
 }
 
+interface CompanionPersonnel {
+  uid: string;
+  name: string;
+  type: ShiftPersonnelType;
+}
+
 interface ShiftRow {
   id: string;
   personnelUid: string;
@@ -34,6 +40,7 @@ interface ShiftRow {
   laboratoryIds: string[];
   laboratoryNames: string[];
   dateRanges: ShiftDateRange[];
+  companions: CompanionPersonnel[];
 }
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -58,6 +65,7 @@ export default function CreateShiftPanel({
   // Modal states
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isLabSelectorOpen, setIsLabSelectorOpen] = useState(false);
+  const [isCompanionSelectorOpen, setIsCompanionSelectorOpen] = useState(false);
 
   // Saving state
   const [isSaving, setIsSaving] = useState(false);
@@ -81,7 +89,8 @@ export default function CreateShiftPanel({
       personnelName: '',
       laboratoryIds: [],
       laboratoryNames: [],
-      dateRanges: []
+      dateRanges: [],
+      companions: []
     };
 
     if (type === 'teknik_servis') {
@@ -182,6 +191,47 @@ export default function CreateShiftPanel({
     setIsCalendarOpen(true);
   };
 
+  // Open companion selector for a row
+  const openCompanionSelector = (type: ShiftPersonnelType, rowId: string) => {
+    setActiveType(type);
+    setActiveRowId(rowId);
+    setIsCompanionSelectorOpen(true);
+  };
+
+  // Update active row companions
+  const updateActiveRowCompanions = (companions: CompanionPersonnel[]) => {
+    if (!activeRowId || !activeType) return;
+
+    const updateFn = (prev: ShiftRow[]) =>
+      prev.map(row =>
+        row.id === activeRowId
+          ? { ...row, companions }
+          : row
+      );
+
+    if (activeType === 'teknik_servis') {
+      setTeknikRows(updateFn);
+    } else {
+      setAplikasyonRows(updateFn);
+    }
+  };
+
+  // Toggle companion selection
+  const toggleCompanion = (uid: string, name: string, type: ShiftPersonnelType) => {
+    if (!activeRow) return;
+
+    const isSelected = activeRow.companions.some(c => c.uid === uid);
+    let newCompanions: CompanionPersonnel[];
+
+    if (isSelected) {
+      newCompanions = activeRow.companions.filter(c => c.uid !== uid);
+    } else {
+      newCompanions = [...activeRow.companions, { uid, name, type }];
+    }
+
+    updateActiveRowCompanions(newCompanions);
+  };
+
   // Validate rows
   const isRowValid = (row: ShiftRow): boolean => {
     return (
@@ -224,8 +274,10 @@ export default function CreateShiftPanel({
     setIsSaving(true);
     try {
       const shiftsCollection = collection(db, 'shiftSchedules');
+      let totalCreated = 0;
 
       for (const row of allRows) {
+        // Ana personel için vardiya oluştur
         await addDoc(shiftsCollection, {
           personnelUid: row.personnelUid,
           personnelName: row.personnelName,
@@ -238,11 +290,29 @@ export default function CreateShiftPanel({
           createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
           isActive: true
         });
+        totalCreated++;
+
+        // Eşlik eden personeller için vardiya oluştur
+        for (const companion of row.companions) {
+          await addDoc(shiftsCollection, {
+            personnelUid: companion.uid,
+            personnelName: companion.name,
+            personnelType: companion.type,
+            laboratoryIds: row.laboratoryIds,
+            laboratoryNames: row.laboratoryNames,
+            dateRanges: row.dateRanges,
+            createdAt: serverTimestamp(),
+            createdByUid: currentUserProfile.uid,
+            createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
+            isActive: true
+          });
+          totalCreated++;
+        }
       }
 
       toast({
         title: 'Başarılı',
-        description: `${allRows.length} vardiya kaydı oluşturuldu.`
+        description: `${totalCreated} vardiya kaydı oluşturuldu.`
       });
 
       onSuccess();
@@ -370,11 +440,57 @@ export default function CreateShiftPanel({
             </div>
           )}
 
+          {/* Companion Personnel Selection - shown after dates are selected */}
+          {row.personnelUid && row.laboratoryIds.length > 0 && row.dateRanges.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Eşlik Eden Personel</span>
+                <span className="text-xs text-muted-foreground">(Opsiyonel)</span>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full justify-between"
+                onClick={() => openCompanionSelector(type, row.id)}
+              >
+                <span className="truncate">
+                  {row.companions.length > 0
+                    ? `${row.companions.length} personel seçildi`
+                    : 'Eşlik eden personel seçin...'}
+                </span>
+                <Users className="h-4 w-4 ml-2 shrink-0" />
+              </Button>
+              {row.companions.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {row.companions.map((companion, i) => (
+                    <Badge
+                      key={i}
+                      variant="secondary"
+                      className={cn(
+                        "text-xs",
+                        companion.type === 'teknik_servis'
+                          ? "bg-orange-500/10 text-orange-600 border-orange-500/30"
+                          : "bg-blue-500/10 text-blue-600 border-blue-500/30"
+                      )}
+                    >
+                      {companion.type === 'teknik_servis' ? (
+                        <Wrench className="h-3 w-3 mr-1" />
+                      ) : (
+                        <FlaskConical className="h-3 w-3 mr-1" />
+                      )}
+                      {companion.name.length > 15 ? companion.name.slice(0, 15) + '...' : companion.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Validity indicator */}
           {isValid && (
             <div className="flex items-center gap-2 text-green-600 text-sm">
               <Check className="h-4 w-4" />
-              <span>Kayda hazır</span>
+              <span>Kayda hazır{row.companions.length > 0 && ` (+${row.companions.length} eşlik eden)`}</span>
             </div>
           )}
         </CardContent>
@@ -551,6 +667,107 @@ export default function CreateShiftPanel({
           <DialogFooter>
             <Button onClick={() => setIsCalendarOpen(false)}>
               Tamam ({activeRow?.dateRanges.length || 0} aralık)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Companion Personnel Selector Dialog */}
+      <Dialog open={isCompanionSelectorOpen} onOpenChange={setIsCompanionSelectorOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Eşlik Eden Personel Seçimi
+            </DialogTitle>
+            <DialogDescription>
+              Bu vardiyada eşlik edecek teknik servis veya aplikasyon personelini seçin. Seçilen personeller için aynı laboratuvar ve tarih aralıklarında otomatik vardiya oluşturulacaktır.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[400px] pr-4">
+            <div className="space-y-4">
+              {/* Teknik Servis Personelleri */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-orange-600 font-medium">
+                  <Wrench className="h-4 w-4" />
+                  <span>Teknik Servis</span>
+                </div>
+                <div className="space-y-1">
+                  {teknikUsers
+                    .filter(u => u.uid !== activeRow?.personnelUid) // Kendisi hariç
+                    .map(user => {
+                      const isSelected = activeRow?.companions.some(c => c.uid === user.uid) || false;
+                      return (
+                        <label
+                          key={user.uid}
+                          className={cn(
+                            "flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors",
+                            isSelected
+                              ? "border-orange-500 bg-orange-500/10"
+                              : "border-border hover:bg-accent/50"
+                          )}
+                        >
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleCompanion(
+                              user.uid,
+                              user.name || user.email || 'Bilinmeyen',
+                              'teknik_servis'
+                            )}
+                          />
+                          <span className="flex-1">{user.name || user.email}</span>
+                        </label>
+                      );
+                    })}
+                  {teknikUsers.filter(u => u.uid !== activeRow?.personnelUid).length === 0 && (
+                    <p className="text-sm text-muted-foreground p-2">Seçilebilecek personel yok</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Aplikasyon Personelleri */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-blue-600 font-medium">
+                  <FlaskConical className="h-4 w-4" />
+                  <span>Aplikasyon</span>
+                </div>
+                <div className="space-y-1">
+                  {aplikasyonUsers
+                    .filter(u => u.uid !== activeRow?.personnelUid) // Kendisi hariç
+                    .map(user => {
+                      const isSelected = activeRow?.companions.some(c => c.uid === user.uid) || false;
+                      return (
+                        <label
+                          key={user.uid}
+                          className={cn(
+                            "flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors",
+                            isSelected
+                              ? "border-blue-500 bg-blue-500/10"
+                              : "border-border hover:bg-accent/50"
+                          )}
+                        >
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleCompanion(
+                              user.uid,
+                              user.name || user.email || 'Bilinmeyen',
+                              'aplikasyon'
+                            )}
+                          />
+                          <span className="flex-1">{user.name || user.email}</span>
+                        </label>
+                      );
+                    })}
+                  {aplikasyonUsers.filter(u => u.uid !== activeRow?.personnelUid).length === 0 && (
+                    <p className="text-sm text-muted-foreground p-2">Seçilebilecek personel yok</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button onClick={() => setIsCompanionSelectorOpen(false)}>
+              Tamam ({activeRow?.companions.length || 0} seçili)
             </Button>
           </DialogFooter>
         </DialogContent>
