@@ -261,7 +261,8 @@ export default function AplikasyonIslemFormuPage() {
       try {
         const snap = await getDocs(collection(db, 'users'));
         const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
-        setAllUsers(users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
+        // Aplikasyon formu için sadece aplikasyon personelini göster
+        setAllUsers(users.filter(u => u.role === 'aplikasyon'));
       } catch (err) {
         console.error("Error fetching users:", err);
       }
@@ -891,25 +892,81 @@ export default function AplikasyonIslemFormuPage() {
 
         // Create closed fault report when ariza is selected
         if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
+          // Parse başlangıç ve bitiş saatlerini tarih olarak oluştur
+          const today = new Date();
+          const [startHour, startMinute] = baslangicSaati.split(':').map(Number);
+          const [endHour, endMinute] = bitisSaati.split(':').map(Number);
+
+          const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), startHour, startMinute);
+          const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), endHour, endMinute);
+
+          // Çözüm süresi hesapla (milisaniye)
+          const cozumSuresi = endTime.getTime() - startTime.getTime();
+          const toplamCozumSuresi = cozumSuresi;
+
+          // İlk eşlik eden personeli destek personeli olarak ata (performans puanı için)
+          const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
+
           const faultReportRef = doc(collection(db, 'deviceFaultReports'));
           batch.set(faultReportRef, {
             deviceId,
             hospitalId: device?.hospitalId,
+            labName: hospital?.name,
+            model: device?.cihazAdi || device?.model,
+            serial: device?.seriNumarasi,
             faultType: 'aplikasyon',
             faultDefinitionId: resolvedFaultId,
             faultName: resolvedFaultName,
-            isCustomFault: isCustomFault || false,
-            status: 'closed',
-            reportedAt: Timestamp.fromDate(now),
-            reportedByUid: currentUserProfile?.uid || '',
-            reportedByName: currentUserProfile?.name || 'Bilinmeyen',
-            resolvedAt: Timestamp.fromDate(now),
-            resolvedByUid: currentUserProfile?.uid || '',
-            resolvedByName: currentUserProfile?.name || 'Bilinmeyen',
-            actionFormId: formRef.id,
-            actionFormType: 'aplikasyon',
-            resolutionNotes: aciklama.trim(),
+            description: aciklama.trim(),
+            status: 'cozuldu',
+            openedAt: Timestamp.fromDate(startTime),
+            closedAt: Timestamp.fromDate(endTime),
+            openedByUid: currentUserProfile?.uid,
+            openedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            closedByUid: currentUserProfile?.uid,
+            closedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            closeDescription: aciklama.trim(),
+            assignedToUid: currentUserProfile?.uid,
+            assignedToName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            assignedAt: Timestamp.fromDate(startTime),
+            interventionStartedAt: Timestamp.fromDate(startTime),
+            interventionType: 'kurum_ziyaret',
+            cozumSuresi,
+            toplamCozumSuresi,
+            resolvedFromFormId: formRef.id,
+            resolvedFromFormType: 'aplikasyon',
+            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+            // Destek personeli bilgisi (performans hesaplaması için)
+            supportPersonnelUid: supportPerson?.uid || null,
+            supportPersonnelName: supportPerson?.name || null,
             relatedTests: selectedTests.length > 0 ? selectedTests : null,
+            isCustomFault: isCustomFault || false,
+            // Arıza kaydı işlem formundan açıldığı için bildirim gönderilmeyecek
+            createdFromActionForm: true,
+          });
+
+          // Arıza geçmişine "opened" kaydı ekle
+          const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
+          batch.set(historyOpenedRef, {
+            type: 'opened',
+            actorUid: currentUserProfile?.uid,
+            actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            description: aciklama.trim(),
+            timestamp: Timestamp.fromDate(startTime),
+          });
+
+          // Arıza geçmişine "closed" kaydı ekle
+          const historyClosedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
+          batch.set(historyClosedRef, {
+            type: 'closed',
+            actorUid: currentUserProfile?.uid,
+            actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            description: supportPerson
+              ? `${aciklama.trim()} (Destek: ${supportPerson.name})`
+              : aciklama.trim(),
+            timestamp: Timestamp.fromDate(endTime),
+            supportPersonnelUid: supportPerson?.uid || null,
+            supportPersonnelName: supportPerson?.name || null,
           });
         }
 
