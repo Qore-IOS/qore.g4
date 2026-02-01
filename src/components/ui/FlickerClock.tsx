@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 interface FlickerClockProps {
@@ -8,93 +8,115 @@ interface FlickerClockProps {
 }
 
 export function FlickerClock({ className }: FlickerClockProps) {
-  const [time, setTime] = useState<{ hours: string; minutes: string; seconds: string }>({
-    hours: '--',
-    minutes: '--',
-    seconds: '--',
-  });
-  const [isFlipping, setIsFlipping] = useState<{ hours: boolean; minutes: boolean; seconds: boolean }>({
-    hours: false,
-    minutes: false,
-    seconds: false,
-  });
+  const [time, setTime] = useState({ hours: '--', minutes: '--', seconds: '--' });
+  const prevTimeRef = useRef({ hours: '--', minutes: '--', seconds: '--' });
+  const [flipping, setFlipping] = useState({ hours: false, minutes: false, seconds: false });
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      const newHours = now.getHours().toString().padStart(2, '0');
-      const newMinutes = now.getMinutes().toString().padStart(2, '0');
-      const newSeconds = now.getSeconds().toString().padStart(2, '0');
+      const newTime = {
+        hours: now.getHours().toString().padStart(2, '0'),
+        minutes: now.getMinutes().toString().padStart(2, '0'),
+        seconds: now.getSeconds().toString().padStart(2, '0'),
+      };
 
-      setIsFlipping({
-        hours: newHours !== time.hours,
-        minutes: newMinutes !== time.minutes,
-        seconds: newSeconds !== time.seconds,
-      });
+      // Check what changed
+      const newFlipping = {
+        hours: newTime.hours !== prevTimeRef.current.hours,
+        minutes: newTime.minutes !== prevTimeRef.current.minutes,
+        seconds: newTime.seconds !== prevTimeRef.current.seconds,
+      };
 
-      setTime({
-        hours: newHours,
-        minutes: newMinutes,
-        seconds: newSeconds,
-      });
+      setFlipping(newFlipping);
+      prevTimeRef.current = time;
+      setTime(newTime);
+
+      // Reset flipping after animation
+      setTimeout(() => {
+        setFlipping({ hours: false, minutes: false, seconds: false });
+      }, 500);
     };
 
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, [time.hours, time.minutes, time.seconds]);
-
-  const FlipCard = ({ value, flipping }: { value: string; flipping: boolean }) => (
-    <div className="relative">
-      <div
-        className={cn(
-          "flex items-center justify-center rounded-md overflow-hidden",
-          "bg-gradient-to-b from-gray-800 to-gray-900 dark:from-gray-700 dark:to-gray-800",
-          "shadow-inner",
-          "w-[28px] h-[36px]",
-          flipping && "animate-flip"
-        )}
-      >
-        {/* Top half */}
-        <div className="absolute inset-x-0 top-0 h-1/2 bg-black/10 border-b border-black/30" />
-        {/* Number */}
-        <span className="text-xl font-bold text-gray-100 font-mono tracking-tight">
-          {value}
-        </span>
-      </div>
-    </div>
-  );
-
-  const Separator = () => (
-    <div className="flex flex-col justify-center gap-1 mx-0.5">
-      <div className="w-1 h-1 rounded-full bg-gray-400 dark:bg-gray-500" />
-      <div className="w-1 h-1 rounded-full bg-gray-400 dark:bg-gray-500" />
-    </div>
-  );
+  }, [time]);
 
   return (
-    <div className={cn("flex items-center gap-0.5", className)}>
-      {/* Hours */}
-      <div className="flex">
-        <FlipCard value={time.hours[0]} flipping={isFlipping.hours} />
-        <FlipCard value={time.hours[1]} flipping={isFlipping.hours} />
+    <div className={cn("flex items-center gap-1", className)}>
+      <FlipUnit value={time.hours} prevValue={prevTimeRef.current.hours} flipping={flipping.hours} />
+      <Colon />
+      <FlipUnit value={time.minutes} prevValue={prevTimeRef.current.minutes} flipping={flipping.minutes} />
+      <Colon />
+      <FlipUnit value={time.seconds} prevValue={prevTimeRef.current.seconds} flipping={flipping.seconds} />
+    </div>
+  );
+}
+
+function FlipUnit({ value, prevValue, flipping }: { value: string; prevValue: string; flipping: boolean }) {
+  return (
+    <div className="flex gap-[2px]">
+      <FlipDigit digit={value[0]} prevDigit={prevValue[0]} flipping={flipping} />
+      <FlipDigit digit={value[1]} prevDigit={prevValue[1]} flipping={flipping} />
+    </div>
+  );
+}
+
+function FlipDigit({ digit, prevDigit, flipping }: { digit: string; prevDigit: string; flipping: boolean }) {
+  const shouldFlip = flipping && digit !== prevDigit;
+
+  return (
+    <div className="relative w-[22px] h-[32px] text-lg font-bold font-mono" style={{ perspective: '200px' }}>
+      {/* Static bottom half (new number) */}
+      <div className="absolute inset-0 flex items-end justify-center overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden">
+          <div className="w-full h-[200%] flex items-center justify-center bg-gradient-to-b from-gray-700 to-gray-800 dark:from-gray-600 dark:to-gray-700 rounded-t-sm">
+            <span className="text-gray-100 translate-y-1/4">{digit}</span>
+          </div>
+        </div>
+        <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden">
+          <div className="w-full h-[200%] flex items-center justify-center bg-gradient-to-b from-gray-800 to-gray-900 dark:from-gray-700 dark:to-gray-800 rounded-b-sm -translate-y-1/2">
+            <span className="text-gray-100">{digit}</span>
+          </div>
+        </div>
+        {/* Center line */}
+        <div className="absolute inset-x-0 top-1/2 h-[1px] bg-black/40 z-10" />
       </div>
 
-      <Separator />
+      {/* Flipping card */}
+      {shouldFlip && (
+        <>
+          {/* Top flip (old number falling) */}
+          <div
+            className="absolute inset-x-0 top-0 h-1/2 overflow-hidden origin-bottom animate-flip-top z-20"
+            style={{ backfaceVisibility: 'hidden' }}
+          >
+            <div className="w-full h-[200%] flex items-center justify-center bg-gradient-to-b from-gray-700 to-gray-800 dark:from-gray-600 dark:to-gray-700 rounded-t-sm">
+              <span className="text-gray-100 translate-y-1/4">{prevDigit}</span>
+            </div>
+          </div>
 
-      {/* Minutes */}
-      <div className="flex">
-        <FlipCard value={time.minutes[0]} flipping={isFlipping.minutes} />
-        <FlipCard value={time.minutes[1]} flipping={isFlipping.minutes} />
-      </div>
+          {/* Bottom flip (new number rising) */}
+          <div
+            className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden origin-top animate-flip-bottom z-20"
+            style={{ backfaceVisibility: 'hidden' }}
+          >
+            <div className="w-full h-[200%] flex items-center justify-center bg-gradient-to-b from-gray-800 to-gray-900 dark:from-gray-700 dark:to-gray-800 rounded-b-sm -translate-y-1/2">
+              <span className="text-gray-100">{digit}</span>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
-      <Separator />
-
-      {/* Seconds */}
-      <div className="flex">
-        <FlipCard value={time.seconds[0]} flipping={isFlipping.seconds} />
-        <FlipCard value={time.seconds[1]} flipping={isFlipping.seconds} />
-      </div>
+function Colon() {
+  return (
+    <div className="flex flex-col justify-center gap-1.5 px-0.5">
+      <div className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500" />
+      <div className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500" />
     </div>
   );
 }

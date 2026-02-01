@@ -1090,20 +1090,15 @@ export default function UrunKullanimPanel() {
         }}
       />
 
-      {/* Main content - Right 45% aligned */}
-      <div className="relative z-10 min-h-screen flex">
-        {/* Left spacer - 55% for background object visibility */}
-        <div className="hidden lg:block lg:w-[55%]" />
-
-        {/* Right content area - 45% with cards */}
-        <div className="w-full lg:w-[45%] min-h-screen p-4 flex flex-col gap-3">
-
-          {/* Card 1: Compact Header - User info, Clock, Duty info, Lab selector */}
+      {/* Main content layout */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        {/* Full-width Header - spans entire screen */}
+        <div className="w-full p-4 pb-0">
           <div className="frosted-glass-card">
             <div className="px-4 py-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-4">
                 {/* Left: User info */}
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
                   <div className="min-w-0">
                     <h2 className="text-base font-bold font-headline text-gradient-primary truncate">{currentUserProfile?.name || 'Kullanıcı'}</h2>
                     <p className="text-[10px] text-muted-foreground truncate">Ürün Kullanım Kaydı</p>
@@ -1121,12 +1116,12 @@ export default function UrunKullanimPanel() {
                 </div>
 
                 {/* Center: Flicker Clock */}
-                <div className="flex-shrink-0">
+                <div className="flex-1 flex justify-center">
                   <FlickerClock />
                 </div>
 
                 {/* Right: Duty info + Lab selector */}
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center gap-4 min-w-0 flex-shrink-0">
                   {/* Duty info */}
                   <DutyInfo selectedLabId={selectedLabId} />
 
@@ -1137,7 +1132,7 @@ export default function UrunKullanimPanel() {
                         variant="outline"
                         role="combobox"
                         aria-expanded={isLabPopoverOpen}
-                        className="w-[140px] justify-between font-normal h-8 text-xs frosted-glass-btn"
+                        className="w-[160px] justify-between font-normal h-8 text-xs frosted-glass-btn"
                         disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
                       >
                         <span className="truncate">
@@ -1178,6 +1173,15 @@ export default function UrunKullanimPanel() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Content area - Right 45% aligned */}
+        <div className="flex-1 flex">
+          {/* Left spacer - 55% for background object visibility */}
+          <div className="hidden lg:block lg:w-[55%]" />
+
+          {/* Right content area - 45% with cards */}
+          <div className="w-full lg:w-[45%] p-4 flex flex-col gap-3">
 
           {/* Card 2: Son Okutulan Ürün */}
           <div
