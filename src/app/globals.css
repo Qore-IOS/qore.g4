@@ -913,19 +913,29 @@
   background: rgba(0, 0, 0, 0.5);
 }
 
-/* Flicker Clock Animation */
-@keyframes flip {
+/* Flicker Clock Flip Animations */
+@keyframes flip-top {
   0% {
-    transform: perspective(400px) rotateX(0deg);
-  }
-  50% {
-    transform: perspective(400px) rotateX(-90deg);
+    transform: rotateX(0deg);
   }
   100% {
-    transform: perspective(400px) rotateX(0deg);
+    transform: rotateX(-90deg);
   }
 }
 
-.animate-flip {
-  animation: flip 0.3s ease-in-out;
+@keyframes flip-bottom {
+  0% {
+    transform: rotateX(90deg);
+  }
+  100% {
+    transform: rotateX(0deg);
+  }
+}
+
+.animate-flip-top {
+  animation: flip-top 0.3s ease-in forwards;
+}
+
+.animate-flip-bottom {
+  animation: flip-bottom 0.3s ease-out 0.3s forwards;
 }
