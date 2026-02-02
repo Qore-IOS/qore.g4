@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 interface FlickerClockProps {
@@ -9,82 +9,80 @@ interface FlickerClockProps {
 
 export function FlickerClock({ className }: FlickerClockProps) {
   const [time, setTime] = useState({ hours: '--', minutes: '--', seconds: '--' });
-  const prevTimeRef = useRef({ hours: '--', minutes: '--', seconds: '--' });
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      const newTime = {
+      setTime({
         hours: now.getHours().toString().padStart(2, '0'),
         minutes: now.getMinutes().toString().padStart(2, '0'),
         seconds: now.getSeconds().toString().padStart(2, '0'),
-      };
-
-      prevTimeRef.current = time;
-      setTime(newTime);
+      });
     };
 
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, [time]);
+  }, []);
 
   return (
     <div className={cn("flex items-center gap-1", className)} style={{ perspective: '400px' }}>
-      <FlipUnit value={time.hours} prevValue={prevTimeRef.current.hours} />
+      <FlipUnit value={time.hours} />
       <Colon />
-      <FlipUnit value={time.minutes} prevValue={prevTimeRef.current.minutes} />
+      <FlipUnit value={time.minutes} />
       <Colon />
-      <FlipUnit value={time.seconds} prevValue={prevTimeRef.current.seconds} />
+      <FlipUnit value={time.seconds} />
     </div>
   );
 }
 
-function FlipUnit({ value, prevValue }: { value: string; prevValue: string }) {
+function FlipUnit({ value }: { value: string }) {
   return (
     <div className="flex gap-[2px]">
-      <FlipDigit digit={value[0]} prevDigit={prevValue[0]} />
-      <FlipDigit digit={value[1]} prevDigit={prevValue[1]} />
+      <FlipDigit digit={value[0]} />
+      <FlipDigit digit={value[1]} />
     </div>
   );
 }
 
-function FlipDigit({ digit, prevDigit }: { digit: string; prevDigit: string }) {
+function FlipDigit({ digit }: { digit: string }) {
   const [isFlipping, setIsFlipping] = useState(false);
-  const [displayDigit, setDisplayDigit] = useState(digit);
-  const [flipFromDigit, setFlipFromDigit] = useState(prevDigit);
-  const animationRef = useRef<NodeJS.Timeout | null>(null);
+  const [currentDigit, setCurrentDigit] = useState(digit);
+  const [previousDigit, setPreviousDigit] = useState(digit);
+  const isFirstRender = useRef(true);
 
   useEffect(() => {
-    if (digit !== prevDigit && prevDigit !== '-') {
-      // Start flip animation
-      setFlipFromDigit(prevDigit);
-      setIsFlipping(true);
-
-      // Clear any existing timeout
-      if (animationRef.current) {
-        clearTimeout(animationRef.current);
-      }
-
-      // Update display digit at halfway point
-      animationRef.current = setTimeout(() => {
-        setDisplayDigit(digit);
-      }, 300);
-
-      // End flip animation
-      animationRef.current = setTimeout(() => {
-        setIsFlipping(false);
-      }, 600);
-    } else {
-      setDisplayDigit(digit);
+    // Skip animation on first render
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      setCurrentDigit(digit);
+      setPreviousDigit(digit);
+      return;
     }
 
-    return () => {
-      if (animationRef.current) {
-        clearTimeout(animationRef.current);
-      }
-    };
-  }, [digit, prevDigit]);
+    // Only animate if digit actually changed
+    if (digit !== currentDigit) {
+      // Store the old digit for the flip animation
+      setPreviousDigit(currentDigit);
+      // Start flipping
+      setIsFlipping(true);
+
+      // Update to new digit at midpoint of animation
+      const midTimer = setTimeout(() => {
+        setCurrentDigit(digit);
+      }, 300);
+
+      // End animation
+      const endTimer = setTimeout(() => {
+        setIsFlipping(false);
+      }, 600);
+
+      return () => {
+        clearTimeout(midTimer);
+        clearTimeout(endTimer);
+      };
+    }
+  }, [digit, currentDigit]);
 
   return (
     <div
@@ -94,70 +92,72 @@ function FlipDigit({ digit, prevDigit }: { digit: string; prevDigit: string }) {
       {/* Top Half - Static (shows current digit) */}
       <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-[3px]">
         <div
-          className="w-full h-full flex items-end justify-center pb-[1px]"
+          className="w-full h-full flex items-end justify-center"
           style={{
             background: 'linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%)',
           }}
         >
-          <span className="text-gray-100 leading-none translate-y-[9px]">{displayDigit}</span>
+          <span className="text-gray-100 leading-none translate-y-[9px]">{currentDigit}</span>
         </div>
       </div>
 
       {/* Bottom Half - Static (shows current digit) */}
       <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-[3px]">
         <div
-          className="w-full h-full flex items-start justify-center pt-[1px]"
+          className="w-full h-full flex items-start justify-center"
           style={{
             background: 'linear-gradient(180deg, #2d2d2d 0%, #1f1f1f 100%)',
           }}
         >
-          <span className="text-gray-100 leading-none -translate-y-[9px]">{displayDigit}</span>
+          <span className="text-gray-100 leading-none -translate-y-[9px]">{currentDigit}</span>
         </div>
       </div>
 
       {/* Center divider line */}
       <div className="absolute inset-x-0 top-1/2 h-[1px] bg-black/50 z-30" style={{ transform: 'translateY(-0.5px)' }} />
 
-      {/* Flip Card - Top part (flips down) */}
+      {/* Flip Animation Cards */}
       {isFlipping && (
-        <div
-          className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-[3px] z-20 flip-card-top"
-          style={{
-            transformOrigin: 'bottom center',
-            backfaceVisibility: 'hidden',
-            transformStyle: 'preserve-3d',
-          }}
-        >
+        <>
+          {/* Top half flipping down - shows OLD digit */}
           <div
-            className="w-full h-full flex items-end justify-center pb-[1px]"
+            className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-[3px] z-20"
             style={{
-              background: 'linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%)',
+              transformOrigin: 'bottom center',
+              backfaceVisibility: 'hidden',
+              animation: 'flipTopDown 0.3s ease-in forwards',
             }}
           >
-            <span className="text-gray-100 leading-none translate-y-[9px]">{flipFromDigit}</span>
+            <div
+              className="w-full h-full flex items-end justify-center"
+              style={{
+                background: 'linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%)',
+              }}
+            >
+              <span className="text-gray-100 leading-none translate-y-[9px]">{previousDigit}</span>
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Flip Card - Bottom part (flips up) */}
-      {isFlipping && (
-        <div
-          className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-[3px] z-20 flip-card-bottom"
-          style={{
-            transformOrigin: 'top center',
-            backfaceVisibility: 'hidden',
-            transformStyle: 'preserve-3d',
-          }}
-        >
+          {/* Bottom half flipping up - shows NEW digit */}
           <div
-            className="w-full h-full flex items-start justify-center pt-[1px]"
+            className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-[3px] z-20"
             style={{
-              background: 'linear-gradient(180deg, #2d2d2d 0%, #1f1f1f 100%)',
+              transformOrigin: 'top center',
+              backfaceVisibility: 'hidden',
+              animation: 'flipBottomUp 0.3s ease-out 0.3s forwards',
+              opacity: 0,
             }}
           >
-            <span className="text-gray-100 leading-none -translate-y-[9px]">{displayDigit}</span>
+            <div
+              className="w-full h-full flex items-start justify-center"
+              style={{
+                background: 'linear-gradient(180deg, #2d2d2d 0%, #1f1f1f 100%)',
+              }}
+            >
+              <span className="text-gray-100 leading-none -translate-y-[9px]">{digit}</span>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

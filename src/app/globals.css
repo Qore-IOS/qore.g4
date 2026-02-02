@@ -914,39 +914,22 @@
 }
 
 /* Flip Clock Animations */
-@keyframes flip-top-down {
+@keyframes flipTopDown {
   0% {
     transform: rotateX(0deg);
-    opacity: 1;
-  }
-  50% {
-    opacity: 1;
   }
   100% {
     transform: rotateX(-90deg);
-    opacity: 0;
   }
 }
 
-@keyframes flip-bottom-up {
+@keyframes flipBottomUp {
   0% {
     transform: rotateX(90deg);
     opacity: 0;
   }
-  50% {
-    opacity: 1;
-  }
   100% {
     transform: rotateX(0deg);
     opacity: 1;
   }
-}
-
-.flip-card-top {
-  animation: flip-top-down 0.3s ease-in forwards;
-}
-
-.flip-card-bottom {
-  animation: flip-bottom-up 0.3s ease-out 0.3s forwards;
-  opacity: 0;
 }
