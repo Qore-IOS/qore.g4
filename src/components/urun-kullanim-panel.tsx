@@ -83,21 +83,21 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
   if (!hasDutyPersonnel) return null;
 
   return (
-    <div className="hidden md:flex items-center gap-2 text-xs text-foreground flex-shrink-0">
-      <span className="text-[11px] opacity-70">Nöbetçi:</span>
+    <div className="hidden md:flex items-center justify-center gap-4 text-foreground flex-1 mx-4">
+      <span className="text-sm opacity-60 font-medium">Nöbetçi</span>
       {dutyPersonnel.teknikServis && (
-        <div className="flex items-center gap-1">
-          <Wrench className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
-          <span className="whitespace-nowrap font-semibold">{dutyPersonnel.teknikServis.name}</span>
+        <div className="flex items-center gap-2 duty-glow-text">
+          <Wrench className="h-5 w-5 text-blue-400 flex-shrink-0" />
+          <span className="whitespace-nowrap font-bold text-lg tracking-wide">{dutyPersonnel.teknikServis.name}</span>
         </div>
       )}
       {dutyPersonnel.teknikServis && dutyPersonnel.aplikasyon && (
-        <span className="opacity-50">|</span>
+        <span className="opacity-30 text-lg">|</span>
       )}
       {dutyPersonnel.aplikasyon && (
-        <div className="flex items-center gap-1">
-          <FlaskConical className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
-          <span className="whitespace-nowrap font-semibold">{dutyPersonnel.aplikasyon.name}</span>
+        <div className="flex items-center gap-2 duty-glow-text">
+          <FlaskConical className="h-5 w-5 text-purple-400 flex-shrink-0" />
+          <span className="whitespace-nowrap font-bold text-lg tracking-wide">{dutyPersonnel.aplikasyon.name}</span>
         </div>
       )}
     </div>

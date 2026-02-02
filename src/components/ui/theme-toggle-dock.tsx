@@ -10,8 +10,8 @@ interface ThemeToggleDockProps {
 }
 
 export function ThemeToggleDock({ className }: ThemeToggleDockProps) {
-  const { theme } = useTheme()
-  const { setUserTheme, currentUser } = useAuth()
+  const { theme, setTheme } = useTheme()
+  const { setUserTheme, currentUser, currentUserProfile } = useAuth()
   const [mounted, setMounted] = React.useState(false)
 
   // Avoid hydration mismatch
@@ -19,7 +19,16 @@ export function ThemeToggleDock({ className }: ThemeToggleDockProps) {
     setMounted(true)
   }, [])
 
+  // Force dark mode for 'user' role and hide the toggle
+  React.useEffect(() => {
+    if (mounted && currentUserProfile?.role === 'user' && theme !== 'dark') {
+      setTheme('dark')
+    }
+  }, [mounted, currentUserProfile?.role, theme, setTheme])
+
+  // Don't render toggle for 'user' role - they're forced to dark mode
   if (!mounted) return null
+  if (currentUserProfile?.role === 'user') return null
 
   const isDark = theme === "dark"
 

@@ -931,3 +931,59 @@
     transform: rotateX(0deg);
   }
 }
+
+/* Duty personnel glow animation - flowing light effect */
+.duty-glow-text {
+  position: relative;
+}
+
+.duty-glow-text span {
+  position: relative;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.7) 0%,
+    rgba(255, 255, 255, 1) 25%,
+    rgba(255, 255, 255, 0.7) 50%,
+    rgba(255, 255, 255, 1) 75%,
+    rgba(255, 255, 255, 0.7) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: dutyGlowFlow 3s ease-in-out infinite;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.15),
+               0 0 40px rgba(255, 255, 255, 0.1),
+               0 0 60px rgba(255, 255, 255, 0.05);
+}
+
+@keyframes dutyGlowFlow {
+  0% {
+    background-position: 200% center;
+    filter: brightness(0.9);
+  }
+  50% {
+    background-position: 0% center;
+    filter: brightness(1.1);
+  }
+  100% {
+    background-position: -200% center;
+    filter: brightness(0.9);
+  }
+}
+
+/* Light mode - darker text with subtle glow */
+:root .duty-glow-text span {
+  background: linear-gradient(
+    90deg,
+    rgba(30, 30, 30, 0.8) 0%,
+    rgba(0, 0, 0, 1) 25%,
+    rgba(30, 30, 30, 0.8) 50%,
+    rgba(0, 0, 0, 1) 75%,
+    rgba(30, 30, 30, 0.8) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
