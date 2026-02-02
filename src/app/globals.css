@@ -913,29 +913,40 @@
   background: rgba(0, 0, 0, 0.5);
 }
 
-/* Flicker Clock Flip Animations */
-@keyframes flip-top {
+/* Flip Clock Animations */
+@keyframes flip-top-down {
   0% {
     transform: rotateX(0deg);
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
   }
   100% {
     transform: rotateX(-90deg);
+    opacity: 0;
   }
 }
 
-@keyframes flip-bottom {
+@keyframes flip-bottom-up {
   0% {
     transform: rotateX(90deg);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
   }
   100% {
     transform: rotateX(0deg);
+    opacity: 1;
   }
 }
 
-.animate-flip-top {
-  animation: flip-top 0.3s ease-in forwards;
+.flip-card-top {
+  animation: flip-top-down 0.3s ease-in forwards;
 }
 
-.animate-flip-bottom {
-  animation: flip-bottom 0.3s ease-out 0.3s forwards;
+.flip-card-bottom {
+  animation: flip-bottom-up 0.3s ease-out 0.3s forwards;
+  opacity: 0;
 }

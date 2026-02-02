@@ -50,39 +50,53 @@ const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-ba
 
 /**
  * DutyInfo Component - Shows on-duty technician and application personnel
+ * Only shows personnel who have this specific lab as their PRIMARY lab
+ * Does not show duty info if no one is assigned as primary
  */
 function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
   const { data: users = [] } = useUsers();
 
-  // Find users assigned to this lab with teknik_servis or aplikasyon role
+  // Find users who have this specific lab as their PRIMARY lab (not just assigned)
+  // This ensures duty is per-lab specific and not shared across pools
   const dutyPersonnel = useMemo(() => {
     if (!selectedLabId || !users.length) return { teknikServis: null, aplikasyon: null };
 
-    const labUsers = users.filter(user =>
-      user.assignedLaboratories?.includes(selectedLabId) ||
+    // Only get users who have this lab as their PRIMARY lab
+    const primaryLabUsers = users.filter(user =>
       user.primaryLaboratories?.includes(selectedLabId)
     );
 
-    const teknikServis = labUsers.find(u => u.role === 'teknik_servis');
-    const aplikasyon = labUsers.find(u => u.role === 'aplikasyon');
+    const teknikServis = primaryLabUsers.find(u => u.role === 'teknik_servis');
+    const aplikasyon = primaryLabUsers.find(u => u.role === 'aplikasyon');
 
     return { teknikServis, aplikasyon };
   }, [selectedLabId, users]);
 
+  // Don't show duty info if no lab is selected or no duty personnel found
   if (!selectedLabId) return null;
 
+  // Only show if at least one duty personnel is assigned as primary to this lab
+  const hasDutyPersonnel = dutyPersonnel.teknikServis || dutyPersonnel.aplikasyon;
+  if (!hasDutyPersonnel) return null;
+
   return (
-    <div className="hidden md:flex items-center gap-2 text-[10px] text-muted-foreground">
-      <span className="text-[9px] opacity-70">Nöbetçi:</span>
-      <div className="flex items-center gap-1">
-        <Wrench className="h-3 w-3 text-blue-500" />
-        <span className="truncate max-w-[80px]">{dutyPersonnel.teknikServis?.name || '-'}</span>
-      </div>
-      <span className="opacity-50">|</span>
-      <div className="flex items-center gap-1">
-        <FlaskConical className="h-3 w-3 text-purple-500" />
-        <span className="truncate max-w-[80px]">{dutyPersonnel.aplikasyon?.name || '-'}</span>
-      </div>
+    <div className="hidden md:flex items-center gap-2 text-[11px] text-muted-foreground flex-shrink-0">
+      <span className="text-[10px] opacity-70">Nöbetçi:</span>
+      {dutyPersonnel.teknikServis && (
+        <div className="flex items-center gap-1">
+          <Wrench className="h-3 w-3 text-blue-500 flex-shrink-0" />
+          <span className="whitespace-nowrap">{dutyPersonnel.teknikServis.name}</span>
+        </div>
+      )}
+      {dutyPersonnel.teknikServis && dutyPersonnel.aplikasyon && (
+        <span className="opacity-50">|</span>
+      )}
+      {dutyPersonnel.aplikasyon && (
+        <div className="flex items-center gap-1">
+          <FlaskConical className="h-3 w-3 text-purple-500 flex-shrink-0" />
+          <span className="whitespace-nowrap">{dutyPersonnel.aplikasyon.name}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1096,12 +1110,13 @@ export default function UrunKullanimPanel() {
         <div className="w-full p-4 pb-0">
           <div className="frosted-glass-card">
             <div className="px-4 py-2">
-              <div className="flex items-center justify-between gap-4">
+              {/* Use relative container for absolute centering of clock */}
+              <div className="relative flex items-center justify-between min-h-[44px]">
                 {/* Left: User info */}
-                <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
-                  <div className="min-w-0">
-                    <h2 className="text-base font-bold font-headline text-gradient-primary truncate">{currentUserProfile?.name || 'Kullanıcı'}</h2>
-                    <p className="text-[10px] text-muted-foreground truncate">Ürün Kullanım Kaydı</p>
+                <div className="flex items-center gap-2 flex-shrink-0 z-10">
+                  <div>
+                    <h2 className="text-base font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
+                    <p className="text-[10px] text-muted-foreground">Ürün Kullanım Kaydı</p>
                   </div>
                   {currentUserProfile?.role === 'teknisyen' && (
                     <Button
@@ -1115,13 +1130,13 @@ export default function UrunKullanimPanel() {
                   )}
                 </div>
 
-                {/* Center: Flicker Clock */}
-                <div className="flex-1 flex justify-center">
+                {/* Center: Flicker Clock - absolute positioned for true center */}
+                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-0">
                   <FlickerClock />
                 </div>
 
                 {/* Right: Duty info + Lab selector */}
-                <div className="flex items-center gap-4 min-w-0 flex-shrink-0">
+                <div className="flex items-center gap-3 flex-shrink-0 z-10">
                   {/* Duty info */}
                   <DutyInfo selectedLabId={selectedLabId} />
 
