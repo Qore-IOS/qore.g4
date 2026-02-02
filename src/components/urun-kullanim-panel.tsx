@@ -38,7 +38,7 @@ import { openDeviceFaultReport } from '@/lib/faults';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useLightDashboardData } from './dashboard/useDashboardData';
-import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices, useUsers } from '@/hooks/useFirebaseQueries';
+import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices, useUsers, useActiveDutyShifts } from '@/hooks/useFirebaseQueries';
 import { FlickerClock } from './ui/FlickerClock';
 import { incrementTodayStats } from '@/lib/dailyConsumptionStats';
 import { urunKullanimLogger } from '@/lib/logger';
@@ -50,33 +50,30 @@ const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-ba
 
 /**
  * DutyInfo Component - Shows on-duty technician and application personnel
- * Shows personnel assigned to this specific lab (checks both primary and assigned)
- * Per-lab specific - not shared across pools
+ * Reads from dutyShifts Firestore collection for active shifts
+ * Only shows personnel with active shifts for the selected lab
  */
 function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
-  const { data: users = [] } = useUsers();
+  const { data: activeShifts = [] } = useActiveDutyShifts();
 
-  // Find users assigned to this specific lab
+  // Find active duty shifts for this specific lab
   const dutyPersonnel = useMemo(() => {
-    if (!selectedLabId || !users.length) return { teknikServis: null, aplikasyon: null };
+    if (!selectedLabId || !activeShifts.length) return { teknikServis: null, aplikasyon: null };
 
-    // First try to find users with this lab as PRIMARY
-    let primaryLabUsers = users.filter(user =>
-      user.primaryLaboratories?.includes(selectedLabId)
+    // Filter shifts that include this lab
+    const labShifts = activeShifts.filter(shift =>
+      shift.laboratoryIds.includes(selectedLabId)
     );
 
-    // If no primary users found, check assignedLaboratories
-    if (primaryLabUsers.length === 0) {
-      primaryLabUsers = users.filter(user =>
-        user.assignedLaboratories?.includes(selectedLabId)
-      );
-    }
+    // Find teknik_servis and aplikasyon shifts
+    const teknikServisShift = labShifts.find(s => s.role === 'teknik_servis');
+    const aplikasyonShift = labShifts.find(s => s.role === 'aplikasyon');
 
-    const teknikServis = primaryLabUsers.find(u => u.role === 'teknik_servis');
-    const aplikasyon = primaryLabUsers.find(u => u.role === 'aplikasyon');
-
-    return { teknikServis, aplikasyon };
-  }, [selectedLabId, users]);
+    return {
+      teknikServis: teknikServisShift ? { name: teknikServisShift.userName } : null,
+      aplikasyon: aplikasyonShift ? { name: aplikasyonShift.userName } : null,
+    };
+  }, [selectedLabId, activeShifts]);
 
   // Don't show duty info if no lab is selected
   if (!selectedLabId) return null;
