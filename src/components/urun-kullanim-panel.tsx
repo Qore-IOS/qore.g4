@@ -50,21 +50,27 @@ const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-ba
 
 /**
  * DutyInfo Component - Shows on-duty technician and application personnel
- * Only shows personnel who have this specific lab as their PRIMARY lab
- * Does not show duty info if no one is assigned as primary
+ * Shows personnel assigned to this specific lab (checks both primary and assigned)
+ * Per-lab specific - not shared across pools
  */
 function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
   const { data: users = [] } = useUsers();
 
-  // Find users who have this specific lab as their PRIMARY lab (not just assigned)
-  // This ensures duty is per-lab specific and not shared across pools
+  // Find users assigned to this specific lab
   const dutyPersonnel = useMemo(() => {
     if (!selectedLabId || !users.length) return { teknikServis: null, aplikasyon: null };
 
-    // Only get users who have this lab as their PRIMARY lab
-    const primaryLabUsers = users.filter(user =>
+    // First try to find users with this lab as PRIMARY
+    let primaryLabUsers = users.filter(user =>
       user.primaryLaboratories?.includes(selectedLabId)
     );
+
+    // If no primary users found, check assignedLaboratories
+    if (primaryLabUsers.length === 0) {
+      primaryLabUsers = users.filter(user =>
+        user.assignedLaboratories?.includes(selectedLabId)
+      );
+    }
 
     const teknikServis = primaryLabUsers.find(u => u.role === 'teknik_servis');
     const aplikasyon = primaryLabUsers.find(u => u.role === 'aplikasyon');
@@ -72,10 +78,10 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
     return { teknikServis, aplikasyon };
   }, [selectedLabId, users]);
 
-  // Don't show duty info if no lab is selected or no duty personnel found
+  // Don't show duty info if no lab is selected
   if (!selectedLabId) return null;
 
-  // Only show if at least one duty personnel is assigned as primary to this lab
+  // Only show if at least one duty personnel is found
   const hasDutyPersonnel = dutyPersonnel.teknikServis || dutyPersonnel.aplikasyon;
   if (!hasDutyPersonnel) return null;
 
