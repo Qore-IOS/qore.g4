@@ -83,8 +83,8 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
   if (!hasDutyPersonnel) return null;
 
   return (
-    <div className="hidden md:flex items-center justify-center gap-4 text-foreground flex-1 mx-4">
-      <span className="text-sm opacity-60 font-medium">Nöbetçi</span>
+    <div className="hidden md:flex items-center gap-4 text-foreground">
+      <span className="text-sm opacity-60 font-medium text-foreground">Nöbetçi</span>
       {dutyPersonnel.teknikServis && (
         <div className="flex items-center gap-2 duty-glow-text">
           <Wrench className="h-5 w-5 text-blue-400 flex-shrink-0" />
@@ -1113,10 +1113,10 @@ export default function UrunKullanimPanel() {
         <div className="w-full p-4 pb-0">
           <div className="frosted-glass-card">
             <div className="px-4 py-2">
-              {/* Use relative container for absolute centering of clock */}
-              <div className="relative flex items-center justify-between min-h-[44px]">
+              {/* Use flex layout for natural flow */}
+              <div className="flex items-center justify-between min-h-[44px]">
                 {/* Left: User info */}
-                <div className="flex items-center gap-2 flex-shrink-0 z-10">
+                <div className="flex items-center gap-2 flex-shrink-0">
                   <div>
                     <h2 className="text-lg font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
                     <p className="text-xs text-foreground/70">Ürün Kullanım Kaydı</p>
@@ -1133,15 +1133,14 @@ export default function UrunKullanimPanel() {
                   )}
                 </div>
 
-                {/* Center: Flicker Clock - absolute positioned for true center */}
-                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-0">
+                {/* Center: Clock + Duty info - flows naturally */}
+                <div className="flex items-center gap-4 flex-1 justify-center">
                   <FlickerClock />
+                  <DutyInfo selectedLabId={selectedLabId} />
                 </div>
 
-                {/* Right: Duty info + Lab selector */}
-                <div className="flex items-center gap-3 flex-shrink-0 z-10">
-                  {/* Duty info */}
-                  <DutyInfo selectedLabId={selectedLabId} />
+                {/* Right: Lab selector */}
+                <div className="flex items-center gap-3 flex-shrink-0">
 
                   {/* Lab selector */}
                   <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
