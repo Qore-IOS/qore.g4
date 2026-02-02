@@ -914,7 +914,7 @@
 }
 
 /* Flip Clock Animations */
-@keyframes flipTopDown {
+@keyframes flipDown {
   0% {
     transform: rotateX(0deg);
   }
@@ -923,13 +923,11 @@
   }
 }
 
-@keyframes flipBottomUp {
+@keyframes flipUp {
   0% {
     transform: rotateX(90deg);
-    opacity: 0;
   }
   100% {
     transform: rotateX(0deg);
-    opacity: 1;
   }
 }
