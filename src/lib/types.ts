@@ -1037,39 +1037,34 @@ export interface FaultDefinition {
 // Nöbet Vardiyası Sistemi
 // ==========================================
 
-// Nöbet personel tipi
-export type ShiftPersonnelType = 'teknik_servis' | 'aplikasyon';
+// Vardiya rolü (teknik servis veya aplikasyon)
+export type DutyShiftRole = 'teknik_servis' | 'aplikasyon';
 
-// Nöbet tarih aralığı
-export interface ShiftDateRange {
-  startDate: string;    // ISO date string (YYYY-MM-DD)
-  endDate: string;      // ISO date string (YYYY-MM-DD)
-}
+// Vardiya durumu
+export type DutyShiftStatus = 'active' | 'completed' | 'cancelled';
 
-// Nöbet kaydı
-export interface ShiftSchedule {
+// Nöbet vardiyası
+export interface DutyShift {
   id: string;
-  personnelUid: string;           // Personel UID
-  personnelName: string;          // Personel adı
-  personnelType: ShiftPersonnelType; // Teknik servis veya aplikasyon
-  laboratoryIds: string[];        // Hangi laboratuvarlarda geçerli
-  laboratoryNames: string[];      // Laboratuvar isimleri (denormalize)
-  dateRanges: ShiftDateRange[];   // Nöbet tarih aralıkları
+  // Personel bilgileri
+  userId: string;                  // Atanan kullanıcının ID'si
+  userName: string;                // Atanan kullanıcının adı
+  role: DutyShiftRole;             // Teknik servis veya aplikasyon
+  // Laboratuvar atamaları
+  laboratoryIds: string[];         // Atanan laboratuvar ID'leri
+  laboratoryNames: string[];       // Atanan laboratuvar adları
+  // Tarih aralığı
+  startDate: TimestampLike;        // Vardiya başlangıç tarihi
+  endDate: TimestampLike;          // Vardiya bitiş tarihi
+  // Durum
+  status: DutyShiftStatus;
+  // Meta bilgiler
   createdAt: TimestampLike;
   createdByUid: string;
   createdByName: string;
   updatedAt?: TimestampLike;
   updatedByUid?: string;
   updatedByName?: string;
-  isActive: boolean;              // Aktif mi (soft delete için)
-}
-
-// Nöbet oluşturma satırı (UI için)
-export interface ShiftScheduleRow {
-  id: string;                     // Geçici ID (UUID)
-  personnelUid: string;
-  personnelName: string;
-  laboratoryIds: string[];
-  laboratoryNames: string[];
-  dateRanges: ShiftDateRange[];
+  // Notlar
+  notes?: string;
 }

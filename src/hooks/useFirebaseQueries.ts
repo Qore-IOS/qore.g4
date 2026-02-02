@@ -550,6 +550,85 @@ export function useStockUpdateListener() {
 }
 
 // ============================================================================
+// DUTY SHIFTS HOOKS
+// ============================================================================
+
+import type { DutyShift } from '@/lib/types';
+
+/**
+ * Get all active duty shifts (current date is within shift period)
+ * Used in DutyInfo component
+ */
+export function useActiveDutyShifts() {
+  return useQuery({
+    queryKey: ['dutyShifts', 'active'],
+    queryFn: async () => {
+      const now = new Date();
+      const snap = await getDocs(
+        query(
+          collection(db, 'dutyShifts'),
+          where('status', '==', 'active')
+        )
+      );
+      // Filter to only include shifts where current date is within range
+      return snap.docs
+        .map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift))
+        .filter(shift => {
+          const startDate = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
+          const endDate = shift.endDate instanceof Date ? shift.endDate : new Date(shift.endDate as any);
+          return now >= startDate && now <= endDate;
+        });
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Get all duty shifts (for admin view)
+ */
+export function useAllDutyShifts() {
+  return useQuery({
+    queryKey: ['dutyShifts', 'all'],
+    queryFn: async () => {
+      const snap = await getDocs(
+        query(
+          collection(db, 'dutyShifts'),
+          orderBy('startDate', 'desc')
+        )
+      );
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Get duty shifts by status
+ */
+export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelled') {
+  return useQuery({
+    queryKey: ['dutyShifts', status],
+    queryFn: async () => {
+      const snap = await getDocs(
+        query(
+          collection(db, 'dutyShifts'),
+          where('status', '==', status),
+          orderBy('startDate', 'desc')
+        )
+      );
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// ============================================================================
 // CACHE INVALIDATION HELPERS
 // ============================================================================
 
