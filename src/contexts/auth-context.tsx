@@ -162,8 +162,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setIsAdmin(userData.role === 'admin' || user.uid === ADMIN_USER_UID);
               setPermissions(userPermissions);
 
-              // Apply user's theme preference from Firestore
-              if (userData.themePreference) {
+              // Force dark mode for 'user' role, otherwise apply user's preference
+              if (userData.role === 'user') {
+                setTheme('dark');
+                setThemePreference('dark');
+              } else if (userData.themePreference) {
                 setTheme(userData.themePreference);
                 setThemePreference(userData.themePreference);
               }
@@ -182,6 +185,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setCurrentUserProfile(defaultProfile);
               setIsAdmin(defaultRole === 'admin');
               setPermissions(defaultViews);
+              // Force dark mode for 'user' role
+              if (defaultRole === 'user') {
+                setTheme('dark');
+                setThemePreference('dark');
+              }
               try {
                 await setDoc(userDocRef, defaultProfile, { merge: true });
               } catch (error) {
