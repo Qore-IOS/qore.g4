@@ -26,7 +26,7 @@ export function FlickerClock({ className }: FlickerClockProps) {
   }, []);
 
   return (
-    <div className={cn("flex items-center gap-1", className)} style={{ perspective: '400px' }}>
+    <div className={cn("flex items-center gap-1", className)}>
       <FlipUnit value={time.hours} />
       <Colon />
       <FlipUnit value={time.minutes} />
@@ -46,118 +46,94 @@ function FlipUnit({ value }: { value: string }) {
 }
 
 function FlipDigit({ digit }: { digit: string }) {
+  const prevDigitRef = useRef(digit);
+  const [flipKey, setFlipKey] = useState(0);
   const [isFlipping, setIsFlipping] = useState(false);
-  const [currentDigit, setCurrentDigit] = useState(digit);
-  const [previousDigit, setPreviousDigit] = useState(digit);
-  const isFirstRender = useRef(true);
+  const [oldDigit, setOldDigit] = useState(digit);
 
   useEffect(() => {
-    // Skip animation on first render
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      setCurrentDigit(digit);
-      setPreviousDigit(digit);
-      return;
-    }
+    const prevDigit = prevDigitRef.current;
 
-    // Only animate if digit actually changed
-    if (digit !== currentDigit) {
-      // Store the old digit for the flip animation
-      setPreviousDigit(currentDigit);
-      // Start flipping
+    if (digit !== prevDigit && prevDigit !== '-') {
+      // Store old digit for animation
+      setOldDigit(prevDigit);
+      // Increment key to force remount of animation elements
+      setFlipKey(k => k + 1);
+      // Start animation
       setIsFlipping(true);
 
-      // Update to new digit at midpoint of animation
-      const midTimer = setTimeout(() => {
-        setCurrentDigit(digit);
-      }, 300);
-
-      // End animation
-      const endTimer = setTimeout(() => {
+      // End animation after it completes
+      const timer = setTimeout(() => {
         setIsFlipping(false);
       }, 600);
 
-      return () => {
-        clearTimeout(midTimer);
-        clearTimeout(endTimer);
-      };
+      return () => clearTimeout(timer);
     }
-  }, [digit, currentDigit]);
+
+    // Update ref for next comparison
+    prevDigitRef.current = digit;
+  }, [digit]);
+
+  // Update ref when digit changes (for cases where effect cleanup happens)
+  useEffect(() => {
+    prevDigitRef.current = digit;
+  });
 
   return (
     <div
       className="relative w-[24px] h-[36px] text-base font-bold font-mono"
-      style={{ perspective: '200px', perspectiveOrigin: 'center center' }}
+      style={{ perspective: '200px' }}
     >
-      {/* Top Half - Static (shows current digit) */}
-      <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-[3px]">
-        <div
-          className="w-full h-full flex items-end justify-center"
-          style={{
-            background: 'linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%)',
-          }}
-        >
-          <span className="text-gray-100 leading-none translate-y-[9px]">{currentDigit}</span>
+      {/* Top Half - Static background showing NEW digit */}
+      <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-[3px] bg-gradient-to-b from-[#4a4a4a] to-[#3a3a3a]">
+        <div className="w-full h-full flex items-center justify-center">
+          <span className="text-gray-100 leading-none translate-y-[9px]">{digit}</span>
         </div>
       </div>
 
-      {/* Bottom Half - Static (shows current digit) */}
-      <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-[3px]">
-        <div
-          className="w-full h-full flex items-start justify-center"
-          style={{
-            background: 'linear-gradient(180deg, #2d2d2d 0%, #1f1f1f 100%)',
-          }}
-        >
-          <span className="text-gray-100 leading-none -translate-y-[9px]">{currentDigit}</span>
+      {/* Bottom Half - Static background showing NEW digit */}
+      <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-[3px] bg-gradient-to-b from-[#2d2d2d] to-[#1f1f1f]">
+        <div className="w-full h-full flex items-center justify-center">
+          <span className="text-gray-100 leading-none -translate-y-[9px]">{digit}</span>
         </div>
       </div>
 
       {/* Center divider line */}
-      <div className="absolute inset-x-0 top-1/2 h-[1px] bg-black/50 z-30" style={{ transform: 'translateY(-0.5px)' }} />
+      <div className="absolute inset-x-0 top-1/2 h-[1px] bg-black/60 z-30 -translate-y-[0.5px]" />
 
-      {/* Flip Animation Cards */}
+      {/* Flip Animation - Top card falling down (shows OLD digit) */}
       {isFlipping && (
-        <>
-          {/* Top half flipping down - shows OLD digit */}
-          <div
-            className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-[3px] z-20"
-            style={{
-              transformOrigin: 'bottom center',
-              backfaceVisibility: 'hidden',
-              animation: 'flipTopDown 0.3s ease-in forwards',
-            }}
-          >
-            <div
-              className="w-full h-full flex items-end justify-center"
-              style={{
-                background: 'linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%)',
-              }}
-            >
-              <span className="text-gray-100 leading-none translate-y-[9px]">{previousDigit}</span>
-            </div>
+        <div
+          key={`top-${flipKey}`}
+          className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-[3px] z-20 bg-gradient-to-b from-[#4a4a4a] to-[#3a3a3a]"
+          style={{
+            transformOrigin: 'bottom center',
+            animation: 'flipDown 0.3s ease-in forwards',
+            backfaceVisibility: 'hidden',
+          }}
+        >
+          <div className="w-full h-full flex items-center justify-center">
+            <span className="text-gray-100 leading-none translate-y-[9px]">{oldDigit}</span>
           </div>
+        </div>
+      )}
 
-          {/* Bottom half flipping up - shows NEW digit */}
-          <div
-            className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-[3px] z-20"
-            style={{
-              transformOrigin: 'top center',
-              backfaceVisibility: 'hidden',
-              animation: 'flipBottomUp 0.3s ease-out 0.3s forwards',
-              opacity: 0,
-            }}
-          >
-            <div
-              className="w-full h-full flex items-start justify-center"
-              style={{
-                background: 'linear-gradient(180deg, #2d2d2d 0%, #1f1f1f 100%)',
-              }}
-            >
-              <span className="text-gray-100 leading-none -translate-y-[9px]">{digit}</span>
-            </div>
+      {/* Flip Animation - Bottom card rising up (shows NEW digit) */}
+      {isFlipping && (
+        <div
+          key={`bottom-${flipKey}`}
+          className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-[3px] z-20 bg-gradient-to-b from-[#2d2d2d] to-[#1f1f1f]"
+          style={{
+            transformOrigin: 'top center',
+            animation: 'flipUp 0.3s ease-out 0.3s forwards',
+            backfaceVisibility: 'hidden',
+            transform: 'rotateX(90deg)',
+          }}
+        >
+          <div className="w-full h-full flex items-center justify-center">
+            <span className="text-gray-100 leading-none -translate-y-[9px]">{digit}</span>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
