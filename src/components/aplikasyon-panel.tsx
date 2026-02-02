@@ -1,12 +1,19 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FlaskConical, ArrowLeft, Layers, ChevronRight } from 'lucide-react';
+import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Loader2, Eye, Calendar, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { db } from '@/lib/firebase';
+import { collection, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
 
 interface AplikasyonPanelProps {
   hospitals: Hospital[];
@@ -21,11 +28,76 @@ interface AplikasyonPanelProps {
   fetchAllApplicationData: () => Promise<void>;
 }
 
+type ActionFormRecord = {
+  id: string;
+  deviceId: string;
+  cihazAdi?: string;
+  seriNumarasi?: string;
+  hospitalId?: string;
+  labName?: string;
+  aciklama?: string;
+  islemTuru?: string;
+  createdAt: Timestamp;
+  createdByName: string;
+  baslangicSaati?: string;
+  bitisSaati?: string;
+  cihazDurumu?: string;
+  faultName?: string;
+};
+
+const ISLEM_TURU_LABELS: Record<string, string> = {
+  rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
+  periyodik_bakim: 'Periyodik Bakım',
+  ariza: 'Arıza',
+  alis: 'ALIS',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
+};
+
+const CIHAZ_DURUMU_LABELS: Record<string, string> = {
+  calisiyor: 'Çalışıyor',
+  arizali: 'Arızalı',
+  denemede: 'Denemede',
+  diger: 'Diğer',
+};
+
 export default function AplikasyonPanel({
-  hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = ''
-}: AplikasyonPanelProps) {
+  hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = '', toast
+}: AplikasyonPanelProps & { toast?: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void }) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
+
+  // All forms dialog state
+  const [isAllFormsDialogOpen, setIsAllFormsDialogOpen] = useState(false);
+  const [allForms, setAllForms] = useState<ActionFormRecord[]>([]);
+  const [isLoadingForms, setIsLoadingForms] = useState(false);
+  const [selectedFormDetail, setSelectedFormDetail] = useState<ActionFormRecord | null>(null);
+
+  // Fetch all aplikasyon forms
+  const fetchAllForms = async () => {
+    setIsLoadingForms(true);
+    try {
+      const q = query(
+        collection(db, 'aplikasyonActionForms'),
+        orderBy('createdAt', 'desc')
+      );
+      const snap = await getDocs(q);
+      const forms = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+      })) as ActionFormRecord[];
+      setAllForms(forms);
+    } catch (err) {
+      console.error("Error fetching forms:", err);
+      toast?.({ title: 'Hata', description: 'Formlar yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setIsLoadingForms(false);
+    }
+  };
+
+  const openAllFormsDialog = () => {
+    setIsAllFormsDialogOpen(true);
+    fetchAllForms();
+  };
 
   const getDevicesForHospital = (hospitalId: string): (AssignedDevice & {device: Device})[] => {
     const assignments = hospitalDeviceAssignments.filter(hda => hda.hastaneId === hospitalId);
@@ -194,6 +266,10 @@ export default function AplikasyonPanel({
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle className="text-2xl font-headline flex items-center text-primary"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
+            <Button variant="outline" onClick={openAllFormsDialog}>
+              <FileText className="mr-2 h-4 w-4" />
+              Tüm İşlem Formlarını Göster
+            </Button>
           </div>
           <CardDescription>Hastanelerdeki cihazların aplikasyon durumlarını görüntüleyin.</CardDescription>
         </CardHeader>
@@ -286,6 +362,165 @@ export default function AplikasyonPanel({
           })}
         </div>
       </div>
+
+      {/* All Forms Dialog */}
+      <Dialog open={isAllFormsDialogOpen} onOpenChange={setIsAllFormsDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Tüm Aplikasyon İşlem Formları
+            </DialogTitle>
+          </DialogHeader>
+          {isLoadingForms ? (
+            <div className="flex justify-center items-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : selectedFormDetail ? (
+            // Form Detail View
+            <div className="space-y-4">
+              <Button variant="ghost" size="sm" onClick={() => setSelectedFormDetail(null)}>
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Listeye Dön
+              </Button>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">{selectedFormDetail.cihazAdi || 'Cihaz'}</CardTitle>
+                  <CardDescription>
+                    Seri No: {selectedFormDetail.seriNumarasi || '-'} | {selectedFormDetail.labName || '-'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium">Form ID:</span>
+                      <span className="ml-2 font-mono text-xs">{selectedFormDetail.id.substring(0, 8)}...</span>
+                    </div>
+                    <div>
+                      <span className="font-medium">Oluşturan:</span>
+                      <span className="ml-2">{selectedFormDetail.createdByName}</span>
+                    </div>
+                    <div>
+                      <span className="font-medium">Tarih:</span>
+                      <span className="ml-2">
+                        {selectedFormDetail.createdAt?.toDate
+                          ? format(selectedFormDetail.createdAt.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr })
+                          : '-'}
+                      </span>
+                    </div>
+                    {selectedFormDetail.islemTuru && (
+                      <div>
+                        <span className="font-medium">İşlem Türü:</span>
+                        <span className="ml-2">{ISLEM_TURU_LABELS[selectedFormDetail.islemTuru] || selectedFormDetail.islemTuru}</span>
+                      </div>
+                    )}
+                    {selectedFormDetail.cihazDurumu && (
+                      <div>
+                        <span className="font-medium">Cihaz Durumu:</span>
+                        <span className="ml-2">{CIHAZ_DURUMU_LABELS[selectedFormDetail.cihazDurumu] || selectedFormDetail.cihazDurumu}</span>
+                      </div>
+                    )}
+                    {selectedFormDetail.faultName && (
+                      <div>
+                        <span className="font-medium">Arıza:</span>
+                        <span className="ml-2 text-red-600">{selectedFormDetail.faultName}</span>
+                      </div>
+                    )}
+                    {selectedFormDetail.baslangicSaati && (
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">Başlangıç:</span>
+                        <span className="ml-2">{selectedFormDetail.baslangicSaati}</span>
+                      </div>
+                    )}
+                    {selectedFormDetail.bitisSaati && (
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">Bitiş:</span>
+                        <span className="ml-2">{selectedFormDetail.bitisSaati}</span>
+                      </div>
+                    )}
+                  </div>
+                  {selectedFormDetail.aciklama && (
+                    <div className="pt-4 border-t">
+                      <span className="font-medium block mb-2">Açıklama:</span>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedFormDetail.aciklama}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            // Forms List View
+            <ScrollArea className="h-[60vh]">
+              {allForms.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  Henüz işlem formu bulunmuyor.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Tarih</TableHead>
+                      <TableHead>Cihaz</TableHead>
+                      <TableHead>Laboratuvar</TableHead>
+                      <TableHead>İşlem Türü</TableHead>
+                      <TableHead>Oluşturan</TableHead>
+                      <TableHead className="w-16"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allForms.map(form => (
+                      <TableRow
+                        key={form.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => setSelectedFormDetail(form)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-sm">
+                              {form.createdAt?.toDate
+                                ? format(form.createdAt.toDate(), 'dd.MM.yyyy', { locale: tr })
+                                : '-'}
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {form.createdAt?.toDate
+                              ? format(form.createdAt.toDate(), 'HH:mm', { locale: tr })
+                              : ''}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{form.cihazAdi || '-'}</div>
+                          <div className="text-xs text-muted-foreground font-mono">{form.seriNumarasi || '-'}</div>
+                        </TableCell>
+                        <TableCell className="text-sm">{form.labName || '-'}</TableCell>
+                        <TableCell>
+                          <span className={cn(
+                            "text-xs px-2 py-1 rounded-full",
+                            form.islemTuru === 'ariza' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
+                            form.islemTuru === 'periyodik_bakim' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                            'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
+                          )}>
+                            {ISLEM_TURU_LABELS[form.islemTuru || ''] || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm">{form.createdByName || '-'}</TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setSelectedFormDetail(form); }}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

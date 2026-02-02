@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle, Clock } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { format } from 'date-fns';
@@ -140,6 +140,10 @@ export default function IslemFormuPage() {
   const [islemTipi, setIslemTipi] = useState<IslemTipi>('');
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
   const [aciklama, setAciklama] = useState('');
+
+  // Başlangıç ve Bitiş Saatleri (Zorunlu)
+  const [baslangicSaati, setBaslangicSaati] = useState<string>('');
+  const [bitisSaati, setBitisSaati] = useState<string>('');
 
 
   // Signature modal
@@ -313,7 +317,8 @@ export default function IslemFormuPage() {
       try {
         const snap = await getDocs(collection(db, 'users'));
         const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
-        setAllUsers(users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
+        // Teknik servis formu için sadece teknik servis personelini göster
+        setAllUsers(users.filter(u => u.role === 'teknik_servis'));
       } catch (err) {
         console.error("Error fetching users:", err);
       }
@@ -769,6 +774,16 @@ export default function IslemFormuPage() {
   };
 
   const startSaveProcess = () => {
+    // Validate başlangıç ve bitiş saatleri (zorunlu)
+    if (!baslangicSaati) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen başlangıç saatini seçin.', variant: 'destructive' });
+      return;
+    }
+    if (!bitisSaati) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen bitiş saatini seçin.', variant: 'destructive' });
+      return;
+    }
+
     // Validate işlem tipi and türü
     if (!islemTipi) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen işlem tipini seçin.', variant: 'destructive' });
@@ -845,7 +860,7 @@ export default function IslemFormuPage() {
         const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
         // Create form document
-        const formRef = doc(collection(db, 'deviceActionForms'));
+        const formRef = doc(collection(db, 'teknikServisActionForms'));
         batch.set(formRef, {
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
@@ -856,6 +871,8 @@ export default function IslemFormuPage() {
             islemTipi,
             islemTuru,
             aciklama: aciklama.trim(),
+            baslangicSaati,
+            bitisSaati,
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -875,34 +892,81 @@ export default function IslemFormuPage() {
 
         // Create closed fault report when ariza is selected
         if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
+          // Parse başlangıç ve bitiş saatlerini tarih olarak oluştur
+          const today = new Date();
+          const [startHour, startMinute] = baslangicSaati.split(':').map(Number);
+          const [endHour, endMinute] = bitisSaati.split(':').map(Number);
+
+          const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), startHour, startMinute);
+          const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), endHour, endMinute);
+
+          // Çözüm süresi hesapla (milisaniye)
+          const cozumSuresi = endTime.getTime() - startTime.getTime();
+          const toplamCozumSuresi = cozumSuresi;
+
+          // İlk eşlik eden personeli destek personeli olarak ata (performans puanı için)
+          const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
+
           const faultReportRef = doc(collection(db, 'deviceFaultReports'));
           batch.set(faultReportRef, {
             deviceId,
             hospitalId: device?.hospitalId,
             labName: hospital?.name,
-            deviceName: device?.cihazAdi || device?.model,
-            seriNumarasi: device?.seriNumarasi,
+            model: device?.cihazAdi || device?.model,
+            serial: device?.seriNumarasi,
             faultType: 'teknik_servis',
             faultDefinitionId: resolvedFaultId,
             faultName: resolvedFaultName,
             description: aciklama.trim(),
-            status: 'closed',
-            openedAt: Timestamp.fromDate(now),
-            closedAt: Timestamp.fromDate(now),
+            status: 'cozuldu',
+            openedAt: Timestamp.fromDate(startTime),
+            closedAt: Timestamp.fromDate(endTime),
             openedByUid: currentUserProfile?.uid,
             openedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
             closedByUid: currentUserProfile?.uid,
             closedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            closeDescription: aciklama.trim(),
             assignedToUid: currentUserProfile?.uid,
             assignedToName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            assignedAt: Timestamp.fromDate(now),
-            interventionStartedAt: Timestamp.fromDate(now),
-            interventionType: 'yerinde',
+            assignedAt: Timestamp.fromDate(startTime),
+            interventionStartedAt: Timestamp.fromDate(startTime),
+            interventionType: 'kurum_ziyaret',
+            cozumSuresi,
+            toplamCozumSuresi,
             resolvedFromFormId: formRef.id,
             resolvedFromFormType: 'teknik_servis',
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+            // Destek personeli bilgisi (performans hesaplaması için)
+            supportPersonnelUid: supportPerson?.uid || null,
+            supportPersonnelName: supportPerson?.name || null,
             relatedTests: selectedTests.length > 0 ? selectedTests : null,
             isCustomFault: isCustomFault || false,
+            // Arıza kaydı işlem formundan açıldığı için bildirim gönderilmeyecek
+            createdFromActionForm: true,
+          });
+
+          // Arıza geçmişine "opened" kaydı ekle
+          const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
+          batch.set(historyOpenedRef, {
+            type: 'opened',
+            actorUid: currentUserProfile?.uid,
+            actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            description: aciklama.trim(),
+            timestamp: Timestamp.fromDate(startTime),
+          });
+
+          // Arıza geçmişine "closed" kaydı ekle
+          const historyClosedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
+          batch.set(historyClosedRef, {
+            type: 'closed',
+            actorUid: currentUserProfile?.uid,
+            actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            description: supportPerson
+              ? `${aciklama.trim()} (Destek: ${supportPerson.name})`
+              : aciklama.trim(),
+            timestamp: Timestamp.fromDate(endTime),
+            supportPersonnelUid: supportPerson?.uid || null,
+            supportPersonnelName: supportPerson?.name || null,
           });
         }
 
@@ -1105,6 +1169,8 @@ export default function IslemFormuPage() {
         setIslemTipi('');
         setIslemTuru('');
         setAciklama('');
+        setBaslangicSaati('');
+        setBitisSaati('');
         setSelectedMaintenanceTasks([]);
         setSelectedPeriodicParts([]);
         setSelectedFaultId('');
@@ -1420,6 +1486,39 @@ export default function IslemFormuPage() {
                 )}
               </div>
             )}
+
+            {/* Başlangıç ve Bitiş Saatleri (Zorunlu) */}
+            <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
+              <Label className="flex items-center gap-2 mb-4">
+                <Clock className="h-4 w-4" />
+                İşlem Saatleri <span className="text-destructive">*</span>
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="baslangicSaati" className="text-sm">Başlangıç Saati <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="baslangicSaati"
+                    type="time"
+                    value={baslangicSaati}
+                    onChange={(e) => setBaslangicSaati(e.target.value)}
+                    className={!baslangicSaati ? 'border-amber-500/50' : ''}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bitisSaati" className="text-sm">Bitiş Saati <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="bitisSaati"
+                    type="time"
+                    value={bitisSaati}
+                    onChange={(e) => setBitisSaati(e.target.value)}
+                    className={!bitisSaati ? 'border-amber-500/50' : ''}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                İşleme başladığınız ve bitirdiğiniz saatleri giriniz. Bu alanlar zorunludur.
+              </p>
+            </div>
 
             {/* Açıklama Alanı (Zorunlu) */}
             <div className="p-4 border rounded-lg bg-muted/30">

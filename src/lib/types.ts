@@ -509,6 +509,7 @@ export type AppView =
   | 'miad-uyarilari'
   | 'verimlilik'
   | 'numune-arsivi'
+  | 'nobet-yonetimi'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';

@@ -814,4 +814,42 @@ declare module "@/lib/types" {
     createdAt?: any;
     [k: string]: any;
   }
+
+  // ---------- Nöbet Vardiyası Sistemi ----------
+  // Nöbet personel tipi
+  export type ShiftPersonnelType = 'teknik_servis' | 'aplikasyon';
+
+  // Nöbet tarih aralığı
+  export interface ShiftDateRange {
+    startDate: string;    // ISO date string (YYYY-MM-DD)
+    endDate: string;      // ISO date string (YYYY-MM-DD)
+  }
+
+  // Nöbet kaydı
+  export interface ShiftSchedule {
+    id: string;
+    personnelUid: string;
+    personnelName: string;
+    personnelType: ShiftPersonnelType;
+    laboratoryIds: string[];
+    laboratoryNames: string[];
+    dateRanges: ShiftDateRange[];
+    createdAt: TimestampLike;
+    createdByUid: string;
+    createdByName: string;
+    updatedAt?: TimestampLike;
+    updatedByUid?: string;
+    updatedByName?: string;
+    isActive: boolean;
+  }
+
+  // Nöbet oluşturma satırı (UI için)
+  export interface ShiftScheduleRow {
+    id: string;
+    personnelUid: string;
+    personnelName: string;
+    laboratoryIds: string[];
+    laboratoryNames: string[];
+    dateRanges: ShiftDateRange[];
+  }
 }

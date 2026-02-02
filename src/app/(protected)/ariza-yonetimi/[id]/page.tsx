@@ -687,6 +687,11 @@ export default function FaultDetailPage() {
 
             // ATAMA BEKLİYOR - Buzlu arka plan ve "Üzerime Ata" butonu
             if (normalized === 'atama_bekliyor') {
+              // Kullanıcının rolü arıza tipine uygun mu kontrol et
+              const userRole = currentUserProfile?.role;
+              const faultType = fault.faultType;
+              const canAssign = isAdmin || (faultType === 'teknik_servis' && userRole === 'teknik_servis') || (faultType === 'aplikasyon' && userRole === 'aplikasyon');
+
               return (
                 <div className="pt-4 border-t">
                   <div className="relative rounded-lg overflow-hidden">
@@ -699,20 +704,31 @@ export default function FaultDetailPage() {
                     </div>
 
                     {/* Üzerime Ata butonu */}
-                    <div className="absolute inset-0 z-20 flex items-center justify-center">
-                      <Button
-                        size="lg"
-                        onClick={handleAssignToSelf}
-                        disabled={isAssigning}
-                        className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-lg px-8 py-6"
-                      >
-                        {isAssigning ? (
-                          <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                        ) : (
-                          <UserPlus className="h-5 w-5 mr-2" />
-                        )}
-                        Arızayı Üzerime Al
-                      </Button>
+                    <div className="absolute inset-0 z-20 flex items-center justify-center flex-col gap-2">
+                      {canAssign ? (
+                        <Button
+                          size="lg"
+                          onClick={handleAssignToSelf}
+                          disabled={isAssigning}
+                          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-lg px-8 py-6"
+                        >
+                          {isAssigning ? (
+                            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                          ) : (
+                            <UserPlus className="h-5 w-5 mr-2" />
+                          )}
+                          Arızayı Üzerime Al
+                        </Button>
+                      ) : (
+                        <div className="text-center p-4 bg-white/80 dark:bg-black/80 rounded-lg">
+                          <p className="text-sm text-muted-foreground">
+                            Bu arıza <span className="font-semibold">{faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}</span> tipinde.
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Sadece {faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli bu arızayı üzerine alabilir.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -920,6 +936,15 @@ export default function FaultDetailPage() {
                   <SelectItem value="none">Seçim Yok</SelectItem>
                   {allPersonnel
                     .filter(p => p.uid !== currentUser?.uid) // Kendisini gösterme
+                    .filter(p => {
+                      // Arıza tipine göre personel filtrele
+                      if (fault?.faultType === 'teknik_servis') {
+                        return p.role === 'teknik_servis';
+                      } else if (fault?.faultType === 'aplikasyon') {
+                        return p.role === 'aplikasyon';
+                      }
+                      return true;
+                    })
                     .filter(p => {
                       if (!personnelSearchQuery) return true;
                       const q = personnelSearchQuery.toLowerCase();
