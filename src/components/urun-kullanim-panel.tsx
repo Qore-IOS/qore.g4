@@ -83,12 +83,12 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
   if (!hasDutyPersonnel) return null;
 
   return (
-    <div className="hidden md:flex items-center gap-2 text-[11px] text-muted-foreground flex-shrink-0">
-      <span className="text-[10px] opacity-70">Nöbetçi:</span>
+    <div className="hidden md:flex items-center gap-2 text-xs text-foreground flex-shrink-0">
+      <span className="text-[11px] opacity-70">Nöbetçi:</span>
       {dutyPersonnel.teknikServis && (
         <div className="flex items-center gap-1">
-          <Wrench className="h-3 w-3 text-blue-500 flex-shrink-0" />
-          <span className="whitespace-nowrap">{dutyPersonnel.teknikServis.name}</span>
+          <Wrench className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+          <span className="whitespace-nowrap font-semibold">{dutyPersonnel.teknikServis.name}</span>
         </div>
       )}
       {dutyPersonnel.teknikServis && dutyPersonnel.aplikasyon && (
@@ -96,8 +96,8 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
       )}
       {dutyPersonnel.aplikasyon && (
         <div className="flex items-center gap-1">
-          <FlaskConical className="h-3 w-3 text-purple-500 flex-shrink-0" />
-          <span className="whitespace-nowrap">{dutyPersonnel.aplikasyon.name}</span>
+          <FlaskConical className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
+          <span className="whitespace-nowrap font-semibold">{dutyPersonnel.aplikasyon.name}</span>
         </div>
       )}
     </div>
@@ -1118,8 +1118,8 @@ export default function UrunKullanimPanel() {
                 {/* Left: User info */}
                 <div className="flex items-center gap-2 flex-shrink-0 z-10">
                   <div>
-                    <h2 className="text-base font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
-                    <p className="text-[10px] text-muted-foreground">Ürün Kullanım Kaydı</p>
+                    <h2 className="text-lg font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
+                    <p className="text-xs text-foreground/70">Ürün Kullanım Kaydı</p>
                   </div>
                   {currentUserProfile?.role === 'teknisyen' && (
                     <Button
@@ -1150,7 +1150,7 @@ export default function UrunKullanimPanel() {
                         variant="outline"
                         role="combobox"
                         aria-expanded={isLabPopoverOpen}
-                        className="w-[160px] justify-between font-normal h-8 text-xs frosted-glass-btn"
+                        className="w-[160px] justify-between font-medium h-8 text-sm frosted-glass-btn"
                         disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
                       >
                         <span className="truncate">
@@ -1268,10 +1268,10 @@ export default function UrunKullanimPanel() {
                   {/* Product info */}
                   <div className="flex-1 space-y-1">
                     <p className="text-base font-semibold truncate">{safeName(lastScannedProduct.stokKodu, lastScannedProduct.stokAdi ?? '')}</p>
-                    <p className="text-xs text-muted-foreground">Seri: <span className="font-mono">{lastScannedProduct.seriNumarasi}</span></p>
-                    <p className="text-xs text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad ?? ''}</p>
+                    <p className="text-xs text-foreground/70 dark:text-foreground/60">Seri: <span className="font-mono">{lastScannedProduct.seriNumarasi}</span></p>
+                    <p className="text-xs text-foreground/70 dark:text-foreground/60">Lot: {lastScannedProduct.lotNumarasi} | Miad: {lastScannedProduct.miad ?? ''}</p>
                     {lastScannedProduct.subPointName && (
-                      <p className="text-xs text-muted-foreground">Nokta: {lastScannedProduct.subPointName}</p>
+                      <p className="text-xs text-foreground/70 dark:text-foreground/60">Nokta: {lastScannedProduct.subPointName}</p>
                     )}
                     {scanStatus === 'success' && <p className="text-green-500 text-xs font-medium mt-1">Stoktan Düşüldü!</p>}
                   </div>
@@ -1289,7 +1289,7 @@ export default function UrunKullanimPanel() {
                   )}
                 </div>
               ) : (
-                <p className="text-muted-foreground text-sm text-center py-4">Henüz ürün okutulmadı.</p>
+                <p className="text-foreground/60 dark:text-foreground/50 text-sm text-center py-4">Henüz ürün okutulmadı.</p>
               )}
             </div>
           </div>
@@ -1297,22 +1297,22 @@ export default function UrunKullanimPanel() {
           {/* Card 3: Son 10 Tüketim */}
           <div className="frosted-glass-card">
             <div className="frosted-header flex items-center gap-2">
-              <Clock className="w-4 h-4 text-muted-foreground"/>
+              <Clock className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
               <span className="font-semibold text-sm">Son 10 Tüketim</span>
             </div>
             <div className="frosted-content">
               <ScrollArea className="h-[120px]">
                 {sessionHistory.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-2">Henüz tüketim kaydı yok.</p>
+                  <p className="text-sm text-foreground/60 dark:text-foreground/50 text-center py-2">Henüz tüketim kaydı yok.</p>
                 ) : (
                   <ul className="text-sm space-y-1">
                     {sessionHistory.map((item, index) => (
                       <li key={index} className="flex justify-between items-center text-xs p-1.5 rounded-md hover:bg-white/10 dark:hover:bg-black/20">
                         <div className="truncate flex-1">
                           <span className="font-semibold">{safeName(item.stokKodu, item.stokAdi ?? '')}</span>
-                          <span className="text-muted-foreground ml-1">({item.lotNumarasi})</span>
+                          <span className="text-foreground/70 dark:text-foreground/60 ml-1">({item.lotNumarasi})</span>
                         </div>
-                        <span className="font-mono text-muted-foreground flex-shrink-0 ml-2">{item.seriNumarasi}</span>
+                        <span className="font-mono text-foreground/70 dark:text-foreground/60 flex-shrink-0 ml-2">{item.seriNumarasi}</span>
                       </li>
                     ))}
                   </ul>
@@ -1325,10 +1325,10 @@ export default function UrunKullanimPanel() {
           {selectedLabId && (
             <div className="frosted-glass-card flex-1" role="region" aria-label="Laboratuvar cihazları">
               <div className="frosted-header flex items-center gap-2">
-                <Wrench className="w-4 h-4 text-muted-foreground"/>
+                <Wrench className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
                 <span className="font-semibold text-sm">Cihazlar</span>
                 {devicesToDisplay.length > 0 && (
-                  <span className="text-xs text-muted-foreground ml-auto">{devicesToDisplay.length} cihaz</span>
+                  <span className="text-xs text-foreground/70 dark:text-foreground/60 ml-auto">{devicesToDisplay.length} cihaz</span>
                 )}
               </div>
               <div className="frosted-content">
@@ -1364,7 +1364,7 @@ export default function UrunKullanimPanel() {
                         {/* Device name and serial above image */}
                         <div className="text-center mb-1">
                           <div className="text-[10px] font-medium leading-tight truncate">{c.cihazAdi || c.model}</div>
-                          <div className="text-[8px] text-muted-foreground font-mono truncate">{c.seriNumarasi || '-'}</div>
+                          <div className="text-[8px] text-foreground/60 dark:text-foreground/50 font-mono truncate">{c.seriNumarasi || '-'}</div>
                         </div>
                         {/* Device image */}
                         <div className="relative w-full aspect-square flex items-center justify-center">
@@ -1393,7 +1393,7 @@ export default function UrunKullanimPanel() {
                     ))}
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-4 text-muted-foreground space-y-1">
+                  <div className="flex flex-col items-center justify-center py-4 text-foreground/60 dark:text-foreground/50 space-y-1">
                     <Info className="w-5 h-5 opacity-40" />
                     <p className="text-xs">Bu laboratuvara tanımlı cihaz bulunamadı.</p>
                   </div>
@@ -1427,7 +1427,7 @@ export default function UrunKullanimPanel() {
           </DialogHeader>
           <div className="flex-1 overflow-auto py-4">
             {faultDefinitions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <div className="flex flex-col items-center justify-center py-12 text-foreground/60 dark:text-foreground/50">
                 <AlertTriangle className="h-12 w-12 mb-4 opacity-50" />
                 <p className="text-lg font-medium">Arıza tanımı bulunamadı</p>
                 <p className="text-sm">Lütfen yöneticinize başvurun.</p>
@@ -1465,7 +1465,7 @@ export default function UrunKullanimPanel() {
                         </div>
                       </button>
                       {teknikServisFaults.length === 0 ? (
-                        <div className="text-center py-6 text-muted-foreground text-sm">
+                        <div className="text-center py-6 text-foreground/60 dark:text-foreground/50 text-sm">
                           Tanımlı arıza yok
                         </div>
                       ) : (
@@ -1528,7 +1528,7 @@ export default function UrunKullanimPanel() {
                         </div>
                       </button>
                       {aplikasyonFaults.length === 0 ? (
-                        <div className="text-center py-6 text-muted-foreground text-sm">
+                        <div className="text-center py-6 text-foreground/60 dark:text-foreground/50 text-sm">
                           Tanımlı arıza yok
                         </div>
                       ) : (
@@ -1659,7 +1659,7 @@ export default function UrunKullanimPanel() {
             {/* Device selection */}
             <div>
               <Label className="text-sm font-medium mb-2 block">Cihaz Seçin</Label>
-              <p className="text-xs text-muted-foreground mb-3">
+              <p className="text-xs text-foreground/70 dark:text-foreground/60 mb-3">
                 Ürün eklemek için önce bir cihaz seçin
               </p>
               {devicesToDisplay.length > 0 ? (
@@ -1680,7 +1680,7 @@ export default function UrunKullanimPanel() {
                         <div className="text-xs font-medium leading-tight truncate px-1">
                           {device.cihazAdi || device.model}
                         </div>
-                        <div className="text-[10px] text-muted-foreground font-mono truncate">
+                        <div className="text-[10px] text-foreground/60 dark:text-foreground/50 font-mono truncate">
                           {device.seriNumarasi || '-'}
                         </div>
                       </div>
@@ -1707,7 +1707,7 @@ export default function UrunKullanimPanel() {
                   ))}
                 </div>
               ) : (
-                <div className="text-center text-muted-foreground py-6 bg-muted rounded-lg">
+                <div className="text-center text-foreground/60 dark:text-foreground/50 py-6 bg-muted rounded-lg">
                   <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
                   <p className="text-sm">Bu laboratuvara tanımlı cihaz bulunamadı.</p>
                 </div>
@@ -1723,7 +1723,7 @@ export default function UrunKullanimPanel() {
                     <p className="text-sm font-medium">
                       Seçilen Cihaz: {selectedTrashDevice.cihazAdi || selectedTrashDevice.model}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-foreground/70 dark:text-foreground/60">
                       SN: {selectedTrashDevice.seriNumarasi}
                     </p>
                   </div>
@@ -1778,7 +1778,7 @@ export default function UrunKullanimPanel() {
 
                                 if (filtered.length === 0) {
                                   return (
-                                    <div className="p-4 text-center text-sm text-muted-foreground">
+                                    <div className="p-4 text-center text-sm text-foreground/60 dark:text-foreground/50">
                                       Ürün bulunamadı.
                                     </div>
                                   );
@@ -1807,7 +1807,7 @@ export default function UrunKullanimPanel() {
                                     />
                                     <div className="flex flex-col flex-1 min-w-0">
                                       <span className="text-sm">{product.stokAdi}</span>
-                                      <span className="text-xs text-muted-foreground">{product.stokKodu}</span>
+                                      <span className="text-xs text-foreground/70 dark:text-foreground/60">{product.stokKodu}</span>
                                     </div>
                                   </div>
                                 ));
@@ -1867,7 +1867,7 @@ export default function UrunKullanimPanel() {
                             <div key={item.id} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
                               <div className="flex-1">
                                 <p className="font-medium">{item.productName}</p>
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-xs text-foreground/70 dark:text-foreground/60">
                                   {item.productCode} • Kalan Test: {item.remainingTests}
                                 </p>
                               </div>
