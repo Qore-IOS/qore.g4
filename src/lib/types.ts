@@ -1031,3 +1031,39 @@ export interface FaultDefinition {
   createdByUid?: string;
   createdByName?: string;
 }
+
+// ==========================================
+// Nöbet Vardiyası Sistemi
+// ==========================================
+
+// Vardiya rolü (teknik servis veya aplikasyon)
+export type DutyShiftRole = 'teknik_servis' | 'aplikasyon';
+
+// Vardiya durumu
+export type DutyShiftStatus = 'active' | 'completed' | 'cancelled';
+
+// Nöbet vardiyası
+export interface DutyShift {
+  id: string;
+  // Personel bilgileri
+  userId: string;                  // Atanan kullanıcının ID'si
+  userName: string;                // Atanan kullanıcının adı
+  role: DutyShiftRole;             // Teknik servis veya aplikasyon
+  // Laboratuvar atamaları
+  laboratoryIds: string[];         // Atanan laboratuvar ID'leri
+  laboratoryNames: string[];       // Atanan laboratuvar adları
+  // Tarih aralığı
+  startDate: TimestampLike;        // Vardiya başlangıç tarihi
+  endDate: TimestampLike;          // Vardiya bitiş tarihi
+  // Durum
+  status: DutyShiftStatus;
+  // Meta bilgiler
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  updatedAt?: TimestampLike;
+  updatedByUid?: string;
+  updatedByName?: string;
+  // Notlar
+  notes?: string;
+}
