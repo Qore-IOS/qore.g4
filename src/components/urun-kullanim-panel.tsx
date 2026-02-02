@@ -1383,9 +1383,10 @@ export default function UrunKullanimPanel() {
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
-      
+
       <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
         <DialogContent className="max-w-xl p-0">
           <DialogHeader className="p-4 pb-0"><DialogTitle>Kamera ile Ürün Kullanımı Tara</DialogTitle></DialogHeader>
