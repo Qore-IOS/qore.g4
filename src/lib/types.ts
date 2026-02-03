@@ -1068,3 +1068,28 @@ export interface DutyShift {
   // Notlar
   notes?: string;
 }
+
+// ==========================================
+// Transfer Şablonu Sistemi
+// ==========================================
+
+// Şablon satırı - bir ürünü temsil eder
+export interface TransferTemplateItem {
+  stokKodu: string;
+  stokAdi: string;
+  tracking: TrackingMode;
+  defaultQty?: number; // Varsayılan adet (opsiyonel)
+}
+
+// Transfer şablonu
+export interface TransferTemplate {
+  id: string;
+  name: string;
+  items: TransferTemplateItem[];
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  updatedAt?: TimestampLike;
+  updatedByUid?: string;
+  updatedByName?: string;
+}
