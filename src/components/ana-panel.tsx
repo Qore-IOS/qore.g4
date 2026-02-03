@@ -1002,12 +1002,14 @@ export default function AnaPanel(props: AnaPanelProps) {
     performGoodsReceipt(itemsToProcess);
   };
   
-  const manualProducts = useMemo(() => {
+  // Barkodsuz giriş için tüm non-serial ürünleri listele (lot_manual, qty_manual, lot_barcode, qty_barcode)
+  const allNonSerialProducts = useMemo(() => {
     const opts: { code: string; name: string; tracking: TrackingMode }[] = [];
     productCodes.forEach(p => {
         if (!p.stokKodu) return;
         const tracking = productTracking[p.stokKodu] || resolveDefaultTrackingMode(p as any);
-        if (tracking === 'lot_manual' || tracking === 'qty_manual') {
+        // Seri takipli ürünleri hariç tut, diğer tüm takip modlarını dahil et
+        if (tracking !== 'serial') {
             opts.push({ code: p.stokKodu, name: productNames[p.stokKodu] || p.stokKodu, tracking });
         }
     });
@@ -1134,8 +1136,8 @@ export default function AnaPanel(props: AnaPanelProps) {
         <ManualInlineAdder
             visible={showManualInline}
             onClose={() => setShowManualInline(false)}
-            manualProducts={manualProducts.filter(p => p.tracking === 'lot_manual' || p.tracking === 'qty_manual')}
-            barcodeProducts={manualProducts.filter(p => p.tracking === 'lot_barcode' || p.tracking === 'qty_barcode')}
+            manualProducts={allNonSerialProducts.filter(p => p.tracking === 'lot_manual' || p.tracking === 'qty_manual')}
+            barcodeProducts={allNonSerialProducts.filter(p => p.tracking === 'lot_barcode' || p.tracking === 'qty_barcode')}
             onAddLot={({ code, name, lot, miad, qty }) => {
                 upsertGroupedRow(
                 setScannedItems,
