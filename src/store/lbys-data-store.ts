@@ -152,6 +152,10 @@ interface LbysStore {
 
   // Summary mode toggle
   setUseSummaryMode: (enabled: boolean) => void;
+
+  // Web Worker desteği için yeni fonksiyonlar
+  getExistingDates: () => Promise<string[]>;
+  uploadParsedData: (parsedData: any[]) => Promise<void>;
 }
 
 // --- HELPERS ---
@@ -209,7 +213,7 @@ export const useLbysDataStore = create<LbysStore>()(
       processingProgress: { current: 0, total: 0, status: '' },
       error: null,
       viewMode: 'approved', // Default: Onaylanmış testler
-      useSummaryMode: false, // Summary mode: migration sonrası aktive edilebilir
+      useSummaryMode: true, // Summary mode: Aktif (optimum performans)
       filters: {
         dateRange: { from: new Date(new Date().setDate(new Date().getDate() - 7)), to: new Date() },
         selectedHospitals: [],
@@ -864,6 +868,181 @@ export const useLbysDataStore = create<LbysStore>()(
           console.error('Migration error:', error);
           set({ error: "Migration hatası: " + error.message });
           return { success: false, message: error.message };
+        } finally {
+          set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
+        }
+      },
+
+      // Mevcut tarihleri al (incremental upload için)
+      getExistingDates: async () => {
+        try {
+          const { useSummaryMode } = get();
+
+          if (useSummaryMode) {
+            // Summary mode: daily summary koleksiyonundan tarihleri al
+            const snapshot = await getDocs(collection(db, COLLECTIONS.DAILY_SUMMARY));
+            const dates: string[] = [];
+            snapshot.forEach((doc) => {
+              dates.push(doc.id); // doc.id = "YYYY-MM-DD"
+            });
+            return dates;
+          } else {
+            // Legacy mode: analysis_results'tan unique tarihleri al
+            const snapshot = await getDocs(collection(db, 'analysis_results'));
+            const dateSet = new Set<string>();
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.date) dateSet.add(data.date);
+            });
+            return Array.from(dateSet);
+          }
+        } catch (error) {
+          console.error('Mevcut tarihler alınamadı:', error);
+          return [];
+        }
+      },
+
+      // Worker'dan gelen parse edilmiş veriyi yükle
+      uploadParsedData: async (parsedData) => {
+        if (!parsedData || parsedData.length === 0) {
+          set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
+          return;
+        }
+
+        const { hospitalDefinitions, useSummaryMode } = get();
+        const uploadBatchId = nanoid();
+
+        try {
+          set({ processingProgress: { current: 0, total: parsedData.length, status: 'Hastane isimleri eşleştiriliyor...' } });
+
+          // Hospital names eşleştirme
+          const recordsWithNames: AggregatedRecord[] = parsedData.map((record: any) => {
+            let hospitalName = 'Bilinmeyen Kurum';
+
+            if (record.isAsm) {
+              hospitalName = record.service;
+            } else {
+              hospitalName = hospitalDefinitions[record.hospitalId] || `Hastane (${record.hospitalId})`;
+            }
+
+            return {
+              ...record,
+              hospitalName,
+              uploadBatchId,
+              createdAt: new Date().toISOString()
+            };
+          });
+
+          // =====================================================
+          // Firestore'a yaz (optimized batch writing)
+          // =====================================================
+          const totalDocs = recordsWithNames.length;
+          set({ processingProgress: { current: 0, total: totalDocs, status: 'Buluta yazılıyor...' } });
+
+          const CHUNK_SIZE = 450;
+          let writtenCount = 0;
+
+          for (let i = 0; i < totalDocs; i += CHUNK_SIZE) {
+            const chunk = recordsWithNames.slice(i, i + CHUNK_SIZE);
+            const batch = writeBatch(db);
+
+            chunk.forEach((docData) => {
+              const docRef = doc(db, 'analysis_results', docData.id);
+              batch.set(docRef, docData, { merge: true });
+            });
+
+            await batch.commit();
+            writtenCount += chunk.length;
+            set({ processingProgress: { current: writtenCount, total: totalDocs, status: `Buluta yazılıyor... (${writtenCount}/${totalDocs})` } });
+
+            // UI nefes alsın
+            await new Promise(r => setTimeout(r, 0));
+          }
+
+          console.log(`Qore Analyse: ${totalDocs} kayıt buluta yüklendi.`);
+
+          // =====================================================
+          // Summary mode ise summary'leri de güncelle
+          // =====================================================
+          if (useSummaryMode) {
+            set({ processingProgress: { current: 0, total: 100, status: 'Summary veriler oluşturuluyor...' } });
+
+            // Günlük summary'ler oluştur
+            const dailySummaries = generateSummariesFromRecords(recordsWithNames);
+            set({ processingProgress: { current: 30, total: 100, status: `${dailySummaries.size} günlük summary oluşturuldu` } });
+
+            // Aylık summary'ler oluştur
+            const monthlySummaries = generateMonthlySummariesFromDaily(dailySummaries);
+            set({ processingProgress: { current: 40, total: 100, status: `${monthlySummaries.size} aylık summary oluşturuldu` } });
+
+            // Filter options güncelle
+            let filterOptions = get().filterOptions;
+            for (const summary of dailySummaries.values()) {
+              filterOptions = updateFilterOptionsFromSummary(summary, filterOptions);
+            }
+
+            // Hospital code map güncelle
+            for (const record of recordsWithNames) {
+              if (!record.isAsm && record.hospitalId) {
+                filterOptions.hospitalCodeMap[record.hospitalId] = record.hospitalName;
+              }
+            }
+
+            set({ processingProgress: { current: 50, total: 100, status: 'Summary veriler yazılıyor...' } });
+
+            // Summary'leri kaydet
+            await saveSummariesBatch(dailySummaries, monthlySummaries, filterOptions, (current, total, status) => {
+              const progress = 50 + Math.round((current / total) * 50);
+              set({ processingProgress: { current: progress, total: 100, status } });
+            });
+
+            // Local state güncelle
+            const existingSummaries = get().dailySummaries;
+            const newSummariesMap = new Map<string, DailySummary>();
+            dailySummaries.forEach((summary, id) => newSummariesMap.set(id, summary));
+
+            // Mevcut summary'leri güncelle veya yenilerini ekle
+            const updatedSummaries = existingSummaries.map(existing => {
+              const newVersion = newSummariesMap.get(existing.id);
+              if (newVersion) {
+                newSummariesMap.delete(existing.id);
+                return newVersion;
+              }
+              return existing;
+            });
+
+            newSummariesMap.forEach(newSummary => updatedSummaries.push(newSummary));
+
+            set({
+              dailySummaries: updatedSummaries,
+              monthlySummaries: Array.from(monthlySummaries.values()),
+              filterOptions
+            });
+
+            console.log(`Qore Analyse: ${dailySummaries.size} günlük summary güncellendi.`);
+          }
+
+          // Local aggregatedData güncelle
+          const currentData = get().aggregatedData;
+          const newDataMap = new Map(recordsWithNames.map(r => [r.id, r]));
+
+          const updatedData = currentData.map(existing => {
+            const newVersion = newDataMap.get(existing.id);
+            if (newVersion) {
+              newDataMap.delete(existing.id);
+              return newVersion;
+            }
+            return existing;
+          });
+
+          newDataMap.forEach(newRec => updatedData.push(newRec));
+
+          set({ aggregatedData: updatedData });
+          get().applyFilters();
+
+        } catch (error: any) {
+          set({ error: "Yükleme hatası: " + error.message });
+          console.error("Upload error:", error);
         } finally {
           set({ isLoading: false, processingProgress: { current: 0, total: 0, status: '' } });
         }
