@@ -844,13 +844,15 @@ export default function DirektTransferPanel() {
     }
   };
 
-  const manualProducts = useMemo(() => {
+  // Barkodsuz giriş için tüm non-serial ürünleri listele (lot_manual, qty_manual, lot_barcode, qty_barcode)
+  const allNonSerialProducts = useMemo(() => {
     const opts: { code: string; name: string; tracking: TrackingMode }[] = [];
     products.forEach(p => {
         const stokKodu = p.stokKodu ?? '';
         if (!stokKodu) return;
         const tracking = productTracking[stokKodu] || resolveDefaultTrackingMode(p as any);
-        if (tracking === 'lot_manual' || tracking === 'qty_manual') {
+        // Seri takipli ürünleri hariç tut, diğer tüm takip modlarını dahil et
+        if (tracking !== 'serial') {
             opts.push({ code: stokKodu, name: productNames[stokKodu] || stokKodu, tracking });
         }
     });
@@ -1125,7 +1127,7 @@ export default function DirektTransferPanel() {
                   depotName={depotName}
                   stockPool={depotStockData}
                   transferRows={directTransferItems}
-                  products={manualProducts}
+                  products={allNonSerialProducts}
                   onAddLot={({ code, name, lot, miad, qty }) => {
                     upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
                   }}

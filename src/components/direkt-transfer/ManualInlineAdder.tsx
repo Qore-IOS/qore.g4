@@ -3,7 +3,7 @@
  * @description Allows users to manually add products to a transfer list
  * either from depot stock or via manual entry.
  * @module components/direkt-transfer/ManualInlineAdder
- * @version 2.0.0
+ * @version 2.1.0
  */
 
 'use client';
@@ -19,7 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DepoStokItem } from '@/lib/types';
 import { direktTransferLogger } from '@/lib/logger';
 
@@ -53,7 +53,7 @@ export default function ManualInlineAdder({
   const [quantity, setQuantity] = useState<number | string>(1);
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'from_stock' | 'manual'>('from_stock');
-  
+
   const [selectedLotKey, setSelectedLotKey] = useState<string>('');
 
   const productsForCurrentTab = useMemo(() => {
@@ -66,9 +66,12 @@ export default function ManualInlineAdder({
     return uniqueCodesInStock
       .map(code => {
         const p = products.find(p => p.code === code);
+        // Ürün adını önce products listesinden, bulunamazsa stockPool'dan al
+        const stockItem = stockPool.find(item => item.stokKodu === code);
+        const name = p?.name || stockItem?.stokAdi || code;
         return {
           code: code,
-          name: p?.name || code,
+          name: name,
           tracking: p?.tracking || 'qty_barcode'
         };
       })
@@ -77,9 +80,32 @@ export default function ManualInlineAdder({
 
 
   const chosenProduct = useMemo(() => productsForCurrentTab.find(p => p.code === selectedProductCode), [productsForCurrentTab, selectedProductCode]);
-  
+
+  // Check if the chosen product is lot-tracked
+  const isLotTracked = useMemo(() => {
+    if (!chosenProduct) return false;
+    return chosenProduct.tracking === 'lot_barcode' || chosenProduct.tracking === 'lot_manual';
+  }, [chosenProduct]);
+
+  // Check if the chosen product is qty-tracked
+  const isQtyTracked = useMemo(() => {
+    if (!chosenProduct) return false;
+    return chosenProduct.tracking === 'qty_barcode' || chosenProduct.tracking === 'qty_manual';
+  }, [chosenProduct]);
+
+  // Calculate total stock for qty-tracked products
+  const totalStockForQtyProduct = useMemo(() => {
+    if (!chosenProduct || !isQtyTracked) return 0;
+    const itemsInStock = stockPool.filter(item => item.stokKodu === chosenProduct.code && !item.isShipped);
+    const totalCount = itemsInStock.length;
+    const allocated = transferRows
+      .filter(r => r.stokKodu === chosenProduct.code)
+      .reduce((sum, r) => sum + (r.adet ?? 1), 0);
+    return totalCount - allocated;
+  }, [chosenProduct, isQtyTracked, stockPool, transferRows]);
+
   const availableLotsForProduct = useMemo(() => {
-    if (!chosenProduct) return [];
+    if (!chosenProduct || !isLotTracked) return [];
     const lotsInStock = stockPool.filter(item => item.stokKodu === chosenProduct.code && !item.isShipped);
     const uniqueLots = Array.from(new Set(lotsInStock.map(item => `${item.lotNumarasi || 'N/A'}|${item.miad || 'N/A'}`)));
     return uniqueLots.map(key => {
@@ -88,7 +114,7 @@ export default function ManualInlineAdder({
         const allocated = transferRows.filter(r => r.stokKodu === chosenProduct.code && r.lotNumarasi === lotNum && r.miad === miadVal).reduce((sum, r) => sum + (r.adet ?? 1), 0);
         return { key, label: `${lotNum} - ${miadVal}`, remaining: count - allocated };
     });
-  }, [chosenProduct, stockPool, transferRows]);
+  }, [chosenProduct, isLotTracked, stockPool, transferRows]);
 
   useEffect(() => {
     if (!visible) resetLocalState();
@@ -106,7 +132,7 @@ export default function ManualInlineAdder({
     setSelectedLotKey('');
     setIsProductPopoverOpen(false);
   };
-  
+
   /**
    * Handles adding a product to the transfer list
    */
@@ -116,36 +142,59 @@ export default function ManualInlineAdder({
     const name = chosenProduct.name || chosenProduct.code;
 
     if (activeTab === 'manual') {
-        const payload = {
-            code: chosenProduct.code,
-            name,
-            lot: lot.trim(),
-            miad: normalizeMiad(miad),
-            qty: qtyNum,
-        };
-        onAddLot(payload);
-        direktTransferLogger.debug('Manuel ürün eklendi', {
-          mode: 'manual',
-          stokKodu: payload.code,
-          lot: payload.lot,
-          qty: payload.qty,
-        });
+        // Manuel tab: lot takipli ürünler için lot/miad ile, adet takipli için sadece adet ile ekle
+        if (isLotTracked) {
+            const payload = {
+                code: chosenProduct.code,
+                name,
+                lot: lot.trim(),
+                miad: normalizeMiad(miad),
+                qty: qtyNum,
+            };
+            onAddLot(payload);
+            direktTransferLogger.debug('Manuel lot ürünü eklendi', {
+              mode: 'manual',
+              stokKodu: payload.code,
+              lot: payload.lot,
+              qty: payload.qty,
+            });
+        } else {
+            // Adet takipli ürün
+            const payload = { code: chosenProduct.code, name, qty: qtyNum };
+            onAddQty(payload);
+            direktTransferLogger.debug('Manuel adet ürünü eklendi', {
+              mode: 'manual',
+              stokKodu: payload.code,
+              qty: payload.qty,
+            });
+        }
     } else { // from_stock
-        const [lotNum, miadVal] = selectedLotKey.split('|');
-        const payload = {
-            code: chosenProduct.code,
-            name,
-            lot: lotNum,
-            miad: miadVal,
-            qty: qtyNum
-        };
-        onAddLot(payload);
-        direktTransferLogger.debug('Stoktan ürün eklendi', {
-          mode: 'from_stock',
-          stokKodu: payload.code,
-          lot: payload.lot,
-          qty: payload.qty,
-        });
+        if (isLotTracked) {
+            const [lotNum, miadVal] = selectedLotKey.split('|');
+            const payload = {
+                code: chosenProduct.code,
+                name,
+                lot: lotNum,
+                miad: miadVal,
+                qty: qtyNum
+            };
+            onAddLot(payload);
+            direktTransferLogger.debug('Stoktan lot ürünü eklendi', {
+              mode: 'from_stock',
+              stokKodu: payload.code,
+              lot: payload.lot,
+              qty: payload.qty,
+            });
+        } else {
+            // Adet takipli ürün - stoktan seçme
+            const payload = { code: chosenProduct.code, name, qty: qtyNum };
+            onAddQty(payload);
+            direktTransferLogger.debug('Stoktan adet ürünü eklendi', {
+              mode: 'from_stock',
+              stokKodu: payload.code,
+              qty: payload.qty,
+            });
+        }
     }
 
     resetLocalState();
@@ -153,6 +202,23 @@ export default function ManualInlineAdder({
   };
 
   const selectedLotInfo = availableLotsForProduct.find(l => l.key === selectedLotKey);
+
+  // Validation for add button
+  const isAddDisabled = useMemo(() => {
+    if (!chosenProduct) return true;
+
+    if (activeTab === 'manual') {
+      // Manuel modda: lot takipli ürünler için lot ve miad zorunlu
+      if (isLotTracked && (!lot || !miad)) return true;
+      return false;
+    } else {
+      // Stoktan seçme modunda: lot takipli ürünler için lot seçimi zorunlu
+      if (isLotTracked && !selectedLotKey) return true;
+      // Adet takipli ürünler için stok kontrolü
+      if (isQtyTracked && totalStockForQtyProduct <= 0) return true;
+      return false;
+    }
+  }, [chosenProduct, activeTab, isLotTracked, isQtyTracked, lot, miad, selectedLotKey, totalStockForQtyProduct]);
 
   return (
     <div className="mt-2 rounded-xl border bg-background/40 p-3">
@@ -213,47 +279,80 @@ export default function ManualInlineAdder({
             {chosenProduct && (
               <>
                 {activeTab === 'from_stock' ? (
-                  <>
-                    <div className="min-w-[200px]">
-                      <Label className="text-xs text-muted-foreground mb-1 block">Lot / Miad (Kalan Stok)</Label>
-                      <Select value={selectedLotKey} onValueChange={setSelectedLotKey}>
-                        <SelectTrigger><SelectValue placeholder="Lot seçin..."/></SelectTrigger>
-                        <SelectContent>
-                          {availableLotsForProduct.map(lot => (
-                            <SelectItem key={lot.key} value={lot.key}>{lot.label} ({lot.remaining})</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max={selectedLotInfo?.remaining || 1}
-                        value={quantity}
-                        onChange={e => setQuantity(e.target.value)}
-                        className="w-28"
-                      />
-                    </div>
-                  </>
-                ) : ( // manual tab
-                  <>
-                    <div>
-                      <Label className="text-xs text-muted-foreground mb-1 block">Lot</Label>
-                      <Input value={lot} onChange={e => setLot(e.target.value)} className="w-40" placeholder="Lot Numarası"/>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground mb-1 block">Miad</Label>
-                      <ExpiryDateInput value={miad} onChange={setMiad} className="w-44 h-9 rounded-md border px-3 bg-background" />
-                    </div>
+                  // Stoktan seçme modu
+                  isLotTracked ? (
+                    // Lot takipli ürünler: Lot seçimi + Adet
+                    <>
+                      <div className="min-w-[200px]">
+                        <Label className="text-xs text-muted-foreground mb-1 block">Lot / Miad (Kalan Stok)</Label>
+                        <Select value={selectedLotKey} onValueChange={setSelectedLotKey}>
+                          <SelectTrigger><SelectValue placeholder="Lot seçin..."/></SelectTrigger>
+                          <SelectContent>
+                            {availableLotsForProduct.map(lot => (
+                              <SelectItem key={lot.key} value={lot.key}>{lot.label} ({lot.remaining})</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max={selectedLotInfo?.remaining || 1}
+                          value={quantity}
+                          onChange={e => setQuantity(e.target.value)}
+                          className="w-28"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    // Adet takipli ürünler: Toplam stok göster + Adet
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs text-muted-foreground">Depo Stoğu:</Label>
+                        <span className="text-sm font-semibold text-primary">{totalStockForQtyProduct}</span>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max={totalStockForQtyProduct}
+                          value={quantity}
+                          onChange={e => setQuantity(e.target.value)}
+                          className="w-28"
+                        />
+                      </div>
+                    </>
+                  )
+                ) : (
+                  // Manuel takip modu
+                  isLotTracked ? (
+                    // Lot takipli ürünler: Lot + Miad + Adet girişi
+                    <>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Lot</Label>
+                        <Input value={lot} onChange={e => setLot(e.target.value)} className="w-40" placeholder="Lot Numarası"/>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Miad</Label>
+                        <ExpiryDateInput value={miad} onChange={setMiad} className="w-44 h-9 rounded-md border px-3 bg-background" />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
+                        <Input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-28" />
+                      </div>
+                    </>
+                  ) : (
+                    // Adet takipli ürünler: Sadece Adet girişi
                     <div>
                       <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
                       <Input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-28" />
                     </div>
-                  </>
+                  )
                 )}
-                <Button onClick={handleAdd} disabled={!chosenProduct || (activeTab === 'manual' && (!lot || !miad)) || (activeTab === 'from_stock' && !selectedLotKey)}>Ekle</Button>
+                <Button onClick={handleAdd} disabled={isAddDisabled}>Ekle</Button>
               </>
             )}
 
