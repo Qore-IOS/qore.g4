@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useState, Suspense, ChangeEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption } from '@/lib/types';
+import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption, TransferTemplate } from '@/lib/types';
 import type { BarcodeFormat, ParsedGeneric } from '@/lib/barcode';
 
 // Type imports from direkt-transfer module
@@ -42,7 +42,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package } from 'lucide-react';
+import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
@@ -56,6 +56,7 @@ import { compareAsc, parse as parseDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import BackButton from '@/components/BackButton';
 import ManualInlineAdder from '@/components/direkt-transfer/ManualInlineAdder';
+import TemplateSelector from '@/components/direkt-transfer/TemplateSelector';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
@@ -254,7 +255,10 @@ export default function DirektTransferPanel() {
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [showManualInline, setShowManualInline] = useState(false);
-  
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
+  const [templates, setTemplates] = useState<TransferTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+
   const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   
@@ -320,6 +324,26 @@ export default function DirektTransferPanel() {
     fetchPrerequisites();
   }, [fetchPrerequisites]);
 
+  // Fetch templates when template selector is opened
+  const fetchTemplates = useCallback(async () => {
+    if (templates.length > 0) return; // Already loaded
+    setTemplatesLoading(true);
+    try {
+      const snap = await getDocs(collection(db, 'transferTemplates'));
+      const templateList = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        createdAt: d.data().createdAt?.toDate?.() || null,
+        updatedAt: d.data().updatedAt?.toDate?.() || null,
+      })) as TransferTemplate[];
+      setTemplates(templateList.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+    } catch (err) {
+      console.error('Error fetching templates:', err);
+      toast({ title: 'Hata', description: 'Şablonlar yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, [templates.length, toast]);
 
   useEffect(() => {
     const trackingMap: Record<string, TrackingMode> = {};
@@ -981,6 +1005,10 @@ export default function DirektTransferPanel() {
                 <History className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">Transfer Geçmişi</span>
             </Button>
+            <Button variant="outline" size="sm" onClick={() => router.push('/transfer-sablonlari')} className="text-xs sm:text-sm">
+                <FileText className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Transfer Şablonu</span>
+            </Button>
           </div>
         </div>
       <Card>
@@ -1080,12 +1108,23 @@ export default function DirektTransferPanel() {
                 <Button variant="default" size="icon" onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Seri Tarama" className="h-9 w-9 sm:h-10 sm:w-10"><Camera className="h-4 w-4" /></Button>
               </div>
             </div>
-            {/* Manuel Button */}
+            {/* Manuel and Template Buttons */}
             <div className="flex items-end gap-2">
               <Button variant="outline" onClick={() => setShowManualInline(v => !v)} title="Manuel Ürün Ekle" size="sm" className="text-xs sm:text-sm">
                 <Plus className="mr-1.5 h-4 w-4" />
                 <span className="hidden sm:inline">Manuel Ürün</span>
                 <span className="sm:hidden">Manuel</span>
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }}
+                title="Şablondan Seç"
+                size="sm"
+                className="text-xs sm:text-sm"
+              >
+                <ListChecks className="mr-1.5 h-4 w-4" />
+                <span className="hidden sm:inline">Şablondan Seç</span>
+                <span className="sm:hidden">Şablon</span>
               </Button>
             </div>
           </div>
@@ -1137,6 +1176,23 @@ export default function DirektTransferPanel() {
                 />
              </div>
           }
+
+          {showTemplateSelector && (
+            <TemplateSelector
+              visible={showTemplateSelector}
+              onClose={() => setShowTemplateSelector(false)}
+              templates={templates}
+              templatesLoading={templatesLoading}
+              stockPool={depotStockData}
+              transferRows={directTransferItems}
+              onAddLot={({ code, name, lot, miad, qty }) => {
+                upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
+              }}
+              onAddQty={({ code, name, qty }) => {
+                upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
+              }}
+            />
+          )}
 
           {isBorcMode ? (
             <div className="grid grid-cols-2 gap-2">
