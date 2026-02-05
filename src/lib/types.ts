@@ -1056,6 +1056,8 @@ export interface DutyShift {
   // Tarih aralığı
   startDate: TimestampLike;        // Vardiya başlangıç tarihi
   endDate: TimestampLike;          // Vardiya bitiş tarihi
+  startTime?: string;              // Başlangıç saati (HH:mm)
+  endTime?: string;                // Bitiş saati (HH:mm)
   // Durum
   status: DutyShiftStatus;
   // Meta bilgiler
