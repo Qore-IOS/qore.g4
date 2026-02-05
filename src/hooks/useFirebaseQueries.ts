@@ -586,6 +586,49 @@ export function useActiveDutyShifts() {
 }
 
 /**
+ * Get upcoming duty shifts for the next 30 days for a specific lab
+ * Used in DutyScheduleModal component
+ */
+export function useUpcomingDutyShifts(labId: string | null) {
+  return useQuery({
+    queryKey: ['dutyShifts', 'upcoming30', labId],
+    queryFn: async () => {
+      if (!labId) return [];
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const thirtyDaysLater = new Date(now);
+      thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+      thirtyDaysLater.setHours(23, 59, 59, 999);
+
+      const snap = await getDocs(
+        query(
+          collection(db, 'dutyShifts'),
+          where('status', '==', 'active')
+        )
+      );
+      return snap.docs
+        .map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift))
+        .filter(shift => {
+          const startDate = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
+          const endDate = shift.endDate instanceof Date ? shift.endDate : new Date(shift.endDate as any);
+          // Shift overlaps with the next 30 days AND includes this lab
+          return shift.laboratoryIds.includes(labId) &&
+            startDate <= thirtyDaysLater && endDate >= now;
+        })
+        .sort((a, b) => {
+          const aStart = a.startDate instanceof Date ? a.startDate : new Date(a.startDate as any);
+          const bStart = b.startDate instanceof Date ? b.startDate : new Date(b.startDate as any);
+          return aStart.getTime() - bStart.getTime();
+        });
+    },
+    enabled: !!labId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
  * Get all duty shifts (for admin view)
  */
 export function useAllDutyShifts() {
