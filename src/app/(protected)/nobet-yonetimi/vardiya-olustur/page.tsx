@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ArrowLeft, Save, Loader2, Calendar } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Calendar, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { useUsers, useHospitals } from '@/hooks/useFirebaseQueries';
@@ -29,6 +29,8 @@ export default function VardiyaOlusturPage() {
   const [selectedLabs, setSelectedLabs] = useState<string[]>([]);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [startTime, setStartTime] = useState<string>('08:00');
+  const [endTime, setEndTime] = useState<string>('17:00');
   const [notes, setNotes] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -87,14 +89,20 @@ export default function VardiyaOlusturPage() {
     setIsSaving(true);
 
     try {
+      // Combine date and time into full timestamps
+      const startDateTime = new Date(`${startDate}T${startTime}:00`);
+      const endDateTime = new Date(`${endDate}T${endTime}:00`);
+
       await addDoc(collection(db, 'dutyShifts'), {
         userId: selectedUserId,
         userName: selectedUserName,
         role: selectedRole,
         laboratoryIds: selectedLabs,
         laboratoryNames: selectedLabNames,
-        startDate: Timestamp.fromDate(new Date(startDate)),
-        endDate: Timestamp.fromDate(new Date(endDate + 'T23:59:59')),
+        startDate: Timestamp.fromDate(startDateTime),
+        endDate: Timestamp.fromDate(endDateTime),
+        startTime,
+        endTime,
         status: 'active',
         notes: notes || null,
         createdAt: Timestamp.now(),
@@ -182,23 +190,49 @@ export default function VardiyaOlusturPage() {
                 )}
               </div>
 
-              {/* Date Range */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Başlangıç Tarihi</Label>
-                  <Input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
+              {/* Date & Time Range */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Başlangıç Tarihi</Label>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Başlangıç Saati
+                    </Label>
+                    <Input
+                      type="time"
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value)}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Bitiş Tarihi</Label>
-                  <Input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Bitiş Tarihi</Label>
+                    <Input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Bitiş Saati
+                    </Label>
+                    <Input
+                      type="time"
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
 
