@@ -19,20 +19,25 @@ export interface PerformanceMetrics {
   periodicMaintenanceForms: number;
   totalPeriodicMaintenanceForms: number;
   recurrenceCount: number;
-  supportCount: number; // Destek verilen arıza sayısı
+  supportCount: number;
+
+  // Peer comparison metrics
+  avgFaultsAssignedForRole: number;
+  avgFaultsResolvedForRole: number;
+  sameRoleTechnicianCount: number;
 
   // Overdue metrics
   overdueMaintenanceTasks: number;
   overduePeriodicParts: number;
 
-  // Calculated scores (0-100 scale for each, then weighted)
-  faultAssignmentScore: number; // max 20
-  interventionTimeScore: number; // max 15
-  resolutionTimeScore: number; // max 15
-  visitFrequencyScore: number; // max 15
-  onsiteRatioScore: number; // max 15
-  maintenanceContributionScore: number; // max 20
-  supportScore: number; // max 10 - destek puanı
+  // Calculated scores
+  faultAssignmentScore: number; // max 30 (fulfillment 20 + volume bonus 10)
+  interventionTimeScore: number; // max 10 (continuous linear)
+  resolutionTimeScore: number; // max 15 (quality 10 + volume 5)
+  visitFrequencyScore: number; // max 10
+  onsiteRatioScore: number; // max 10 (with sample threshold)
+  maintenanceContributionScore: number; // max 15 (expected share based)
+  supportScore: number; // max 10
   recurrencePenalty: number; // -10 to 0
   overduePenalty: number; // -15 to 0
 
@@ -45,26 +50,18 @@ export interface PersonnelPerformance {
   metrics: PerformanceMetrics;
 }
 
-// Calculate intervention time score (max 15 points)
+// Continuous intervention time score (max 10 points)
+// Linear: 0 min = 10, 120 min (2h) = 0
 function calculateInterventionTimeScore(avgMinutes: number): number {
   if (avgMinutes <= 0) return 0; // No data
-  if (avgMinutes <= 30) return 15;
-  if (avgMinutes <= 60) return 12;
-  if (avgMinutes <= 120) return 9;
-  if (avgMinutes <= 240) return 6;
-  if (avgMinutes <= 480) return 3;
-  return 0;
+  return Math.max(0, Math.min(10, 10 * (1 - avgMinutes / 120)));
 }
 
-// Calculate resolution time score (max 15 points)
-function calculateResolutionTimeScore(avgMinutes: number): number {
+// Continuous resolution time quality score (max 10 points)
+// Linear: 0 min = 10, 480 min (8h) = 0
+function calculateResolutionQualityScore(avgMinutes: number): number {
   if (avgMinutes <= 0) return 0; // No data
-  if (avgMinutes <= 60) return 15;
-  if (avgMinutes <= 120) return 12;
-  if (avgMinutes <= 240) return 9;
-  if (avgMinutes <= 480) return 6;
-  if (avgMinutes <= 1440) return 3;
-  return 0;
+  return Math.max(0, Math.min(10, 10 * (1 - avgMinutes / 480)));
 }
 
 export interface PerformanceFilters {
@@ -234,27 +231,11 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
   const faultsForCalculation = (hasDateFilter || hasLabFilter) ? filteredFaults : allFaults;
   const formsForCalculation = (hasDateFilter || hasLabFilter) ? filteredForms : allForms;
 
-  // Calculate total periodic maintenance forms
-  const totalPeriodicMaintenanceForms = formsForCalculation.filter(f => f.islemTuru === 'periyodik_bakim').length;
-
-  // Calculate average institution visits
-  const visitCounts = technicians.map(user => {
-    const userForms = formsForCalculation.filter(f => f.createdByUid === user.uid).length;
-    const userOnsiteInterventions = faultsForCalculation.filter(f =>
-      f.assignedToUid === user.uid && f.interventionType === 'yerinde'
-    ).length;
-    return userForms + userOnsiteInterventions;
-  });
-  const avgInstitutionVisits = visitCounts.length > 0
-    ? visitCounts.reduce((a, b) => a + b, 0) / visitCounts.length
-    : 0;
-
   // Count faults by type
   const teknikServisFaults = faultsForCalculation.filter(f => f.faultType === 'teknik_servis');
   const aplikasyonFaults = faultsForCalculation.filter(f => f.faultType === 'aplikasyon');
 
   // Build map of lab -> personnel count (per role) for expected fault calculation
-  // This counts how many personnel have each lab as primary, grouped by role
   const teknikPersonnelPerLab = new Map<string, number>();
   const aplikasyonPersonnelPerLab = new Map<string, number>();
 
@@ -282,11 +263,8 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     let expectedTotal = 0;
 
     for (const labId of userPrimaryLabs) {
-      // Count faults in this lab
       const faultsInLab = faultsByType.filter(f => f.hospitalId === labId).length;
-      // Get number of personnel responsible for this lab
       const personnelCount = personnelPerLabMap.get(labId) || 1;
-      // Add this user's expected share
       expectedTotal += faultsInLab / personnelCount;
     }
 
@@ -302,12 +280,10 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     const isAplikasyon = userRole === 'aplikasyon';
     const maintenanceType = isAplikasyon ? 'aplikasyon' : 'teknik_servis';
 
-    // Get all devices in primary laboratories
     const primaryLabDeviceIds = devices
       .filter(d => d.hospitalId && userPrimaryLabs.includes(d.hospitalId))
       .map(d => d.id);
 
-    // Calculate overdue maintenance tasks
     let overdueMaintenanceTasks = 0;
     const relevantPlans = maintenancePlans.filter(
       p => primaryLabDeviceIds.includes(p.deviceId) && p.type === maintenanceType
@@ -325,7 +301,6 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
       }
     }
 
-    // Calculate overdue periodic parts
     let overduePeriodicParts = 0;
     const relevantPartChanges = periodicPartChanges.filter(p => {
       if (!primaryLabDeviceIds.includes(p.deviceId)) return false;
@@ -347,15 +322,91 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     return { overdueMaintenanceTasks, overduePeriodicParts };
   };
 
-  // Calculate performance for each technician
+  // ============================================================================
+  // PRE-CALCULATE PEER AVERAGES (per role) for fair comparison
+  // ============================================================================
+
+  const teknikTechnicians = technicians.filter(u => u.role === 'teknik_servis');
+  const aplikasyonTechnicians = technicians.filter(u => u.role === 'aplikasyon');
+
+  // Pre-compute per-user fault counts for peer averaging
+  const userFaultCounts = new Map<string, { assigned: number; resolved: number }>();
+  for (const user of technicians) {
+    const isAplikasyon = user.role === 'aplikasyon';
+    const primaryLabs = user.primaryLaboratories || [];
+    const hasPrimaryLabs = primaryLabs.length > 0;
+    const allRelevantFaults = isAplikasyon ? aplikasyonFaults : teknikServisFaults;
+    const relevantFaults = hasPrimaryLabs
+      ? allRelevantFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : allRelevantFaults;
+
+    const assigned = relevantFaults.filter(f => f.assignedToUid === user.uid).length;
+
+    const relevantFaultsForResolution = hasPrimaryLabs
+      ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+      : faultsForCalculation;
+    const resolved = relevantFaultsForResolution.filter(f =>
+      f.closedByUid === user.uid && f.interventionStartedAt && f.closedAt
+    ).length;
+
+    userFaultCounts.set(user.uid, { assigned, resolved });
+  }
+
+  // Calculate averages per role
+  const calcRoleAvg = (roleUsers: User[]) => {
+    if (roleUsers.length === 0) return { avgAssigned: 0, avgResolved: 0 };
+    const totals = roleUsers.reduce((acc, u) => {
+      const counts = userFaultCounts.get(u.uid) || { assigned: 0, resolved: 0 };
+      return { assigned: acc.assigned + counts.assigned, resolved: acc.resolved + counts.resolved };
+    }, { assigned: 0, resolved: 0 });
+    return {
+      avgAssigned: totals.assigned / roleUsers.length,
+      avgResolved: totals.resolved / roleUsers.length,
+    };
+  };
+
+  const teknikAvg = calcRoleAvg(teknikTechnicians);
+  const aplikasyonAvg = calcRoleAvg(aplikasyonTechnicians);
+
+  // Calculate average institution visits per role
+  const calcVisitAvg = (roleUsers: User[]) => {
+    if (roleUsers.length === 0) return 0;
+    const total = roleUsers.reduce((sum, user) => {
+      const primaryLabs = user.primaryLaboratories || [];
+      const hasPrimaryLabs = primaryLabs.length > 0;
+      const relevantForms = hasPrimaryLabs
+        ? formsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+        : formsForCalculation;
+      const relevantFaultsForVisits = hasPrimaryLabs
+        ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
+        : faultsForCalculation;
+      const userForms = relevantForms.filter(f => f.createdByUid === user.uid).length;
+      const onsiteInterventions = relevantFaultsForVisits.filter(f =>
+        f.assignedToUid === user.uid && f.interventionType === 'yerinde'
+      ).length;
+      return sum + userForms + onsiteInterventions;
+    }, 0);
+    return total / roleUsers.length;
+  };
+
+  const teknikVisitAvg = calcVisitAvg(teknikTechnicians);
+  const aplikasyonVisitAvg = calcVisitAvg(aplikasyonTechnicians);
+
+  // ============================================================================
+  // CALCULATE PERFORMANCE FOR EACH TECHNICIAN
+  // ============================================================================
+
   const performances: PersonnelPerformance[] = [];
 
   for (const user of technicians) {
     const isAplikasyon = user.role === 'aplikasyon';
-
-    // Use primaryLaboratories for performance calculation, fallback to empty array
     const primaryLabs = user.primaryLaboratories || [];
     const hasPrimaryLabs = primaryLabs.length > 0;
+
+    // Peer averages for this user's role
+    const roleAvg = isAplikasyon ? aplikasyonAvg : teknikAvg;
+    const roleVisitAvg = isAplikasyon ? aplikasyonVisitAvg : teknikVisitAvg;
+    const sameRoleTechnicianCount = isAplikasyon ? aplikasyonTechnicians.length : teknikTechnicians.length;
 
     // Filter faults for primary laboratories only
     const allRelevantFaults = isAplikasyon ? aplikasyonFaults : teknikServisFaults;
@@ -363,30 +414,43 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
       ? allRelevantFaults.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
       : allRelevantFaults;
 
-    // 1. Fault Assignment Score (max 20 points)
-    // Calculate expected faults based on primary laboratories
-    // Each lab's faults are divided by the number of personnel who have that lab as primary
+    // =========================================================================
+    // 1. ARIZA ÜSTLENME & İŞ YÜKÜ (max 30 points)
+    //    Fulfillment (max 20): Meeting expected share
+    //    Volume bonus (max 10): Handling more than average
+    // =========================================================================
     const faultsByType = isAplikasyon ? aplikasyonFaults : teknikServisFaults;
     const expectedFaults = calculateExpectedFaults(primaryLabs, user.role, faultsByType);
-
-    // Count faults assigned to this user (from primary labs only)
     const faultsAssigned = relevantFaults.filter(f => f.assignedToUid === user.uid).length;
     const totalFaultsForRole = relevantFaults.length;
 
-    // Score based on meeting expected share
-    // If user meets or exceeds expected: full 20 points
-    // If user is below expected: proportional score
-    let faultAssignmentScore = 0;
+    let fulfillmentScore = 0;
     if (expectedFaults > 0) {
-      const fulfillmentRatio = faultsAssigned / expectedFaults;
-      // Cap at 1.0 (meeting 100% of expectation = 20 points, 50% = 10 points)
-      faultAssignmentScore = Math.min(20, fulfillmentRatio * 20);
+      // Proportional to meeting expected share (100% = 20 pts)
+      fulfillmentScore = Math.min(20, (faultsAssigned / expectedFaults) * 20);
+    } else if (roleAvg.avgAssigned > 0) {
+      // No expected faults (no primary labs?) → compare against peer average
+      fulfillmentScore = Math.min(20, (faultsAssigned / roleAvg.avgAssigned) * 20);
     } else if (faultsAssigned > 0) {
-      // No expected faults but user still took some (bonus)
-      faultAssignmentScore = 20;
+      // No baseline at all, but did some work
+      fulfillmentScore = 10;
     }
 
-    // 2. Intervention Start Time (max 15 points) - filter by primary labs
+    // Volume bonus: reward handling more faults than role average
+    let volumeBonus = 0;
+    if (roleAvg.avgAssigned > 0) {
+      // 1x average = 5 pts, 2x average = 10 pts (max)
+      volumeBonus = Math.min(10, (faultsAssigned / roleAvg.avgAssigned) * 5);
+    } else if (faultsAssigned > 0) {
+      volumeBonus = 5; // No average baseline, give partial
+    }
+
+    const faultAssignmentScore = Math.min(30, fulfillmentScore + volumeBonus);
+
+    // =========================================================================
+    // 2. MÜDAHALE BAŞLATMA HIZI (max 10 points) - Continuous linear
+    //    0 min = 10 pts, 120 min = 0 pts
+    // =========================================================================
     const faultsWithIntervention = (hasPrimaryLabs
       ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
       : faultsForCalculation
@@ -405,7 +469,11 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     }
     const interventionTimeScore = calculateInterventionTimeScore(avgInterventionStartTimeMinutes);
 
-    // 3. Resolution Time (max 15 points) - filter by primary labs
+    // =========================================================================
+    // 3. ÇÖZÜM SÜRESİ & BAŞARISI (max 15 points)
+    //    Quality (max 10): Based on avg resolution time (continuous)
+    //    Volume (max 5): Reward for resolving more faults than average
+    // =========================================================================
     const resolvedFaults = (hasPrimaryLabs
       ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
       : faultsForCalculation
@@ -422,9 +490,24 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
       }, 0);
       avgResolutionTimeMinutes = totalMinutes / resolvedFaults.length;
     }
-    const resolutionTimeScore = calculateResolutionTimeScore(avgResolutionTimeMinutes);
 
-    // 4. Institution Visit Frequency (max 15 points) - filter by primary labs
+    const resolutionQuality = calculateResolutionQualityScore(avgResolutionTimeMinutes);
+
+    // Volume component: resolved faults vs peer average
+    let resolutionVolume = 0;
+    if (roleAvg.avgResolved > 0) {
+      // 1x average = 2.5 pts, 2x average = 5 pts (max)
+      resolutionVolume = Math.min(5, (resolvedFaults.length / roleAvg.avgResolved) * 2.5);
+    } else if (resolvedFaults.length > 0) {
+      resolutionVolume = 2.5;
+    }
+
+    const resolutionTimeScore = resolutionQuality + resolutionVolume;
+
+    // =========================================================================
+    // 4. KURUM ZİYARETİ (max 10 points) - Relative to role average
+    //    1x average = 5 pts, 2x average = 10 pts
+    // =========================================================================
     const relevantForms = hasPrimaryLabs
       ? formsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
       : formsForCalculation;
@@ -442,20 +525,34 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     const institutionVisits = userForms + onsiteInterventions;
 
     let visitFrequencyScore = 0;
-    if (avgInstitutionVisits > 0) {
-      const ratio = institutionVisits / avgInstitutionVisits;
-      visitFrequencyScore = Math.min(15, ratio * 7.5); // 2x average = 15 pts
+    if (roleVisitAvg > 0) {
+      const ratio = institutionVisits / roleVisitAvg;
+      visitFrequencyScore = Math.min(10, ratio * 5); // 2x average = 10 pts
+    } else if (institutionVisits > 0) {
+      visitFrequencyScore = 5;
     }
 
-    // 5. On-site Intervention Ratio (max 15 points)
+    // =========================================================================
+    // 5. KURUMDA MÜDAHALE ORANI (max 10 points) - With sample threshold
+    //    100% on-site = 10 pts, but scaled down if < 3 total interventions
+    // =========================================================================
     const totalInterventions = onsiteInterventions + phoneInterventions;
     let onsiteRatioScore = 0;
     if (totalInterventions > 0) {
       const onsiteRatio = onsiteInterventions / totalInterventions;
-      onsiteRatioScore = onsiteRatio * 15;
+      let baseScore = onsiteRatio * 10;
+      // Scale down for small sample sizes to prevent 1/1 = 100% scoring full points
+      if (totalInterventions < 3) {
+        baseScore = baseScore * (totalInterventions / 3);
+      }
+      onsiteRatioScore = baseScore;
     }
 
-    // 6. Periodic Maintenance Contribution (max 20 points) - filter by primary labs
+    // =========================================================================
+    // 6. PERİYODİK BAKIM KATKISI (max 15 points) - Expected share based
+    //    If there are N technicians of same role and T total periodic forms,
+    //    each should do T/N. Score = (actual / expected) * 15
+    // =========================================================================
     const relevantPeriodicForms = hasPrimaryLabs
       ? relevantForms.filter(f => f.islemTuru === 'periyodik_bakim')
       : formsForCalculation.filter(f => f.islemTuru === 'periyodik_bakim');
@@ -463,13 +560,17 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
     const userPeriodicForms = relevantPeriodicForms.filter(f => f.createdByUid === user.uid).length;
     let maintenanceContributionScore = 0;
-    if (totalRelevantPeriodicForms > 0) {
-      const ratio = userPeriodicForms / totalRelevantPeriodicForms;
-      maintenanceContributionScore = Math.min(20, ratio * 100); // 20% contribution = 20 pts
+    if (totalRelevantPeriodicForms > 0 && sameRoleTechnicianCount > 0) {
+      const expectedShare = totalRelevantPeriodicForms / sameRoleTechnicianCount;
+      if (expectedShare > 0) {
+        maintenanceContributionScore = Math.min(15, (userPeriodicForms / expectedShare) * 15);
+      }
     }
 
-    // 7. Recurrence Penalty (-10 to 0 points) - filter by primary labs
-    // Check if any fault recurred within 7 days after this user resolved it
+    // =========================================================================
+    // 7. TEKRAR ARIZA CEZASI (-10 to 0 points)
+    //    -2 per recurrence within 7 days, max -10
+    // =========================================================================
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     let recurrenceCount = 0;
 
@@ -479,7 +580,6 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     ).filter(f => f.closedByUid === user.uid && f.status === 'closed' && f.closedAt);
 
     for (const resolved of userResolvedFaultsForRecurrence) {
-      // Check if same device had a new fault within 7 days
       const hasRecurrence = faultsForCalculation.some(f =>
         f.id !== resolved.id &&
         f.deviceId === resolved.deviceId &&
@@ -493,28 +593,32 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
     const recurrencePenalty = Math.max(-10, -recurrenceCount * 2);
 
-    // 8. Overdue Penalty (-15 to 0 points)
-    // Penalty for overdue maintenance tasks and periodic part changes in primary laboratories
+    // =========================================================================
+    // 8. GECİKMİŞ BAKIM CEZASI (-15 to 0 points)
+    //    -3 per overdue item, max -15
+    // =========================================================================
     const overdueData = hasPrimaryLabs
       ? calculateOverdueItems(primaryLabs, user.role)
       : { overdueMaintenanceTasks: 0, overduePeriodicParts: 0 };
 
     const { overdueMaintenanceTasks, overduePeriodicParts } = overdueData;
     const totalOverdue = overdueMaintenanceTasks + overduePeriodicParts;
-    // -3 points per overdue item, max -15
     const overduePenalty = Math.max(-15, -totalOverdue * 3);
 
-    // 9. Support Score (max 10 points)
-    // Count how many times this user was selected as support personnel during fault resolution
+    // =========================================================================
+    // 9. DESTEK PUANI (max 10 points)
+    //    2 points per support, max 10
+    // =========================================================================
     const supportCount = faultsForCalculation.filter(f =>
       f.supportPersonnelUid === user.uid &&
       (f.status === 'cozuldu' || f.status === 'closed')
     ).length;
 
-    // 2 points per support, max 10
     const supportScore = Math.min(10, supportCount * 2);
 
-    // Calculate total score
+    // =========================================================================
+    // TOTAL SCORE (clamped 0-100)
+    // =========================================================================
     const totalScore = Math.max(0, Math.min(100,
       faultAssignmentScore +
       interventionTimeScore +
@@ -537,13 +641,16 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
         avgInterventionStartTimeMinutes,
         avgResolutionTimeMinutes,
         institutionVisits,
-        avgInstitutionVisits,
+        avgInstitutionVisits: roleVisitAvg,
         onsiteInterventions,
         phoneInterventions,
         periodicMaintenanceForms: userPeriodicForms,
         totalPeriodicMaintenanceForms: totalRelevantPeriodicForms,
         recurrenceCount,
         supportCount,
+        avgFaultsAssignedForRole: roleAvg.avgAssigned,
+        avgFaultsResolvedForRole: roleAvg.avgResolved,
+        sameRoleTechnicianCount,
         overdueMaintenanceTasks,
         overduePeriodicParts,
         faultAssignmentScore,
