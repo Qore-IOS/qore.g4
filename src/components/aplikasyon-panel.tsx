@@ -116,7 +116,8 @@ export default function AplikasyonPanel({
     return assignments.map(a => {
         const deviceDef = devices.find(d => d.id === a.deviceId)!;
         return { ...a, device: deviceDef };
-    }).filter(d => d.device);
+    }).filter(d => d.device)
+     .sort((a, b) => (Number(a.device.order ?? 99)) - (Number(b.device.order ?? 99)));
   };
 
   // Get devices for multiple hospitals (for pool summary)
@@ -125,7 +126,8 @@ export default function AplikasyonPanel({
     return assignments.map(a => {
         const deviceDef = devices.find(d => d.id === a.deviceId)!;
         return { ...a, device: deviceDef };
-    }).filter(d => d.device);
+    }).filter(d => d.device)
+     .sort((a, b) => (Number(a.device.order ?? 99)) - (Number(b.device.order ?? 99)));
   };
 
   // Filter hospitals based on user's assigned laboratories
@@ -198,6 +200,27 @@ export default function AplikasyonPanel({
     };
   };
 
+  // Reusable device dot indicators
+  const DeviceDots = ({ devices: devs }: { devices: (AssignedDevice & {device: Device})[] }) => (
+    <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
+      {devs.map((assigned) => {
+        const isFaulty = assigned.device.arizaDurumu === 'aplikasyon';
+        return (
+          <span
+            key={assigned.id}
+            className={cn(
+              "h-2.5 w-2.5 rounded-full transition-all",
+              isFaulty
+                ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
+                : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
+            )}
+            title={`${assigned.device.cihazAdi || assigned.device.model} - ${isFaulty ? 'Arızalı' : 'Sağlıklı'}`}
+          ></span>
+        );
+      })}
+    </div>
+  );
+
   // If a pool is expanded, show labs in that pool
   if (expandedPoolId) {
     const poolGroup = poolGroups.find(pg => pg.pool.id === expandedPoolId);
@@ -244,22 +267,7 @@ export default function AplikasyonPanel({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0 pb-4">
-                    <div className="flex items-center mt-2">
-                      {stats.devices.slice(0, 10).map((assigned) => {
-                         const isAplikasyonFaulty = assigned.device.arizaDurumu === 'aplikasyon';
-                         return (
-                            <span
-                                key={assigned.id}
-                                className={cn(
-                                    "h-3 w-3 rounded-full mr-1 border",
-                                    isAplikasyonFaulty ? 'bg-red-500' : 'bg-green-500'
-                                )}
-                                title={isAplikasyonFaulty ? 'Aplikasyon Arızası' : 'Sağlıklı'}
-                            ></span>
-                         );
-                      })}
-                      {stats.cihazSayisi > 10 && <span className="text-xs text-muted-foreground ml-1">+{stats.cihazSayisi - 10}</span>}
-                    </div>
+                    <DeviceDots devices={stats.devices} />
                   </CardContent>
                 </Card>
               );
@@ -316,22 +324,7 @@ export default function AplikasyonPanel({
                   )}
                 </CardHeader>
                 <CardContent className="pt-0 pb-4">
-                  <div className="flex items-center mt-2">
-                    {stats.devices.slice(0, 10).map((assigned) => {
-                       const isAplikasyonFaulty = assigned.device.arizaDurumu === 'aplikasyon';
-                       return (
-                          <span
-                              key={assigned.id}
-                              className={cn(
-                                  "h-3 w-3 rounded-full mr-1 border",
-                                  isAplikasyonFaulty ? 'bg-red-500' : 'bg-green-500'
-                              )}
-                              title={isAplikasyonFaulty ? 'Aplikasyon Arızası' : 'Sağlıklı'}
-                          ></span>
-                       );
-                    })}
-                    {stats.cihazSayisi > 10 && <span className="text-xs text-muted-foreground ml-1">+{stats.cihazSayisi - 10}</span>}
-                  </div>
+                  <DeviceDots devices={stats.devices} />
                 </CardContent>
               </Card>
             );
@@ -352,22 +345,7 @@ export default function AplikasyonPanel({
                   <CardTitle className="text-base font-headline text-primary truncate" title={hospital.name}>{hospital.name}</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0 pb-4">
-                  <div className="flex items-center mt-2">
-                    {stats.devices.slice(0, 10).map((assigned) => {
-                       const isAplikasyonFaulty = assigned.device.arizaDurumu === 'aplikasyon';
-                       return (
-                          <span
-                              key={assigned.id}
-                              className={cn(
-                                  "h-3 w-3 rounded-full mr-1 border",
-                                  isAplikasyonFaulty ? 'bg-red-500' : 'bg-green-500'
-                              )}
-                              title={isAplikasyonFaulty ? 'Aplikasyon Arızası' : 'Sağlıklı'}
-                          ></span>
-                       );
-                    })}
-                    {stats.cihazSayisi > 10 && <span className="text-xs text-muted-foreground ml-1">+{stats.cihazSayisi - 10}</span>}
-                  </div>
+                  <DeviceDots devices={stats.devices} />
                 </CardContent>
               </Card>
             );

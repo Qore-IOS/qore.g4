@@ -29,7 +29,8 @@ export default function TeknikServisPanel({
     return assignments.map(a => {
         const deviceDef = devices.find(d => d.id === a.deviceId)!;
         return { ...a, device: deviceDef };
-    }).filter(d => d.device); // filter out if definition is missing
+    }).filter(d => d.device)
+     .sort((a, b) => (Number(a.device.order ?? 99)) - (Number(b.device.order ?? 99)));
   };
 
   const hospitalDeviceStatuses = hospitals.map(hospital => {
@@ -69,37 +70,38 @@ export default function TeknikServisPanel({
                 <CardTitle className="text-lg font-headline text-primary truncate" title={hospital.name}>{hospital.name}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm">Toplam Cihaz: {hospital.cihazSayisi}</p>
-                <div className="flex items-center mt-2">
-                  {hospital.devices.slice(0, 10).map((assigned) => {
-                     return (
-                        <span 
-                            key={assigned.id} 
-                            className={cn(
-                                "h-3 w-3 rounded-full mr-1 border",
-                                assigned.device.arizaDurumu === 'yok' ? 'bg-green-500' : 'bg-red-500'
-                            )}
-                            title={assigned.device.arizaDurumu === 'yok' ? 'Sağlıklı' : 'Arızalı'}
-                        ></span>
-                     );
-                  })}
-                  {hospital.cihazSayisi > 10 && <span className="text-xs text-muted-foreground ml-1">+{hospital.cihazSayisi - 10}</span>}
-                </div>
                 {hospital.arizaSayisi > 0 ? (
-                  <p className="text-sm text-red-500 font-semibold mt-2 flex items-center">
+                  <p className="text-sm text-red-500 font-semibold flex items-center">
                     <AlertTriangle className="h-4 w-4 mr-1" /> {hospital.arizaSayisi} Cihaz Arızalı
                   </p>
                 ) : (
                    hospital.cihazSayisi > 0 ? (
-                    <p className="text-sm text-green-600 font-semibold mt-2 flex items-center">
+                    <p className="text-sm text-green-600 font-semibold flex items-center">
                         <CheckCircle className="h-4 w-4 mr-1" /> Tüm Cihazlar Sağlıklı
                     </p>
                    ) : (
-                    <p className="text-sm text-muted-foreground font-medium mt-2 flex items-center">
+                    <p className="text-sm text-muted-foreground font-medium flex items-center">
                         Cihaz Yok
                     </p>
                    )
                 )}
+                <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
+                  {hospital.devices.map((assigned) => {
+                     const isFaulty = assigned.device.arizaDurumu !== 'yok' && assigned.device.arizaDurumu !== undefined;
+                     return (
+                        <span
+                            key={assigned.id}
+                            className={cn(
+                                "h-2.5 w-2.5 rounded-full transition-all",
+                                isFaulty
+                                  ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
+                                  : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
+                            )}
+                            title={`${assigned.device.cihazAdi || assigned.device.model} - ${isFaulty ? 'Arızalı' : 'Sağlıklı'}`}
+                        ></span>
+                     );
+                  })}
+                </div>
               </CardContent>
             </Card>
           ))}
