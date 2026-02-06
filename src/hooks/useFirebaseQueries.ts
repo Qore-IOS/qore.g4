@@ -637,11 +637,17 @@ export function useAllDutyShifts() {
     queryFn: async () => {
       const snap = await getDocs(
         query(
-          collection(db, 'dutyShifts'),
-          orderBy('startDate', 'desc')
+          collection(db, 'dutyShifts')
         )
       );
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      const shifts = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      // Sort client-side by startDate descending to avoid composite index requirement
+      shifts.sort((a, b) => {
+        const aTime = a.startDate instanceof Date ? a.startDate.getTime() : new Date(a.startDate as any).getTime();
+        const bTime = b.startDate instanceof Date ? b.startDate.getTime() : new Date(b.startDate as any).getTime();
+        return bTime - aTime;
+      });
+      return shifts;
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
@@ -659,11 +665,17 @@ export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelle
       const snap = await getDocs(
         query(
           collection(db, 'dutyShifts'),
-          where('status', '==', status),
-          orderBy('startDate', 'desc')
+          where('status', '==', status)
         )
       );
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      const shifts = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      // Sort client-side by startDate descending to avoid composite index requirement
+      shifts.sort((a, b) => {
+        const aTime = a.startDate instanceof Date ? a.startDate.getTime() : new Date(a.startDate as any).getTime();
+        const bTime = b.startDate instanceof Date ? b.startDate.getTime() : new Date(b.startDate as any).getTime();
+        return bTime - aTime;
+      });
+      return shifts;
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
