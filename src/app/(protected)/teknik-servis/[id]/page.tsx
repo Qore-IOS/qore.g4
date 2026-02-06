@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -23,7 +23,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Hospital, Device, DeviceFaultReport, PersonalStockItem } from '@/lib/types';
+import type { Hospital, Device, DeviceFaultReport, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { Package, ArrowLeftRight, Warehouse } from 'lucide-react';
 import { format } from 'date-fns';
@@ -76,6 +76,11 @@ export default function TeknikServisDetayPage() {
   // Device fault history state
   const [deviceFaultHistory, setDeviceFaultHistory] = useState<Record<string, { description: string; closedAt: Date }[]>>({});
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set());
+
+  // Maintenance flip state
+  const [showMaintenance, setShowMaintenance] = useState(false);
+  const [maintenanceData, setMaintenanceData] = useState<Record<string, { taskName: string; daysRemaining: number; type: 'maintenance' | 'part' }[]>>({});
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
 
 
   // --- Fetch hospital once ---
@@ -155,6 +160,122 @@ export default function TeknikServisDetayPage() {
 
     fetchFaultHistory();
   }, [devicesByHospital]);
+
+  // Fetch maintenance data for all devices
+  const fetchMaintenanceData = useCallback(async () => {
+    if (devicesByHospital.length === 0) return;
+    setMaintenanceLoading(true);
+    const result: Record<string, { taskName: string; daysRemaining: number; type: 'maintenance' | 'part' }[]> = {};
+    const now = new Date();
+
+    for (const device of devicesByHospital) {
+      const items: { taskName: string; daysRemaining: number; type: 'maintenance' | 'part' }[] = [];
+
+      try {
+        // Fetch maintenance plans for this device
+        const plansQ = query(
+          collection(db, 'maintenancePlans'),
+          where('deviceId', '==', device.id)
+        );
+        const plansSnap = await getDocs(plansQ);
+        const plans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() } as MaintenancePlan));
+
+        // Fetch maintenance logs for this device
+        const logsQ = query(
+          collection(db, 'maintenanceLogs'),
+          where('deviceId', '==', device.id)
+        );
+        const logsSnap = await getDocs(logsQ);
+        const logs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceLog));
+
+        for (const plan of plans) {
+          // Find the latest log for this plan
+          const planLogs = logs
+            .filter(l => l.planId === plan.id)
+            .sort((a, b) => {
+              const dateA = a.nextDueDate instanceof Date ? a.nextDueDate : (a.nextDueDate as any)?.toDate?.() || new Date(0);
+              const dateB = b.nextDueDate instanceof Date ? b.nextDueDate : (b.nextDueDate as any)?.toDate?.() || new Date(0);
+              return dateB.getTime() - dateA.getTime();
+            });
+
+          let nextDue: Date | null = null;
+          if (planLogs.length > 0) {
+            const raw = planLogs[0].nextDueDate;
+            nextDue = raw instanceof Date ? raw : (raw as any)?.toDate?.() || null;
+          } else {
+            // No log exists, calculate from plan creation date
+            const created = plan.createdAt instanceof Date ? plan.createdAt : (plan.createdAt as any)?.toDate?.() || now;
+            nextDue = new Date(created);
+            if (plan.periodUnit === 'hafta') nextDue.setDate(nextDue.getDate() + plan.periodValue * 7);
+            else if (plan.periodUnit === 'ay') nextDue.setMonth(nextDue.getMonth() + plan.periodValue);
+            else if (plan.periodUnit === 'yil') nextDue.setFullYear(nextDue.getFullYear() + plan.periodValue);
+          }
+
+          if (nextDue) {
+            const diffMs = nextDue.getTime() - now.getTime();
+            const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            items.push({ taskName: plan.taskName, daysRemaining, type: 'maintenance' });
+          }
+        }
+
+        // Fetch periodic part changes for this device
+        const partsQ = query(
+          collection(db, 'periodicPartChanges'),
+          where('deviceId', '==', device.id)
+        );
+        const partsSnap = await getDocs(partsQ);
+        const parts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PeriodicPartChange));
+
+        // Fetch periodic part change logs for this device
+        const partLogsQ = query(
+          collection(db, 'periodicPartChangeLogs'),
+          where('deviceId', '==', device.id)
+        );
+        const partLogsSnap = await getDocs(partLogsQ);
+        const partLogs = partLogsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PeriodicPartChangeLog));
+
+        for (const part of parts) {
+          const relatedLogs = partLogs
+            .filter(l => l.periodicPartChangeId === part.id)
+            .sort((a, b) => {
+              const dateA = a.nextDueDate instanceof Date ? a.nextDueDate : (a.nextDueDate as any)?.toDate?.() || new Date(0);
+              const dateB = b.nextDueDate instanceof Date ? b.nextDueDate : (b.nextDueDate as any)?.toDate?.() || new Date(0);
+              return dateB.getTime() - dateA.getTime();
+            });
+
+          let nextDue: Date | null = null;
+          if (relatedLogs.length > 0) {
+            const raw = relatedLogs[0].nextDueDate;
+            nextDue = raw instanceof Date ? raw : (raw as any)?.toDate?.() || null;
+          } else if (part.nextDueDate) {
+            nextDue = part.nextDueDate instanceof Date ? part.nextDueDate : (part.nextDueDate as any)?.toDate?.() || null;
+          }
+
+          if (nextDue) {
+            const diffMs = nextDue.getTime() - now.getTime();
+            const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            items.push({ taskName: `${part.stokAdi}`, daysRemaining, type: 'part' });
+          }
+        }
+      } catch (err) {
+        console.error(`Error fetching maintenance data for device ${device.id}:`, err);
+      }
+
+      // Sort by days remaining ascending
+      items.sort((a, b) => a.daysRemaining - b.daysRemaining);
+      result[device.id] = items;
+    }
+
+    setMaintenanceData(result);
+    setMaintenanceLoading(false);
+  }, [devicesByHospital]);
+
+  // Fetch maintenance data when toggled on
+  useEffect(() => {
+    if (showMaintenance && Object.keys(maintenanceData).length === 0) {
+      fetchMaintenanceData();
+    }
+  }, [showMaintenance, maintenanceData, fetchMaintenanceData]);
 
   const toggleDeviceExpand = (deviceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -421,6 +542,15 @@ export default function TeknikServisDetayPage() {
             </CardTitle>
             <div className="flex items-center gap-2">
               <Button
+                variant={showMaintenance ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowMaintenance(prev => !prev)}
+                className="flex items-center gap-2"
+              >
+                {showMaintenance ? <RotateCcw className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}
+                <span className="hidden sm:inline">{showMaintenance ? 'Cihazlara Dön' : 'Bakım Periyotlarını Göster'}</span>
+              </Button>
+              <Button
                 variant="outline"
                 size="sm"
                 onClick={openDigerFirmaModal}
@@ -453,121 +583,197 @@ export default function TeknikServisDetayPage() {
                 const isTeknikServisFaulty = device.arizaDurumu === 'teknik_servis';
                 const isAplikasyonFaulty = device.arizaDurumu === 'aplikasyon';
                 const isFaulty = isTeknikServisFaulty || isAplikasyonFaulty;
+                const deviceMaintenanceItems = maintenanceData[device.id] || [];
 
                 return (
-                  <button
-                    key={device.id}
-                    className="flex flex-col items-center group text-center cursor-pointer"
-                    onClick={() => handleDeviceClick(device)}
-                  >
-                    <div className="mb-2">
-                      <p className="font-semibold text-sm truncate" title={device.cihazAdi || device.model}>
-                        {device.cihazAdi || device.model}
-                      </p>
-                      <p className="text-xs text-muted-foreground font-mono">
-                        {device.seriNumarasi || 'SN yok'}
-                      </p>
-                    </div>
-                    <div className="relative w-full aspect-square">
-                      {device.imageUrl ? (
-                        <Image
-                          src={`/${device.imageUrl}`}
-                          alt={device.cihazAdi || device.model || ''}
-                          width={1024}
-                          height={1024}
-                          className="object-contain"
-                          priority
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground rounded-md">
-                          Görsel Yok
-                        </div>
-                      )}
-                    </div>
-                    <div
-                        className={cn(
-                            "w-full h-4 animate-pulse mt-1",
-                            isTeknikServisFaulty ? 'bg-red-500/50' : isAplikasyonFaulty ? 'bg-amber-500/50' : 'bg-green-500/50'
-                        )}
-                        style={{ filter: 'blur(12px)' }}
-                    />
-                    <div className="mt-2 h-10">
-                      {isTeknikServisFaulty ? (
-                        <>
-                          <p className="text-xs text-red-500 font-semibold flex items-center justify-center">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            Arızalı (Teknik Servis)
-                          </p>
-                          {device.arizaAciklamasi && (
-                            <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
-                              {device.arizaAciklamasi}
+                  <div key={device.id} className="device-flip-container">
+                    <div className={cn("device-flip-inner", showMaintenance && "flipped")}>
+                      {/* FRONT - Device Image */}
+                      <div className="device-flip-front">
+                        <button
+                          className="flex flex-col items-center group text-center cursor-pointer w-full"
+                          onClick={() => handleDeviceClick(device)}
+                        >
+                          <div className="mb-2">
+                            <p className="font-semibold text-sm truncate" title={device.cihazAdi || device.model}>
+                              {device.cihazAdi || device.model}
                             </p>
-                          )}
-                        </>
-                      ) : isAplikasyonFaulty ? (
-                        <>
-                          <p className="text-xs text-amber-600 font-semibold flex items-center justify-center">
-                            <FlaskConical className="h-3 w-3 mr-1" />
-                            Arızalı (Aplikasyon)
-                          </p>
-                          {device.arizaAciklamasi && (
-                            <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
-                              {device.arizaAciklamasi}
+                            <p className="text-xs text-muted-foreground font-mono">
+                              {device.seriNumarasi || 'SN yok'}
                             </p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-xs text-green-600 font-semibold flex items-center justify-center">
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Sağlıklı
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Mini Fault History */}
-                    {deviceFaultHistory[device.id]?.length > 0 && (
-                      <div className="w-full mt-2 text-left" onClick={(e) => e.stopPropagation()}>
-                        <div className="border rounded-md p-2 bg-muted/30">
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                            <History className="h-3 w-3" />
-                            <span className="font-medium">Son Arızalar</span>
                           </div>
-                          <div className="space-y-1">
-                            {deviceFaultHistory[device.id]
-                              .slice(0, expandedDevices.has(device.id) ? 10 : 3)
-                              .map((fault, idx) => (
-                                <div key={idx} className="text-xs border-l-2 border-primary/30 pl-2 py-0.5">
-                                  <p className="text-muted-foreground truncate" title={fault.description}>
-                                    {fault.description}
+                          <div className="relative w-full aspect-square">
+                            {device.imageUrl ? (
+                              <Image
+                                src={`/${device.imageUrl}`}
+                                alt={device.cihazAdi || device.model || ''}
+                                width={1024}
+                                height={1024}
+                                className="object-contain"
+                                priority
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground rounded-md">
+                                Görsel Yok
+                              </div>
+                            )}
+                          </div>
+                          <div
+                              className={cn(
+                                  "w-full h-4 animate-pulse mt-1",
+                                  isTeknikServisFaulty ? 'bg-red-500/50' : isAplikasyonFaulty ? 'bg-amber-500/50' : 'bg-green-500/50'
+                              )}
+                              style={{ filter: 'blur(12px)' }}
+                          />
+                          <div className="mt-2 h-10">
+                            {isTeknikServisFaulty ? (
+                              <>
+                                <p className="text-xs text-red-500 font-semibold flex items-center justify-center">
+                                  <AlertTriangle className="h-3 w-3 mr-1" />
+                                  Arızalı (Teknik Servis)
+                                </p>
+                                {device.arizaAciklamasi && (
+                                  <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
+                                    {device.arizaAciklamasi}
                                   </p>
-                                  <p className="text-[10px] text-muted-foreground/70">
-                                    {format(fault.closedAt, 'dd.MM.yy', { locale: tr })}
+                                )}
+                              </>
+                            ) : isAplikasyonFaulty ? (
+                              <>
+                                <p className="text-xs text-amber-600 font-semibold flex items-center justify-center">
+                                  <FlaskConical className="h-3 w-3 mr-1" />
+                                  Arızalı (Aplikasyon)
+                                </p>
+                                {device.arizaAciklamasi && (
+                                  <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
+                                    {device.arizaAciklamasi}
                                   </p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-xs text-green-600 font-semibold flex items-center justify-center">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Sağlıklı
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Mini Fault History */}
+                          {deviceFaultHistory[device.id]?.length > 0 && (
+                            <div className="w-full mt-2 text-left" onClick={(e) => e.stopPropagation()}>
+                              <div className="border rounded-md p-2 bg-muted/30">
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                                  <History className="h-3 w-3" />
+                                  <span className="font-medium">Son Arızalar</span>
+                                </div>
+                                <div className="space-y-1">
+                                  {deviceFaultHistory[device.id]
+                                    .slice(0, expandedDevices.has(device.id) ? 10 : 3)
+                                    .map((fault, idx) => (
+                                      <div key={idx} className="text-xs border-l-2 border-primary/30 pl-2 py-0.5">
+                                        <p className="text-muted-foreground truncate" title={fault.description}>
+                                          {fault.description}
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground/70">
+                                          {format(fault.closedAt, 'dd.MM.yy', { locale: tr })}
+                                        </p>
+                                      </div>
+                                    ))}
+                                </div>
+                                {deviceFaultHistory[device.id].length > 3 && (
+                                  <button
+                                    onClick={(e) => toggleDeviceExpand(device.id, e)}
+                                    className="w-full mt-1 text-xs text-primary hover:text-primary/80 flex items-center justify-center gap-1 py-1"
+                                  >
+                                    {expandedDevices.has(device.id) ? (
+                                      <>
+                                        <ChevronUp className="h-3 w-3" />
+                                        Daha az göster
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ChevronDown className="h-3 w-3" />
+                                        Daha fazla göster ({Math.min(deviceFaultHistory[device.id].length, 10) - 3})
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* BACK - Maintenance Info */}
+                      <div className="device-flip-back">
+                        <div className="maintenance-card-neumorphic p-4 h-full">
+                          <div className="mb-3">
+                            <p className="font-semibold text-sm truncate" title={device.cihazAdi || device.model}>
+                              {device.cihazAdi || device.model}
+                            </p>
+                            <p className="text-xs text-muted-foreground font-mono">
+                              {device.seriNumarasi || 'SN yok'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 mb-3">
+                            <CalendarClock className="h-4 w-4 text-primary" />
+                            <span className="text-xs font-semibold text-primary">Bakım Periyotları</span>
+                          </div>
+                          {maintenanceLoading ? (
+                            <div className="flex items-center justify-center py-6">
+                              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                            </div>
+                          ) : deviceMaintenanceItems.length === 0 ? (
+                            <p className="text-xs text-muted-foreground text-center py-4">
+                              Tanımlı bakım periyodu yok
+                            </p>
+                          ) : (
+                            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                              {deviceMaintenanceItems.map((item, idx) => (
+                                <div
+                                  key={idx}
+                                  className={cn(
+                                    "flex items-start justify-between gap-2 p-2 rounded-lg text-xs",
+                                    item.daysRemaining <= 0
+                                      ? "bg-red-100 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50"
+                                      : item.daysRemaining <= 7
+                                      ? "bg-amber-100 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50"
+                                      : "bg-muted/50 dark:bg-white/5 border border-transparent"
+                                  )}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1">
+                                      {item.type === 'part' && (
+                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
+                                      )}
+                                      {item.type === 'maintenance' && (
+                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                                      )}
+                                      <span className="truncate font-medium" title={item.taskName}>
+                                        {item.taskName}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className={cn(
+                                    "font-bold whitespace-nowrap flex-shrink-0",
+                                    item.daysRemaining <= 0
+                                      ? "text-red-600 dark:text-red-400"
+                                      : item.daysRemaining <= 7
+                                      ? "text-amber-600 dark:text-amber-400"
+                                      : "text-muted-foreground"
+                                  )}>
+                                    {item.daysRemaining <= 0
+                                      ? `${Math.abs(item.daysRemaining)} gün gecikti`
+                                      : `${item.daysRemaining} gün kaldı`}
+                                  </span>
                                 </div>
                               ))}
-                          </div>
-                          {deviceFaultHistory[device.id].length > 3 && (
-                            <button
-                              onClick={(e) => toggleDeviceExpand(device.id, e)}
-                              className="w-full mt-1 text-xs text-primary hover:text-primary/80 flex items-center justify-center gap-1 py-1"
-                            >
-                              {expandedDevices.has(device.id) ? (
-                                <>
-                                  <ChevronUp className="h-3 w-3" />
-                                  Daha az göster
-                                </>
-                              ) : (
-                                <>
-                                  <ChevronDown className="h-3 w-3" />
-                                  Daha fazla göster ({Math.min(deviceFaultHistory[device.id].length, 10) - 3})
-                                </>
-                              )}
-                            </button>
+                            </div>
                           )}
                         </div>
                       </div>
-                    )}
-                  </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
