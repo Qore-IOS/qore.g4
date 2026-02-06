@@ -717,6 +717,19 @@ export interface SparePartTransferRow {
   targetName: string;
 }
 
+// Yedek Parça Depo Stok (bağımsız koleksiyon - stok yönetiminden ayrı)
+export interface YedekParcaDepoStokItem {
+  id: string;
+  productCodeId: string;
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber?: string;         // Opsiyonel seri numarası
+  quantity: number;              // Seri numarasız ürünler için adet
+  createdAt: Date;
+  createdByUid: string;
+  createdByName: string;
+}
+
 export interface FirebaseConfig {
   apiKey: string;
   authDomain: string;
