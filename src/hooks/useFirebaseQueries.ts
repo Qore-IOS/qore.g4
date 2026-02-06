@@ -558,6 +558,7 @@ import type { DutyShift } from '@/lib/types';
 /**
  * Get all active duty shifts (current date is within shift period)
  * Used in DutyInfo component
+ * Considers startTime/endTime fields for accurate time-based filtering
  */
 export function useActiveDutyShifts() {
   return useQuery({
@@ -570,13 +571,32 @@ export function useActiveDutyShifts() {
           where('status', '==', 'active')
         )
       );
-      // Filter to only include shifts where current date is within range
+      // Filter to only include shifts where current datetime is within range (including startTime/endTime)
       return snap.docs
         .map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift))
         .filter(shift => {
           const startDate = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
           const endDate = shift.endDate instanceof Date ? shift.endDate : new Date(shift.endDate as any);
-          return now >= startDate && now <= endDate;
+
+          // Build effective start datetime using startTime field
+          const effectiveStart = new Date(startDate);
+          if (shift.startTime) {
+            const [h, m] = shift.startTime.split(':').map(Number);
+            if (!isNaN(h) && !isNaN(m)) {
+              effectiveStart.setHours(h, m, 0, 0);
+            }
+          }
+
+          // Build effective end datetime using endTime field
+          const effectiveEnd = new Date(endDate);
+          if (shift.endTime) {
+            const [h, m] = shift.endTime.split(':').map(Number);
+            if (!isNaN(h) && !isNaN(m)) {
+              effectiveEnd.setHours(h, m, 59, 999);
+            }
+          }
+
+          return now >= effectiveStart && now <= effectiveEnd;
         });
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
