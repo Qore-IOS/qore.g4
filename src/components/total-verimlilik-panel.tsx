@@ -2587,8 +2587,8 @@ export default function TotalVerimlilikPanel({
               </div>
             ) : (
               <>
-              {/* Yatay Slider - Tablonun üstünde */}
-              <div className="flex items-center gap-3 px-2 pb-3">
+              {/* Yatay Slider - Her zaman üstte sabit (sticky) */}
+              <div className="flex items-center gap-3 px-2 pb-3 sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-b py-2">
                 <span className="text-xs text-muted-foreground whitespace-nowrap select-none">◀ Sol</span>
                 <input
                   ref={sliderRef}
