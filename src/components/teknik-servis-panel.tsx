@@ -88,6 +88,30 @@ export default function TeknikServisPanel({
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
 
+  // Open fault reports - deviceIds with active faults
+  const [faultyDeviceIds, setFaultyDeviceIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const fetchOpenFaults = async () => {
+      try {
+        const q = query(
+          collection(db, 'deviceFaultReports'),
+          where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+        );
+        const snap = await getDocs(q);
+        const ids = new Set<string>();
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.deviceId) ids.add(data.deviceId);
+        });
+        setFaultyDeviceIds(ids);
+      } catch (err) {
+        console.error('Error fetching open fault reports:', err);
+      }
+    };
+    fetchOpenFaults();
+  }, []);
+
   // All forms dialog state
   const [isAllFormsDialogOpen, setIsAllFormsDialogOpen] = useState(false);
   const [allForms, setAllForms] = useState<ActionFormRecord[]>([]);
@@ -182,8 +206,9 @@ export default function TeknikServisPanel({
     return { poolGroups, standaloneLabs };
   }, [filteredHospitals, labPools, userAssignedLabs, isAdmin]);
 
-  // Helper: is device faulty?
-  const isDeviceFaulty = (d: Device) => d.arizaDurumu !== undefined && d.arizaDurumu !== 'yok';
+  // Helper: is device faulty? Check both device field AND open fault reports
+  const isDeviceFaulty = (d: Device) =>
+    (d.arizaDurumu !== undefined && d.arizaDurumu !== 'yok') || faultyDeviceIds.has(d.id);
 
   // Calculate device stats for a hospital
   const getHospitalStats = (hospitalId: string) => {
