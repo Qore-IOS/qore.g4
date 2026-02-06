@@ -181,12 +181,14 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
               <MetricItem
                 icon={TrendingUp}
                 label="Arıza Üstlenme"
-                value={`${metrics.faultsAssigned} / ${metrics.expectedFaults.toFixed(1)}`}
+                value={`${metrics.faultsAssigned} / ${metrics.expectedFaults > 0 ? metrics.expectedFaults.toFixed(1) : metrics.avgFaultsAssignedForRole.toFixed(1)}`}
                 subValue={metrics.expectedFaults > 0
                   ? `%${((metrics.faultsAssigned / metrics.expectedFaults) * 100).toFixed(0)} beklenen`
+                  : metrics.avgFaultsAssignedForRole > 0
+                  ? `ort: ${metrics.avgFaultsAssignedForRole.toFixed(1)}`
                   : 'beklenti yok'}
                 score={metrics.faultAssignmentScore}
-                tooltip="Ana sorumlu olunan laboratuvarlara göre beklenen arıza sayısı ve gerçek üstlenilen. Beklenenin %100'ü = 20 puan."
+                tooltip="İş yükü puanı (maks 30): Beklenen arıza payı karşılama (20pt) + hacim bonusu (10pt). Ortalamaya göre daha fazla arıza = daha yüksek puan."
               />
               <MetricItem
                 icon={Clock}
@@ -194,7 +196,7 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
                 value={formatDuration(metrics.avgInterventionStartTimeMinutes)}
                 subValue="ortalama süre"
                 score={metrics.interventionTimeScore}
-                tooltip="Arıza atandıktan sonra müdahaleye başlama süresi. Hızlı başlama = yüksek puan."
+                tooltip="Müdahale başlatma hızı (maks 10): 0dk=10pt, 2saat=0pt. Doğrusal ölçek."
               />
               <MetricItem
                 icon={CheckCircle}
@@ -202,7 +204,7 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
                 value={formatDuration(metrics.avgResolutionTimeMinutes)}
                 subValue={`${metrics.faultsResolved} arıza çözüldü`}
                 score={metrics.resolutionTimeScore}
-                tooltip="Müdahaleden arıza çözümüne kadar geçen süre. Hızlı çözüm = yüksek puan."
+                tooltip="Çözüm kalitesi (10pt) + çözüm hacmi (5pt). Hızlı çözüm ve çok arıza = yüksek puan."
               />
               <MetricItem
                 icon={Building}
@@ -458,14 +460,16 @@ function DetailedKPICard({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <DetailedMetricRow
             icon={TrendingUp}
-            label="Arıza Üstlenme"
-            value={`${metrics.faultsAssigned} / ${metrics.expectedFaults.toFixed(1)}`}
+            label="Arıza Üstlenme & İş Yükü"
+            value={`${metrics.faultsAssigned} / ${metrics.expectedFaults > 0 ? metrics.expectedFaults.toFixed(1) : metrics.avgFaultsAssignedForRole.toFixed(1)}`}
             subValue={metrics.expectedFaults > 0
               ? `Beklenen arıza sayısının %${((metrics.faultsAssigned / metrics.expectedFaults) * 100).toFixed(0)}'i karşılandı`
+              : metrics.avgFaultsAssignedForRole > 0
+              ? `Rol ortalaması: ${metrics.avgFaultsAssignedForRole.toFixed(1)} arıza`
               : 'Beklenen arıza yok'}
             score={metrics.faultAssignmentScore}
-            maxScore={20}
-            tooltip="Ana sorumlu olunan laboratuvarlara göre beklenen arıza sayısı ve gerçek üstlenilen. Beklenenin %100'ü = 20 puan."
+            maxScore={30}
+            tooltip="Beklenen pay karşılama (20pt) + hacim bonusu (10pt). Ortalamadan fazla arıza üstlenmek ekstra puan kazandırır."
           />
           <DetailedMetricRow
             icon={Clock}
@@ -473,26 +477,26 @@ function DetailedKPICard({
             value={formatDuration(metrics.avgInterventionStartTimeMinutes)}
             subValue="Ortalama müdahale başlama süresi"
             score={metrics.interventionTimeScore}
-            maxScore={15}
-            tooltip="Arıza atandıktan sonra müdahaleye başlama süresi. ≤30dk: 15pt, ≤1sa: 12pt, ≤2sa: 9pt, ≤4sa: 6pt"
+            maxScore={10}
+            tooltip="Doğrusal ölçek: 0dk=10pt, 1saat=5pt, 2saat=0pt. Hızlı müdahale sürekli ödüllendirilir."
           />
           <DetailedMetricRow
             icon={CheckCircle}
-            label="Çözüm Süresi"
+            label="Çözüm Süresi & Başarısı"
             value={formatDuration(metrics.avgResolutionTimeMinutes)}
-            subValue={`Toplam ${metrics.faultsResolved} arıza çözüldü`}
+            subValue={`Toplam ${metrics.faultsResolved} arıza çözüldü (ort: ${metrics.avgFaultsResolvedForRole.toFixed(1)})`}
             score={metrics.resolutionTimeScore}
             maxScore={15}
-            tooltip="Müdahaleden arıza çözümüne kadar geçen süre. ≤1sa: 15pt, ≤2sa: 12pt, ≤4sa: 9pt, ≤8sa: 6pt"
+            tooltip="Çözüm kalitesi (10pt): 0dk=10pt, 8saat=0pt doğrusal. Çözüm hacmi (5pt): Ortalama kadar çözüm=2.5pt, 2x ortalama=5pt."
           />
           <DetailedMetricRow
             icon={Building}
             label="Kurum Ziyareti"
             value={`${metrics.institutionVisits} ziyaret`}
-            subValue={`Ekip ortalaması: ${metrics.avgInstitutionVisits.toFixed(1)} ziyaret`}
+            subValue={`Rol ortalaması: ${metrics.avgInstitutionVisits.toFixed(1)} ziyaret`}
             score={metrics.visitFrequencyScore}
-            maxScore={15}
-            tooltip="Form oluşturma + kurumda müdahale sayısı. Ortalama üstü = yüksek puan."
+            maxScore={10}
+            tooltip="Ortalama kadar ziyaret=5pt, 2x ortalama=10pt. Form + kurumda müdahale sayısı."
           />
           <DetailedMetricRow
             icon={Phone}
@@ -502,19 +506,19 @@ function DetailedKPICard({
               ? `Müdahalelerin %${((metrics.onsiteInterventions / (metrics.onsiteInterventions + metrics.phoneInterventions)) * 100).toFixed(0)}'i kurumda yapıldı`
               : 'Müdahale verisi yok'}
             score={metrics.onsiteRatioScore}
-            maxScore={15}
-            tooltip="Telefon vs kurumda müdahale oranı. Kurumda müdahale daha değerlidir."
+            maxScore={10}
+            tooltip="Kurumda müdahale oranı × 10pt. 3'ten az müdahale varsa örneklem küçüklüğü nedeniyle oransal düşürülür."
           />
           <DetailedMetricRow
             icon={Calendar}
             label="Periyodik Bakım Katkısı"
             value={`${metrics.periodicMaintenanceForms} / ${metrics.totalPeriodicMaintenanceForms}`}
-            subValue={metrics.totalPeriodicMaintenanceForms > 0
-              ? `Toplam bakımların %${((metrics.periodicMaintenanceForms / metrics.totalPeriodicMaintenanceForms) * 100).toFixed(1)}'i bu personel tarafından yapıldı`
+            subValue={metrics.totalPeriodicMaintenanceForms > 0 && metrics.sameRoleTechnicianCount > 0
+              ? `Kişi başı beklenen: ${(metrics.totalPeriodicMaintenanceForms / metrics.sameRoleTechnicianCount).toFixed(1)} bakım`
               : 'Periyodik bakım verisi yok'}
             score={metrics.maintenanceContributionScore}
-            maxScore={20}
-            tooltip="Toplam periyodik bakım formlarındaki pay. Yüksek katkı = yüksek puan."
+            maxScore={15}
+            tooltip="Kişi başı beklenen pay bazlı. Toplam bakım / personel sayısı = beklenen. Beklenen kadar yapma = 15pt."
           />
           <DetailedMetricRow
             icon={HeartHandshake}
@@ -721,11 +725,11 @@ function ComparisonView({
           <ComparisonMetricRow
             icon={TrendingUp}
             label="Arıza Üstlenme"
-            value1={`${m1.faultsAssigned} / ${m1.expectedFaults.toFixed(1)}`}
-            value2={`${m2.faultsAssigned} / ${m2.expectedFaults.toFixed(1)}`}
+            value1={`${m1.faultsAssigned} / ${m1.expectedFaults > 0 ? m1.expectedFaults.toFixed(1) : m1.avgFaultsAssignedForRole.toFixed(1)}`}
+            value2={`${m2.faultsAssigned} / ${m2.expectedFaults > 0 ? m2.expectedFaults.toFixed(1) : m2.avgFaultsAssignedForRole.toFixed(1)}`}
             score1={m1.faultAssignmentScore}
             score2={m2.faultAssignmentScore}
-            maxScore={20}
+            maxScore={30}
           />
           <ComparisonMetricRow
             icon={Clock}
@@ -734,7 +738,7 @@ function ComparisonView({
             value2={formatDuration(m2.avgInterventionStartTimeMinutes)}
             score1={m1.interventionTimeScore}
             score2={m2.interventionTimeScore}
-            maxScore={15}
+            maxScore={10}
           />
           <ComparisonMetricRow
             icon={CheckCircle}
@@ -752,7 +756,7 @@ function ComparisonView({
             value2={`${m2.institutionVisits} ziyaret`}
             score1={m1.visitFrequencyScore}
             score2={m2.visitFrequencyScore}
-            maxScore={15}
+            maxScore={10}
           />
           <ComparisonMetricRow
             icon={Phone}
@@ -761,7 +765,7 @@ function ComparisonView({
             value2={`${m2.onsiteInterventions} / ${m2.onsiteInterventions + m2.phoneInterventions}`}
             score1={m1.onsiteRatioScore}
             score2={m2.onsiteRatioScore}
-            maxScore={15}
+            maxScore={10}
           />
           <ComparisonMetricRow
             icon={Calendar}
@@ -770,7 +774,7 @@ function ComparisonView({
             value2={`${m2.periodicMaintenanceForms} / ${m2.totalPeriodicMaintenanceForms}`}
             score1={m1.maintenanceContributionScore}
             score2={m2.maintenanceContributionScore}
-            maxScore={20}
+            maxScore={15}
           />
           <ComparisonMetricRow
             icon={HeartHandshake}
@@ -945,19 +949,19 @@ export default function PersonelIzlemPage() {
         totalScore: Math.round(p.metrics.totalScore),
         metrics: [
           {
-            label: 'Arıza Üstlenme',
-            value: `${p.metrics.faultsAssigned} / ${p.metrics.expectedFaults.toFixed(1)}`,
+            label: 'Arıza Üstlenme & İş Yükü',
+            value: `${p.metrics.faultsAssigned} / ${p.metrics.expectedFaults > 0 ? p.metrics.expectedFaults.toFixed(1) : p.metrics.avgFaultsAssignedForRole.toFixed(1)}`,
             score: `+${p.metrics.faultAssignmentScore.toFixed(1)}`,
-            maxScore: '20',
+            maxScore: '30',
           },
           {
             label: 'Müdahale Başlatma Süresi',
             value: formatDuration(p.metrics.avgInterventionStartTimeMinutes),
             score: `+${p.metrics.interventionTimeScore.toFixed(1)}`,
-            maxScore: '15',
+            maxScore: '10',
           },
           {
-            label: 'Çözüm Süresi',
+            label: 'Çözüm Süresi & Başarısı',
             value: `${formatDuration(p.metrics.avgResolutionTimeMinutes)} (${p.metrics.faultsResolved} arıza çözüldü)`,
             score: `+${p.metrics.resolutionTimeScore.toFixed(1)}`,
             maxScore: '15',
@@ -966,19 +970,19 @@ export default function PersonelIzlemPage() {
             label: 'Kurum Ziyareti',
             value: `${p.metrics.institutionVisits} ziyaret (ort: ${p.metrics.avgInstitutionVisits.toFixed(1)})`,
             score: `+${p.metrics.visitFrequencyScore.toFixed(1)}`,
-            maxScore: '15',
+            maxScore: '10',
           },
           {
             label: 'Kurumda Müdahale Oranı',
             value: `${p.metrics.onsiteInterventions} / ${p.metrics.onsiteInterventions + p.metrics.phoneInterventions}`,
             score: `+${p.metrics.onsiteRatioScore.toFixed(1)}`,
-            maxScore: '15',
+            maxScore: '10',
           },
           {
             label: 'Periyodik Bakım Katkısı',
             value: `${p.metrics.periodicMaintenanceForms} / ${p.metrics.totalPeriodicMaintenanceForms}`,
             score: `+${p.metrics.maintenanceContributionScore.toFixed(1)}`,
-            maxScore: '20',
+            maxScore: '15',
           },
           {
             label: 'Destek Puanı',
@@ -1298,32 +1302,40 @@ export default function PersonelIzlemPage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
             <div className="p-3 rounded-lg bg-muted/30">
-              <p className="font-semibold">Arıza Üstlenme (20 puan)</p>
-              <p className="text-muted-foreground">Ana sorumlu laboratuvarlara göre beklenen arıza payını karşılama oranı</p>
+              <p className="font-semibold">Arıza Üstlenme & İş Yükü (30 puan)</p>
+              <p className="text-muted-foreground">Beklenen pay karşılama (20pt) + ortalama üstü hacim bonusu (10pt)</p>
             </div>
             <div className="p-3 rounded-lg bg-muted/30">
-              <p className="font-semibold">Müdahale Süresi (15 puan)</p>
-              <p className="text-muted-foreground">≤30dk: 15pt, ≤1sa: 12pt, ≤2sa: 9pt, ≤4sa: 6pt</p>
+              <p className="font-semibold">Müdahale Süresi (10 puan)</p>
+              <p className="text-muted-foreground">Doğrusal: 0dk=10pt, 1saat=5pt, 2saat=0pt</p>
             </div>
             <div className="p-3 rounded-lg bg-muted/30">
-              <p className="font-semibold">Çözüm Süresi (15 puan)</p>
-              <p className="text-muted-foreground">≤1sa: 15pt, ≤2sa: 12pt, ≤4sa: 9pt, ≤8sa: 6pt</p>
+              <p className="font-semibold">Çözüm Süresi & Başarısı (15 puan)</p>
+              <p className="text-muted-foreground">Kalite (10pt): 0dk=10pt, 8sa=0pt. Hacim (5pt): çözüm sayısı/ort</p>
             </div>
             <div className="p-3 rounded-lg bg-muted/30">
-              <p className="font-semibold">Kurum Ziyareti (15 puan)</p>
-              <p className="text-muted-foreground">Form + kurumda müdahale sayısı, ortalamaya göre</p>
+              <p className="font-semibold">Kurum Ziyareti (10 puan)</p>
+              <p className="text-muted-foreground">Rol ortalamasına göre: 1x ort=5pt, 2x ort=10pt</p>
             </div>
             <div className="p-3 rounded-lg bg-muted/30">
-              <p className="font-semibold">Kurumda Müdahale (15 puan)</p>
-              <p className="text-muted-foreground">Telefon vs kurumda oranı, kurumda = daha değerli</p>
+              <p className="font-semibold">Kurumda Müdahale (10 puan)</p>
+              <p className="text-muted-foreground">Oran × 10pt, 3&apos;ten az müdahalede küçük örneklem düşürücü</p>
             </div>
             <div className="p-3 rounded-lg bg-muted/30">
-              <p className="font-semibold">Periyodik Bakım (20 puan)</p>
-              <p className="text-muted-foreground">Toplam periyodik bakım formlarındaki pay</p>
+              <p className="font-semibold">Periyodik Bakım (15 puan)</p>
+              <p className="text-muted-foreground">Kişi başı beklenen pay bazlı: toplam/personel sayısı</p>
+            </div>
+            <div className="p-3 rounded-lg bg-muted/30">
+              <p className="font-semibold">Destek Katkısı (10 puan)</p>
+              <p className="text-muted-foreground">Arıza çözümünde destek: +2pt/destek, maks 10pt</p>
             </div>
             <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/30">
               <p className="font-semibold text-red-600">Tekrar Arıza Cezası (-10 puan)</p>
               <p className="text-muted-foreground">7 gün içinde aynı cihazda tekrar arıza: -2pt/adet</p>
+            </div>
+            <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/30">
+              <p className="font-semibold text-red-600">Gecikmiş Bakım Cezası (-15 puan)</p>
+              <p className="text-muted-foreground">Gecikmiş bakım ve parça değişimi: -3pt/adet</p>
             </div>
           </div>
         </CardContent>
