@@ -121,21 +121,17 @@ export default function TeknikServisPanel({
     fetchAllForms();
   };
 
-  const getDevicesForHospital = (hospitalId: string): (AssignedDevice & {device: Device})[] => {
-    const assignments = hospitalDeviceAssignments.filter(hda => hda.hastaneId === hospitalId);
-    return assignments.map(a => {
-        const deviceDef = devices.find(d => d.id === a.deviceId)!;
-        return { ...a, device: deviceDef };
-    }).filter(d => d.device); // filter out if definition is missing
+  const getDevicesForHospital = (hospitalId: string): Device[] => {
+    return devices
+      .filter(d => (d as any).hospitalId === hospitalId)
+      .sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
   };
 
   // Get devices for multiple hospitals (for pool summary)
-  const getDevicesForHospitals = (hospitalIds: string[]): (AssignedDevice & {device: Device})[] => {
-    const assignments = hospitalDeviceAssignments.filter(hda => hospitalIds.includes(hda.hastaneId));
-    return assignments.map(a => {
-        const deviceDef = devices.find(d => d.id === a.deviceId)!;
-        return { ...a, device: deviceDef };
-    }).filter(d => d.device);
+  const getDevicesForHospitals = (hospitalIds: string[]): Device[] => {
+    return devices
+      .filter(d => hospitalIds.includes((d as any).hospitalId))
+      .sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
   };
 
   // Filter hospitals based on user's assigned laboratories
@@ -186,10 +182,13 @@ export default function TeknikServisPanel({
     return { poolGroups, standaloneLabs };
   }, [filteredHospitals, labPools, userAssignedLabs, isAdmin]);
 
+  // Helper: is device faulty?
+  const isDeviceFaulty = (d: Device) => d.arizaDurumu !== undefined && d.arizaDurumu !== 'yok';
+
   // Calculate device stats for a hospital
   const getHospitalStats = (hospitalId: string) => {
     const hospitalDevices = getDevicesForHospital(hospitalId);
-    const arizaSayisi = hospitalDevices.filter(d => d.device.arizaDurumu === 'teknik_servis').length;
+    const arizaSayisi = hospitalDevices.filter(isDeviceFaulty).length;
     return {
       cihazSayisi: hospitalDevices.length,
       arizaSayisi,
@@ -200,12 +199,36 @@ export default function TeknikServisPanel({
   // Calculate combined stats for a pool
   const getPoolStats = (memberIds: string[]) => {
     const poolDevices = getDevicesForHospitals(memberIds);
-    const arizaSayisi = poolDevices.filter(d => d.device.arizaDurumu === 'teknik_servis').length;
+    const arizaSayisi = poolDevices.filter(isDeviceFaulty).length;
     return {
       cihazSayisi: poolDevices.length,
       arizaSayisi,
       devices: poolDevices
     };
+  };
+
+  // Reusable device dot indicators
+  const DeviceDots = ({ devices: devs }: { devices: Device[] }) => {
+    if (devs.length === 0) return null;
+    return (
+      <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
+        {devs.map((device) => {
+          const faulty = isDeviceFaulty(device);
+          return (
+            <span
+              key={device.id}
+              className={cn(
+                "h-2.5 w-2.5 rounded-full transition-all",
+                faulty
+                  ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
+                  : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
+              )}
+              title={`${device.cihazAdi || device.model} - ${faulty ? 'Arızalı' : 'Sağlıklı'}`}
+            ></span>
+          );
+        })}
+      </div>
+    );
   };
 
   // If a pool is expanded, show labs in that pool
@@ -254,23 +277,7 @@ export default function TeknikServisPanel({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0 pb-4">
-                    <div className="flex items-center mt-2">
-                      {stats.devices.slice(0, 10).map((assigned) => {
-                         const isTeknikServisFaulty = assigned.device.arizaDurumu === 'teknik_servis';
-                         const isAplikasyonFaulty = assigned.device.arizaDurumu === 'aplikasyon';
-                         return (
-                            <span
-                                key={assigned.id}
-                                className={cn(
-                                    "h-3 w-3 rounded-full mr-1 border",
-                                    isTeknikServisFaulty ? 'bg-red-500' : isAplikasyonFaulty ? 'bg-amber-500' : 'bg-green-500'
-                                )}
-                                title={isTeknikServisFaulty ? 'Teknik Servis Arızası' : isAplikasyonFaulty ? 'Aplikasyon Arızası' : 'Sağlıklı'}
-                            ></span>
-                         );
-                      })}
-                      {stats.cihazSayisi > 10 && <span className="text-xs text-muted-foreground ml-1">+{stats.cihazSayisi - 10}</span>}
-                    </div>
+                    <DeviceDots devices={stats.devices} />
                   </CardContent>
                 </Card>
               );
@@ -327,23 +334,7 @@ export default function TeknikServisPanel({
                   )}
                 </CardHeader>
                 <CardContent className="pt-0 pb-4">
-                  <div className="flex items-center mt-2">
-                    {stats.devices.slice(0, 10).map((assigned) => {
-                       const isTeknikServisFaulty = assigned.device.arizaDurumu === 'teknik_servis';
-                       const isAplikasyonFaulty = assigned.device.arizaDurumu === 'aplikasyon';
-                       return (
-                          <span
-                              key={assigned.id}
-                              className={cn(
-                                  "h-3 w-3 rounded-full mr-1 border",
-                                  isTeknikServisFaulty ? 'bg-red-500' : isAplikasyonFaulty ? 'bg-amber-500' : 'bg-green-500'
-                              )}
-                              title={isTeknikServisFaulty ? 'Teknik Servis Arızası' : isAplikasyonFaulty ? 'Aplikasyon Arızası' : 'Sağlıklı'}
-                          ></span>
-                       );
-                    })}
-                    {stats.cihazSayisi > 10 && <span className="text-xs text-muted-foreground ml-1">+{stats.cihazSayisi - 10}</span>}
-                  </div>
+                  <DeviceDots devices={stats.devices} />
                 </CardContent>
               </Card>
             );
@@ -364,23 +355,7 @@ export default function TeknikServisPanel({
                   <CardTitle className="text-base font-headline text-primary truncate" title={hospital.name}>{hospital.name}</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0 pb-4">
-                  <div className="flex items-center mt-2">
-                    {stats.devices.slice(0, 10).map((assigned) => {
-                       const isTeknikServisFaulty = assigned.device.arizaDurumu === 'teknik_servis';
-                       const isAplikasyonFaulty = assigned.device.arizaDurumu === 'aplikasyon';
-                       return (
-                          <span
-                              key={assigned.id}
-                              className={cn(
-                                  "h-3 w-3 rounded-full mr-1 border",
-                                  isTeknikServisFaulty ? 'bg-red-500' : isAplikasyonFaulty ? 'bg-amber-500' : 'bg-green-500'
-                              )}
-                              title={isTeknikServisFaulty ? 'Teknik Servis Arızası' : isAplikasyonFaulty ? 'Aplikasyon Arızası' : 'Sağlıklı'}
-                          ></span>
-                       );
-                    })}
-                    {stats.cihazSayisi > 10 && <span className="text-xs text-muted-foreground ml-1">+{stats.cihazSayisi - 10}</span>}
-                  </div>
+                  <DeviceDots devices={stats.devices} />
                 </CardContent>
               </Card>
             );
