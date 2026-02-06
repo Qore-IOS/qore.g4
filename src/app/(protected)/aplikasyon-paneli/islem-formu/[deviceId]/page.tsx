@@ -189,6 +189,7 @@ export default function AplikasyonIslemFormuPage() {
   const [periodicPartChanges, setPeriodicPartChanges] = useState<PeriodicPartChange[]>([]);
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
+  const [pendingPeriodicPartChangeId, setPendingPeriodicPartChangeId] = useState<string | null>(null);
 
   // Fault definitions for arıza işlem türü
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
@@ -516,57 +517,89 @@ export default function AplikasyonIslemFormuPage() {
 
   // Toggle periodic part selection and add to actions
   const togglePeriodicPart = (partChangeId: string) => {
-    setSelectedPeriodicParts(prev => {
-      const newSelected = prev.includes(partChangeId)
-        ? prev.filter(id => id !== partChangeId)
-        : [...prev, partChangeId];
+    const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
 
-      // If selecting, add to actions if not already there
-      if (!prev.includes(partChangeId)) {
-        const partChange = periodicPartChanges.find(p => p.id === partChangeId);
-        if (partChange) {
-          // Check if already in actions
-          const alreadyInActions = actions.some(a =>
-            a.periodicPartChangeId === partChangeId ||
-            (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
-          );
+    if (isCurrentlySelected) {
+      // Deselecting
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+      setActions(prev => prev.filter(a => a.periodicPartChangeId !== partChangeId));
+      return;
+    }
 
-          if (!alreadyInActions) {
-            // Find matching item in personal stock
-            const matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+    // Selecting
+    const partChange = periodicPartChanges.find(p => p.id === partChangeId);
+    if (!partChange) return;
 
-            if (matchingStockItem) {
-              // Auto-add from personal stock
-              const newItem: ActionItem = {
-                id: crypto.randomUUID(),
-                type: 'part_change',
-                action: matchingStockItem.productCodeId,
-                stokKodu: matchingStockItem.stokKodu,
-                stokAdi: matchingStockItem.stokAdi,
-                serialNumber: matchingStockItem.serialNumber,
-                personalStockId: matchingStockItem.id,
-                quantity: 1,
-                periodicPartChangeId: partChangeId,
-                isPeriodicPartChange: true,
-              };
-              setActions(prevActions => [newItem, ...prevActions]);
-              toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
-            } else {
-              toast({
-                title: 'Dikkat',
-                description: `${partChange.stokAdi} şahsi stokunuzda bulunamadı. Manuel olarak ekleyebilirsiniz.`,
-                variant: 'default'
-              });
-            }
-          }
-        }
+    const alreadyInActions = actions.some(a =>
+      a.periodicPartChangeId === partChangeId ||
+      (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
+    );
+
+    // Always add to selected
+    setSelectedPeriodicParts(prev => [...prev, partChangeId]);
+    if (alreadyInActions) return;
+
+    const matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+
+    // If no serial tracking and no outgoing part tracking needed, auto-save
+    if (!partChange.requiresSerialTracking && !partChange.requiresOutgoingPartInfo) {
+      if (matchingStockItem) {
+        const newItem: ActionItem = {
+          id: crypto.randomUUID(),
+          type: 'part_change',
+          action: matchingStockItem.productCodeId,
+          stokKodu: matchingStockItem.stokKodu,
+          stokAdi: matchingStockItem.stokAdi,
+          serialNumber: matchingStockItem.serialNumber,
+          personalStockId: matchingStockItem.id,
+          quantity: 1,
+          periodicPartChangeId: partChangeId,
+          isPeriodicPartChange: true,
+        };
+        setActions(prev => [newItem, ...prev]);
+        toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
       } else {
-        // If deselecting, remove from actions
-        setActions(prevActions => prevActions.filter(a => a.periodicPartChangeId !== partChangeId));
+        const newItem: ActionItem = {
+          id: crypto.randomUUID(),
+          type: 'part_change',
+          action: 'periodic_auto',
+          stokKodu: partChange.stokKodu,
+          stokAdi: partChange.stokAdi,
+          quantity: 1,
+          periodicPartChangeId: partChangeId,
+          isPeriodicPartChange: true,
+        };
+        setActions(prev => [newItem, ...prev]);
+        toast({ title: 'Periyodik Değişim Kaydedildi', description: `${partChange.stokAdi} periyodik değişimi kaydedildi.` });
       }
+      return;
+    }
 
-      return newSelected;
-    });
+    // Tracking needed - open part modal with pre-fill
+    setPendingPeriodicPartChangeId(partChangeId);
+    setPartSearchQuery('');
+    setManualPartCode('');
+    setManualPartName('');
+    setManualSerialNumber('');
+    setPartQuantity(1);
+    setRemovedPartStokKodu(partChange.stokKodu);
+    setRemovedPartStokAdi(partChange.stokAdi);
+    setRemovedPartSerialNumber('');
+    setRemovedPartImageFile(null);
+    setRemovedPartImagePreview(null);
+
+    if (matchingStockItem) {
+      setSelectedStockItem(matchingStockItem);
+      setShowManualEntry(false);
+      setPartSearchQuery(matchingStockItem.stokAdi);
+    } else {
+      setSelectedStockItem(null);
+      setShowManualEntry(true);
+      setManualPartCode(partChange.stokKodu);
+      setManualPartName(partChange.stokAdi);
+    }
+
+    setIsPartModalOpen(true);
   };
 
   const openPartModal = () => {
@@ -633,8 +666,15 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const addSelectedPart = async () => {
-    // Validate removed part info is provided
-    if (!removedPartSerialNumber.trim()) {
+    // Determine if this is for a periodic part with reduced requirements
+    const pendingPeriodic = pendingPeriodicPartChangeId
+      ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
+      : null;
+    const needsRemovedPartInfo = pendingPeriodic ? pendingPeriodic.requiresOutgoingPartInfo : true;
+    const needsSerialTracking = pendingPeriodic ? pendingPeriodic.requiresSerialTracking : true;
+
+    // Validate removed part info is provided (only if needed)
+    if (needsRemovedPartInfo && !removedPartSerialNumber.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen cihazdan çıkan parçanın seri numarasını girin.', variant: 'destructive' });
       return;
     }
@@ -649,13 +689,19 @@ export default function AplikasyonIslemFormuPage() {
     }
 
     if (showManualEntry) {
-      if (!manualPartCode.trim() || !manualPartName.trim() || !manualSerialNumber.trim()) {
-        toast({ title: 'Eksik Bilgi', description: 'Lütfen parça kodu, adı ve seri numarasını girin.', variant: 'destructive' });
+      if (!manualPartCode.trim() || !manualPartName.trim()) {
+        toast({ title: 'Eksik Bilgi', description: 'Lütfen parça kodu ve adını girin.', variant: 'destructive' });
+        return;
+      }
+      if (needsSerialTracking && !manualSerialNumber.trim()) {
+        toast({ title: 'Eksik Bilgi', description: 'Lütfen parça seri numarasını girin.', variant: 'destructive' });
         return;
       }
 
       // Check if this matches a periodic part change
-      const matchingPeriodic = periodicPartChanges.find(p => p.stokKodu === manualPartCode.trim());
+      const matchingPeriodic = pendingPeriodicPartChangeId
+        ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
+        : periodicPartChanges.find(p => p.stokKodu === manualPartCode.trim());
 
       const newItem: ActionItem = {
         id: crypto.randomUUID(),
@@ -691,7 +737,9 @@ export default function AplikasyonIslemFormuPage() {
       }
 
       // Check if this matches a periodic part change
-      const matchingPeriodic = periodicPartChanges.find(p => p.stokKodu === selectedStockItem.stokKodu);
+      const matchingPeriodic = pendingPeriodicPartChangeId
+        ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
+        : periodicPartChanges.find(p => p.stokKodu === selectedStockItem.stokKodu);
 
       const newItem: ActionItem = {
         id: crypto.randomUUID(),
@@ -723,6 +771,7 @@ export default function AplikasyonIslemFormuPage() {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen şahsi stokunuzdan bir parça seçin.', variant: 'destructive' });
       return;
     }
+    setPendingPeriodicPartChangeId(null);
     setIsPartModalOpen(false);
   };
 
@@ -1678,7 +1727,13 @@ export default function AplikasyonIslemFormuPage() {
       </Dialog>
 
       {/* Part Selection Modal - Personal Stock */}
-      <Dialog open={isPartModalOpen} onOpenChange={setIsPartModalOpen}>
+      <Dialog open={isPartModalOpen} onOpenChange={(open) => {
+        if (!open && pendingPeriodicPartChangeId) {
+          setSelectedPeriodicParts(prev => prev.filter(id => id !== pendingPeriodicPartChangeId));
+          setPendingPeriodicPartChangeId(null);
+        }
+        setIsPartModalOpen(open);
+      }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Yedek Parça Değişimi</DialogTitle>
@@ -1757,7 +1812,7 @@ export default function AplikasyonIslemFormuPage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Seri No <span className="text-destructive">*</span></Label>
+                      <Label className="text-xs">Seri No {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking) && <span className="text-destructive">*</span>}</Label>
                       <Input
                         placeholder="Seri No..."
                         value={manualSerialNumber}
@@ -1788,10 +1843,13 @@ export default function AplikasyonIslemFormuPage() {
             </div>
 
             {/* Section 2: Removed part info (from device) */}
-            <div className="p-3 border rounded-lg bg-amber-50 dark:bg-amber-950/20 space-y-3">
+            <div className={`p-3 border rounded-lg space-y-3 ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'bg-amber-50 dark:bg-amber-950/20' : 'bg-muted/30'}`}>
               <Label className="font-semibold flex items-center gap-2">
                 2. Cihazdan Çıkan Parça Bilgisi
-                <span className="text-xs font-normal text-muted-foreground">(zorunlu)</span>
+                {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo)
+                  ? <span className="text-xs font-normal text-muted-foreground">(zorunlu)</span>
+                  : <span className="text-xs font-normal text-muted-foreground">(opsiyonel)</span>
+                }
               </Label>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
@@ -1805,7 +1863,7 @@ export default function AplikasyonIslemFormuPage() {
                   <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça kodu kullanılır</p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Seri No <span className="text-destructive">*</span></Label>
+                  <Label className="text-xs">Seri No {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) && <span className="text-destructive">*</span>}</Label>
                   <Input
                     placeholder="Çıkan parça seri no..."
                     value={removedPartSerialNumber}
@@ -1894,7 +1952,11 @@ export default function AplikasyonIslemFormuPage() {
             <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
             <Button
               onClick={addSelectedPart}
-              disabled={(!selectedStockItem && !(showManualEntry && manualPartCode && manualSerialNumber && manualPartName)) || !removedPartSerialNumber.trim() || isUploadingImage}
+              disabled={
+                (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
+                || ((!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo !== false) && !removedPartSerialNumber.trim())
+                || isUploadingImage
+              }
             >
               {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Yükleniyor...</> : 'Ekle'}
             </Button>
