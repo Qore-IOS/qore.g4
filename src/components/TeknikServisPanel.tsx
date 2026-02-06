@@ -24,18 +24,15 @@ export default function TeknikServisPanel({
 }: TeknikServisPanelProps) {
   const router = useRouter();
 
-  const getDevicesForHospital = (hospitalId: string): (AssignedDevice & {device: Device})[] => {
-    const assignments = hospitalDeviceAssignments.filter(hda => hda.hastaneId === hospitalId);
-    return assignments.map(a => {
-        const deviceDef = devices.find(d => d.id === a.deviceId)!;
-        return { ...a, device: deviceDef };
-    }).filter(d => d.device)
-     .sort((a, b) => (Number(a.device.order ?? 99)) - (Number(b.device.order ?? 99)));
+  const getDevicesForHospital = (hospitalId: string): Device[] => {
+    return devices
+      .filter(d => (d as any).hospitalId === hospitalId)
+      .sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
   };
 
   const hospitalDeviceStatuses = hospitals.map(hospital => {
     const hospitalDevices = getDevicesForHospital(hospital.id);
-    const arizaSayisi = hospitalDevices.filter(d => d.device.arizaDurumu !== 'yok').length;
+    const arizaSayisi = hospitalDevices.filter(d => d.arizaDurumu !== 'yok' && d.arizaDurumu !== undefined).length;
     return {
       ...hospital,
       cihazSayisi: hospitalDevices.length,
@@ -85,23 +82,25 @@ export default function TeknikServisPanel({
                     </p>
                    )
                 )}
-                <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
-                  {hospital.devices.map((assigned) => {
-                     const isFaulty = assigned.device.arizaDurumu !== 'yok' && assigned.device.arizaDurumu !== undefined;
-                     return (
-                        <span
-                            key={assigned.id}
-                            className={cn(
-                                "h-2.5 w-2.5 rounded-full transition-all",
-                                isFaulty
-                                  ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
-                                  : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
-                            )}
-                            title={`${assigned.device.cihazAdi || assigned.device.model} - ${isFaulty ? 'Arızalı' : 'Sağlıklı'}`}
-                        ></span>
-                     );
-                  })}
-                </div>
+                {hospital.devices.length > 0 && (
+                  <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
+                    {hospital.devices.map((device) => {
+                       const isFaulty = device.arizaDurumu !== 'yok' && device.arizaDurumu !== undefined;
+                       return (
+                          <span
+                              key={device.id}
+                              className={cn(
+                                  "h-2.5 w-2.5 rounded-full transition-all",
+                                  isFaulty
+                                    ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
+                                    : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
+                              )}
+                              title={`${device.cihazAdi || device.model} - ${isFaulty ? 'Arızalı' : 'Sağlıklı'}`}
+                          ></span>
+                       );
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}
