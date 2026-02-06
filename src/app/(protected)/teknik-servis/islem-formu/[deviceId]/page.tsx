@@ -498,9 +498,23 @@ export default function IslemFormuPage() {
         const diffTime = nextDueDate.getTime() - now.getTime();
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         isOverdue = daysRemaining < 0;
+      } else if (partChange.nextDueDate) {
+        // Use initial nextDueDate from part change definition when no log exists yet
+        nextDueDate = partChange.nextDueDate?.toDate ? partChange.nextDueDate.toDate() : new Date(partChange.nextDueDate);
+        const now = new Date();
+        const diffTime = nextDueDate.getTime() - now.getTime();
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        isOverdue = daysRemaining < 0;
       }
 
-      const periodLabel = `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
+      // Show date-based label if nextDueDate exists, otherwise legacy period label
+      let periodLabel: string;
+      if (nextDueDate) {
+        const day = nextDueDate.getDate();
+        periodLabel = `Her ayın ${day}'${day === 1 ? 'i' : day === 3 || day === 4 || day === 13 || day === 14 || day === 23 || day === 24 ? 'ü' : day === 6 || day === 16 || day === 26 ? 'sı' : day === 9 || day === 19 || day === 29 ? 'u' : day === 10 || day === 30 ? 'u' : day === 7 || day === 17 || day === 27 ? 'si' : day === 8 || day === 18 || day === 28 ? 'i' : 'i'}`;
+      } else {
+        periodLabel = `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
+      }
 
       return {
         partChange,
@@ -1153,17 +1167,30 @@ export default function IslemFormuPage() {
           for (const planId of selectedMaintenanceTasks) {
             const plan = maintenancePlans.find(p => p.id === planId);
             if (plan) {
-              const nextDueDate = new Date(now);
-              switch (plan.periodUnit) {
-                case 'hafta':
-                  nextDueDate.setDate(nextDueDate.getDate() + (plan.periodValue * 7));
-                  break;
-                case 'ay':
-                  nextDueDate.setMonth(nextDueDate.getMonth() + plan.periodValue);
-                  break;
-                case 'yil':
-                  nextDueDate.setFullYear(nextDueDate.getFullYear() + plan.periodValue);
-                  break;
+              // Calculate next due date: use nextDueDate-based monthly recurrence if available
+              let nextDueDate: Date;
+              if (plan.nextDueDate) {
+                // Get current scheduled date
+                const currentDue = plan.nextDueDate?.toDate ? plan.nextDueDate.toDate() : new Date(plan.nextDueDate);
+                // Find latest log to get most recent scheduled date
+                const latestPlanLog = maintenanceLogs.find((l: any) => l.maintenancePlanId === plan.id);
+                const baseDue = latestPlanLog?.nextDueDate ? (latestPlanLog.nextDueDate instanceof Date ? latestPlanLog.nextDueDate : latestPlanLog.nextDueDate.toDate()) : currentDue;
+                // Advance by 1 month from the current scheduled date (same day-of-month)
+                nextDueDate = new Date(baseDue);
+                nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+              } else {
+                nextDueDate = new Date(now);
+                switch (plan.periodUnit) {
+                  case 'hafta':
+                    nextDueDate.setDate(nextDueDate.getDate() + (plan.periodValue * 7));
+                    break;
+                  case 'ay':
+                    nextDueDate.setMonth(nextDueDate.getMonth() + plan.periodValue);
+                    break;
+                  case 'yil':
+                    nextDueDate.setFullYear(nextDueDate.getFullYear() + plan.periodValue);
+                    break;
+                }
               }
 
               const maintenanceLogRef = doc(collection(db, 'maintenanceLogs'));
@@ -1205,17 +1232,30 @@ export default function IslemFormuPage() {
         for (const periodicId of periodicPartChangeIds) {
           const periodic = periodicPartChanges.find(p => p.id === periodicId);
           if (periodic) {
-            const nextDueDate = new Date(now);
-            switch (periodic.periodUnit) {
-              case 'hafta':
-                nextDueDate.setDate(nextDueDate.getDate() + (periodic.periodValue * 7));
-                break;
-              case 'ay':
-                nextDueDate.setMonth(nextDueDate.getMonth() + periodic.periodValue);
-                break;
-              case 'yil':
-                nextDueDate.setFullYear(nextDueDate.getFullYear() + periodic.periodValue);
-                break;
+            // Calculate next due date: use nextDueDate-based monthly recurrence if available
+            let nextDueDate: Date;
+            if (periodic.nextDueDate) {
+              // Get the initial scheduled date from part change definition
+              const initialDue = periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : new Date(periodic.nextDueDate);
+              // Find latest log for this periodic part to get current scheduled date
+              const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
+              const baseDue = latestPeriodicLog?.nextDueDate ? (latestPeriodicLog.nextDueDate instanceof Date ? latestPeriodicLog.nextDueDate : latestPeriodicLog.nextDueDate.toDate()) : initialDue;
+              // Advance by 1 month from the current scheduled date (same day-of-month)
+              nextDueDate = new Date(baseDue);
+              nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+            } else {
+              nextDueDate = new Date(now);
+              switch (periodic.periodUnit) {
+                case 'hafta':
+                  nextDueDate.setDate(nextDueDate.getDate() + (periodic.periodValue * 7));
+                  break;
+                case 'ay':
+                  nextDueDate.setMonth(nextDueDate.getMonth() + periodic.periodValue);
+                  break;
+                case 'yil':
+                  nextDueDate.setFullYear(nextDueDate.getFullYear() + periodic.periodValue);
+                  break;
+              }
             }
 
             // Find the matching part change in actions
