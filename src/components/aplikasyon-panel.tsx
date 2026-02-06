@@ -172,10 +172,13 @@ export default function AplikasyonPanel({
     return { poolGroups, standaloneLabs };
   }, [filteredHospitals, labPools, userAssignedLabs, isAdmin]);
 
+  // Helper: is device faulty?
+  const isDeviceFaulty = (d: Device) => d.arizaDurumu !== undefined && d.arizaDurumu !== 'yok';
+
   // Calculate device stats for a hospital
   const getHospitalStats = (hospitalId: string) => {
     const hospitalDevices = getDevicesForHospital(hospitalId);
-    const arizaSayisi = hospitalDevices.filter(d => d.arizaDurumu === 'aplikasyon').length;
+    const arizaSayisi = hospitalDevices.filter(isDeviceFaulty).length;
     return {
       cihazSayisi: hospitalDevices.length,
       arizaSayisi,
@@ -186,7 +189,7 @@ export default function AplikasyonPanel({
   // Calculate combined stats for a pool
   const getPoolStats = (memberIds: string[]) => {
     const poolDevices = getDevicesForHospitals(memberIds);
-    const arizaSayisi = poolDevices.filter(d => d.arizaDurumu === 'aplikasyon').length;
+    const arizaSayisi = poolDevices.filter(isDeviceFaulty).length;
     return {
       cihazSayisi: poolDevices.length,
       arizaSayisi,
@@ -200,17 +203,17 @@ export default function AplikasyonPanel({
     return (
       <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
         {devs.map((device) => {
-          const isFaulty = device.arizaDurumu === 'aplikasyon';
+          const faulty = isDeviceFaulty(device);
           return (
             <span
               key={device.id}
               className={cn(
                 "h-2.5 w-2.5 rounded-full transition-all",
-                isFaulty
+                faulty
                   ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
                   : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
               )}
-              title={`${device.cihazAdi || device.model} - ${isFaulty ? 'Arızalı' : 'Sağlıklı'}`}
+              title={`${device.cihazAdi || device.model} - ${faulty ? 'Arızalı' : 'Sağlıklı'}`}
             ></span>
           );
         })}
