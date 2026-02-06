@@ -2,7 +2,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import {
-  collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where
+  collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Device, Hospital, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
@@ -51,8 +51,7 @@ type NewPeriodicPartRow = {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
-  periodValue: number;
-  periodUnit: MaintenancePeriodUnit;
+  nextDueDate: string; // YYYY-MM-DD format
   responsibilityType: PeriodicPartResponsibility;
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
@@ -60,50 +59,13 @@ type NewPeriodicPartRow = {
   searchText: string;
 };
 
-// Toplu bakım planı - periyodik zamanlama tipi
-type BulkScheduleType = 'her_haftanin' | 'her_ayin' | 'her_yilin';
-
-const BULK_SCHEDULE_LABELS: Record<BulkScheduleType, string> = {
-  her_haftanin: 'Her Haftanın',
-  her_ayin: 'Her Ayın',
-  her_yilin: 'Her Yılın',
-};
-
-const WEEKDAYS = [
-  { value: 1, label: 'Pazartesi' },
-  { value: 2, label: 'Salı' },
-  { value: 3, label: 'Çarşamba' },
-  { value: 4, label: 'Perşembe' },
-  { value: 5, label: 'Cuma' },
-  { value: 6, label: 'Cumartesi' },
-  { value: 7, label: 'Pazar' },
-];
-
-const MONTHS = [
-  { value: 1, label: 'Ocak' },
-  { value: 2, label: 'Şubat' },
-  { value: 3, label: 'Mart' },
-  { value: 4, label: 'Nisan' },
-  { value: 5, label: 'Mayıs' },
-  { value: 6, label: 'Haziran' },
-  { value: 7, label: 'Temmuz' },
-  { value: 8, label: 'Ağustos' },
-  { value: 9, label: 'Eylül' },
-  { value: 10, label: 'Ekim' },
-  { value: 11, label: 'Kasım' },
-  { value: 12, label: 'Aralık' },
-];
-
-const MONTH_DAYS = Array.from({ length: 30 }, (_, i) => ({ value: i + 1, label: `${i + 1}` }));
-
 // Toplu bakım planı - yedek parça satırı tipi
 type BulkPeriodicPartRow = {
   id: string;
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
-  scheduleType: BulkScheduleType;
-  scheduleDay: number; // hafta: 1-7, ay: 1-30, yıl: 1-12
+  nextDueDate: string; // YYYY-MM-DD format
   responsibilityType: PeriodicPartResponsibility;
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
@@ -301,8 +263,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       productCodeId: '',
       stokKodu: '',
       stokAdi: '',
-      periodValue: 1,
-      periodUnit: 'ay',
+      nextDueDate: '',
       responsibilityType: 'teknik_servis',
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
@@ -388,8 +349,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       productCodeId: '',
       stokKodu: '',
       stokAdi: '',
-      scheduleType: 'her_ayin',
-      scheduleDay: 1,
+      nextDueDate: '',
       responsibilityType: 'teknik_servis',
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
@@ -400,15 +360,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   };
 
   const updateBulkPeriodicPartRow = (id: string, field: keyof BulkPeriodicPartRow, value: any) => {
-    setBulkPeriodicPartRows(prev => prev.map(row => {
-      if (row.id !== id) return row;
-      const updated = { ...row, [field]: value };
-      // scheduleType değiştiğinde scheduleDay'i sıfırla
-      if (field === 'scheduleType') {
-        updated.scheduleDay = 1;
-      }
-      return updated;
-    }));
+    setBulkPeriodicPartRows(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
   };
 
   const selectBulkProductForRow = (rowId: string, product: ProductCode) => {
@@ -421,28 +373,6 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
   const removeBulkPeriodicPartRow = (id: string) => {
     setBulkPeriodicPartRows(prev => prev.filter(row => row.id !== id));
-  };
-
-  const getScheduleDayLabel = (scheduleType: BulkScheduleType, scheduleDay: number): string => {
-    if (scheduleType === 'her_haftanin') {
-      return WEEKDAYS.find(d => d.value === scheduleDay)?.label || '';
-    } else if (scheduleType === 'her_ayin') {
-      return `${scheduleDay}. gün`;
-    } else {
-      return MONTHS.find(m => m.value === scheduleDay)?.label || '';
-    }
-  };
-
-  const getScheduleDescription = (scheduleType: BulkScheduleType, scheduleDay: number): string => {
-    if (scheduleType === 'her_haftanin') {
-      const dayLabel = WEEKDAYS.find(d => d.value === scheduleDay)?.label || '';
-      return `Her ${dayLabel} değişmeli`;
-    } else if (scheduleType === 'her_ayin') {
-      return `Her ayın ${scheduleDay}'inde değişmeli`;
-    } else {
-      const monthLabel = MONTHS.find(m => m.value === scheduleDay)?.label || '';
-      return `Her yılın ${monthLabel} ayında değişmeli`;
-    }
   };
 
   // Toplu bakım planı kaydetme - 1. adım: doğrulama ve lab seçimine geç
@@ -458,9 +388,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       return;
     }
 
-    const invalidPartRow = bulkPeriodicPartRows.find(r => !r.productCodeId);
+    const invalidPartRow = bulkPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate);
     if (invalidPartRow) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün ve tarih seçin.', variant: 'destructive' });
       return;
     }
 
@@ -521,20 +451,14 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
         // Periyodik parça değişimlerini kaydet
         for (const row of bulkPeriodicPartRows) {
-          // scheduleType'dan periodUnit'e dönüştür
-          const periodUnit: MaintenancePeriodUnit =
-            row.scheduleType === 'her_haftanin' ? 'hafta' :
-            row.scheduleType === 'her_ayin' ? 'ay' : 'yil';
-
           await addDoc(collection(db, 'periodicPartChanges'), {
             deviceId: device.id,
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
             periodValue: 1,
-            periodUnit: periodUnit,
-            scheduleType: row.scheduleType,
-            scheduleDay: row.scheduleDay,
+            periodUnit: 'ay',
+            nextDueDate: row.nextDueDate ? Timestamp.fromDate(new Date(row.nextDueDate + 'T00:00:00')) : null,
             responsibilityType: row.responsibilityType,
             requiresOutgoingPartInfo: row.requiresOutgoingPartInfo,
             requiresSerialTracking: row.requiresSerialTracking,
@@ -590,9 +514,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
 
     // Validate periodic part change rows
-    const invalidPartRow = newPeriodicPartRows.find(r => !r.productCodeId);
+    const invalidPartRow = newPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate);
     if (invalidPartRow) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün ve tarih seçin.', variant: 'destructive' });
       return;
     }
 
@@ -625,8 +549,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           productCodeId: row.productCodeId,
           stokKodu: row.stokKodu,
           stokAdi: row.stokAdi,
-          periodValue: row.periodValue,
-          periodUnit: row.periodUnit,
+          periodValue: 1,
+          periodUnit: 'ay',
+          nextDueDate: row.nextDueDate ? Timestamp.fromDate(new Date(row.nextDueDate + 'T00:00:00')) : null,
           responsibilityType: row.responsibilityType,
           requiresOutgoingPartInfo: row.requiresOutgoingPartInfo,
           requiresSerialTracking: row.requiresSerialTracking,
@@ -689,7 +614,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           periodicParts: deviceParts.map(p => ({
             partName: p.stokAdi,
             partCode: p.stokKodu,
-            period: `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
+            period: p.nextDueDate?.toDate ? `Her ayın ${new Date(p.nextDueDate.toDate()).getDate()}'i` : `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
             responsibility: RESPONSIBILITY_LABELS[p.responsibilityType],
           })),
         };
@@ -1068,7 +993,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                           <p className="text-xs text-muted-foreground font-mono">{part.stokKodu}</p>
                           <div className="flex gap-2 mt-1">
                             <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                              {part.periodValue} {PERIOD_UNIT_LABELS[part.periodUnit]}
+                              {part.nextDueDate?.toDate ? new Date(part.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${part.periodValue} ${PERIOD_UNIT_LABELS[part.periodUnit]}`}
                             </span>
                             <span className="text-xs bg-secondary px-1.5 py-0.5 rounded">
                               {RESPONSIBILITY_LABELS[part.responsibilityType]}
@@ -1150,25 +1075,12 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                             )}
                           </div>
                           <Input
-                            type="number"
-                            min="1"
-                            value={row.periodValue}
-                            onChange={(e) => updatePeriodicPartRow(row.id, 'periodValue', Number(e.target.value))}
-                            className="w-16"
+                            type="date"
+                            value={row.nextDueDate}
+                            onChange={(e) => updatePeriodicPartRow(row.id, 'nextDueDate', e.target.value)}
+                            className="w-40"
+                            placeholder="Tarih seçin"
                           />
-                          <Select
-                            value={row.periodUnit}
-                            onValueChange={(v) => updatePeriodicPartRow(row.id, 'periodUnit', v as MaintenancePeriodUnit)}
-                          >
-                            <SelectTrigger className="w-24">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="hafta">Hafta</SelectItem>
-                              <SelectItem value="ay">Ay</SelectItem>
-                              <SelectItem value="yil">Yıl</SelectItem>
-                            </SelectContent>
-                          </Select>
                           <Button variant="ghost" size="icon" onClick={() => removePeriodicPartRow(row.id)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
@@ -1435,48 +1347,22 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                         </Button>
                       </div>
 
-                      {/* Periyot seçimi: Her Haftanın / Her Ayın / Her Yılın */}
+                      {/* Tarih seçimi */}
                       <div className="flex flex-wrap items-center gap-2">
-                        <Select
-                          value={row.scheduleType}
-                          onValueChange={(v) => updateBulkPeriodicPartRow(row.id, 'scheduleType', v as BulkScheduleType)}
-                        >
-                          <SelectTrigger className="w-40">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="her_haftanin">Her Haftanın</SelectItem>
-                            <SelectItem value="her_ayin">Her Ayın</SelectItem>
-                            <SelectItem value="her_yilin">Her Yılın</SelectItem>
-                          </SelectContent>
-                        </Select>
-
-                        {/* Alt seçenek: gün / ay seçimi */}
-                        <Select
-                          value={String(row.scheduleDay)}
-                          onValueChange={(v) => updateBulkPeriodicPartRow(row.id, 'scheduleDay', Number(v))}
-                        >
-                          <SelectTrigger className="w-44">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {row.scheduleType === 'her_haftanin' && WEEKDAYS.map(day => (
-                              <SelectItem key={day.value} value={String(day.value)}>{day.label}</SelectItem>
-                            ))}
-                            {row.scheduleType === 'her_ayin' && MONTH_DAYS.map(day => (
-                              <SelectItem key={day.value} value={String(day.value)}>{day.label}. gün</SelectItem>
-                            ))}
-                            {row.scheduleType === 'her_yilin' && MONTHS.map(month => (
-                              <SelectItem key={month.value} value={String(month.value)}>{month.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-xs text-muted-foreground">İlk Değişim Tarihi:</Label>
+                        <Input
+                          type="date"
+                          value={row.nextDueDate}
+                          onChange={(e) => updateBulkPeriodicPartRow(row.id, 'nextDueDate', e.target.value)}
+                          className="w-40"
+                        />
                       </div>
 
-                      {/* Açıklama */}
-                      <p className="text-xs text-muted-foreground italic">
-                        {getScheduleDescription(row.scheduleType, row.scheduleDay)}
-                      </p>
+                      {row.nextDueDate && (
+                        <p className="text-xs text-muted-foreground italic">
+                          Her ayın {new Date(row.nextDueDate + 'T00:00:00').getDate()}'inde değişmeli
+                        </p>
+                      )}
 
                       {/* Sorumluluk ve takip seçenekleri */}
                       <div className="flex flex-wrap items-center gap-4">

@@ -574,8 +574,9 @@ export interface PeriodicPartChange {
   productCodeId: string;         // ProductCode referansı
   stokKodu: string;              // Ürün stok kodu
   stokAdi: string;               // Ürün adı
-  periodValue: number;           // Periyot değeri (örn: 2)
-  periodUnit: MaintenancePeriodUnit; // Periyot birimi (hafta/ay/yıl)
+  periodValue: number;           // Periyot değeri (legacy, varsayılan 1)
+  periodUnit: MaintenancePeriodUnit; // Periyot birimi (legacy, varsayılan 'ay')
+  nextDueDate?: any;             // İlk beklenen değişim tarihi (açık tarih - Firestore Timestamp)
   responsibilityType: PeriodicPartResponsibility; // Sorumluluk tipi
   requiresOutgoingPartInfo: boolean; // Cihazdan çıkan parça bilgisi gerekli mi
   requiresSerialTracking: boolean;   // Seri no takibi yapılacak mı
