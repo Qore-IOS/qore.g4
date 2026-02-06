@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Wrench, ArrowLeft, Layers, ChevronRight, FileText, Loader2, Eye, Calendar, Clock } from 'lucide-react';
+import { Wrench, ArrowLeft, Layers, ChevronRight, FileText, Loader2, Eye, Calendar, Clock, AlertTriangle, FlaskConical, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import Image from 'next/image';
@@ -15,6 +15,7 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 
 interface TeknikServisPanelProps {
   hospitals: Hospital[];
@@ -41,9 +42,21 @@ type ActionFormRecord = {
   islemTuru?: string;
   createdAt: Timestamp;
   createdByName: string;
+  createdByUid?: string;
   baslangicSaati?: string;
   bitisSaati?: string;
   cihazDurumu?: string;
+  cihazDurumuAciklama?: string;
+  actions?: any[];
+  selectedFaultId?: string;
+  selectedFaultName?: string;
+  isCustomFault?: boolean;
+  selectedTests?: string[];
+  eslikEdenPersonel?: { uid: string; name: string; role: string }[];
+  personnelSignature?: string;
+  technicianSignature?: string;
+  technicianName?: string;
+  selectedMaintenanceTasks?: { id: string; taskName: string }[];
 };
 
 const ISLEM_TIPI_LABELS: Record<string, string> = {
@@ -391,10 +404,18 @@ export default function TeknikServisPanel({
           ) : selectedFormDetail ? (
             // Form Detail View
             <div className="space-y-4">
-              <Button variant="ghost" size="sm" onClick={() => setSelectedFormDetail(null)}>
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Listeye Dön
-              </Button>
+              <div className="flex items-center justify-between">
+                <Button variant="ghost" size="sm" onClick={() => setSelectedFormDetail(null)}>
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Listeye Dön
+                </Button>
+                <TeknikServisTutanakPDFButton
+                  device={{ id: selectedFormDetail.deviceId, cihazAdi: selectedFormDetail.cihazAdi, seriNumarasi: selectedFormDetail.seriNumarasi, hospitalId: selectedFormDetail.hospitalId } as Device}
+                  hospital={selectedFormDetail.labName ? { id: selectedFormDetail.hospitalId || '', name: selectedFormDetail.labName } as Hospital : null}
+                  actionRecord={selectedFormDetail as any}
+                  className="ml-auto"
+                />
+              </div>
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">{selectedFormDetail.cihazAdi || 'Cihaz'}</CardTitle>
@@ -453,6 +474,25 @@ export default function TeknikServisPanel({
                       </div>
                     )}
                   </div>
+                  {selectedFormDetail.selectedFaultName && (
+                    <div className="pt-4 border-t">
+                      <span className="font-medium flex items-center gap-1 mb-2">
+                        <AlertTriangle className="h-4 w-4 text-red-500" />
+                        Tespit Edilen Arıza:
+                      </span>
+                      <p className="text-sm text-red-600 dark:text-red-400">{selectedFormDetail.selectedFaultName}</p>
+                    </div>
+                  )}
+                  {selectedFormDetail.selectedTests && selectedFormDetail.selectedTests.length > 0 && (
+                    <div className="pt-2">
+                      <span className="font-medium block mb-2">İlişkili Testler:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {selectedFormDetail.selectedTests.map((test: string, i: number) => (
+                          <span key={i} className="text-xs px-2 py-1 bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 rounded-full">{test}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {selectedFormDetail.aciklama && (
                     <div className="pt-4 border-t">
                       <span className="font-medium block mb-2">Açıklama:</span>
