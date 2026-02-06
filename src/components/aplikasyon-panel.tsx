@@ -111,23 +111,17 @@ export default function AplikasyonPanel({
     fetchAllForms();
   };
 
-  const getDevicesForHospital = (hospitalId: string): (AssignedDevice & {device: Device})[] => {
-    const assignments = hospitalDeviceAssignments.filter(hda => hda.hastaneId === hospitalId);
-    return assignments.map(a => {
-        const deviceDef = devices.find(d => d.id === a.deviceId)!;
-        return { ...a, device: deviceDef };
-    }).filter(d => d.device)
-     .sort((a, b) => (Number(a.device.order ?? 99)) - (Number(b.device.order ?? 99)));
+  const getDevicesForHospital = (hospitalId: string): Device[] => {
+    return devices
+      .filter(d => (d as any).hospitalId === hospitalId)
+      .sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
   };
 
   // Get devices for multiple hospitals (for pool summary)
-  const getDevicesForHospitals = (hospitalIds: string[]): (AssignedDevice & {device: Device})[] => {
-    const assignments = hospitalDeviceAssignments.filter(hda => hospitalIds.includes(hda.hastaneId));
-    return assignments.map(a => {
-        const deviceDef = devices.find(d => d.id === a.deviceId)!;
-        return { ...a, device: deviceDef };
-    }).filter(d => d.device)
-     .sort((a, b) => (Number(a.device.order ?? 99)) - (Number(b.device.order ?? 99)));
+  const getDevicesForHospitals = (hospitalIds: string[]): Device[] => {
+    return devices
+      .filter(d => hospitalIds.includes((d as any).hospitalId))
+      .sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
   };
 
   // Filter hospitals based on user's assigned laboratories
@@ -181,7 +175,7 @@ export default function AplikasyonPanel({
   // Calculate device stats for a hospital
   const getHospitalStats = (hospitalId: string) => {
     const hospitalDevices = getDevicesForHospital(hospitalId);
-    const arizaSayisi = hospitalDevices.filter(d => d.device.arizaDurumu === 'aplikasyon').length;
+    const arizaSayisi = hospitalDevices.filter(d => d.arizaDurumu === 'aplikasyon').length;
     return {
       cihazSayisi: hospitalDevices.length,
       arizaSayisi,
@@ -192,7 +186,7 @@ export default function AplikasyonPanel({
   // Calculate combined stats for a pool
   const getPoolStats = (memberIds: string[]) => {
     const poolDevices = getDevicesForHospitals(memberIds);
-    const arizaSayisi = poolDevices.filter(d => d.device.arizaDurumu === 'aplikasyon').length;
+    const arizaSayisi = poolDevices.filter(d => d.arizaDurumu === 'aplikasyon').length;
     return {
       cihazSayisi: poolDevices.length,
       arizaSayisi,
@@ -201,25 +195,28 @@ export default function AplikasyonPanel({
   };
 
   // Reusable device dot indicators
-  const DeviceDots = ({ devices: devs }: { devices: (AssignedDevice & {device: Device})[] }) => (
-    <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
-      {devs.map((assigned) => {
-        const isFaulty = assigned.device.arizaDurumu === 'aplikasyon';
-        return (
-          <span
-            key={assigned.id}
-            className={cn(
-              "h-2.5 w-2.5 rounded-full transition-all",
-              isFaulty
-                ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
-                : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
-            )}
-            title={`${assigned.device.cihazAdi || assigned.device.model} - ${isFaulty ? 'Arızalı' : 'Sağlıklı'}`}
-          ></span>
-        );
-      })}
-    </div>
-  );
+  const DeviceDots = ({ devices: devs }: { devices: Device[] }) => {
+    if (devs.length === 0) return null;
+    return (
+      <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
+        {devs.map((device) => {
+          const isFaulty = device.arizaDurumu === 'aplikasyon';
+          return (
+            <span
+              key={device.id}
+              className={cn(
+                "h-2.5 w-2.5 rounded-full transition-all",
+                isFaulty
+                  ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
+                  : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
+              )}
+              title={`${device.cihazAdi || device.model} - ${isFaulty ? 'Arızalı' : 'Sağlıklı'}`}
+            ></span>
+          );
+        })}
+      </div>
+    );
+  };
 
   // If a pool is expanded, show labs in that pool
   if (expandedPoolId) {
