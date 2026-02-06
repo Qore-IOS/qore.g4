@@ -888,6 +888,38 @@ export default function IslemFormuPage() {
             selectedFaultId: resolvedFaultId,
             selectedFaultName: resolvedFaultName,
             isCustomFault: isCustomFault || false,
+            selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+        });
+
+        // Mirror form to deviceActionForms for device history page
+        const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
+        batch.set(deviceFormRef, {
+            deviceId,
+            cihazAdi: device?.cihazAdi || device?.model,
+            seriNumarasi: device?.seriNumarasi,
+            hospitalId: device?.hospitalId,
+            labName: hospital?.name,
+            actions,
+            islemTipi,
+            islemTuru,
+            aciklama: aciklama.trim(),
+            baslangicSaati,
+            bitisSaati,
+            cihazDurumu,
+            cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
+            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+            personnelSignature: finalSignatures.personnel || null,
+            technicianSignature: finalSignatures.technician || null,
+            technicianName: finalTechnicianName || null,
+            createdAt: Timestamp.fromDate(now),
+            createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            createdByUid: currentUserProfile?.uid,
+            formType: 'teknik_servis',
+            selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
+            selectedFaultId: resolvedFaultId,
+            selectedFaultName: resolvedFaultName,
+            isCustomFault: isCustomFault || false,
+            selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
         });
 
         // Create closed fault report when ariza is selected

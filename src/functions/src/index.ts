@@ -157,6 +157,12 @@ export const sendFaultReportEmail = functions
             return;
         }
 
+        // İşlem formundan açılan arızalarda mail gönderme
+        if (faultData.createdFromActionForm === true) {
+            logger.info(`Skipping email for fault report ${docId} - created from action form.`);
+            return;
+        }
+
         try {
             await sendFaultReportToQorEngine({
                 reportId: docId,
