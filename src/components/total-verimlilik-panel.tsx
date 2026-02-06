@@ -44,8 +44,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo, useDeferredValue } from 'react';
 import * as XLSX from 'xlsx';
 import type { Hospital, ProductCode, EfficiencyPool, LabPool, MinMaxRule } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -133,6 +132,7 @@ interface HakEdisDefinition {
   linkedStokKodu: string;
   hakEdisMiktari: number; // TL cinsinden
 }
+
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
@@ -246,6 +246,12 @@ export default function TotalVerimlilikPanel({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const tableParentRef = useRef<HTMLDivElement>(null);
   const edgeScrollIntervalRef = useRef<number | null>(null);
+
+  // Yatay slider ve kenar glow ref'leri (state yerine ref kullanarak gereksiz re-render'ları önle)
+  const sliderRef = useRef<HTMLInputElement>(null);
+  const glowLeftRef = useRef<HTMLDivElement>(null);
+  const glowRightRef = useRef<HTMLDivElement>(null);
+  const sliderSyncRef = useRef(false); // slider → scroll sync flag
 
   // Phase 6 - Sonuç Odaklı Görünüm
   const [showResultsOnly, setShowResultsOnly] = useState(false);
@@ -1404,6 +1410,9 @@ export default function TotalVerimlilikPanel({
     return result;
   }, [rows, searchTerm, columnFilters, sortConfig]);
 
+  // Deferred value ile ağır tablo render'larında UI'ın bloke olmasını engelle
+  const deferredRows = useDeferredValue(filteredAndSortedRows);
+
   // Filter toggle helper
   const toggleFilterValue = useCallback((
     filterKey: 'labName' | 'stokAdi' | 'testAdi' | 'cihazGrubu',
@@ -1941,13 +1950,48 @@ export default function TotalVerimlilikPanel({
     setTestsSentToCenter({});
   }, []);
 
-  // Edge Scroll - Mouse ekranın sağına geldiğinde yumuşak kaydırma
+  // Scroll viewport yardımcı fonksiyon
+  const getScrollViewport = useCallback(() => {
+    const container = scrollContainerRef.current;
+    return container?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
+  }, []);
+
+  // Yatay slider sync: viewport scroll → slider position (DOM manipulation ile - state kullanmadan)
+  useEffect(() => {
+    const scrollEl = getScrollViewport();
+    if (!scrollEl) return;
+
+    const handleScroll = () => {
+      if (sliderSyncRef.current) return;
+      const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
+      if (maxScroll > 0 && sliderRef.current) {
+        sliderRef.current.value = String((scrollEl.scrollLeft / maxScroll) * 100);
+      }
+    };
+
+    scrollEl.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollEl.removeEventListener('scroll', handleScroll);
+  }, [getScrollViewport, rows.length]);
+
+  // Slider değişimi → viewport scroll (DOM manipulation ile)
+  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = Number(e.target.value);
+    const scrollEl = getScrollViewport();
+    if (scrollEl) {
+      sliderSyncRef.current = true;
+      const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
+      scrollEl.scrollLeft = (value / 100) * maxScroll;
+      requestAnimationFrame(() => { sliderSyncRef.current = false; });
+    }
+  }, [getScrollViewport]);
+
+  // Edge Scroll + Glow efekti - Mouse ekranın kenarlarına geldiğinde
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
 
-    const EDGE_THRESHOLD = 80; // Kenardan 80px içinde tetikle
-    const SCROLL_SPEED = 8; // Kaydırma hızı
+    const EDGE_THRESHOLD = 100; // Kenardan 100px içinde tetikle
+    const SCROLL_SPEED = 10; // Kaydırma hızı
 
     const handleMouseMove = (e: MouseEvent) => {
       const rect = scrollContainer.getBoundingClientRect();
@@ -1960,31 +2004,53 @@ export default function TotalVerimlilikPanel({
           clearInterval(edgeScrollIntervalRef.current);
           edgeScrollIntervalRef.current = null;
         }
+        if (glowLeftRef.current) { glowLeftRef.current.style.opacity = '0'; glowLeftRef.current.style.boxShadow = 'none'; }
+        if (glowRightRef.current) { glowRightRef.current.style.opacity = '0'; glowRightRef.current.style.boxShadow = 'none'; }
         return;
       }
 
       const distanceFromRight = rect.right - mouseX;
       const distanceFromLeft = mouseX - rect.left;
 
-      // Sağ kenara yakınsa sağa kaydır
+      // Glow DOM güncellemesi (React state kullanmadan - performans için)
+      const updateGlow = (leftIntensity: number, rightIntensity: number) => {
+        if (glowLeftRef.current) {
+          glowLeftRef.current.style.opacity = String(leftIntensity);
+          glowLeftRef.current.style.boxShadow = leftIntensity > 0
+            ? `inset 12px 0 20px -8px rgba(249, 115, 22, ${leftIntensity * 0.5})`
+            : 'none';
+        }
+        if (glowRightRef.current) {
+          glowRightRef.current.style.opacity = String(rightIntensity);
+          glowRightRef.current.style.boxShadow = rightIntensity > 0
+            ? `inset -12px 0 20px -8px rgba(249, 115, 22, ${rightIntensity * 0.5})`
+            : 'none';
+        }
+      };
+
+      // Sağ kenara yakınsa sağa kaydır + glow
       if (distanceFromRight < EDGE_THRESHOLD && distanceFromRight > 0) {
+        const intensity = 1 - distanceFromRight / EDGE_THRESHOLD;
+        updateGlow(0, intensity);
         if (!edgeScrollIntervalRef.current) {
           edgeScrollIntervalRef.current = window.setInterval(() => {
             const scrollEl = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
             if (scrollEl) {
-              const speed = Math.max(1, SCROLL_SPEED * (1 - distanceFromRight / EDGE_THRESHOLD));
+              const speed = Math.max(1, SCROLL_SPEED * intensity);
               scrollEl.scrollLeft += speed;
             }
           }, 16);
         }
       }
-      // Sol kenara yakınsa sola kaydır
+      // Sol kenara yakınsa sola kaydır + glow
       else if (distanceFromLeft < EDGE_THRESHOLD && distanceFromLeft > 0) {
+        const intensity = 1 - distanceFromLeft / EDGE_THRESHOLD;
+        updateGlow(intensity, 0);
         if (!edgeScrollIntervalRef.current) {
           edgeScrollIntervalRef.current = window.setInterval(() => {
             const scrollEl = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
             if (scrollEl) {
-              const speed = Math.max(1, SCROLL_SPEED * (1 - distanceFromLeft / EDGE_THRESHOLD));
+              const speed = Math.max(1, SCROLL_SPEED * intensity);
               scrollEl.scrollLeft -= speed;
             }
           }, 16);
@@ -1992,6 +2058,7 @@ export default function TotalVerimlilikPanel({
       }
       // Kenarlardan uzaksa durdur
       else {
+        updateGlow(0, 0);
         if (edgeScrollIntervalRef.current) {
           clearInterval(edgeScrollIntervalRef.current);
           edgeScrollIntervalRef.current = null;
@@ -2000,6 +2067,14 @@ export default function TotalVerimlilikPanel({
     };
 
     const handleMouseLeave = () => {
+      if (glowLeftRef.current) {
+        glowLeftRef.current.style.opacity = '0';
+        glowLeftRef.current.style.boxShadow = 'none';
+      }
+      if (glowRightRef.current) {
+        glowRightRef.current.style.opacity = '0';
+        glowRightRef.current.style.boxShadow = 'none';
+      }
       if (edgeScrollIntervalRef.current) {
         clearInterval(edgeScrollIntervalRef.current);
         edgeScrollIntervalRef.current = null;
@@ -2017,17 +2092,6 @@ export default function TotalVerimlilikPanel({
       }
     };
   }, []);
-
-  // Row virtualization için virtualizer
-  const rowVirtualizer = useVirtualizer({
-    count: filteredAndSortedRows.length,
-    getScrollElement: () => {
-      const container = scrollContainerRef.current;
-      return container?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
-    },
-    estimateSize: () => 60, // Tahmini satır yüksekliği
-    overscan: 5, // Görünür alanın dışında render edilecek ekstra satır sayısı
-  });
 
   return (
     <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Paneli">
@@ -2522,8 +2586,49 @@ export default function TotalVerimlilikPanel({
                 Bu havuz için min-max tanımlı ürün bulunamadı.
               </div>
             ) : (
+              <>
+              {/* Yatay Slider - Tablonun üstünde */}
+              <div className="flex items-center gap-3 px-2 pb-3">
+                <span className="text-xs text-muted-foreground whitespace-nowrap select-none">◀ Sol</span>
+                <input
+                  ref={sliderRef}
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  defaultValue={0}
+                  onChange={handleSliderChange}
+                  className="w-full h-2 rounded-full appearance-none cursor-pointer bg-gradient-to-r from-orange-200 via-muted to-orange-200 dark:from-orange-900 dark:via-muted dark:to-orange-900 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:active:cursor-grabbing [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-orange-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:cursor-grab"
+                  aria-label="Tabloyu yatay kaydır"
+                />
+                <span className="text-xs text-muted-foreground whitespace-nowrap select-none">Sağ ▶</span>
+              </div>
+
+              {/* Tablo konteyneri - glow efektleri ile */}
+              <div className="relative">
+                {/* Sol kenar turuncu glow */}
+                <div
+                  ref={glowLeftRef}
+                  className="pointer-events-none absolute left-0 top-0 bottom-0 w-16 z-20"
+                  style={{
+                    opacity: 0,
+                    background: 'linear-gradient(to right, rgba(249, 115, 22, 0.35), transparent)',
+                    transition: 'opacity 200ms ease',
+                  }}
+                />
+                {/* Sağ kenar turuncu glow */}
+                <div
+                  ref={glowRightRef}
+                  className="pointer-events-none absolute right-0 top-0 bottom-0 w-16 z-20"
+                  style={{
+                    opacity: 0,
+                    background: 'linear-gradient(to left, rgba(249, 115, 22, 0.35), transparent)',
+                    transition: 'opacity 200ms ease',
+                  }}
+                />
+
               <ScrollArea className="w-full" ref={scrollContainerRef}>
-                <div ref={tableParentRef} className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'}>
+                <div ref={tableParentRef} className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'} style={{ willChange: 'transform' }}>
                   <Table aria-label="Total verimlilik veri tablosu">
                     <TableHeader>
                       <TableRow>
@@ -3073,15 +3178,16 @@ export default function TotalVerimlilikPanel({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredAndSortedRows.map((row, index) => {
+                      {deferredRows.map((row) => {
                         return (
                           <TableRow
                             key={row.id}
                             className="text-sm"
                             style={{
                               contentVisibility: 'auto',
-                              containIntrinsicSize: '0 60px'
-                            }}
+                              containIntrinsicSize: '0 60px',
+                              contain: 'layout style paint',
+                            } as React.CSSProperties}
                           >
                             <TableCell className="font-medium bg-muted/30 sticky left-0 z-10">
                               <div>
@@ -3547,6 +3653,8 @@ export default function TotalVerimlilikPanel({
                 </div>
                 <ScrollBar orientation="horizontal" />
               </ScrollArea>
+              </div>
+              </>
             )}
           </CardContent>
         </Card>
