@@ -15,7 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { format, isWithinInterval, isBefore, isAfter, parseISO, eachDayOfInterval, differenceInDays } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { collection, query, getDocs, doc, updateDoc, orderBy, where } from 'firebase/firestore';
+import { collection, query, getDocs, doc, updateDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
@@ -64,21 +64,26 @@ export default function ActiveShiftsPanel({
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Fetch shifts
+  // Fetch shifts - only filter by isActive, sort client-side to avoid composite index issues
   useEffect(() => {
     const fetchShifts = async () => {
       setIsLoading(true);
       try {
         const shiftsQuery = query(
           collection(db, 'shiftSchedules'),
-          where('isActive', '==', true),
-          orderBy('createdAt', 'desc')
+          where('isActive', '==', true)
         );
         const snapshot = await getDocs(shiftsQuery);
         const shiftsData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as ShiftSchedule[];
+        // Sort client-side by createdAt descending
+        shiftsData.sort((a, b) => {
+          const aTime = a.createdAt?.toDate?.() ? a.createdAt.toDate().getTime() : 0;
+          const bTime = b.createdAt?.toDate?.() ? b.createdAt.toDate().getTime() : 0;
+          return bTime - aTime;
+        });
         setShifts(shiftsData);
       } catch (error) {
         console.error('Fetch shifts error:', error);
