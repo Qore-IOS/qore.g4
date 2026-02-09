@@ -969,8 +969,8 @@ export default function DirektTransferPanel() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <BackButton fallback="/siparisler" aria-label="Geri dön" />
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Yedek Parça Transfer - only for admin and lojistik_sorumlusu */}
-            {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu') && (
+            {/* Yedek Parça Transfer - only for admin, lojistik_sorumlusu, and teknik_lojistik */}
+            {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
               <Button
                 variant="default"
                 size="sm"

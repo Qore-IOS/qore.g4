@@ -139,7 +139,7 @@ export default function YedekParcaTransferPage() {
   const [allStockLoading, setAllStockLoading] = useState(false);
 
   // Check authorization
-  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu';
+  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik';
 
   // Fetch data
   useEffect(() => {
