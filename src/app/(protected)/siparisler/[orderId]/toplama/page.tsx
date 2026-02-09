@@ -31,21 +31,21 @@ import { collection, doc, getDoc, updateDoc, writeBatch, serverTimestamp, query,
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
+import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, AlertTriangle, CheckCircle2, Info, Truck, Trash2 } from 'lucide-react';
+import { Loader2, Info, Truck, Trash2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { emitFefoOverride } from '@/lib/notifications';
 import { maybeAutoPrintTutanak } from '@/lib/tutanak-autoprint';
 import { formatMiad, toDateFromAny } from '@/lib/date';
-import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
+import { resolveEffectiveTrackingMode, TrackingMode } from '@/lib/tracking';
 import type { ParsedGeneric } from '@/lib/barcode';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -125,6 +125,16 @@ export default function ToplamaPage() {
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
   const { parseAnyBarcode, resolveProductFromParsed, formats: barcodeFormats } = useBarcodeParser();
+  const { suppressGlobalLoading } = useLoading();
+
+  // Suppress global loading overlay - it interferes with barcode scanning
+  useEffect(() => {
+    const unsuppress = suppressGlobalLoading();
+    return unsuppress;
+  }, [suppressGlobalLoading]);
+
+  // Scan processing lock to prevent race conditions from rapid sequential scans
+  const scanLockRef = useRef(false);
 
   const [order, setOrder] = useState<Order | null>(null);
   const [pickingList, setPickingList] = useState<PickingListItemType[]>([]);
@@ -137,7 +147,6 @@ export default function ToplamaPage() {
   const [lastTransferDates, setLastTransferDates] = useState<Record<string, Date>>({});
 
   const [scannedSerials, setScannedSerials] = useState<Record<string, string[]>>({});
-  const [fefoWarning, setFefoWarning] = useState<{ scannedItem: DepoStokItem, suggestedLot: string, onConfirm: () => void } | null>(null);
   
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -368,85 +377,117 @@ export default function ToplamaPage() {
   }, [toast, productCodes]);
 
   const handleScan = useCallback(async (code: string) => {
-    const parsed = parseAnyBarcode(code, barcodeFormats);
-  
-    if (!parsed) {
-        const stockItem = depoStok.find(item => item.seriNumarasi === code && item.depotId === order?.depotId && !item.isShipped);
-        if (stockItem) {
-            const pickItem = pickingList.find(it => it.stokKodu === stockItem.stokKodu);
-            if (!pickItem) {
-                 toast({ title: 'Hata', description: `Bu ürün (${stockItem.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
-                 return;
-            }
-            addScannedSerial(stockItem.stokKodu || '', code);
-        } else {
-            toast({ title: 'Hata', description: 'Barkod formatı geçersiz veya tanınmıyor.', variant: 'destructive' });
+    // Scan lock to prevent race conditions from rapid sequential scans
+    if (scanLockRef.current) {
+      siparisToplamaLogger.debug('Tarama kilidi aktif, barkod atlandı', { code });
+      return;
+    }
+    scanLockRef.current = true;
+    try {
+      const parsed = parseAnyBarcode(code, barcodeFormats);
+
+      if (!parsed) {
+          const stockItem = depoStok.find(item => item.seriNumarasi === code && item.depotId === order?.depotId && !item.isShipped);
+          if (stockItem) {
+              const pickItem = pickingList.find(it => it.stokKodu === stockItem.stokKodu);
+              if (!pickItem) {
+                   toast({ title: 'Hata', description: `Bu ürün (${stockItem.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
+                   return;
+              }
+              addScannedSerial(stockItem.stokKodu || '', code);
+          } else {
+              toast({ title: 'Hata', description: 'Barkod formatı geçersiz veya tanınmıyor.', variant: 'destructive' });
+          }
+          return;
+      }
+
+      const resolved = resolveProductFromParsed(parsed, productCodes);
+      const { product, stokKodu, seriNumarasi, lotNumarasi } = resolved;
+
+      if (!product || !stokKodu) {
+          toast({ title: 'Hata', description: 'Barkod bir ürünle eşleşmedi.', variant: 'destructive' });
+          return;
+      }
+
+      const pickItemForProduct = pickingList.find(it => it.stokKodu === stokKodu);
+      if (!pickItemForProduct) {
+          toast({ title: 'Hata', description: `Bu ürün (${product.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
+          return;
+      }
+
+      // Use effective tracking mode based on actual barcode content (like direct transfer)
+      const matchedFormat = parsed.matchedFormatId
+        ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+        : undefined;
+      const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
+
+      if (mode === 'serial' || (mode as string) === 'serial_and_lot') {
+        if (!seriNumarasi) {
+          toast({ title: 'Hata', description: 'Seri no takipli ürün için barkod seri no içermiyor.', variant: 'destructive' });
+          return;
         }
-        return;
-    }
-  
-    const resolved = resolveProductFromParsed(parsed, productCodes);
-    const { product, stokKodu, seriNumarasi, lotNumarasi } = resolved;
-  
-    if (!product || !stokKodu) {
-        toast({ title: 'Hata', description: 'Barkod bir ürünle eşleşmedi.', variant: 'destructive' });
-        return;
-    }
-    
-    const pickItemForProduct = pickingList.find(it => it.stokKodu === stokKodu);
-    if (!pickItemForProduct) {
-        toast({ title: 'Hata', description: `Bu ürün (${product.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
-        return;
-    }
-  
-    const mode = resolveDefaultTrackingMode(product as any);
-  
-    if (mode === 'serial' || (mode as string) === 'serial_and_lot') {
-      if (!seriNumarasi) {
-        toast({ title: 'Hata', description: 'Seri no takipli ürün için barkod seri no içermiyor.', variant: 'destructive' });
-        return;
-      }
-      const stockEntry = depoStok.find(item =>
-        item.seriNumarasi === seriNumarasi && item.depotId === order?.depotId && !item.isShipped
-      );
-      if (!stockEntry) {
-        toast({ title: 'Hata', description: `Seri ${seriNumarasi} stoğu bulunamadı veya sevk edilmiş.`, variant: 'destructive' });
-        return;
-      }
-      if (Object.values(scannedSerials).flat().includes(seriNumarasi)) {
-        toast({ title: 'Uyarı', description: 'Bu seri numarası zaten okutulmuş.', variant: 'default' });
-        return;
-      }
-      const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + (item.adetIstenen ?? 0), 0);
-      const currentScannedForProduct = scannedSerials[stokKodu] || [];
-      if (currentScannedForProduct.length >= totalNeededForProduct) {
-        toast({ title: 'Uyarı', description: `Bu ürün için istenen adete ulaşıldı.`, variant: 'default' });
-        return;
-      }
-      const suggestion = pickingList.find(pl => pl.stokKodu === stokKodu);
-      const expectedLot = suggestion?.lotNumarasi;
-      if (stockEntry.lotNumarasi !== expectedLot) {
-        setFefoWarning({
-          scannedItem: stockEntry,
-          suggestedLot: expectedLot || 'Bilinmiyor',
-          onConfirm: () => addScannedSerial(stokKodu, seriNumarasi),
-        });
-        return;
-      }
-      addScannedSerial(stokKodu, seriNumarasi);
-    } else { // Lot/Quantity logic
-        const groupToIncrement = pickingList.find(pl => 
-            pl.stokKodu === stokKodu &&
-            (scannedSerials[stokKodu] || []).filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < (pl.adetIstenen ?? 0)
+        const stockEntry = depoStok.find(item =>
+          item.seriNumarasi === seriNumarasi && item.depotId === order?.depotId && !item.isShipped
         );
-
-        if (!groupToIncrement) {
-            toast({ title: 'Hata', description: `Bu ürün (${stokKodu}) için uygun veya adeti eksik bir toplama grubu bulunamadı.`, variant: 'destructive' });
-            return;
+        if (!stockEntry) {
+          toast({ title: 'Hata', description: `Seri ${seriNumarasi} stoğu bulunamadı veya sevk edilmiş.`, variant: 'destructive' });
+          return;
+        }
+        if (Object.values(scannedSerials).flat().includes(seriNumarasi)) {
+          toast({ title: 'Uyarı', description: 'Bu seri numarası zaten okutulmuş.', variant: 'default' });
+          return;
+        }
+        const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + (item.adetIstenen ?? 0), 0);
+        const currentScannedForProduct = scannedSerials[stokKodu] || [];
+        if (currentScannedForProduct.length >= totalNeededForProduct) {
+          toast({ title: 'Uyarı', description: `Bu ürün için istenen adete ulaşıldı.`, variant: 'default' });
+          return;
         }
 
-        const scannedCount = (scannedSerials[stokKodu] || []).filter(s => s.startsWith(`${groupToIncrement.lotNumarasi}-`)).length;
-        addScannedSerial(stokKodu, `${groupToIncrement.lotNumarasi}-${scannedCount + 1}`);
+        // FEFO check: show info toast but DO NOT block scanning.
+        // The suggested lot is just a recommendation - accept any lot/serial.
+        const suggestion = pickingList.find(pl => pl.stokKodu === stokKodu);
+        const expectedLot = suggestion?.lotNumarasi;
+        if (expectedLot && stockEntry.lotNumarasi !== expectedLot) {
+          siparisToplamaLogger.info('FEFO uyarısı: farklı lot okutuldu (engellenmedi)', {
+            stokKodu,
+            seriNumarasi,
+            scannedLot: stockEntry.lotNumarasi,
+            suggestedLot: expectedLot,
+          });
+          toast({
+            title: 'FEFO Bilgi',
+            description: `Önerilen lot: ${expectedLot}, okutulan lot: ${stockEntry.lotNumarasi}. Ürün eklendi.`,
+            variant: 'default',
+          });
+        }
+        addScannedSerial(stokKodu, seriNumarasi);
+      } else { // Lot/Quantity logic
+          // Accept any lot - first try to find a matching picking group,
+          // then fall back to any group for this product that still needs items
+          const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + (item.adetIstenen ?? 0), 0);
+          const currentScannedForProduct = (scannedSerials[stokKodu] || []);
+          if (currentScannedForProduct.length >= totalNeededForProduct) {
+            toast({ title: 'Uyarı', description: `Bu ürün için istenen adete ulaşıldı.`, variant: 'default' });
+            return;
+          }
+
+          // Find any group for this product that still has capacity
+          const groupToIncrement = pickingList.find(pl =>
+              pl.stokKodu === stokKodu &&
+              currentScannedForProduct.filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < (pl.adetIstenen ?? 0)
+          );
+
+          if (!groupToIncrement) {
+              toast({ title: 'Hata', description: `Bu ürün (${stokKodu}) için uygun veya adeti eksik bir toplama grubu bulunamadı.`, variant: 'destructive' });
+              return;
+          }
+
+          const scannedCount = currentScannedForProduct.filter(s => s.startsWith(`${groupToIncrement.lotNumarasi}-`)).length;
+          addScannedSerial(stokKodu, `${groupToIncrement.lotNumarasi}-${scannedCount + 1}`);
+      }
+    } finally {
+      scanLockRef.current = false;
     }
   }, [order, scannedSerials, toast, depoStok, pickingList, addScannedSerial, parseAnyBarcode, productCodes, resolveProductFromParsed, barcodeFormats]);
   
@@ -741,24 +782,6 @@ export default function ToplamaPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!fefoWarning} onOpenChange={(open) => !open && setFefoWarning(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><AlertTriangle className="text-amber-500" />FEFO Uyarısı</DialogTitle>
-            <DialogDescription>
-              Okutulan ürünün miadı, depodaki aynı ürüne ait başka bir lottan daha ileri bir tarihe sahip. Önce miadı yakın olan ürünün tüketilmesi önerilir.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4 space-y-2">
-            <p><strong>Okutulan Lot:</strong> {fefoWarning?.scannedItem.lotNumarasi} (Miad: {formatMiad(fefoWarning?.scannedItem.miad)})</p>
-            <p><strong>Önerilen Lot:</strong> {fefoWarning?.suggestedLot}</p>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setFefoWarning(null)}>İptal</Button>
-            <Button variant="destructive" onClick={() => { fefoWarning?.onConfirm(); setFefoWarning(null); }}>Yine de Devam Et</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
