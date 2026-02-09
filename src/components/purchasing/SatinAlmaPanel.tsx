@@ -330,7 +330,7 @@ export default function SatinAlmaPanel() {
 
           <div
             ref={sliderRef}
-            className="flex gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1"
+            className="flex flex-nowrap gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
             style={{ scrollSnapType: 'x mandatory' }}
           >
             {sliderDates.map((date) => {
