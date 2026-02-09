@@ -8,11 +8,13 @@ import {
   getDocs,
   addDoc,
   updateDoc,
+  deleteDoc,
   doc,
   query,
   where,
   Timestamp,
   writeBatch,
+  increment,
 } from 'firebase/firestore';
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -46,6 +48,11 @@ import {
   Wrench,
   Cpu,
   PackageOpen,
+  ChevronDown,
+  ChevronUp,
+  Info,
+  Hash,
+  List,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -64,13 +71,24 @@ interface MenuSelection {
   personnelRole?: string;
 }
 
+// Grouped stock item for depo stok view
+interface GroupedDepoStokItem {
+  productCodeId: string;
+  stokKodu: string;
+  stokAdi: string;
+  cihazGrubu: string;
+  totalQuantity: number;
+  earliestDate: Date;
+  serialNumbers: { serialNumber: string; createdAt: Date; id: string }[];
+  entries: YedekParcaDepoStokItem[];
+}
+
 export default function YedekParcaTransferPage() {
   const router = useRouter();
   const { currentUserProfile } = useAuth();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
-  const [spareParts, setSpareParts] = useState<ProductCode[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [pendingReturns, setPendingReturns] = useState<PendingReturn[]>([]);
   const [borrowedParts, setBorrowedParts] = useState<any[]>([]);
@@ -83,21 +101,28 @@ export default function YedekParcaTransferPage() {
   const [transferRows, setTransferRows] = useState<SparePartTransferRow[]>([]);
   const [isTransferring, setIsTransferring] = useState(false);
 
-  // New row state
-  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  // New row state - product selector now uses depo stock products
+  const [depoStokProducts, setDepoStokProducts] = useState<GroupedDepoStokItem[]>([]);
+  const [selectedStokKodu, setSelectedStokKodu] = useState<string>('');
   const [serialNumber, setSerialNumber] = useState('');
+  const [transferQuantity, setTransferQuantity] = useState<number>(1);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [userSearchOpen, setUserSearchOpen] = useState(false);
   const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [serialSelectOpen, setSerialSelectOpen] = useState(false);
 
   // Left menu selection
   const [menuSelection, setMenuSelection] = useState<MenuSelection>({ section: 'transfer' });
 
-  // Depo stok data
+  // Depo stok data (raw)
   const [depoStok, setDepoStok] = useState<YedekParcaDepoStokItem[]>([]);
   const [depoStokLoading, setDepoStokLoading] = useState(false);
+  const [expandedStokKodu, setExpandedStokKodu] = useState<string | null>(null);
+
+  // Product code reference for cihazGrubu lookup
+  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
   // Personnel stock data
   const [personnelStock, setPersonnelStock] = useState<PersonalStockItem[]>([]);
@@ -121,21 +146,33 @@ export default function YedekParcaTransferPage() {
 
     const fetchData = async () => {
       try {
-        // Fetch spare parts (productCodes where urunGrubu is 'yedek_parca')
+        // Fetch product codes for cihazGrubu reference
         const productsQuery = query(
           collection(db, 'productCodes'),
           where('urunGrubu', '==', 'yedek_parca')
         );
         const productsSnap = await getDocs(productsQuery);
         const sparePartProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        setSpareParts(sparePartProducts);
+        setProductCodes(sparePartProducts);
+
+        // Fetch depot stock - only products in the depot
+        const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const stokItems = stokSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+          } as YedekParcaDepoStokItem;
+        });
+        setDepoStok(stokItems);
 
         // Fetch technicians and application specialists
         const usersSnap = await getDocs(collection(db, 'users'));
         const allUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
         setUsers(allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
 
-        // Fetch pending returns (status === 'pending') - no orderBy to avoid index requirement
+        // Fetch pending returns (status === 'pending')
         const pendingQuery = query(
           collection(db, 'pendingReturns'),
           where('status', '==', 'pending')
@@ -149,7 +186,6 @@ export default function YedekParcaTransferPage() {
             requestedAt: data.requestedAt?.toDate ? data.requestedAt.toDate() : new Date(),
           } as PendingReturn;
         });
-        // Sort by requestedAt in memory (newest first)
         pending.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
         setPendingReturns(pending);
 
@@ -167,22 +203,16 @@ export default function YedekParcaTransferPage() {
             borrowedAt: data.borrowedAt?.toDate ? data.borrowedAt.toDate() : new Date(),
           };
         });
-        // Sort by borrowedAt in memory (newest first)
         borrowed.sort((a, b) => new Date(b.borrowedAt).getTime() - new Date(a.borrowedAt).getTime());
         setBorrowedParts(borrowed);
 
-        // Fetch recent transfer logs - no orderBy to avoid index requirement
+        // Fetch recent transfer logs
         const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
         const logs = logsSnap.docs.map(d => {
           const data = d.data();
           const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-          return {
-            id: d.id,
-            ...data,
-            timestamp,
-          };
+          return { id: d.id, ...data, timestamp };
         });
-        // Sort by timestamp in memory (newest first) and take first 50
         logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         setTransferLogs(logs.slice(0, 50));
       } catch (err) {
@@ -195,6 +225,50 @@ export default function YedekParcaTransferPage() {
 
     fetchData();
   }, [isAuthorized, toast]);
+
+  // Build grouped depot stock products (for transfer product selector)
+  useEffect(() => {
+    const productCodeMap = new Map<string, ProductCode>();
+    productCodes.forEach(p => productCodeMap.set(p.id, p));
+
+    const grouped = new Map<string, GroupedDepoStokItem>();
+
+    for (const item of depoStok) {
+      const key = item.stokKodu;
+      if (!grouped.has(key)) {
+        const pc = productCodeMap.get(item.productCodeId);
+        grouped.set(key, {
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          cihazGrubu: item.cihazGrubu || pc?.cihazGrubu || '',
+          totalQuantity: 0,
+          earliestDate: item.createdAt,
+          serialNumbers: [],
+          entries: [],
+        });
+      }
+
+      const g = grouped.get(key)!;
+      g.totalQuantity += item.quantity;
+      g.entries.push(item);
+
+      if (item.serialNumber) {
+        g.serialNumbers.push({
+          serialNumber: item.serialNumber,
+          createdAt: item.createdAt,
+          id: item.id,
+        });
+      }
+
+      if (item.createdAt < g.earliestDate) {
+        g.earliestDate = item.createdAt;
+      }
+    }
+
+    const sorted = Array.from(grouped.values()).sort((a, b) => a.stokKodu.localeCompare(b.stokKodu));
+    setDepoStokProducts(sorted);
+  }, [depoStok, productCodes]);
 
   // Fetch depo stok when selected
   const fetchDepoStok = useCallback(async () => {
@@ -238,7 +312,6 @@ export default function YedekParcaTransferPage() {
           usedAt: data.usedAt?.toDate ? data.usedAt.toDate() : undefined,
         } as PersonalStockItem;
       });
-      // Sort by createdAt (newest first)
       stockItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setPersonnelStock(stockItems);
     } catch (err) {
@@ -287,16 +360,16 @@ export default function YedekParcaTransferPage() {
     }
   }, [menuSelection, fetchDepoStok, fetchPersonnelStock, fetchAllPersonnelStock]);
 
-  // Filtered products for search
+  // Filtered products for search (from depo stock - only products that exist in depot)
   const filteredProducts = useMemo(() => {
-    if (!productSearchQuery) return spareParts.slice(0, 50);
+    if (!productSearchQuery) return depoStokProducts.slice(0, 50);
     const q = productSearchQuery.toLowerCase();
-    return spareParts
+    return depoStokProducts
       .filter(p =>
         (p.stokKodu?.toLowerCase().includes(q) || p.stokAdi?.toLowerCase().includes(q))
       )
       .slice(0, 50);
-  }, [spareParts, productSearchQuery]);
+  }, [depoStokProducts, productSearchQuery]);
 
   // Filtered users for search
   const filteredUsers = useMemo(() => {
@@ -308,10 +381,10 @@ export default function YedekParcaTransferPage() {
     );
   }, [users, userSearchQuery]);
 
-  // Get selected product details
+  // Get selected product details (from grouped depot stock)
   const selectedProduct = useMemo(() => {
-    return spareParts.find(p => p.id === selectedProductId);
-  }, [spareParts, selectedProductId]);
+    return depoStokProducts.find(p => p.stokKodu === selectedStokKodu);
+  }, [depoStokProducts, selectedStokKodu]);
 
   // Get selected user details
   const selectedUser = useMemo(() => {
@@ -330,6 +403,19 @@ export default function YedekParcaTransferPage() {
 
   const totalPersonnelPages = Math.ceil(personnelStock.length / ITEMS_PER_PAGE);
 
+  // Grouped depo stok for the depo stok view
+  const groupedDepoStok = useMemo(() => {
+    return depoStokProducts;
+  }, [depoStokProducts]);
+
+  // Handle serial number change - if serial entered, qty must be 1
+  const handleTransferSerialChange = (value: string) => {
+    setSerialNumber(value);
+    if (value.trim()) {
+      setTransferQuantity(1);
+    }
+  };
+
   // Add row to transfer list
   const addTransferRow = useCallback(() => {
     if (!selectedProduct || !selectedUser) {
@@ -337,37 +423,68 @@ export default function YedekParcaTransferPage() {
       return;
     }
 
+    const sn = serialNumber.trim();
+    const qty = sn ? 1 : Math.max(1, Math.floor(transferQuantity));
+
     // Check for duplicate serial number in current rows
-    if (serialNumber.trim() && transferRows.some(r => r.serialNumber === serialNumber.trim())) {
+    if (sn && transferRows.some(r => r.serialNumber === sn)) {
       toast({ title: 'Uyarı', description: 'Bu seri numarası zaten listede var.', variant: 'default' });
+      return;
+    }
+
+    // Check depot stock availability
+    // Already committed rows for same product
+    const alreadyInList = transferRows
+      .filter(r => r.stokKodu === selectedProduct.stokKodu)
+      .reduce((sum, r) => sum + r.quantity, 0);
+
+    if (alreadyInList + qty > selectedProduct.totalQuantity) {
+      toast({
+        title: 'Yetersiz Stok',
+        description: `Depoda ${selectedProduct.stokKodu} için ${selectedProduct.totalQuantity} adet var, listede zaten ${alreadyInList} adet mevcut.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // If serial number selected, verify it exists in depot
+    if (sn && !selectedProduct.serialNumbers.some(s => s.serialNumber === sn)) {
+      toast({ title: 'Uyarı', description: 'Bu seri numarası depoda bulunamadı.', variant: 'default' });
       return;
     }
 
     const newRow: SparePartTransferRow = {
       id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      productCodeId: selectedProduct.id,
-      stokKodu: selectedProduct.stokKodu || '',
-      stokAdi: selectedProduct.stokAdi || '',
-      serialNumber: serialNumber.trim(),
+      productCodeId: selectedProduct.productCodeId,
+      stokKodu: selectedProduct.stokKodu,
+      stokAdi: selectedProduct.stokAdi,
+      serialNumber: sn,
+      quantity: qty,
+      cihazGrubu: selectedProduct.cihazGrubu,
       targetUid: selectedUser.uid || '',
       targetName: selectedUser.name || '',
     };
 
     setTransferRows(prev => [...prev, newRow]);
 
-    // Reset form for next entry
+    // Reset form
     setSerialNumber('');
-    // Keep product and user selected for quick multiple entries
+    setTransferQuantity(1);
 
-    toast({ title: 'Eklendi', description: `${selectedProduct.stokAdi} (${serialNumber.trim() || 'Seri No Yok'}) listeye eklendi.` });
-  }, [selectedProduct, serialNumber, selectedUser, transferRows, toast]);
+    toast({
+      title: 'Eklendi',
+      description: sn
+        ? `${selectedProduct.stokAdi} (SN: ${sn}) listeye eklendi.`
+        : `${selectedProduct.stokAdi} x${qty} listeye eklendi.`,
+    });
+  }, [selectedProduct, serialNumber, transferQuantity, selectedUser, transferRows, toast]);
 
   // Remove row from transfer list
   const removeTransferRow = (rowId: string) => {
     setTransferRows(prev => prev.filter(r => r.id !== rowId));
   };
 
-  // Execute transfer
+  // Execute transfer - depodan düşüm + personele ekleme + log
   const executeTransfer = async () => {
     if (transferRows.length === 0) {
       toast({ title: 'Uyarı', description: 'Transfer edilecek ürün yok.', variant: 'default' });
@@ -381,58 +498,168 @@ export default function YedekParcaTransferPage() {
       const now = new Date();
 
       for (const row of transferRows) {
-        // Create PersonalStockItem
-        const stockRef = doc(collection(db, 'personalStock'));
-        batch.set(stockRef, {
-          ownerUid: row.targetUid,
-          ownerName: row.targetName,
-          productCodeId: row.productCodeId,
-          stokKodu: row.stokKodu,
-          stokAdi: row.stokAdi,
-          serialNumber: row.serialNumber,
-          source: 'depot',
-          status: 'in_stock',
-          createdAt: Timestamp.fromDate(now),
-          transferredByUid: currentUserProfile?.uid || '',
-          transferredByName: currentUserProfile?.name || '',
-        });
+        if (row.serialNumber) {
+          // Seri numaralı: depodan ilgili seri numaralı kaydı bul ve sil
+          const depoItem = depoStok.find(
+            d => d.stokKodu === row.stokKodu && d.serialNumber === row.serialNumber
+          );
+          if (depoItem) {
+            batch.delete(doc(db, 'yedekParcaDepoStok', depoItem.id));
+          }
 
-        // Create transfer log
-        const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(logRef, {
-          action: 'transfer_to_personnel',
-          personalStockId: stockRef.id,
-          productCodeId: row.productCodeId,
-          stokKodu: row.stokKodu,
-          stokAdi: row.stokAdi,
-          serialNumber: row.serialNumber,
-          toUid: row.targetUid,
-          toName: row.targetName,
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        });
+          // Personel stokuna ekle
+          const stockRef = doc(collection(db, 'personalStock'));
+          batch.set(stockRef, {
+            ownerUid: row.targetUid,
+            ownerName: row.targetName,
+            productCodeId: row.productCodeId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            serialNumber: row.serialNumber,
+            source: 'depot',
+            status: 'in_stock',
+            createdAt: Timestamp.fromDate(now),
+            transferredByUid: currentUserProfile?.uid || '',
+            transferredByName: currentUserProfile?.name || '',
+          });
+
+          // Transfer log
+          const logRef = doc(collection(db, 'sparePartTransferLogs'));
+          batch.set(logRef, {
+            action: 'transfer_to_personnel',
+            personalStockId: stockRef.id,
+            productCodeId: row.productCodeId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            serialNumber: row.serialNumber,
+            toUid: row.targetUid,
+            toName: row.targetName,
+            quantity: 1,
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          });
+
+          // Depo log
+          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+          batch.set(depoLogRef, {
+            action: 'transfer_cikis',
+            productCodeId: row.productCodeId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            cihazGrubu: row.cihazGrubu || '',
+            serialNumber: row.serialNumber,
+            quantity: 1,
+            relatedPersonnelUid: row.targetUid,
+            relatedPersonnelName: row.targetName,
+            notes: `Seri numaralı transfer: ${row.serialNumber} -> ${row.targetName}`,
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          });
+        } else {
+          // Seri numarasız: adetli transfer
+          // Depodan ilgili ürünün seri numarasız kayıtlarından adet düş
+          let remainingQty = row.quantity;
+          const nonSerialEntries = depoStok
+            .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber)
+            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()); // FIFO
+
+          for (const entry of nonSerialEntries) {
+            if (remainingQty <= 0) break;
+
+            if (entry.quantity <= remainingQty) {
+              // Tüm kaydı sil
+              batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+              remainingQty -= entry.quantity;
+            } else {
+              // Adeti düş
+              batch.update(doc(db, 'yedekParcaDepoStok', entry.id), {
+                quantity: entry.quantity - remainingQty,
+              });
+              remainingQty = 0;
+            }
+          }
+
+          // Personel stokuna ekle (seri numarasız, adetli)
+          // Her adet için ayrı personalStock kaydı oluştur (takip kolaylığı için)
+          for (let i = 0; i < row.quantity; i++) {
+            const stockRef = doc(collection(db, 'personalStock'));
+            batch.set(stockRef, {
+              ownerUid: row.targetUid,
+              ownerName: row.targetName,
+              productCodeId: row.productCodeId,
+              stokKodu: row.stokKodu,
+              stokAdi: row.stokAdi,
+              serialNumber: '',
+              source: 'depot',
+              status: 'in_stock',
+              createdAt: Timestamp.fromDate(now),
+              transferredByUid: currentUserProfile?.uid || '',
+              transferredByName: currentUserProfile?.name || '',
+            });
+          }
+
+          // Transfer log
+          const logRef = doc(collection(db, 'sparePartTransferLogs'));
+          batch.set(logRef, {
+            action: 'transfer_to_personnel',
+            productCodeId: row.productCodeId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            serialNumber: '',
+            toUid: row.targetUid,
+            toName: row.targetName,
+            quantity: row.quantity,
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          });
+
+          // Depo log
+          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+          batch.set(depoLogRef, {
+            action: 'transfer_cikis',
+            productCodeId: row.productCodeId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            cihazGrubu: row.cihazGrubu || '',
+            serialNumber: '',
+            quantity: row.quantity,
+            relatedPersonnelUid: row.targetUid,
+            relatedPersonnelName: row.targetName,
+            notes: `${row.quantity} adet transfer -> ${row.targetName}`,
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          });
+        }
       }
 
       await batch.commit();
 
+      const totalItems = transferRows.reduce((s, r) => s + r.quantity, 0);
       toast({
         title: 'Transfer Tamamlandı',
-        description: `${transferRows.length} yedek parça başarıyla transfer edildi.`,
+        description: `${totalItems} adet yedek parça başarıyla transfer edildi.`,
       });
 
       setTransferRows([]);
+
+      // Refresh data
+      const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+      const stokItems = stokSnap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date() } as YedekParcaDepoStokItem;
+      });
+      setDepoStok(stokItems);
 
       // Refresh logs
       const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
       const logs = logsSnap.docs.map(d => {
         const data = d.data();
         const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-        return {
-          id: d.id,
-          ...data,
-          timestamp,
-        };
+        return { id: d.id, ...data, timestamp };
       });
       logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setTransferLogs(logs.slice(0, 50));
@@ -459,8 +686,41 @@ export default function YedekParcaTransferPage() {
 
       // Update personal stock status
       await updateDoc(doc(db, 'personalStock', pendingReturn.personalStockId), {
-        status: 'used', // No longer in personnel's stock
+        status: 'used',
       });
+
+      // If return_to_depot, add back to depot stock
+      if (pendingReturn.returnType === 'return_to_depot') {
+        const pc = productCodes.find(p => p.id === pendingReturn.productCodeId);
+        await addDoc(collection(db, 'yedekParcaDepoStok'), {
+          productCodeId: pendingReturn.productCodeId,
+          stokKodu: pendingReturn.stokKodu,
+          stokAdi: pendingReturn.stokAdi,
+          cihazGrubu: pc?.cihazGrubu || '',
+          serialNumber: pendingReturn.serialNumber || '',
+          quantity: 1,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+
+        // Depo log for return
+        await addDoc(collection(db, 'yedekParcaDepoLog'), {
+          action: 'iade_giris',
+          productCodeId: pendingReturn.productCodeId,
+          stokKodu: pendingReturn.stokKodu,
+          stokAdi: pendingReturn.stokAdi,
+          cihazGrubu: pc?.cihazGrubu || '',
+          serialNumber: pendingReturn.serialNumber || '',
+          quantity: 1,
+          relatedPersonnelUid: pendingReturn.ownerUid,
+          relatedPersonnelName: pendingReturn.ownerName,
+          notes: `İade teslim alındı: ${pendingReturn.ownerName} -> Depo`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+      }
 
       // Create log entry
       await addDoc(collection(db, 'sparePartTransferLogs'), {
@@ -478,11 +738,13 @@ export default function YedekParcaTransferPage() {
 
       toast({
         title: 'Teslim Alındı',
-        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber}) depoya teslim alındı.`,
+        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber || 'Seri No Yok'}) depoya teslim alındı.`,
       });
 
-      // Refresh pending returns
       setPendingReturns(prev => prev.filter(p => p.id !== pendingReturn.id));
+
+      // Refresh depot stock
+      fetchDepoStok();
     } catch (err) {
       console.error('Error confirming return:', err);
       toast({ title: 'Hata', description: 'İşlem sırasında hata oluştu.', variant: 'destructive' });
@@ -494,7 +756,6 @@ export default function YedekParcaTransferPage() {
     try {
       const now = new Date();
 
-      // Update borrowed record as approved
       await updateDoc(doc(db, 'borrowedSpareParts', borrowed.id), {
         status: 'approved',
         approvedAt: Timestamp.fromDate(now),
@@ -502,7 +763,6 @@ export default function YedekParcaTransferPage() {
         approvedByName: currentUserProfile?.name || '',
       });
 
-      // Create log entry
       await addDoc(collection(db, 'sparePartTransferLogs'), {
         action: 'borrowed_approved',
         stokKodu: borrowed.stokKodu,
@@ -519,10 +779,9 @@ export default function YedekParcaTransferPage() {
 
       toast({
         title: 'Onaylandı',
-        description: `${borrowed.stokAdi} (${borrowed.serialNumber}) borç kaydı onaylandı.`,
+        description: `${borrowed.stokAdi} (${borrowed.serialNumber || ''}) borç kaydı onaylandı.`,
       });
 
-      // Refresh borrowed parts
       setBorrowedParts(prev => prev.filter(b => b.id !== borrowed.id));
     } catch (err) {
       console.error('Error approving borrowed part:', err);
@@ -535,7 +794,6 @@ export default function YedekParcaTransferPage() {
     try {
       const now = new Date();
 
-      // Update borrowed record as rejected
       await updateDoc(doc(db, 'borrowedSpareParts', borrowed.id), {
         status: 'rejected',
         rejectedAt: Timestamp.fromDate(now),
@@ -543,7 +801,6 @@ export default function YedekParcaTransferPage() {
         rejectedByName: currentUserProfile?.name || '',
       });
 
-      // Create log entry
       await addDoc(collection(db, 'sparePartTransferLogs'), {
         action: 'borrowed_rejected',
         stokKodu: borrowed.stokKodu,
@@ -560,10 +817,9 @@ export default function YedekParcaTransferPage() {
 
       toast({
         title: 'Reddedildi',
-        description: `${borrowed.stokAdi} (${borrowed.serialNumber}) borç kaydı reddedildi.`,
+        description: `${borrowed.stokAdi} (${borrowed.serialNumber || ''}) borç kaydı reddedildi.`,
       });
 
-      // Refresh borrowed parts
       setBorrowedParts(prev => prev.filter(b => b.id !== borrowed.id));
     } catch (err) {
       console.error('Error rejecting borrowed part:', err);
@@ -596,7 +852,7 @@ export default function YedekParcaTransferPage() {
           Yedek Parça Transfer Paneli
         </CardTitle>
         <CardDescription>
-          Yedek parçaları personel şahsi stoklarına transfer edin ve iade işlemlerini yönetin.
+          Yedek parçaları personel şahsi stoklarına transfer edin. Sadece depoda mevcut ürünler listelenir.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -626,10 +882,10 @@ export default function YedekParcaTransferPage() {
             <div className="p-4 border rounded-lg bg-muted/30 space-y-4">
               <Label className="font-semibold">Yeni Transfer Ekle</Label>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Product selector */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Product selector - from depot stock */}
                 <div className="space-y-2">
-                  <Label>Yedek Parça</Label>
+                  <Label>Yedek Parça (Depodaki Ürünler)</Label>
                   <Popover open={productSearchOpen} onOpenChange={setProductSearchOpen}>
                     <PopoverTrigger asChild>
                       <Button
@@ -638,12 +894,12 @@ export default function YedekParcaTransferPage() {
                         className="w-full justify-between"
                       >
                         {selectedProduct
-                          ? `${selectedProduct.stokKodu} - ${selectedProduct.stokAdi?.substring(0, 15)}...`
-                          : 'Ürün seçin...'}
+                          ? `${selectedProduct.stokKodu} - ${selectedProduct.stokAdi?.substring(0, 15)}... (${selectedProduct.totalQuantity})`
+                          : 'Depodaki ürünlerden seçin...'}
                         <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[400px] p-0">
+                    <PopoverContent className="w-[450px] p-0">
                       <Command>
                         <CommandInput
                           placeholder="Kod veya isim ile ara..."
@@ -651,22 +907,39 @@ export default function YedekParcaTransferPage() {
                           onValueChange={setProductSearchQuery}
                         />
                         <CommandList>
-                          <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                          <CommandEmpty>Depoda eşleşen ürün bulunamadı.</CommandEmpty>
                           <CommandGroup>
                             {filteredProducts.map((product) => (
                               <CommandItem
-                                key={product.id}
+                                key={product.stokKodu}
                                 value={`${product.stokKodu} ${product.stokAdi}`}
                                 onSelect={() => {
-                                  setSelectedProductId(product.id);
+                                  setSelectedStokKodu(product.stokKodu);
                                   setProductSearchOpen(false);
+                                  setSerialNumber('');
+                                  setTransferQuantity(1);
                                 }}
                               >
-                                <div className="flex flex-col">
-                                  <span className="font-medium">{product.stokKodu}</span>
+                                <div className="flex flex-col flex-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-medium">{product.stokKodu}</span>
+                                    <Badge variant="secondary" className="text-xs ml-2">
+                                      {product.totalQuantity} adet
+                                    </Badge>
+                                  </div>
                                   <span className="text-sm text-muted-foreground truncate">
                                     {product.stokAdi}
                                   </span>
+                                  {product.cihazGrubu && (
+                                    <span className="text-xs text-blue-500">
+                                      {product.cihazGrubu}
+                                    </span>
+                                  )}
+                                  {product.serialNumbers.length > 0 && (
+                                    <span className="text-xs text-muted-foreground">
+                                      {product.serialNumbers.length} adet seri numaralı
+                                    </span>
+                                  )}
                                 </div>
                               </CommandItem>
                             ))}
@@ -675,17 +948,13 @@ export default function YedekParcaTransferPage() {
                       </Command>
                     </PopoverContent>
                   </Popover>
-                </div>
 
-                {/* Serial number input */}
-                <div className="space-y-2">
-                  <Label>Seri Numarası</Label>
-                  <Input
-                    placeholder="Seri numarasını girin"
-                    value={serialNumber}
-                    onChange={(e) => setSerialNumber(e.target.value)}
-                    disabled={!selectedProductId}
-                  />
+                  {selectedProduct?.cihazGrubu && (
+                    <div className="flex items-center gap-1 text-xs text-blue-600">
+                      <Info className="h-3 w-3" />
+                      {selectedProduct.cihazGrubu}
+                    </div>
+                  )}
                 </div>
 
                 {/* User selector */}
@@ -735,19 +1004,96 @@ export default function YedekParcaTransferPage() {
                     </PopoverContent>
                   </Popover>
                 </div>
-
-                {/* Add button */}
-                <div className="flex items-end">
-                  <Button
-                    onClick={addTransferRow}
-                    disabled={!selectedProductId || !selectedUserId}
-                    className="w-full"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Satır Ekle
-                  </Button>
-                </div>
               </div>
+
+              {/* Serial Number / Quantity row */}
+              {selectedProduct && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Serial number input */}
+                  <div className="space-y-2">
+                    <Label>Seri Numarası (Opsiyonel)</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Seri numarası girin"
+                        value={serialNumber}
+                        onChange={(e) => handleTransferSerialChange(e.target.value)}
+                        className="flex-1"
+                      />
+                      {selectedProduct.serialNumbers.length > 0 && (
+                        <Popover open={serialSelectOpen} onOpenChange={setSerialSelectOpen}>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="shrink-0">
+                              <List className="h-4 w-4 mr-1" />
+                              Depodan Seç ({selectedProduct.serialNumbers.length})
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[350px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Seri numarası ara..." />
+                              <CommandList>
+                                <CommandEmpty>Seri numarası bulunamadı.</CommandEmpty>
+                                <CommandGroup heading={`${selectedProduct.stokKodu} Seri Numaraları`}>
+                                  {selectedProduct.serialNumbers
+                                    .filter(sn => !transferRows.some(r => r.serialNumber === sn.serialNumber))
+                                    .map((sn) => (
+                                      <CommandItem
+                                        key={sn.id}
+                                        value={sn.serialNumber}
+                                        onSelect={() => {
+                                          setSerialNumber(sn.serialNumber);
+                                          setTransferQuantity(1);
+                                          setSerialSelectOpen(false);
+                                        }}
+                                      >
+                                        <div className="flex flex-col">
+                                          <span className="font-mono font-medium">{sn.serialNumber}</span>
+                                          <span className="text-xs text-muted-foreground">
+                                            Eklenme: {format(sn.createdAt, 'dd.MM.yyyy', { locale: tr })}
+                                          </span>
+                                        </div>
+                                      </CommandItem>
+                                    ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quantity input */}
+                  <div className="space-y-2">
+                    <Label>Adet</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={selectedProduct.totalQuantity}
+                      value={serialNumber.trim() ? 1 : transferQuantity}
+                      onChange={(e) => setTransferQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                      disabled={!!serialNumber.trim()}
+                    />
+                    {serialNumber.trim() && (
+                      <p className="text-xs text-muted-foreground">Seri numaralı transferde adet 1 olmalıdır.</p>
+                    )}
+                    {!serialNumber.trim() && (
+                      <p className="text-xs text-muted-foreground">Depoda mevcut: {selectedProduct.totalQuantity}</p>
+                    )}
+                  </div>
+
+                  {/* Add button */}
+                  <div className="flex items-end">
+                    <Button
+                      onClick={addTransferRow}
+                      disabled={!selectedStokKodu || !selectedUserId}
+                      className="w-full"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Satır Ekle
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Transfer list */}
@@ -758,7 +1104,9 @@ export default function YedekParcaTransferPage() {
                     <TableRow>
                       <TableHead>Ürün Kodu</TableHead>
                       <TableHead>Ürün Adı</TableHead>
+                      <TableHead>Cihaz Grubu</TableHead>
                       <TableHead>Seri No</TableHead>
+                      <TableHead>Adet</TableHead>
                       <TableHead>Hedef Personel</TableHead>
                       <TableHead className="w-12"></TableHead>
                     </TableRow>
@@ -768,7 +1116,13 @@ export default function YedekParcaTransferPage() {
                       <TableRow key={row.id}>
                         <TableCell className="font-mono">{row.stokKodu}</TableCell>
                         <TableCell>{row.stokAdi}</TableCell>
+                        <TableCell>
+                          {row.cihazGrubu ? (
+                            <Badge variant="outline" className="text-xs">{row.cihazGrubu}</Badge>
+                          ) : '-'}
+                        </TableCell>
                         <TableCell className="font-mono">{row.serialNumber || '-'}</TableCell>
+                        <TableCell className="font-mono">{row.quantity}</TableCell>
                         <TableCell>{row.targetName}</TableCell>
                         <TableCell>
                           <Button
@@ -785,9 +1139,9 @@ export default function YedekParcaTransferPage() {
                 </Table>
 
                 <div className="p-4 border-t flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">
-                    {transferRows.length} ürün transfer edilecek
-                  </span>
+                  <div className="text-sm text-muted-foreground">
+                    <span>{transferRows.length} satır, toplam <strong>{transferRows.reduce((s, r) => s + r.quantity, 0)}</strong> adet transfer edilecek</span>
+                  </div>
                   <Button
                     onClick={executeTransfer}
                     disabled={isTransferring}
@@ -807,7 +1161,7 @@ export default function YedekParcaTransferPage() {
               <div className="text-center py-8 text-muted-foreground">
                 <ArrowLeftRight className="h-12 w-12 mx-auto mb-4 opacity-20" />
                 <p>Henüz transfer edilecek ürün eklenmedi.</p>
-                <p className="text-sm">Yukarıdaki formu kullanarak ürün ekleyin.</p>
+                <p className="text-sm">Yukarıdaki formu kullanarak depodaki ürünlerden seçim yapın.</p>
               </div>
             )}
           </TabsContent>
@@ -841,7 +1195,7 @@ export default function YedekParcaTransferPage() {
                             <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono">{item.serialNumber}</TableCell>
+                        <TableCell className="font-mono">{item.serialNumber || '-'}</TableCell>
                         <TableCell>
                           <div>
                             <p className="text-sm">{item.deviceName}</p>
@@ -916,7 +1270,7 @@ export default function YedekParcaTransferPage() {
                             <p className="text-xs text-muted-foreground">{item.stokKodu}</p>
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono">{item.serialNumber}</TableCell>
+                        <TableCell className="font-mono">{item.serialNumber || '-'}</TableCell>
                         <TableCell>{item.ownerName}</TableCell>
                         <TableCell>
                           <Badge variant={item.returnType === 'return_to_depot' ? 'secondary' : 'outline'}>
@@ -971,6 +1325,7 @@ export default function YedekParcaTransferPage() {
                         <TableHead>İşlem</TableHead>
                         <TableHead>Ürün</TableHead>
                         <TableHead>Seri No</TableHead>
+                        <TableHead>Adet</TableHead>
                         <TableHead>Kişi</TableHead>
                         <TableHead>İşlemi Yapan</TableHead>
                       </TableRow>
@@ -990,7 +1345,8 @@ export default function YedekParcaTransferPage() {
                               <p className="text-xs text-muted-foreground">{log.stokKodu}</p>
                             </div>
                           </TableCell>
-                          <TableCell className="font-mono text-sm">{log.serialNumber}</TableCell>
+                          <TableCell className="font-mono text-sm">{log.serialNumber || '-'}</TableCell>
+                          <TableCell className="font-mono text-sm">{log.quantity || 1}</TableCell>
                           <TableCell>
                             {log.toName || log.fromName || '-'}
                           </TableCell>
@@ -1010,7 +1366,7 @@ export default function YedekParcaTransferPage() {
     </Card>
   );
 
-  // ========== RENDER: Depo Stok View ==========
+  // ========== RENDER: Depo Stok View (Grouped) ==========
   const renderDepoStok = () => (
     <Card>
       <CardHeader>
@@ -1022,6 +1378,7 @@ export default function YedekParcaTransferPage() {
             </CardTitle>
             <CardDescription>
               Yedek parça deposundaki mevcut stok durumu.
+              Toplam: <strong>{groupedDepoStok.reduce((s, g) => s + g.totalQuantity, 0)}</strong> adet, <strong>{groupedDepoStok.length}</strong> farklı ürün.
             </CardDescription>
           </div>
           <Button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')}>
@@ -1036,7 +1393,7 @@ export default function YedekParcaTransferPage() {
             <Loader2 className="h-6 w-6 animate-spin" />
             <span className="ml-2">Yükleniyor...</span>
           </div>
-        ) : depoStok.length === 0 ? (
+        ) : groupedDepoStok.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Warehouse className="h-12 w-12 mx-auto mb-4 opacity-20" />
             <p>Depoda yedek parça stoku bulunmuyor.</p>
@@ -1049,24 +1406,94 @@ export default function YedekParcaTransferPage() {
                 <TableRow>
                   <TableHead>Ürün Kodu</TableHead>
                   <TableHead>Ürün Adı</TableHead>
-                  <TableHead>Seri No</TableHead>
+                  <TableHead>Cihaz Grubu</TableHead>
+                  <TableHead>Adet</TableHead>
                   <TableHead>Eklenme Tarihi</TableHead>
-                  <TableHead>Ekleyen</TableHead>
+                  <TableHead className="w-12"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {depoStok.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-mono">{item.stokKodu}</TableCell>
-                    <TableCell>{item.stokAdi}</TableCell>
-                    <TableCell className="font-mono">{item.serialNumber || '-'}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {item.createdByName}
-                    </TableCell>
-                  </TableRow>
+                {groupedDepoStok.map((group) => (
+                  <React.Fragment key={group.stokKodu}>
+                    <TableRow
+                      className={cn(
+                        'cursor-pointer hover:bg-muted/50 transition-colors',
+                        expandedStokKodu === group.stokKodu && 'bg-muted/30'
+                      )}
+                      onClick={() => setExpandedStokKodu(
+                        expandedStokKodu === group.stokKodu ? null : group.stokKodu
+                      )}
+                    >
+                      <TableCell className="font-mono">{group.stokKodu}</TableCell>
+                      <TableCell>{group.stokAdi}</TableCell>
+                      <TableCell>
+                        {group.cihazGrubu ? (
+                          <Badge variant="outline" className="text-xs">{group.cihazGrubu}</Badge>
+                        ) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{group.totalQuantity}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}
+                      </TableCell>
+                      <TableCell>
+                        {group.serialNumbers.length > 0 ? (
+                          expandedStokKodu === group.stokKodu ? (
+                            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <Hash className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">{group.serialNumbers.length}</span>
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                          )
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+
+                    {/* Expanded serial numbers */}
+                    {expandedStokKodu === group.stokKodu && group.serialNumbers.length > 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="p-0">
+                          <div className="bg-blue-50 dark:bg-blue-950/30 p-3 border-t">
+                            <p className="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">
+                              Seri Numaraları ({group.serialNumbers.length} / {group.totalQuantity} adet):
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {group.serialNumbers.map((sn) => (
+                                <Badge key={sn.id} variant="outline" className="font-mono text-xs">
+                                  {sn.serialNumber}
+                                  <span className="ml-1 text-muted-foreground">
+                                    ({format(sn.createdAt, 'dd.MM.yy', { locale: tr })})
+                                  </span>
+                                </Badge>
+                              ))}
+                            </div>
+                            {group.totalQuantity > group.serialNumbers.length && (
+                              <p className="text-xs text-muted-foreground mt-2">
+                                + {group.totalQuantity - group.serialNumbers.length} adet seri numarasız
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+
+                    {expandedStokKodu === group.stokKodu && group.serialNumbers.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="p-0">
+                          <div className="bg-muted/20 p-3 border-t">
+                            <p className="text-xs text-muted-foreground">
+                              Bu üründe seri numaralı kayıt bulunmuyor. Toplam {group.totalQuantity} adet seri numarasız stok.
+                            </p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
                 ))}
               </TableBody>
             </Table>
@@ -1197,7 +1624,6 @@ export default function YedekParcaTransferPage() {
 
   // ========== RENDER: Toplam Stok View ==========
   const renderToplamStok = () => {
-    // Group by personnel
     const groupedByPersonnel = allPersonnelStock.reduce((acc, item) => {
       const key = item.ownerUid;
       if (!acc[key]) {
