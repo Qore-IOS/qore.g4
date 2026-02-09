@@ -123,7 +123,7 @@ export interface MinMaxRule {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | string;
+  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
   name?: string;
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
@@ -510,6 +510,7 @@ export type AppView =
   | 'verimlilik'
   | 'numune-arsivi'
   | 'nobet-yonetimi'
+  | 'satin-alma'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
@@ -1137,4 +1138,22 @@ export interface TransferTemplate {
   updatedAt?: TimestampLike;
   updatedByUid?: string;
   updatedByName?: string;
+}
+
+// ==========================================
+// Satın Alma Birimi Görev Sistemi
+// ==========================================
+
+export interface PurchasingTask {
+  id: string;
+  title: string;
+  description?: string;
+  date: string;               // ISO date string (YYYY-MM-DD)
+  startTime: string;           // HH:mm format
+  endTime: string;             // HH:mm format
+  completed: boolean;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+  updatedAt?: TimestampLike;
 }

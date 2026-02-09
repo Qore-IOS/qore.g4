@@ -1,7 +1,7 @@
 
 
 import type { AppView } from './types';
-import { LayoutDashboard, Package, TestTube, BarChart3, Settings, ScanBarcode, ShieldCheck, TrendingUp, Calculator, PackagePlus, Server, CheckSquare, LogOut, Moon, Wallet, Map, ShoppingBag, Truck, Activity, Archive, BookText, Bell, Search, SprayCan, ClipboardPlus, UserCog, ListChecks, Unplug, ListTodo } from 'lucide-react';
+import { LayoutDashboard, Package, TestTube, BarChart3, Settings, ScanBarcode, ShieldCheck, TrendingUp, Calculator, PackagePlus, Server, CheckSquare, LogOut, Moon, Wallet, Map, ShoppingBag, Truck, Activity, Archive, BookText, Bell, Search, SprayCan, ClipboardPlus, UserCog, ListChecks, Unplug, ListTodo, ShoppingCart } from 'lucide-react';
 
 // VIEWS dizisi Türkçeleştirildi ve "Hastane" "Laboratuvar" olarak güncellendi.
 // URL'ler kebab-case yapısına uygun güncellendi.
@@ -29,6 +29,7 @@ export const VIEWS: { key: string; label: string; icon: React.ElementType; type:
   { key: 'cihaz-ustu-gecmisi', label: 'Cihaz Üstü Geçmişi', icon: Archive, type: 'nav', href: '/raporlama/cihaz-ustu-gecmisi'},
   { key: 'personel-islemleri', label: 'Personel İşlemleri', icon: UserCog, type: 'nav', href: '/personel-islemleri'},
   { key: 'tanimlar', label: 'Tanımlar', icon: BookText, type: 'nav', href: '/yonetim/tanimlar' },
+  { key: 'satin-alma', label: 'Satın Alma', icon: ShoppingCart, type: 'nav', href: '/satin-alma' },
   { key: 'yonetim', label: 'Yönetim', icon: Settings, type: 'nav', href: '/yonetim' },
 ];
 
