@@ -78,7 +78,7 @@ declare module "@/lib/types" {
     cihazGrubu?: string;
     aktif?: boolean;
     ambalajDegeri?: number;
-    urunGrubu?: 'kit' | 'sarf';
+    urunGrubu?: 'kit' | 'sarf' | 'yedek_parca';
     trackingMode?: any; // Keep it flexible
     barcodeNumber?: string;
     barcodeFormatId?: string | null;
@@ -813,6 +813,134 @@ declare module "@/lib/types" {
     sealedAt?: any;
     createdAt?: any;
     [k: string]: any;
+  }
+
+  // ---------- Spare Parts / Yedek Parça ----------
+  export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
+  export type PersonalStockSource = 'depot' | 'device';
+
+  export interface PersonalStockItem {
+    id: string;
+    ownerUid: string;
+    ownerName: string;
+    productCodeId: string;
+    stokKodu: string;
+    stokAdi: string;
+    serialNumber?: string;
+    source: PersonalStockSource;
+    sourceDeviceId?: string;
+    sourceDeviceName?: string;
+    status: PersonalStockStatus;
+    createdAt: Date;
+    transferredByUid?: string;
+    transferredByName?: string;
+    usedAt?: Date;
+    usedOnDeviceId?: string;
+    usedOnDeviceName?: string;
+    usedOnFormId?: string;
+    usedOnFormType?: string;
+    replacedPartId?: string;
+    imageUrl?: string;
+  }
+
+  export type SparePartTransferAction =
+    | 'transfer_to_personnel'
+    | 'use_on_device'
+    | 'return_to_depot'
+    | 'submit_to_depot'
+    | 'return_confirmed'
+    | 'submit_confirmed';
+
+  export interface SparePartTransferLog {
+    id: string;
+    action: SparePartTransferAction;
+    personalStockId?: string;
+    productCodeId?: string;
+    stokKodu?: string;
+    stokAdi?: string;
+    serialNumber?: string;
+    fromUid?: string;
+    fromName?: string;
+    toUid?: string;
+    toName?: string;
+    deviceId?: string;
+    formId?: string;
+    formType?: string;
+    quantity?: number;
+    createdAt: Date;
+    createdByUid: string;
+    createdByName: string;
+    notes?: string;
+  }
+
+  export interface PendingReturn {
+    id: string;
+    personalStockId: string;
+    ownerUid: string;
+    ownerName: string;
+    productCodeId: string;
+    stokKodu: string;
+    stokAdi: string;
+    serialNumber?: string;
+    source?: PersonalStockSource;
+    sourceDeviceId?: string;
+    returnType: 'return_to_depot' | 'submit_to_depot';
+    status: 'pending' | 'confirmed';
+    requestedAt: Date;
+    confirmedAt?: Date;
+    confirmedByUid?: string;
+    confirmedByName?: string;
+    imageUrl?: string;
+  }
+
+  export interface SparePartTransferRow {
+    id: string;
+    productCodeId: string;
+    stokKodu: string;
+    stokAdi: string;
+    serialNumber: string;
+    quantity: number;
+    cihazGrubu?: string;
+    targetUid: string;
+    targetName: string;
+  }
+
+  export interface YedekParcaDepoStokItem {
+    id: string;
+    productCodeId: string;
+    stokKodu: string;
+    stokAdi: string;
+    serialNumber?: string;
+    quantity: number;
+    cihazGrubu?: string;
+    createdAt: Date;
+    createdByUid: string;
+    createdByName: string;
+  }
+
+  export type YedekParcaLogAction =
+    | 'stok_giris'
+    | 'stok_giris_excel'
+    | 'transfer_cikis'
+    | 'iade_giris'
+    | 'stok_duzeltme';
+
+  export interface YedekParcaDepoLog {
+    id: string;
+    action: YedekParcaLogAction;
+    productCodeId: string;
+    stokKodu: string;
+    stokAdi: string;
+    cihazGrubu?: string;
+    serialNumber?: string;
+    quantity: number;
+    relatedTransferId?: string;
+    relatedPersonnelUid?: string;
+    relatedPersonnelName?: string;
+    notes?: string;
+    createdAt: Date;
+    createdByUid: string;
+    createdByName: string;
   }
 
   // ---------- Nöbet Vardiyası Sistemi ----------

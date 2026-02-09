@@ -713,6 +713,8 @@ export interface SparePartTransferRow {
   stokKodu: string;
   stokAdi: string;
   serialNumber: string;
+  quantity: number;            // Seri numarasız transferlerde adet (seri numaralıysa 1)
+  cihazGrubu?: string;        // Cihaz ana grubu (kutu, adet, şişe vs.)
   targetUid: string;
   targetName: string;
 }
@@ -725,6 +727,33 @@ export interface YedekParcaDepoStokItem {
   stokAdi: string;
   serialNumber?: string;         // Opsiyonel seri numarası
   quantity: number;              // Seri numarasız ürünler için adet
+  cihazGrubu?: string;          // Cihaz ana grubu (kutu, adet, şişe vs.)
+  createdAt: Date;
+  createdByUid: string;
+  createdByName: string;
+}
+
+// Yedek Parça Depo Stok Log (tüm stok giriş/çıkış/transfer işlemleri)
+export type YedekParcaLogAction =
+  | 'stok_giris'              // Depoya stok girişi (manuel)
+  | 'stok_giris_excel'        // Depoya stok girişi (Excel ile)
+  | 'transfer_cikis'          // Depodan personele transfer (stok düşümü)
+  | 'iade_giris'              // Personelden depoya iade (stok artışı)
+  | 'stok_duzeltme';          // Manuel stok düzeltmesi
+
+export interface YedekParcaDepoLog {
+  id: string;
+  action: YedekParcaLogAction;
+  productCodeId: string;
+  stokKodu: string;
+  stokAdi: string;
+  cihazGrubu?: string;
+  serialNumber?: string;
+  quantity: number;              // İşlemdeki adet
+  relatedTransferId?: string;   // İlişkili transfer ID (varsa)
+  relatedPersonnelUid?: string; // İlişkili personel (transfer için)
+  relatedPersonnelName?: string;
+  notes?: string;
   createdAt: Date;
   createdByUid: string;
   createdByName: string;
