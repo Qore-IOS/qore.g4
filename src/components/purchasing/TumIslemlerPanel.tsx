@@ -46,7 +46,7 @@ export default function TumIslemlerPanel() {
   const [taskTypeFilter, setTaskTypeFilter] = useState<TaskTypeFilter>('all');
   const [personnelFilter, setPersonnelFilter] = useState<string>('all'); // 'all' or uid
   const [searchQuery, setSearchQuery] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -99,14 +99,18 @@ export default function TumIslemlerPanel() {
   const filteredTasks = useMemo(() => {
     let result = tasks;
 
-    // Task type filter
+    // Task type filter (default to 'custom' for tasks without taskType field)
     if (taskTypeFilter !== 'all') {
-      result = result.filter((t) => t.taskType === taskTypeFilter);
+      result = result.filter((t) => (t.taskType || 'custom') === taskTypeFilter);
     }
 
-    // Personnel filter
+    // Personnel filter - check both creator and accompanying personnel
     if (personnelFilter !== 'all') {
-      result = result.filter((t) => t.createdByUid === personnelFilter);
+      result = result.filter(
+        (t) =>
+          t.createdByUid === personnelFilter ||
+          (t.accompanyingPersonnel && t.accompanyingPersonnel.some((p) => p.uid === personnelFilter))
+      );
     }
 
     // Search query
@@ -117,7 +121,8 @@ export default function TumIslemlerPanel() {
           (t.title || '').toLowerCase().includes(q) ||
           (t.description || '').toLowerCase().includes(q) ||
           (t.laboratoryName || '').toLowerCase().includes(q) ||
-          (t.createdByName || '').toLowerCase().includes(q)
+          (t.createdByName || '').toLowerCase().includes(q) ||
+          (t.accompanyingPersonnel || []).some((p) => (p.name || '').toLowerCase().includes(q))
       );
     }
 
@@ -152,7 +157,7 @@ export default function TumIslemlerPanel() {
     const rows = filteredTasks.map((t) => ({
       'Görev Başlığı': t.title,
       'Açıklama': t.description || '',
-      'Görev Türü': t.taskType === 'kurum_ziyareti' ? 'Kurum Ziyareti' : 'Serbest Görev',
+      'Görev Türü': (t.taskType || 'custom') === 'kurum_ziyareti' ? 'Kurum Ziyareti' : 'Serbest Görev',
       'Tarih': t.date,
       'Başlangıç': t.startTime,
       'Bitiş': t.endTime,
@@ -183,7 +188,7 @@ export default function TumIslemlerPanel() {
     URL.revokeObjectURL(url);
   }, [filteredTasks]);
 
-  const taskTypeLabel = (type: string) =>
+  const taskTypeLabel = (type: string | undefined) =>
     type === 'kurum_ziyareti' ? 'Kurum Ziyareti' : 'Serbest Görev';
 
   return (
@@ -334,12 +339,12 @@ export default function TumIslemlerPanel() {
                         <span
                           className={cn(
                             'inline-block text-[10px] px-2 py-0.5 rounded-full font-medium',
-                            task.taskType === 'kurum_ziyareti'
+                            (task.taskType || 'custom') === 'kurum_ziyareti'
                               ? 'bg-[#d4ec00]/10 text-[#7a8a00] dark:text-[#d4ec00]'
                               : 'bg-secondary text-muted-foreground'
                           )}
                         >
-                          {taskTypeLabel(task.taskType)}
+                          {taskTypeLabel(task.taskType || 'custom')}
                         </span>
                       </td>
                       <td className="py-3 pr-4 text-muted-foreground whitespace-nowrap">
@@ -398,12 +403,12 @@ export default function TumIslemlerPanel() {
                     <span
                       className={cn(
                         'shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium',
-                        task.taskType === 'kurum_ziyareti'
+                        (task.taskType || 'custom') === 'kurum_ziyareti'
                           ? 'bg-[#d4ec00]/10 text-[#7a8a00] dark:text-[#d4ec00]'
                           : 'bg-secondary text-muted-foreground'
                       )}
                     >
-                      {task.taskType === 'kurum_ziyareti' ? 'Ziyaret' : 'Serbest'}
+                      {(task.taskType || 'custom') === 'kurum_ziyareti' ? 'Ziyaret' : 'Serbest'}
                     </span>
                   </div>
 
