@@ -7,14 +7,16 @@ import {
   collection,
   onSnapshot,
   query,
+  where,
   orderBy,
   addDoc,
   updateDoc,
   deleteDoc,
   doc,
+  getDocs,
   Timestamp,
 } from 'firebase/firestore';
-import type { PurchasingTask } from '@/lib/types';
+import type { PurchasingTask, Hospital, LabPool, User } from '@/lib/types';
 import {
   Plus,
   Check,
@@ -25,8 +27,12 @@ import {
   Trash2,
   X,
   ChevronsUpDown,
+  Building2,
+  Users,
+  ChevronDown,
+  Search,
 } from 'lucide-react';
-import { format, addDays, subDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, getDay, startOfWeek, endOfWeek, parseISO, isSameMonth } from 'date-fns';
+import { format, addDays, subDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, startOfWeek, endOfWeek, parseISO, isSameMonth } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -86,6 +92,11 @@ export default function SatinAlmaPanel() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
 
+  // Reference data for the modal
+  const [laboratories, setLaboratories] = useState<Hospital[]>([]);
+  const [labPools, setLabPools] = useState<LabPool[]>([]);
+  const [personnel, setPersonnel] = useState<User[]>([]);
+
   // Date slider ref
   const sliderRef = useRef<HTMLDivElement>(null);
 
@@ -110,6 +121,60 @@ export default function SatinAlmaPanel() {
     );
     return () => unsub();
   }, []);
+
+  // Fetch laboratories, labPools, and personnel once
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchReferenceData() {
+      try {
+        const [hospSnap, poolSnap, usersSnap] = await Promise.all([
+          getDocs(collection(db, 'hospitals')),
+          getDocs(collection(db, 'labPools')),
+          getDocs(
+            query(
+              collection(db, 'users'),
+              where('role', 'in', ['admin', 'satin_alma'])
+            )
+          ),
+        ]);
+
+        if (cancelled) return;
+
+        setLaboratories(
+          hospSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital))
+        );
+        setLabPools(
+          poolSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LabPool))
+        );
+        setPersonnel(
+          usersSnap.docs.map((d) => ({ uid: d.id, ...d.data() } as User))
+        );
+      } catch (err) {
+        console.error('Error fetching reference data', err);
+      }
+    }
+
+    fetchReferenceData();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Compute main laboratories only (standalone + pool main labs)
+  const mainLaboratories = useMemo(() => {
+    // Collect all member IDs that are NOT the mainLabId of their pool
+    const subLabIds = new Set<string>();
+    for (const pool of labPools) {
+      if (pool.active && pool.mainLabId && pool.memberIds) {
+        for (const memberId of pool.memberIds) {
+          if (memberId !== pool.mainLabId) {
+            subLabIds.add(memberId);
+          }
+        }
+      }
+    }
+    // Filter: show labs that are NOT sub-labs
+    return laboratories.filter((lab) => !subLabIds.has(lab.id));
+  }, [laboratories, labPools]);
 
   // Selected date string
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -146,12 +211,23 @@ export default function SatinAlmaPanel() {
 
   // Add task handler
   const handleAddTask = useCallback(
-    async (data: { title: string; description: string; date: string; startTime: string; endTime: string }) => {
+    async (data: {
+      title: string;
+      description: string;
+      taskType: 'custom' | 'kurum_ziyareti';
+      date: string;
+      startTime: string;
+      endTime: string;
+      laboratoryId?: string;
+      laboratoryName?: string;
+      accompanyingPersonnel?: { uid: string; name: string }[];
+    }) => {
       if (!currentUserProfile) return;
       try {
-        await addDoc(collection(db, 'purchasingTasks'), {
+        const taskDoc: Record<string, any> = {
           title: data.title,
-          description: data.description || '',
+          description: data.description,
+          taskType: data.taskType,
           date: data.date,
           startTime: data.startTime,
           endTime: data.endTime,
@@ -159,10 +235,19 @@ export default function SatinAlmaPanel() {
           createdAt: Timestamp.now(),
           createdByUid: currentUserProfile.uid,
           createdByName: currentUserProfile.name || '',
-        });
+        };
+
+        if (data.taskType === 'kurum_ziyareti') {
+          if (data.laboratoryId) taskDoc.laboratoryId = data.laboratoryId;
+          if (data.laboratoryName) taskDoc.laboratoryName = data.laboratoryName;
+          if (data.accompanyingPersonnel && data.accompanyingPersonnel.length > 0) {
+            taskDoc.accompanyingPersonnel = data.accompanyingPersonnel;
+          }
+        }
+
+        await addDoc(collection(db, 'purchasingTasks'), taskDoc);
         toast.success('Görev eklendi');
         setShowAddModal(false);
-        // Navigate to that date
         setSelectedDate(parseISO(data.date));
       } catch (err) {
         console.error('Error adding task', err);
@@ -452,6 +537,8 @@ export default function SatinAlmaPanel() {
       {showAddModal && (
         <AddTaskModal
           defaultDate={selectedDateStr}
+          laboratories={mainLaboratories}
+          personnel={personnel}
           onClose={() => setShowAddModal(false)}
           onSubmit={handleAddTask}
         />
@@ -477,6 +564,7 @@ function TaskCard({
     parseTime(task.endTime) - parseTime(task.startTime);
   const hours = Math.floor(durationMin / 60);
   const mins = durationMin % 60;
+  const isVisit = task.taskType === 'kurum_ziyareti';
 
   return (
     <div
@@ -502,17 +590,44 @@ function TaskCard({
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <p
-          className={cn(
-            'text-sm font-medium leading-tight transition-all',
-            task.completed ? 'line-through text-zinc-600' : 'text-white'
+        <div className="flex items-center gap-2">
+          <p
+            className={cn(
+              'text-sm font-medium leading-tight transition-all',
+              task.completed ? 'line-through text-zinc-600' : 'text-white'
+            )}
+          >
+            {task.title}
+          </p>
+          {isVisit && (
+            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-[#d4ec00]/15 text-[#d4ec00] font-medium">
+              Ziyaret
+            </span>
           )}
-        >
-          {task.title}
-        </p>
+        </div>
+
+        {/* Laboratory info for visit tasks */}
+        {isVisit && task.laboratoryName && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <Building2 className="w-3 h-3 text-zinc-500" />
+            <span className="text-xs text-zinc-400">{task.laboratoryName}</span>
+          </div>
+        )}
+
         {task.description && (
           <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{task.description}</p>
         )}
+
+        {/* Accompanying personnel */}
+        {isVisit && task.accompanyingPersonnel && task.accompanyingPersonnel.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <Users className="w-3 h-3 text-zinc-500" />
+            <span className="text-[11px] text-zinc-500">
+              {task.accompanyingPersonnel.map((p) => p.name).join(', ')}
+            </span>
+          </div>
+        )}
+
         <div className="flex items-center gap-3 mt-2">
           <div className="flex items-center gap-1 text-zinc-500">
             <Clock className="w-3 h-3" />
@@ -555,21 +670,32 @@ function TaskCard({
 // Add Task Modal
 // ==========================================
 
+interface AddTaskSubmitData {
+  title: string;
+  description: string;
+  taskType: 'custom' | 'kurum_ziyareti';
+  date: string;
+  startTime: string;
+  endTime: string;
+  laboratoryId?: string;
+  laboratoryName?: string;
+  accompanyingPersonnel?: { uid: string; name: string }[];
+}
+
 function AddTaskModal({
   defaultDate,
+  laboratories,
+  personnel,
   onClose,
   onSubmit,
 }: {
   defaultDate: string;
+  laboratories: Hospital[];
+  personnel: User[];
   onClose: () => void;
-  onSubmit: (data: {
-    title: string;
-    description: string;
-    date: string;
-    startTime: string;
-    endTime: string;
-  }) => void;
+  onSubmit: (data: AddTaskSubmitData) => void;
 }) {
+  const [taskType, setTaskType] = useState<'custom' | 'kurum_ziyareti'>('custom');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(defaultDate);
@@ -577,20 +703,101 @@ function AddTaskModal({
   const [endTime, setEndTime] = useState('10:00');
   const [submitting, setSubmitting] = useState(false);
 
-  const valid = title.trim().length > 0 && parseTime(endTime) > parseTime(startTime);
+  // Kurum ziyareti fields
+  const [selectedLabId, setSelectedLabId] = useState('');
+  const [selectedPersonnel, setSelectedPersonnel] = useState<{ uid: string; name: string }[]>([]);
+  const [labSearchQuery, setLabSearchQuery] = useState('');
+  const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
+  const [showLabDropdown, setShowLabDropdown] = useState(false);
+  const [showPersonnelDropdown, setShowPersonnelDropdown] = useState(false);
+
+  const labDropdownRef = useRef<HTMLDivElement>(null);
+  const personnelDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (labDropdownRef.current && !labDropdownRef.current.contains(e.target as Node)) {
+        setShowLabDropdown(false);
+      }
+      if (personnelDropdownRef.current && !personnelDropdownRef.current.contains(e.target as Node)) {
+        setShowPersonnelDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Effective title for kurum_ziyareti
+  const effectiveTitle = taskType === 'kurum_ziyareti' ? 'Kurum Ziyareti' : title;
+
+  // Selected laboratory object
+  const selectedLab = laboratories.find((l) => l.id === selectedLabId);
+
+  // Filtered laboratories
+  const filteredLabs = useMemo(() => {
+    if (!labSearchQuery.trim()) return laboratories;
+    const q = labSearchQuery.toLowerCase();
+    return laboratories.filter(
+      (l) =>
+        (l.name || '').toLowerCase().includes(q) ||
+        (l.kod || '').toLowerCase().includes(q)
+    );
+  }, [laboratories, labSearchQuery]);
+
+  // Filtered personnel
+  const filteredPersonnel = useMemo(() => {
+    if (!personnelSearchQuery.trim()) return personnel;
+    const q = personnelSearchQuery.toLowerCase();
+    return personnel.filter(
+      (p) =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.email || '').toLowerCase().includes(q)
+    );
+  }, [personnel, personnelSearchQuery]);
+
+  // Validation
+  const timeValid = parseTime(endTime) > parseTime(startTime);
+  const descriptionValid = description.trim().length > 0;
+  const titleValid = taskType === 'kurum_ziyareti' || title.trim().length > 0;
+  const labValid = taskType === 'custom' || selectedLabId !== '';
+  const valid = titleValid && descriptionValid && timeValid && labValid;
+
+  const togglePersonnel = (user: User) => {
+    setSelectedPersonnel((prev) => {
+      const exists = prev.find((p) => p.uid === user.uid);
+      if (exists) return prev.filter((p) => p.uid !== user.uid);
+      return [...prev, { uid: user.uid, name: user.name || user.email || '' }];
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid || submitting) return;
     setSubmitting(true);
-    await onSubmit({ title: title.trim(), description: description.trim(), date, startTime, endTime });
+    await onSubmit({
+      title: effectiveTitle,
+      description: description.trim(),
+      taskType,
+      date,
+      startTime,
+      endTime,
+      ...(taskType === 'kurum_ziyareti' && {
+        laboratoryId: selectedLabId,
+        laboratoryName: selectedLab?.name || '',
+        accompanyingPersonnel: selectedPersonnel.length > 0 ? selectedPersonnel : undefined,
+      }),
+    });
     setSubmitting(false);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div
-        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300"
+        className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-zinc-900 border border-zinc-800 rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -605,30 +812,255 @@ function AddTaskModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Title */}
+          {/* Task Type Selector */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Görev Adı *</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Görev başlığı girin"
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all"
-              autoFocus
-            />
+            <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Görev Türü</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTaskType('custom');
+                  setTitle('');
+                  setSelectedLabId('');
+                  setSelectedPersonnel([]);
+                }}
+                className={cn(
+                  'flex-1 py-2.5 px-3 rounded-xl text-sm font-medium border transition-all',
+                  taskType === 'custom'
+                    ? 'bg-[#d4ec00]/10 border-[#d4ec00]/40 text-[#d4ec00]'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                )}
+              >
+                Serbest Görev
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTaskType('kurum_ziyareti');
+                  setTitle('Kurum Ziyareti');
+                }}
+                className={cn(
+                  'flex-1 py-2.5 px-3 rounded-xl text-sm font-medium border transition-all flex items-center justify-center gap-2',
+                  taskType === 'kurum_ziyareti'
+                    ? 'bg-[#d4ec00]/10 border-[#d4ec00]/40 text-[#d4ec00]'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                )}
+              >
+                <Building2 className="w-4 h-4" />
+                Kurum Ziyareti
+              </button>
+            </div>
           </div>
 
-          {/* Description */}
+          {/* Title - shown only for custom tasks */}
+          {taskType === 'custom' ? (
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Görev Adı *</label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Görev başlığı girin"
+                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all"
+                autoFocus
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-4 py-3 bg-zinc-800/50 rounded-xl border border-zinc-700/50">
+              <Building2 className="w-4 h-4 text-[#d4ec00]" />
+              <span className="text-sm font-medium text-white">Kurum Ziyareti</span>
+            </div>
+          )}
+
+          {/* Laboratory selector (kurum_ziyareti only) */}
+          {taskType === 'kurum_ziyareti' && (
+            <div ref={labDropdownRef} className="relative">
+              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Kurum (Laboratuvar) *</label>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLabDropdown((v) => !v);
+                  setShowPersonnelDropdown(false);
+                }}
+                className={cn(
+                  'w-full flex items-center justify-between px-4 py-3 bg-zinc-800 border rounded-xl text-sm transition-all',
+                  showLabDropdown
+                    ? 'border-[#d4ec00]/40 ring-2 ring-[#d4ec00]/40'
+                    : 'border-zinc-700',
+                  selectedLabId ? 'text-white' : 'text-zinc-600'
+                )}
+              >
+                <span className="truncate">{selectedLab?.name || 'Laboratuvar seçin'}</span>
+                <ChevronDown className={cn('w-4 h-4 text-zinc-500 shrink-0 transition-transform', showLabDropdown && 'rotate-180')} />
+              </button>
+
+              {showLabDropdown && (
+                <div className="absolute z-20 mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
+                  <div className="p-2 border-b border-zinc-700">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-zinc-900 rounded-lg">
+                      <Search className="w-3.5 h-3.5 text-zinc-500" />
+                      <input
+                        type="text"
+                        value={labSearchQuery}
+                        onChange={(e) => setLabSearchQuery(e.target.value)}
+                        placeholder="Ara..."
+                        className="flex-1 bg-transparent text-sm text-white placeholder:text-zinc-600 outline-none"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {filteredLabs.length === 0 ? (
+                      <div className="px-4 py-3 text-xs text-zinc-500 text-center">Sonuç bulunamadı</div>
+                    ) : (
+                      filteredLabs.map((lab) => (
+                        <button
+                          key={lab.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedLabId(lab.id);
+                            setShowLabDropdown(false);
+                            setLabSearchQuery('');
+                          }}
+                          className={cn(
+                            'w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-zinc-700 transition-colors text-left',
+                            selectedLabId === lab.id ? 'bg-zinc-700/50 text-[#d4ec00]' : 'text-zinc-300'
+                          )}
+                        >
+                          <Building2 className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                          <span className="truncate">{lab.name}</span>
+                          {selectedLabId === lab.id && (
+                            <Check className="w-3.5 h-3.5 shrink-0 ml-auto text-[#d4ec00]" />
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Description (required in all scenarios) */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Açıklama</label>
+            <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Açıklama *</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Opsiyonel açıklama"
+              placeholder="Açıklama girin"
               rows={2}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 resize-none transition-all"
+              className={cn(
+                'w-full px-4 py-3 bg-zinc-800 border rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 resize-none transition-all',
+                !descriptionValid && description !== undefined ? 'border-zinc-700' : 'border-zinc-700'
+              )}
             />
           </div>
+
+          {/* Accompanying Personnel (kurum_ziyareti only) */}
+          {taskType === 'kurum_ziyareti' && (
+            <div ref={personnelDropdownRef} className="relative">
+              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Eşlik Eden Personel</label>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPersonnelDropdown((v) => !v);
+                  setShowLabDropdown(false);
+                }}
+                className={cn(
+                  'w-full flex items-center justify-between px-4 py-3 bg-zinc-800 border rounded-xl text-sm transition-all',
+                  showPersonnelDropdown
+                    ? 'border-[#d4ec00]/40 ring-2 ring-[#d4ec00]/40'
+                    : 'border-zinc-700',
+                  selectedPersonnel.length > 0 ? 'text-white' : 'text-zinc-600'
+                )}
+              >
+                <span className="truncate">
+                  {selectedPersonnel.length > 0
+                    ? `${selectedPersonnel.length} kişi seçildi`
+                    : 'Personel seçin (opsiyonel)'}
+                </span>
+                <ChevronDown className={cn('w-4 h-4 text-zinc-500 shrink-0 transition-transform', showPersonnelDropdown && 'rotate-180')} />
+              </button>
+
+              {/* Selected personnel tags */}
+              {selectedPersonnel.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {selectedPersonnel.map((p) => (
+                    <span
+                      key={p.uid}
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded-lg text-[11px] text-zinc-300"
+                    >
+                      {p.name}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedPersonnel((prev) => prev.filter((x) => x.uid !== p.uid))
+                        }
+                        className="text-zinc-500 hover:text-red-400 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {showPersonnelDropdown && (
+                <div className="absolute z-20 mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
+                  <div className="p-2 border-b border-zinc-700">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-zinc-900 rounded-lg">
+                      <Search className="w-3.5 h-3.5 text-zinc-500" />
+                      <input
+                        type="text"
+                        value={personnelSearchQuery}
+                        onChange={(e) => setPersonnelSearchQuery(e.target.value)}
+                        placeholder="Personel ara..."
+                        className="flex-1 bg-transparent text-sm text-white placeholder:text-zinc-600 outline-none"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {filteredPersonnel.length === 0 ? (
+                      <div className="px-4 py-3 text-xs text-zinc-500 text-center">Sonuç bulunamadı</div>
+                    ) : (
+                      filteredPersonnel.map((user) => {
+                        const isSelected = selectedPersonnel.some((p) => p.uid === user.uid);
+                        return (
+                          <button
+                            key={user.uid}
+                            type="button"
+                            onClick={() => togglePersonnel(user)}
+                            className={cn(
+                              'w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-zinc-700 transition-colors text-left',
+                              isSelected ? 'bg-zinc-700/50' : ''
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                'w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all',
+                                isSelected ? 'bg-[#d4ec00] border-[#d4ec00]' : 'border-zinc-600'
+                              )}
+                            >
+                              {isSelected && <Check className="w-2.5 h-2.5 text-zinc-900" strokeWidth={3} />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className={cn('truncate block', isSelected ? 'text-white' : 'text-zinc-300')}>
+                                {user.name || user.email}
+                              </span>
+                              <span className="text-[10px] text-zinc-500">
+                                {user.role === 'admin' ? 'Admin' : 'Satın Alma'}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Date */}
           <div>
@@ -664,7 +1096,7 @@ function AddTaskModal({
           </div>
 
           {/* Duration preview */}
-          {parseTime(endTime) > parseTime(startTime) && (
+          {timeValid && (
             <div className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 rounded-xl">
               <Clock className="w-3.5 h-3.5 text-[#d4ec00]" />
               <span className="text-xs text-zinc-400">
@@ -680,7 +1112,7 @@ function AddTaskModal({
           )}
 
           {/* Validation errors */}
-          {parseTime(endTime) <= parseTime(startTime) && startTime && endTime && (
+          {!timeValid && startTime && endTime && (
             <p className="text-xs text-red-400">Bitiş saati başlangıçtan sonra olmalıdır</p>
           )}
 
