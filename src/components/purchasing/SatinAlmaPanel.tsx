@@ -67,15 +67,22 @@ function getOccupancyColor(pct: number): string {
   if (pct >= 80) return 'bg-red-500';
   if (pct >= 50) return 'bg-yellow-500';
   if (pct > 0) return 'bg-emerald-400';
-  return 'bg-zinc-700';
+  return 'bg-zinc-300 dark:bg-zinc-700';
 }
 
 function getOccupancyRingColor(pct: number): string {
   if (pct >= 80) return 'text-red-500';
   if (pct >= 50) return 'text-yellow-500';
-  if (pct > 0) return 'text-emerald-400';
-  return 'text-zinc-600';
+  if (pct > 0) return 'text-emerald-500 dark:text-emerald-400';
+  return 'text-zinc-400 dark:text-zinc-600';
 }
+
+// Accent color helpers
+const ACCENT = 'text-[#7a8a00] dark:text-[#d4ec00]';
+const ACCENT_BG = 'bg-[#d4ec00]';
+const ACCENT_BG_SUBTLE = 'bg-[#d4ec00]/10 dark:bg-[#d4ec00]/10';
+const ACCENT_BORDER = 'border-[#d4ec00]/40';
+const ACCENT_RING = 'ring-[#d4ec00]/30';
 
 // ==========================================
 // Main Panel Component
@@ -161,7 +168,6 @@ export default function SatinAlmaPanel() {
 
   // Compute main laboratories only (standalone + pool main labs)
   const mainLaboratories = useMemo(() => {
-    // Collect all member IDs that are NOT the mainLabId of their pool
     const subLabIds = new Set<string>();
     for (const pool of labPools) {
       if (pool.active && pool.mainLabId && pool.memberIds) {
@@ -172,7 +178,6 @@ export default function SatinAlmaPanel() {
         }
       }
     }
-    // Filter: show labs that are NOT sub-labs
     return laboratories.filter((lab) => !subLabIds.has(lab.id));
   }, [laboratories, labPools]);
 
@@ -288,28 +293,28 @@ export default function SatinAlmaPanel() {
   }, [selectedDate]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white pb-24">
+    <div className="min-h-screen bg-background text-foreground pb-24">
       {/* Header with greeting */}
       <div className="px-4 pt-6 pb-2 md:px-8 md:pt-8">
-        <p className="text-zinc-500 text-sm">Satın Alma Birimi</p>
+        <p className="text-muted-foreground text-sm">Satın Alma Birimi</p>
         <h1 className="text-2xl md:text-3xl font-bold mt-1">
-          Merhaba, <span className="text-[#d4ec00]">{userName}</span>
+          Merhaba, <span className={ACCENT}>{userName}</span>
         </h1>
       </div>
 
       {/* Date Slider */}
-      <div className="mt-4 px-2 md:px-6">
-        <div className="flex items-center gap-1">
+      <div className="mt-4 px-1 md:px-4">
+        <div className="flex items-center gap-0.5">
           <button
             onClick={() => setSelectedDate((d) => subDays(d, 1))}
-            className="shrink-0 p-2 rounded-xl hover:bg-zinc-800 transition-colors"
+            className="shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
           >
-            <ChevronLeft className="w-5 h-5 text-zinc-400" />
+            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </button>
 
           <div
             ref={sliderRef}
-            className="flex gap-2 overflow-x-auto scrollbar-none py-2 snap-x snap-mandatory flex-1"
+            className="flex gap-1 overflow-x-auto scrollbar-none py-2 flex-1"
           >
             {sliderDates.map((date) => {
               const dateStr = format(date, 'yyyy-MM-dd');
@@ -323,12 +328,12 @@ export default function SatinAlmaPanel() {
                   key={dateStr}
                   onClick={() => setSelectedDate(date)}
                   className={cn(
-                    'snap-center shrink-0 flex flex-col items-center justify-center rounded-2xl px-3 py-3 min-w-[64px] transition-all duration-200',
+                    'flex-1 min-w-0 flex flex-col items-center justify-center rounded-2xl py-2.5 transition-all duration-200',
                     isSelected
-                      ? 'bg-[#d4ec00] text-zinc-900 shadow-lg shadow-[#d4ec00]/20 scale-105'
+                      ? `${ACCENT_BG} text-zinc-900 shadow-lg shadow-[#d4ec00]/20 scale-105 z-10`
                       : today
-                      ? 'bg-zinc-800 text-white ring-1 ring-[#d4ec00]/30'
-                      : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800'
+                      ? `bg-accent text-foreground ring-1 ${ACCENT_RING}`
+                      : 'bg-secondary text-muted-foreground hover:bg-accent'
                   )}
                 >
                   <span className="text-[10px] uppercase font-medium opacity-70">
@@ -343,7 +348,7 @@ export default function SatinAlmaPanel() {
 
                   {/* Occupancy indicator */}
                   {dayTaskCount > 0 && (
-                    <div className="mt-1.5 flex items-center gap-1">
+                    <div className="mt-1 flex items-center gap-0.5">
                       <div
                         className={cn(
                           'w-1.5 h-1.5 rounded-full',
@@ -362,9 +367,9 @@ export default function SatinAlmaPanel() {
 
           <button
             onClick={() => setSelectedDate((d) => addDays(d, 1))}
-            className="shrink-0 p-2 rounded-xl hover:bg-zinc-800 transition-colors"
+            className="shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
           >
-            <ChevronRight className="w-5 h-5 text-zinc-400" />
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
       </div>
@@ -376,7 +381,7 @@ export default function SatinAlmaPanel() {
             setCalendarExpanded((v) => !v);
             setCalendarMonth(selectedDate);
           }}
-          className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <CalendarIcon className="w-4 h-4" />
           <span>{calendarExpanded ? 'Takvimi Kapat' : 'Takvimi Genişlet'}</span>
@@ -387,12 +392,12 @@ export default function SatinAlmaPanel() {
       {/* Expandable Monthly Calendar */}
       {calendarExpanded && (
         <div className="px-4 md:px-8 mt-3 animate-in slide-in-from-top-2 duration-300">
-          <div className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800">
+          <div className="bg-card rounded-2xl p-4 border border-border">
             {/* Month navigation */}
             <div className="flex items-center justify-between mb-4">
               <button
                 onClick={() => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
-                className="p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+                className="p-1.5 rounded-lg hover:bg-accent transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -401,7 +406,7 @@ export default function SatinAlmaPanel() {
               </span>
               <button
                 onClick={() => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
-                className="p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+                className="p-1.5 rounded-lg hover:bg-accent transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -410,7 +415,7 @@ export default function SatinAlmaPanel() {
             {/* Weekday headers */}
             <div className="grid grid-cols-7 gap-1 mb-1">
               {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((d) => (
-                <div key={d} className="text-center text-[10px] text-zinc-500 font-medium py-1">
+                <div key={d} className="text-center text-[10px] text-muted-foreground font-medium py-1">
                   {d}
                 </div>
               ))}
@@ -437,10 +442,10 @@ export default function SatinAlmaPanel() {
                       'relative flex flex-col items-center justify-center py-2 rounded-xl text-sm transition-all',
                       !inMonth && 'opacity-30',
                       isSelected
-                        ? 'bg-[#d4ec00] text-zinc-900 font-bold'
+                        ? `${ACCENT_BG} text-zinc-900 font-bold`
                         : today
-                        ? 'bg-zinc-800 text-white font-semibold'
-                        : 'hover:bg-zinc-800 text-zinc-300'
+                        ? 'bg-accent text-foreground font-semibold'
+                        : 'hover:bg-accent text-foreground'
                     )}
                   >
                     <span>{format(day, 'd')}</span>
@@ -476,13 +481,13 @@ export default function SatinAlmaPanel() {
             </span>
           </div>
         </div>
-        <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
           <div
             className={cn('h-full rounded-full transition-all duration-500', getOccupancyColor(selectedOccupancy))}
             style={{ width: `${selectedOccupancy}%` }}
           />
         </div>
-        <div className="flex justify-between mt-1 text-[10px] text-zinc-600">
+        <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
           <span>09:00</span>
           <span>12:00</span>
           <span>15:00</span>
@@ -493,18 +498,18 @@ export default function SatinAlmaPanel() {
       {/* Task List */}
       <div className="px-4 md:px-8 mt-6">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-zinc-400">
+          <h3 className="text-sm font-semibold text-muted-foreground">
             Görevler ({dayTasks.length})
           </h3>
         </div>
 
         {dayTasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-zinc-600">
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <CalendarIcon className="w-10 h-10 mb-3 opacity-40" />
             <p className="text-sm">Bu güne ait görev bulunmuyor</p>
             <button
               onClick={() => setShowAddModal(true)}
-              className="mt-3 text-xs text-[#d4ec00] hover:underline"
+              className={cn('mt-3 text-xs hover:underline', ACCENT)}
             >
               Yeni görev ekle
             </button>
@@ -528,7 +533,10 @@ export default function SatinAlmaPanel() {
       {/* Floating Add Button */}
       <button
         onClick={() => setShowAddModal(true)}
-        className="fixed bottom-20 right-5 md:bottom-8 md:right-8 z-40 w-14 h-14 rounded-full bg-[#d4ec00] text-zinc-900 shadow-lg shadow-[#d4ec00]/30 flex items-center justify-center hover:scale-110 active:scale-95 transition-transform"
+        className={cn(
+          'fixed bottom-20 right-5 md:bottom-8 md:right-8 z-40 w-14 h-14 rounded-full shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-transform',
+          ACCENT_BG, 'text-zinc-900 shadow-[#d4ec00]/30'
+        )}
       >
         <Plus className="w-6 h-6" strokeWidth={2.5} />
       </button>
@@ -571,8 +579,8 @@ function TaskCard({
       className={cn(
         'group relative flex items-start gap-3 p-4 rounded-2xl border transition-all duration-200',
         task.completed
-          ? 'bg-zinc-900/50 border-zinc-800/50'
-          : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
+          ? 'bg-card/50 border-border/50'
+          : 'bg-card border-border hover:border-muted-foreground/30'
       )}
     >
       {/* Checkbox */}
@@ -581,8 +589,8 @@ function TaskCard({
         className={cn(
           'shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all',
           task.completed
-            ? 'bg-[#d4ec00] border-[#d4ec00]'
-            : 'border-zinc-600 hover:border-[#d4ec00]'
+            ? `${ACCENT_BG} border-[#d4ec00]`
+            : 'border-muted-foreground/40 hover:border-[#d4ec00]'
         )}
       >
         {task.completed && <Check className="w-3 h-3 text-zinc-900" strokeWidth={3} />}
@@ -594,13 +602,13 @@ function TaskCard({
           <p
             className={cn(
               'text-sm font-medium leading-tight transition-all',
-              task.completed ? 'line-through text-zinc-600' : 'text-white'
+              task.completed ? 'line-through text-muted-foreground' : 'text-foreground'
             )}
           >
             {task.title}
           </p>
           {isVisit && (
-            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-[#d4ec00]/15 text-[#d4ec00] font-medium">
+            <span className={cn('shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium', ACCENT_BG_SUBTLE, ACCENT)}>
               Ziyaret
             </span>
           )}
@@ -609,33 +617,33 @@ function TaskCard({
         {/* Laboratory info for visit tasks */}
         {isVisit && task.laboratoryName && (
           <div className="flex items-center gap-1.5 mt-1.5">
-            <Building2 className="w-3 h-3 text-zinc-500" />
-            <span className="text-xs text-zinc-400">{task.laboratoryName}</span>
+            <Building2 className="w-3 h-3 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">{task.laboratoryName}</span>
           </div>
         )}
 
         {task.description && (
-          <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{task.description}</p>
+          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.description}</p>
         )}
 
         {/* Accompanying personnel */}
         {isVisit && task.accompanyingPersonnel && task.accompanyingPersonnel.length > 0 && (
           <div className="flex items-center gap-1.5 mt-1.5">
-            <Users className="w-3 h-3 text-zinc-500" />
-            <span className="text-[11px] text-zinc-500">
+            <Users className="w-3 h-3 text-muted-foreground" />
+            <span className="text-[11px] text-muted-foreground">
               {task.accompanyingPersonnel.map((p) => p.name).join(', ')}
             </span>
           </div>
         )}
 
         <div className="flex items-center gap-3 mt-2">
-          <div className="flex items-center gap-1 text-zinc-500">
+          <div className="flex items-center gap-1 text-muted-foreground">
             <Clock className="w-3 h-3" />
             <span className="text-[11px]">
               {task.startTime} - {task.endTime}
             </span>
           </div>
-          <span className="text-[11px] text-zinc-600">
+          <span className="text-[11px] text-muted-foreground/70">
             {hours > 0 ? `${hours}s ` : ''}
             {mins > 0 ? `${mins}dk` : ''}
           </span>
@@ -643,11 +651,11 @@ function TaskCard({
       </div>
 
       {/* Time bar indicator */}
-      <div className="shrink-0 w-1 h-10 rounded-full bg-zinc-800 overflow-hidden self-center">
+      <div className="shrink-0 w-1 h-10 rounded-full bg-secondary overflow-hidden self-center">
         <div
           className={cn(
             'w-full rounded-full transition-all',
-            task.completed ? 'bg-zinc-600' : 'bg-[#d4ec00]'
+            task.completed ? 'bg-muted-foreground/30' : ACCENT_BG
           )}
           style={{
             height: `${Math.min((durationMin / TOTAL_WORK_MINUTES) * 100, 100)}%`,
@@ -658,7 +666,7 @@ function TaskCard({
       {/* Delete button */}
       <button
         onClick={onDelete}
-        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-500 hover:text-red-400 transition-all"
+        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-red-400 transition-all"
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
@@ -728,13 +736,9 @@ function AddTaskModal({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Effective title for kurum_ziyareti
   const effectiveTitle = taskType === 'kurum_ziyareti' ? 'Kurum Ziyareti' : title;
-
-  // Selected laboratory object
   const selectedLab = laboratories.find((l) => l.id === selectedLabId);
 
-  // Filtered laboratories
   const filteredLabs = useMemo(() => {
     if (!labSearchQuery.trim()) return laboratories;
     const q = labSearchQuery.toLowerCase();
@@ -745,7 +749,6 @@ function AddTaskModal({
     );
   }, [laboratories, labSearchQuery]);
 
-  // Filtered personnel
   const filteredPersonnel = useMemo(() => {
     if (!personnelSearchQuery.trim()) return personnel;
     const q = personnelSearchQuery.toLowerCase();
@@ -756,7 +759,6 @@ function AddTaskModal({
     );
   }, [personnel, personnelSearchQuery]);
 
-  // Validation
   const timeValid = parseTime(endTime) > parseTime(startTime);
   const descriptionValid = description.trim().length > 0;
   const titleValid = taskType === 'kurum_ziyareti' || title.trim().length > 0;
@@ -791,21 +793,25 @@ function AddTaskModal({
     setSubmitting(false);
   };
 
+  // Modal input/surface classes
+  const inputCls = 'w-full px-4 py-3 bg-secondary border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all';
+  const dropdownTriggerCls = 'w-full flex items-center justify-between px-4 py-3 bg-secondary border rounded-xl text-sm transition-all';
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-zinc-900 border border-zinc-800 rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300"
+        className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-bold">Yeni Görev</h3>
+          <h3 className="text-lg font-bold text-foreground">Yeni Görev</h3>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -814,7 +820,7 @@ function AddTaskModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Task Type Selector */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Görev Türü</label>
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görev Türü</label>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -827,8 +833,8 @@ function AddTaskModal({
                 className={cn(
                   'flex-1 py-2.5 px-3 rounded-xl text-sm font-medium border transition-all',
                   taskType === 'custom'
-                    ? 'bg-[#d4ec00]/10 border-[#d4ec00]/40 text-[#d4ec00]'
-                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                    ? cn(ACCENT_BG_SUBTLE, ACCENT_BORDER, ACCENT)
+                    : 'bg-secondary border-border text-muted-foreground hover:border-muted-foreground/40'
                 )}
               >
                 Serbest Görev
@@ -842,8 +848,8 @@ function AddTaskModal({
                 className={cn(
                   'flex-1 py-2.5 px-3 rounded-xl text-sm font-medium border transition-all flex items-center justify-center gap-2',
                   taskType === 'kurum_ziyareti'
-                    ? 'bg-[#d4ec00]/10 border-[#d4ec00]/40 text-[#d4ec00]'
-                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                    ? cn(ACCENT_BG_SUBTLE, ACCENT_BORDER, ACCENT)
+                    : 'bg-secondary border-border text-muted-foreground hover:border-muted-foreground/40'
                 )}
               >
                 <Building2 className="w-4 h-4" />
@@ -855,27 +861,27 @@ function AddTaskModal({
           {/* Title - shown only for custom tasks */}
           {taskType === 'custom' ? (
             <div>
-              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Görev Adı *</label>
+              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görev Adı *</label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Görev başlığı girin"
-                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all"
+                className={inputCls}
                 autoFocus
               />
             </div>
           ) : (
-            <div className="flex items-center gap-2 px-4 py-3 bg-zinc-800/50 rounded-xl border border-zinc-700/50">
-              <Building2 className="w-4 h-4 text-[#d4ec00]" />
-              <span className="text-sm font-medium text-white">Kurum Ziyareti</span>
+            <div className={cn('flex items-center gap-2 px-4 py-3 rounded-xl border', ACCENT_BG_SUBTLE, 'border-border/50')}>
+              <Building2 className={cn('w-4 h-4', ACCENT)} />
+              <span className="text-sm font-medium text-foreground">Kurum Ziyareti</span>
             </div>
           )}
 
           {/* Laboratory selector (kurum_ziyareti only) */}
           {taskType === 'kurum_ziyareti' && (
             <div ref={labDropdownRef} className="relative">
-              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Kurum (Laboratuvar) *</label>
+              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Kurum (Laboratuvar) *</label>
               <button
                 type="button"
                 onClick={() => {
@@ -883,35 +889,35 @@ function AddTaskModal({
                   setShowPersonnelDropdown(false);
                 }}
                 className={cn(
-                  'w-full flex items-center justify-between px-4 py-3 bg-zinc-800 border rounded-xl text-sm transition-all',
+                  dropdownTriggerCls,
                   showLabDropdown
-                    ? 'border-[#d4ec00]/40 ring-2 ring-[#d4ec00]/40'
-                    : 'border-zinc-700',
-                  selectedLabId ? 'text-white' : 'text-zinc-600'
+                    ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40`
+                    : 'border-border',
+                  selectedLabId ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
                 <span className="truncate">{selectedLab?.name || 'Laboratuvar seçin'}</span>
-                <ChevronDown className={cn('w-4 h-4 text-zinc-500 shrink-0 transition-transform', showLabDropdown && 'rotate-180')} />
+                <ChevronDown className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', showLabDropdown && 'rotate-180')} />
               </button>
 
               {showLabDropdown && (
-                <div className="absolute z-20 mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
-                  <div className="p-2 border-b border-zinc-700">
-                    <div className="flex items-center gap-2 px-3 py-2 bg-zinc-900 rounded-lg">
-                      <Search className="w-3.5 h-3.5 text-zinc-500" />
+                <div className="absolute z-20 mt-1 w-full bg-popover border border-border rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
+                  <div className="p-2 border-b border-border">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
+                      <Search className="w-3.5 h-3.5 text-muted-foreground" />
                       <input
                         type="text"
                         value={labSearchQuery}
                         onChange={(e) => setLabSearchQuery(e.target.value)}
                         placeholder="Ara..."
-                        className="flex-1 bg-transparent text-sm text-white placeholder:text-zinc-600 outline-none"
+                        className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
                         autoFocus
                       />
                     </div>
                   </div>
                   <div className="max-h-48 overflow-y-auto">
                     {filteredLabs.length === 0 ? (
-                      <div className="px-4 py-3 text-xs text-zinc-500 text-center">Sonuç bulunamadı</div>
+                      <div className="px-4 py-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
                     ) : (
                       filteredLabs.map((lab) => (
                         <button
@@ -923,14 +929,14 @@ function AddTaskModal({
                             setLabSearchQuery('');
                           }}
                           className={cn(
-                            'w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-zinc-700 transition-colors text-left',
-                            selectedLabId === lab.id ? 'bg-zinc-700/50 text-[#d4ec00]' : 'text-zinc-300'
+                            'w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent transition-colors text-left',
+                            selectedLabId === lab.id ? cn('bg-accent/50', ACCENT) : 'text-foreground'
                           )}
                         >
                           <Building2 className="w-3.5 h-3.5 shrink-0 opacity-50" />
                           <span className="truncate">{lab.name}</span>
                           {selectedLabId === lab.id && (
-                            <Check className="w-3.5 h-3.5 shrink-0 ml-auto text-[#d4ec00]" />
+                            <Check className={cn('w-3.5 h-3.5 shrink-0 ml-auto', ACCENT)} />
                           )}
                         </button>
                       ))
@@ -943,23 +949,20 @@ function AddTaskModal({
 
           {/* Description (required in all scenarios) */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Açıklama *</label>
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Açıklama *</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Açıklama girin"
               rows={2}
-              className={cn(
-                'w-full px-4 py-3 bg-zinc-800 border rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 resize-none transition-all',
-                !descriptionValid && description !== undefined ? 'border-zinc-700' : 'border-zinc-700'
-              )}
+              className={cn(inputCls, 'resize-none')}
             />
           </div>
 
           {/* Accompanying Personnel (kurum_ziyareti only) */}
           {taskType === 'kurum_ziyareti' && (
             <div ref={personnelDropdownRef} className="relative">
-              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Eşlik Eden Personel</label>
+              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Eşlik Eden Personel</label>
               <button
                 type="button"
                 onClick={() => {
@@ -967,11 +970,11 @@ function AddTaskModal({
                   setShowLabDropdown(false);
                 }}
                 className={cn(
-                  'w-full flex items-center justify-between px-4 py-3 bg-zinc-800 border rounded-xl text-sm transition-all',
+                  dropdownTriggerCls,
                   showPersonnelDropdown
-                    ? 'border-[#d4ec00]/40 ring-2 ring-[#d4ec00]/40'
-                    : 'border-zinc-700',
-                  selectedPersonnel.length > 0 ? 'text-white' : 'text-zinc-600'
+                    ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40`
+                    : 'border-border',
+                  selectedPersonnel.length > 0 ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
                 <span className="truncate">
@@ -979,7 +982,7 @@ function AddTaskModal({
                     ? `${selectedPersonnel.length} kişi seçildi`
                     : 'Personel seçin (opsiyonel)'}
                 </span>
-                <ChevronDown className={cn('w-4 h-4 text-zinc-500 shrink-0 transition-transform', showPersonnelDropdown && 'rotate-180')} />
+                <ChevronDown className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', showPersonnelDropdown && 'rotate-180')} />
               </button>
 
               {/* Selected personnel tags */}
@@ -988,7 +991,7 @@ function AddTaskModal({
                   {selectedPersonnel.map((p) => (
                     <span
                       key={p.uid}
-                      className="inline-flex items-center gap-1 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded-lg text-[11px] text-zinc-300"
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-secondary border border-border rounded-lg text-[11px] text-foreground"
                     >
                       {p.name}
                       <button
@@ -996,7 +999,7 @@ function AddTaskModal({
                         onClick={() =>
                           setSelectedPersonnel((prev) => prev.filter((x) => x.uid !== p.uid))
                         }
-                        className="text-zinc-500 hover:text-red-400 transition-colors"
+                        className="text-muted-foreground hover:text-red-400 transition-colors"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -1006,23 +1009,23 @@ function AddTaskModal({
               )}
 
               {showPersonnelDropdown && (
-                <div className="absolute z-20 mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
-                  <div className="p-2 border-b border-zinc-700">
-                    <div className="flex items-center gap-2 px-3 py-2 bg-zinc-900 rounded-lg">
-                      <Search className="w-3.5 h-3.5 text-zinc-500" />
+                <div className="absolute z-20 mt-1 w-full bg-popover border border-border rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
+                  <div className="p-2 border-b border-border">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
+                      <Search className="w-3.5 h-3.5 text-muted-foreground" />
                       <input
                         type="text"
                         value={personnelSearchQuery}
                         onChange={(e) => setPersonnelSearchQuery(e.target.value)}
                         placeholder="Personel ara..."
-                        className="flex-1 bg-transparent text-sm text-white placeholder:text-zinc-600 outline-none"
+                        className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
                         autoFocus
                       />
                     </div>
                   </div>
                   <div className="max-h-48 overflow-y-auto">
                     {filteredPersonnel.length === 0 ? (
-                      <div className="px-4 py-3 text-xs text-zinc-500 text-center">Sonuç bulunamadı</div>
+                      <div className="px-4 py-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
                     ) : (
                       filteredPersonnel.map((user) => {
                         const isSelected = selectedPersonnel.some((p) => p.uid === user.uid);
@@ -1032,23 +1035,23 @@ function AddTaskModal({
                             type="button"
                             onClick={() => togglePersonnel(user)}
                             className={cn(
-                              'w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-zinc-700 transition-colors text-left',
-                              isSelected ? 'bg-zinc-700/50' : ''
+                              'w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent transition-colors text-left',
+                              isSelected ? 'bg-accent/50' : ''
                             )}
                           >
                             <div
                               className={cn(
                                 'w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all',
-                                isSelected ? 'bg-[#d4ec00] border-[#d4ec00]' : 'border-zinc-600'
+                                isSelected ? `${ACCENT_BG} border-[#d4ec00]` : 'border-muted-foreground/40'
                               )}
                             >
                               {isSelected && <Check className="w-2.5 h-2.5 text-zinc-900" strokeWidth={3} />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <span className={cn('truncate block', isSelected ? 'text-white' : 'text-zinc-300')}>
+                              <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>
                                 {user.name || user.email}
                               </span>
-                              <span className="text-[10px] text-zinc-500">
+                              <span className="text-[10px] text-muted-foreground">
                                 {user.role === 'admin' ? 'Admin' : 'Satın Alma'}
                               </span>
                             </div>
@@ -1064,42 +1067,42 @@ function AddTaskModal({
 
           {/* Date */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Tarih</label>
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Tarih</label>
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all [color-scheme:dark]"
+              className={cn(inputCls, 'dark:[color-scheme:dark]')}
             />
           </div>
 
           {/* Time range */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Başlangıç</label>
+              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Başlangıç</label>
               <input
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all [color-scheme:dark]"
+                className={cn(inputCls, 'dark:[color-scheme:dark]')}
               />
             </div>
             <div>
-              <label className="block text-xs text-zinc-500 mb-1.5 font-medium">Bitiş</label>
+              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Bitiş</label>
               <input
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all [color-scheme:dark]"
+                className={cn(inputCls, 'dark:[color-scheme:dark]')}
               />
             </div>
           </div>
 
           {/* Duration preview */}
           {timeValid && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 rounded-xl">
-              <Clock className="w-3.5 h-3.5 text-[#d4ec00]" />
-              <span className="text-xs text-zinc-400">
+            <div className="flex items-center gap-2 px-3 py-2 bg-secondary/50 rounded-xl">
+              <Clock className={cn('w-3.5 h-3.5', ACCENT)} />
+              <span className="text-xs text-muted-foreground">
                 Süre:{' '}
                 {(() => {
                   const dur = parseTime(endTime) - parseTime(startTime);
@@ -1123,8 +1126,8 @@ function AddTaskModal({
             className={cn(
               'w-full py-3.5 rounded-xl text-sm font-semibold transition-all',
               valid && !submitting
-                ? 'bg-[#d4ec00] text-zinc-900 hover:brightness-110 active:scale-[0.98]'
-                : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
+                ? `${ACCENT_BG} text-zinc-900 hover:brightness-110 active:scale-[0.98]`
+                : 'bg-secondary text-muted-foreground cursor-not-allowed'
             )}
           >
             {submitting ? 'Ekleniyor...' : 'Görev Ekle'}
