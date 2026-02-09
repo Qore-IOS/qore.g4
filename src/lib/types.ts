@@ -1147,7 +1147,8 @@ export interface TransferTemplate {
 export interface PurchasingTask {
   id: string;
   title: string;
-  description?: string;
+  description: string;
+  taskType: 'custom' | 'kurum_ziyareti';
   date: string;               // ISO date string (YYYY-MM-DD)
   startTime: string;           // HH:mm format
   endTime: string;             // HH:mm format
@@ -1156,4 +1157,8 @@ export interface PurchasingTask {
   createdByUid: string;
   createdByName: string;
   updatedAt?: TimestampLike;
+  // Kurum Ziyareti specific fields
+  laboratoryId?: string;
+  laboratoryName?: string;
+  accompanyingPersonnel?: { uid: string; name: string }[];
 }
