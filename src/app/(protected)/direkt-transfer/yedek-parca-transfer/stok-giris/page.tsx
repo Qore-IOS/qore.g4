@@ -32,6 +32,7 @@ import {
   Save,
   FileSpreadsheet,
   Upload,
+  Download,
   AlertCircle,
   CheckCircle,
   Info,
@@ -164,6 +165,26 @@ export default function YedekParcaStokGirisPage() {
     setRows(prev => prev.filter(r => r.id !== rowId));
   };
 
+  // Excel şablon indirme
+  const downloadTemplate = useCallback(async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const templateData = [
+        ['Stok Kodu', 'Seri Numarası', 'Adet'],
+        ['ORN-001', 'SN123456', 1],
+        ['ORN-002', '', 5],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(templateData);
+      ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 10 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Stok Girişi');
+      XLSX.writeFile(wb, 'yedek_parca_stok_giris_sablon.xlsx');
+    } catch (err) {
+      console.error('Template download error:', err);
+      toast({ title: 'Hata', description: 'Şablon indirilemedi.', variant: 'destructive' });
+    }
+  }, [toast]);
+
   // Excel dosyası yükleme işlemi
   const handleExcelUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -174,7 +195,7 @@ export default function YedekParcaStokGirisPage() {
     setExcelRows([]);
 
     try {
-      const XLSX = (await import('xlsx')).default;
+      const XLSX = await import('xlsx');
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: 'array' });
       const sheetName = workbook.SheetNames[0];
@@ -568,6 +589,13 @@ export default function YedekParcaStokGirisPage() {
                 </Alert>
 
                 <div className="flex items-center gap-4">
+                  <Button
+                    variant="outline"
+                    onClick={downloadTemplate}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Şablon İndir
+                  </Button>
                   <input
                     ref={fileInputRef}
                     type="file"
