@@ -31,7 +31,9 @@ import {
   Users,
   ChevronDown,
   Search,
+  ClipboardList,
 } from 'lucide-react';
+import Link from 'next/link';
 import { format, addDays, subDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, startOfWeek, endOfWeek, parseISO, isSameMonth } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -296,10 +298,24 @@ export default function SatinAlmaPanel() {
     <div className="min-h-screen bg-background text-foreground pb-24">
       {/* Header with greeting */}
       <div className="px-4 pt-6 pb-2 md:px-8 md:pt-8">
-        <p className="text-muted-foreground text-sm">Satın Alma Birimi</p>
-        <h1 className="text-2xl md:text-3xl font-bold mt-1">
-          Merhaba, <span className={ACCENT}>{userName}</span>
-        </h1>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-muted-foreground text-sm">Satın Alma Birimi</p>
+            <h1 className="text-2xl md:text-3xl font-bold mt-1">
+              Merhaba, <span className={ACCENT}>{userName}</span>
+            </h1>
+          </div>
+          <Link
+            href="/satin-alma/tum-islemler"
+            className={cn(
+              'shrink-0 mt-1 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-all',
+              'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'
+            )}
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Tüm İşlemler</span>
+          </Link>
+        </div>
       </div>
 
       {/* Date Slider */}
@@ -314,7 +330,8 @@ export default function SatinAlmaPanel() {
 
           <div
             ref={sliderRef}
-            className="flex gap-1 overflow-x-auto scrollbar-none py-2 flex-1"
+            className="flex gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1"
+            style={{ scrollSnapType: 'x mandatory' }}
           >
             {sliderDates.map((date) => {
               const dateStr = format(date, 'yyyy-MM-dd');
@@ -327,8 +344,9 @@ export default function SatinAlmaPanel() {
                 <button
                   key={dateStr}
                   onClick={() => setSelectedDate(date)}
+                  style={{ scrollSnapAlign: 'center' }}
                   className={cn(
-                    'flex-1 min-w-0 flex flex-col items-center justify-center rounded-2xl py-2.5 transition-all duration-200',
+                    'shrink-0 w-[60px] md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center justify-center rounded-2xl py-2.5 transition-all duration-200',
                     isSelected
                       ? `${ACCENT_BG} text-zinc-900 shadow-lg shadow-[#d4ec00]/20 scale-105 z-10`
                       : today
