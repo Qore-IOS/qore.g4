@@ -77,7 +77,7 @@ export default function YedekParcaStokGirisPage() {
   const [excelTotalRows, setExcelTotalRows] = useState(0);
   const [isParsingExcel, setIsParsingExcel] = useState(false);
 
-  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu';
+  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik';
 
   useEffect(() => {
     if (!isAuthorized) {
