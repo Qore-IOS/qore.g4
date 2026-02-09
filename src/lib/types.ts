@@ -1161,4 +1161,14 @@ export interface PurchasingTask {
   laboratoryId?: string;
   laboratoryName?: string;
   accompanyingPersonnel?: { uid: string; name: string }[];
+  // File attachments
+  attachments?: PurchasingTaskAttachment[];
+}
+
+export interface PurchasingTaskAttachment {
+  name: string;
+  url: string;
+  type: 'image' | 'pdf';
+  size: number; // bytes
+  storagePath: string;
 }

@@ -23,6 +23,9 @@ import {
   Filter,
   X,
   ChevronDown,
+  Paperclip,
+  FileText,
+  ImageIcon,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -164,6 +167,7 @@ export default function TumIslemlerPanel() {
       'Laboratuvar': t.laboratoryName || '-',
       'Personel': t.createdByName || '',
       'Eşlik Eden': t.accompanyingPersonnel?.map((p) => p.name).join(', ') || '-',
+      'Dosyalar': t.attachments?.map((a) => a.name).join(', ') || '-',
       'Durum': t.completed ? 'Tamamlandı' : 'Devam Ediyor',
     }));
 
@@ -316,6 +320,7 @@ export default function TumIslemlerPanel() {
                     <th className="pb-3 pr-4 font-medium">Saat</th>
                     <th className="pb-3 pr-4 font-medium">Laboratuvar</th>
                     <th className="pb-3 pr-4 font-medium">Personel</th>
+                    <th className="pb-3 pr-4 font-medium">Dosyalar</th>
                     <th className="pb-3 font-medium">Durum</th>
                   </tr>
                 </thead>
@@ -365,6 +370,36 @@ export default function TumIslemlerPanel() {
                             </p>
                           )}
                         </div>
+                      </td>
+                      <td className="py-3 pr-4">
+                        {task.attachments && task.attachments.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {task.attachments.map((att, idx) => (
+                              <a
+                                key={idx}
+                                href={att.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={cn(
+                                  'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all hover:brightness-110',
+                                  att.type === 'image'
+                                    ? 'bg-blue-500/10 text-blue-500'
+                                    : 'bg-red-500/10 text-red-500'
+                                )}
+                                title={att.name}
+                              >
+                                {att.type === 'image' ? (
+                                  <ImageIcon className="w-2.5 h-2.5" />
+                                ) : (
+                                  <FileText className="w-2.5 h-2.5" />
+                                )}
+                                <span className="truncate max-w-[60px]">{att.name}</span>
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                       </td>
                       <td className="py-3">
                         <span
@@ -434,6 +469,33 @@ export default function TumIslemlerPanel() {
                   {task.accompanyingPersonnel && task.accompanyingPersonnel.length > 0 && (
                     <div className="mt-1.5 text-[10px] text-muted-foreground">
                       Eşlik: {task.accompanyingPersonnel.map((p) => p.name).join(', ')}
+                    </div>
+                  )}
+
+                  {/* Attachments */}
+                  {task.attachments && task.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {task.attachments.map((att, idx) => (
+                        <a
+                          key={idx}
+                          href={att.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cn(
+                            'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all hover:brightness-110',
+                            att.type === 'image'
+                              ? 'bg-blue-500/10 text-blue-500'
+                              : 'bg-red-500/10 text-red-500'
+                          )}
+                        >
+                          {att.type === 'image' ? (
+                            <ImageIcon className="w-2.5 h-2.5" />
+                          ) : (
+                            <FileText className="w-2.5 h-2.5" />
+                          )}
+                          <span className="truncate max-w-[80px]">{att.name}</span>
+                        </a>
+                      ))}
                     </div>
                   )}
 
