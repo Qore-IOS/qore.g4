@@ -73,6 +73,8 @@ export default function YedekParcaStokGirisPage() {
   // Excel import state
   const [excelRows, setExcelRows] = useState<StokGirisRow[]>([]);
   const [excelErrors, setExcelErrors] = useState<string[]>([]);
+  const [excelNotFoundProducts, setExcelNotFoundProducts] = useState<string[]>([]);
+  const [excelTotalRows, setExcelTotalRows] = useState(0);
   const [isParsingExcel, setIsParsingExcel] = useState(false);
 
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu';
@@ -193,6 +195,8 @@ export default function YedekParcaStokGirisPage() {
     setIsParsingExcel(true);
     setExcelErrors([]);
     setExcelRows([]);
+    setExcelNotFoundProducts([]);
+    setExcelTotalRows(0);
 
     try {
       const XLSX = await import('xlsx');
@@ -214,6 +218,7 @@ export default function YedekParcaStokGirisPage() {
 
       const errors: string[] = [];
       const parsedRows: StokGirisRow[] = [];
+      const notFoundProducts = new Set<string>();
 
       // Stok kodu -> ProductCode map
       const productMap = new Map<string, ProductCode>();
@@ -222,10 +227,13 @@ export default function YedekParcaStokGirisPage() {
       });
 
       const seenSerials = new Set<string>();
+      let totalDataRows = 0;
 
       for (let i = startRow; i < jsonData.length; i++) {
         const row = jsonData[i] as any[];
         if (!row || row.length === 0 || !row[0]) continue;
+
+        totalDataRows++;
 
         const rawStokKodu = String(row[0]).trim();
         const rawSeriNo = row[1] != null ? String(row[1]).trim() : '';
@@ -235,6 +243,7 @@ export default function YedekParcaStokGirisPage() {
         const product = productMap.get(stokKoduUpper);
 
         if (!product) {
+          notFoundProducts.add(rawStokKodu);
           errors.push(`Satır ${i + 1}: "${rawStokKodu}" stok kodu sistemde tanımlı değil.`);
           continue;
         }
@@ -278,11 +287,16 @@ export default function YedekParcaStokGirisPage() {
 
       setExcelRows(parsedRows);
       setExcelErrors(errors);
+      setExcelNotFoundProducts(Array.from(notFoundProducts));
+      setExcelTotalRows(totalDataRows);
 
       if (parsedRows.length > 0) {
+        const notFoundMsg = notFoundProducts.size > 0
+          ? ` ${notFoundProducts.size} ürün sistemde bulunamadı.`
+          : '';
         toast({
           title: 'Excel Okundu',
-          description: `${parsedRows.length} ürün satırı başarıyla ayrıştırıldı.${errors.length > 0 ? ` ${errors.length} satırda hata var.` : ''}`,
+          description: `${totalDataRows} satırdan ${parsedRows.length} tanesi başarıyla okundu.${notFoundMsg}`,
         });
       } else {
         toast({
@@ -312,6 +326,8 @@ export default function YedekParcaStokGirisPage() {
     setRows(prev => [...prev, ...filtered]);
     setExcelRows([]);
     setExcelErrors([]);
+    setExcelNotFoundProducts([]);
+    setExcelTotalRows(0);
     toast({
       title: 'Excel Verileri Eklendi',
       description: `${filtered.length} ürün satırı listeye eklendi.`,
@@ -410,6 +426,8 @@ export default function YedekParcaStokGirisPage() {
     setRows(allRows);
     setExcelRows([]);
     setExcelErrors([]);
+    setExcelNotFoundProducts([]);
+    setExcelTotalRows(0);
   };
 
   if (loading) {
@@ -617,17 +635,43 @@ export default function YedekParcaStokGirisPage() {
                   </Button>
                 </div>
 
-                {/* Excel errors */}
-                {excelErrors.length > 0 && (
-                  <Alert variant="destructive">
+                {/* Excel summary + errors */}
+                {excelTotalRows > 0 && (excelRows.length > 0 || excelErrors.length > 0) && (
+                  <Alert variant={excelErrors.length > 0 ? 'destructive' : 'default'}>
                     <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      <p className="font-medium mb-1">{excelErrors.length} satırda hata bulundu:</p>
-                      <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
-                        {excelErrors.map((err, i) => (
-                          <li key={i}>{err}</li>
-                        ))}
-                      </ul>
+                    <AlertDescription className="space-y-2">
+                      <p className="font-medium">
+                        Excel&apos;deki {excelTotalRows} üründen {excelRows.length} tanesi sisteme eklendi.
+                        {excelErrors.length > 0 && ` ${excelErrors.length} satırda sorun tespit edildi.`}
+                      </p>
+
+                      {excelNotFoundProducts.length > 0 && (
+                        <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
+                          <p className="text-sm font-medium mb-1">
+                            Sistemde bulunamayan ürünler ({excelNotFoundProducts.length}):
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {excelNotFoundProducts.map((code, i) => (
+                              <Badge key={i} variant="destructive" className="font-mono text-xs">
+                                {code}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {excelErrors.length > 0 && (
+                        <details className="text-sm">
+                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                            Detaylı hata listesi ({excelErrors.length} satır)
+                          </summary>
+                          <ul className="mt-1 space-y-0.5 max-h-32 overflow-y-auto pl-4 list-disc">
+                            {excelErrors.map((err, i) => (
+                              <li key={i}>{err}</li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                     </AlertDescription>
                   </Alert>
                 )}
@@ -643,7 +687,7 @@ export default function YedekParcaStokGirisPage() {
                         </span>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => { setExcelRows([]); setExcelErrors([]); }}>
+                        <Button size="sm" variant="outline" onClick={() => { setExcelRows([]); setExcelErrors([]); setExcelNotFoundProducts([]); setExcelTotalRows(0); }}>
                           İptal
                         </Button>
                         <Button size="sm" onClick={confirmExcelRows}>

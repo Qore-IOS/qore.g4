@@ -53,6 +53,7 @@ import {
   Info,
   Hash,
   List,
+  ChevronLeft,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -120,6 +121,9 @@ export default function YedekParcaTransferPage() {
   const [depoStok, setDepoStok] = useState<YedekParcaDepoStokItem[]>([]);
   const [depoStokLoading, setDepoStokLoading] = useState(false);
   const [expandedStokKodu, setExpandedStokKodu] = useState<string | null>(null);
+  const [depoStokSearchQuery, setDepoStokSearchQuery] = useState('');
+  const [depoStokPage, setDepoStokPage] = useState(0);
+  const DEPO_STOK_PER_PAGE = 20;
 
   // Product code reference for cihazGrubu lookup
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
@@ -403,10 +407,23 @@ export default function YedekParcaTransferPage() {
 
   const totalPersonnelPages = Math.ceil(personnelStock.length / ITEMS_PER_PAGE);
 
-  // Grouped depo stok for the depo stok view
-  const groupedDepoStok = useMemo(() => {
-    return depoStokProducts;
-  }, [depoStokProducts]);
+  // Filtered depo stok for the depo stok view (search by stok kodu, stok adı, seri numarası)
+  const filteredDepoStok = useMemo(() => {
+    if (!depoStokSearchQuery.trim()) return depoStokProducts;
+    const q = depoStokSearchQuery.trim().toLowerCase();
+    return depoStokProducts.filter(g =>
+      g.stokKodu.toLowerCase().includes(q) ||
+      g.stokAdi.toLowerCase().includes(q) ||
+      g.serialNumbers.some(sn => sn.serialNumber.toLowerCase().includes(q))
+    );
+  }, [depoStokProducts, depoStokSearchQuery]);
+
+  const totalDepoStokPages = Math.ceil(filteredDepoStok.length / DEPO_STOK_PER_PAGE);
+
+  const paginatedDepoStok = useMemo(() => {
+    const start = depoStokPage * DEPO_STOK_PER_PAGE;
+    return filteredDepoStok.slice(start, start + DEPO_STOK_PER_PAGE);
+  }, [filteredDepoStok, depoStokPage]);
 
   // Handle serial number change - if serial entered, qty must be 1
   const handleTransferSerialChange = (value: string) => {
@@ -1378,7 +1395,7 @@ export default function YedekParcaTransferPage() {
             </CardTitle>
             <CardDescription>
               Yedek parça deposundaki mevcut stok durumu.
-              Toplam: <strong>{groupedDepoStok.reduce((s, g) => s + g.totalQuantity, 0)}</strong> adet, <strong>{groupedDepoStok.length}</strong> farklı ürün.
+              Toplam: <strong>{depoStokProducts.reduce((s, g) => s + g.totalQuantity, 0)}</strong> adet, <strong>{depoStokProducts.length}</strong> farklı ürün.
             </CardDescription>
           </div>
           <Button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')}>
@@ -1387,20 +1404,42 @@ export default function YedekParcaTransferPage() {
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
+        {/* Search input */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Stok kodu, ürün adı veya seri numarası ile ara..."
+            value={depoStokSearchQuery}
+            onChange={(e) => { setDepoStokSearchQuery(e.target.value); setDepoStokPage(0); }}
+            className="pl-9"
+          />
+        </div>
+
         {depoStokLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin" />
             <span className="ml-2">Yükleniyor...</span>
           </div>
-        ) : groupedDepoStok.length === 0 ? (
+        ) : depoStokProducts.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Warehouse className="h-12 w-12 mx-auto mb-4 opacity-20" />
             <p>Depoda yedek parça stoku bulunmuyor.</p>
             <p className="text-sm">Stok girişi yaparak ürün ekleyin.</p>
           </div>
+        ) : filteredDepoStok.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Search className="h-12 w-12 mx-auto mb-4 opacity-20" />
+            <p>&quot;{depoStokSearchQuery}&quot; ile eşleşen ürün bulunamadı.</p>
+          </div>
         ) : (
           <div className="border rounded-lg">
+            {/* Filtered result info */}
+            {depoStokSearchQuery.trim() && (
+              <div className="px-4 py-2 bg-muted/30 border-b text-sm text-muted-foreground">
+                {filteredDepoStok.length} ürün bulundu
+              </div>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1413,7 +1452,7 @@ export default function YedekParcaTransferPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {groupedDepoStok.map((group) => (
+                {paginatedDepoStok.map((group) => (
                   <React.Fragment key={group.stokKodu}>
                     <TableRow
                       className={cn(
@@ -1497,6 +1536,36 @@ export default function YedekParcaTransferPage() {
                 ))}
               </TableBody>
             </Table>
+
+            {/* Pagination */}
+            {totalDepoStokPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t">
+                <p className="text-sm text-muted-foreground">
+                  Sayfa {depoStokPage + 1} / {totalDepoStokPages}
+                  <span className="ml-2">({filteredDepoStok.length} ürün)</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={depoStokPage === 0}
+                    onClick={() => setDepoStokPage(p => p - 1)}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Önceki
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={depoStokPage >= totalDepoStokPages - 1}
+                    onClick={() => setDepoStokPage(p => p + 1)}
+                  >
+                    Sonraki
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </CardContent>
