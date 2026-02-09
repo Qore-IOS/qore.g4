@@ -123,7 +123,7 @@ export interface MinMaxRule {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | string;
+  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | string;
   name?: string;
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
