@@ -2,7 +2,8 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import {
   collection,
   onSnapshot,
@@ -16,7 +17,7 @@ import {
   getDocs,
   Timestamp,
 } from 'firebase/firestore';
-import type { PurchasingTask, Hospital, LabPool, User } from '@/lib/types';
+import type { PurchasingTask, PurchasingTaskAttachment, Hospital, LabPool, User } from '@/lib/types';
 import {
   Plus,
   Check,
@@ -32,6 +33,10 @@ import {
   ChevronDown,
   Search,
   ClipboardList,
+  Paperclip,
+  FileText,
+  ImageIcon,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { format, addDays, subDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, startOfWeek, endOfWeek, parseISO, isSameMonth } from 'date-fns';
@@ -85,6 +90,86 @@ const ACCENT_BG = 'bg-[#d4ec00]';
 const ACCENT_BG_SUBTLE = 'bg-[#d4ec00]/10 dark:bg-[#d4ec00]/10';
 const ACCENT_BORDER = 'border-[#d4ec00]/40';
 const ACCENT_RING = 'ring-[#d4ec00]/30';
+
+// ==========================================
+// Image compression - downgrade resolution
+// ==========================================
+
+const MAX_IMAGE_WIDTH = 1200;
+const MAX_IMAGE_HEIGHT = 1200;
+const JPEG_QUALITY = 0.7;
+
+function compressImage(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+
+      // Downscale if exceeds max dimensions
+      if (width > MAX_IMAGE_WIDTH || height > MAX_IMAGE_HEIGHT) {
+        const ratio = Math.min(MAX_IMAGE_WIDTH / width, MAX_IMAGE_HEIGHT / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('Canvas context unavailable'));
+
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Compression failed'));
+        },
+        'image/jpeg',
+        JPEG_QUALITY
+      );
+    };
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function uploadAttachment(
+  file: File,
+  taskPath: string
+): Promise<PurchasingTaskAttachment> {
+  const isImage = file.type.startsWith('image/');
+  const isPdf = file.type === 'application/pdf';
+
+  if (!isImage && !isPdf) {
+    throw new Error('Sadece resim ve PDF dosyaları yüklenebilir');
+  }
+
+  const timestamp = Date.now();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `purchasing-tasks/${taskPath}/${timestamp}_${safeName}`;
+  const storageRef = ref(storage, storagePath);
+
+  let uploadData: Blob | File = file;
+  if (isImage) {
+    uploadData = await compressImage(file);
+  }
+
+  const uploadPromise = uploadBytes(storageRef, uploadData);
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Yükleme zaman aşımına uğradı')), 60000)
+  );
+
+  await Promise.race([uploadPromise, timeoutPromise]);
+  const url = await getDownloadURL(storageRef);
+
+  return {
+    name: file.name,
+    url,
+    type: isImage ? 'image' : 'pdf',
+    size: uploadData.size,
+    storagePath,
+  };
+}
 
 // ==========================================
 // Main Panel Component
@@ -205,10 +290,18 @@ export default function SatinAlmaPanel() {
     }
   }, []);
 
-  // Delete task
-  const deleteTask = useCallback(async (taskId: string) => {
+  // Delete task (also removes storage files)
+  const deleteTask = useCallback(async (task: PurchasingTask) => {
     try {
-      await deleteDoc(doc(db, 'purchasingTasks', taskId));
+      // Delete attachments from storage
+      if (task.attachments && task.attachments.length > 0) {
+        for (const att of task.attachments) {
+          try {
+            await deleteObject(ref(storage, att.storagePath));
+          } catch { /* file may already be deleted */ }
+        }
+      }
+      await deleteDoc(doc(db, 'purchasingTasks', task.id));
       toast.success('Görev silindi');
     } catch (err) {
       console.error('Error deleting task', err);
@@ -228,6 +321,7 @@ export default function SatinAlmaPanel() {
       laboratoryId?: string;
       laboratoryName?: string;
       accompanyingPersonnel?: { uid: string; name: string }[];
+      files?: File[];
     }) => {
       if (!currentUserProfile) return;
       try {
@@ -252,7 +346,26 @@ export default function SatinAlmaPanel() {
           }
         }
 
-        await addDoc(collection(db, 'purchasingTasks'), taskDoc);
+        // Create the task first
+        const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
+
+        // Upload files if any
+        if (data.files && data.files.length > 0) {
+          const attachments: PurchasingTaskAttachment[] = [];
+          for (const file of data.files) {
+            try {
+              const att = await uploadAttachment(file, docRef.id);
+              attachments.push(att);
+            } catch (err) {
+              console.error('File upload error:', err);
+              toast.error(`"${file.name}" yüklenemedi`);
+            }
+          }
+          if (attachments.length > 0) {
+            await updateDoc(doc(db, 'purchasingTasks', docRef.id), { attachments });
+          }
+        }
+
         toast.success('Görev eklendi');
         setShowAddModal(false);
         setSelectedDate(parseISO(data.date));
@@ -541,7 +654,7 @@ export default function SatinAlmaPanel() {
                   key={task.id}
                   task={task}
                   onToggle={() => toggleTask(task)}
-                  onDelete={() => deleteTask(task.id)}
+                  onDelete={() => deleteTask(task)}
                 />
               ))}
           </div>
@@ -654,6 +767,33 @@ function TaskCard({
           </div>
         )}
 
+        {/* Attachments */}
+        {task.attachments && task.attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {task.attachments.map((att, idx) => (
+              <a
+                key={idx}
+                href={att.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all hover:brightness-110',
+                  att.type === 'image'
+                    ? 'bg-blue-500/10 text-blue-500'
+                    : 'bg-red-500/10 text-red-500'
+                )}
+              >
+                {att.type === 'image' ? (
+                  <ImageIcon className="w-3 h-3" />
+                ) : (
+                  <FileText className="w-3 h-3" />
+                )}
+                <span className="truncate max-w-[100px]">{att.name}</span>
+              </a>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center gap-3 mt-2">
           <div className="flex items-center gap-1 text-muted-foreground">
             <Clock className="w-3 h-3" />
@@ -706,6 +846,7 @@ interface AddTaskSubmitData {
   laboratoryId?: string;
   laboratoryName?: string;
   accompanyingPersonnel?: { uid: string; name: string }[];
+  files?: File[];
 }
 
 function AddTaskModal({
@@ -736,6 +877,10 @@ function AddTaskModal({
   const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
   const [showLabDropdown, setShowLabDropdown] = useState(false);
   const [showPersonnelDropdown, setShowPersonnelDropdown] = useState(false);
+
+  // File attachments
+  const [files, setFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const labDropdownRef = useRef<HTMLDivElement>(null);
   const personnelDropdownRef = useRef<HTMLDivElement>(null);
@@ -791,6 +936,30 @@ function AddTaskModal({
     });
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    if (!selected) return;
+    const allowed = Array.from(selected).filter(
+      (f) => f.type.startsWith('image/') || f.type === 'application/pdf'
+    );
+    if (allowed.length < selected.length) {
+      toast.error('Sadece resim ve PDF dosyaları yüklenebilir');
+    }
+    setFiles((prev) => [...prev, ...allowed]);
+    // Reset input so re-selecting same file works
+    e.target.value = '';
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid || submitting) return;
@@ -807,6 +976,7 @@ function AddTaskModal({
         laboratoryName: selectedLab?.name || '',
         accompanyingPersonnel: selectedPersonnel.length > 0 ? selectedPersonnel : undefined,
       }),
+      files: files.length > 0 ? files : undefined,
     });
     setSubmitting(false);
   };
@@ -1137,6 +1307,67 @@ function AddTaskModal({
             <p className="text-xs text-red-400">Bitiş saati başlangıçtan sonra olmalıdır</p>
           )}
 
+          {/* File Attachments */}
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">
+              Dosya Ekle (Resim / PDF)
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed transition-all',
+                'border-border text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground bg-secondary/30'
+              )}
+            >
+              <Paperclip className="w-4 h-4" />
+              <span className="text-sm">Dosya Seç</span>
+            </button>
+
+            {/* File list */}
+            {files.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {files.map((file, idx) => {
+                  const isImage = file.type.startsWith('image/');
+                  return (
+                    <div
+                      key={`${file.name}-${idx}`}
+                      className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg"
+                    >
+                      {isImage ? (
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-foreground truncate">{file.name}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatFileSize(file.size)}
+                          {isImage && ' — sıkıştırılacak'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(idx)}
+                        className="shrink-0 p-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Submit */}
           <button
             type="submit"
@@ -1148,7 +1379,14 @@ function AddTaskModal({
                 : 'bg-secondary text-muted-foreground cursor-not-allowed'
             )}
           >
-            {submitting ? 'Ekleniyor...' : 'Görev Ekle'}
+            {submitting ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {files.length > 0 ? 'Dosyalar yükleniyor...' : 'Ekleniyor...'}
+              </span>
+            ) : (
+              `Görev Ekle${files.length > 0 ? ` (${files.length} dosya)` : ''}`
+            )}
           </button>
         </form>
       </div>
