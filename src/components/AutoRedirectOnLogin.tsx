@@ -21,6 +21,12 @@ export default function AutoRedirectOnLogin() {
     // Check for specific role-based redirects first
     const userRole = currentUserProfile?.role;
 
+    // Redirect teknik_lojistik users to /direkt-transfer/yedek-parca-transfer
+    if (userRole === 'teknik_lojistik' && pathname === '/dashboard') {
+      router.replace('/direkt-transfer/yedek-parca-transfer');
+      return;
+    }
+
     // Redirect teknik_servis and aplikasyon users to /cihaz-yonetimi-ana
     if ((userRole === 'teknik_servis' || userRole === 'aplikasyon') && pathname === '/dashboard') {
       router.replace('/cihaz-yonetimi-ana');
