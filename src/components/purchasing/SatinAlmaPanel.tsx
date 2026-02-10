@@ -537,6 +537,7 @@ export default function SatinAlmaPanel() {
   const [myDayTaskIds, setMyDayTaskIds] = useState<string[]>([]);
   const [naturalInput, setNaturalInput] = useState('');
   const [naturalSubmitting, setNaturalSubmitting] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [isOffline, setIsOffline] = useState<boolean>(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [pendingMutations, setPendingMutations] = useState(0);
   const [syncInProgress, setSyncInProgress] = useState(false);
@@ -728,6 +729,48 @@ export default function SatinAlmaPanel() {
   }, [laboratories, labPools]);
 
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+
+  const normalizedSearchQuery = useMemo(() => globalSearchQuery.trim().toLocaleLowerCase('tr-TR'), [globalSearchQuery]);
+
+  const globalSearchResults = useMemo(() => {
+    if (!normalizedSearchQuery) return [] as PurchasingTask[];
+
+    return tasks
+      .filter((task) => {
+        const attachmentNames = (task.attachments || []).map((a) => a.name || '').join(' ');
+        const assignedNames = (task.assignedPersonnel || []).map((p) => p.name || '').join(' ');
+        const accompanyingNames = (task.accompanyingPersonnel || []).map((p) => p.name || '').join(' ');
+        const fields = [
+          task.date,
+          task.title,
+          task.description || '',
+          task.priority || '',
+          task.laboratoryName || '',
+          task.createdByName || '',
+          attachmentNames,
+          assignedNames,
+          accompanyingNames,
+        ]
+          .join(' ')
+          .toLocaleLowerCase('tr-TR');
+
+        return fields.includes(normalizedSearchQuery);
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date > b.date ? 1 : -1;
+        return parseTime(a.startTime) - parseTime(b.startTime);
+      });
+  }, [normalizedSearchQuery, tasks]);
+
+  const groupedSearchResults = useMemo(() => {
+    const grouped = new Map<string, PurchasingTask[]>();
+    for (const task of globalSearchResults) {
+      const arr = grouped.get(task.date) || [];
+      arr.push(task);
+      grouped.set(task.date, arr);
+    }
+    return Array.from(grouped.entries()).sort((a, b) => (a[0] > b[0] ? 1 : -1));
+  }, [globalSearchResults]);
 
   const handleMonthlyDayClick = useCallback((day: Date) => {
     setSelectedDate(day);
@@ -1350,6 +1393,63 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
+      {/* Main Search */}
+      <div className="px-4 md:px-8 mt-2">
+        <div className="rounded-2xl border border-border bg-card p-3">
+          <div className="relative">
+            <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={globalSearchQuery}
+              onChange={(e) => setGlobalSearchQuery(e.target.value)}
+              placeholder="Görevlerde ara: tarih, personel, başlık, açıklama, öncelik, dosya adı..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl bg-secondary border border-border text-sm outline-none"
+            />
+          </div>
+
+          {normalizedSearchQuery && (
+            <div className="mt-3 rounded-xl border border-border bg-secondary/30 p-2">
+              <p className="text-xs text-muted-foreground mb-2">
+                {globalSearchResults.length} görev / {groupedSearchResults.length} gün eşleşti
+              </p>
+              <div className="max-h-52 overflow-y-auto space-y-2">
+                {groupedSearchResults.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Eşleşen kayıt bulunamadı.</p>
+                ) : (
+                  groupedSearchResults.map(([day, dayTasks]) => (
+                    <div key={day} className="rounded-lg border border-border bg-card p-2">
+                      <button
+                        onClick={() => setSelectedDate(parseISO(day))}
+                        className="text-[11px] font-semibold mb-1 hover:underline"
+                      >
+                        {format(parseISO(day), 'd MMMM EEEE', { locale: tr })}
+                      </button>
+                      <div className="space-y-1">
+                        {dayTasks.map((task) => (
+                          <button
+                            key={task.id}
+                            onClick={() => {
+                              setSelectedDate(parseISO(task.date));
+                              setEditingTask(task);
+                            }}
+                            className="w-full text-left text-[11px] p-1.5 rounded-md hover:bg-accent/40 border border-transparent hover:border-border"
+                          >
+                            <span className="font-medium">{task.startTime}</span> • {task.title}
+                            <span className="text-muted-foreground"> • {task.priority}</span>
+                            {task.attachments?.length ? (
+                              <span className="text-muted-foreground"> • {task.attachments.map((a) => a.name).join(', ')}</span>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Date Slider */}
       <div className="mt-4 px-1 md:px-4">
         <div className="flex items-center gap-0.5">
@@ -1362,7 +1462,7 @@ export default function SatinAlmaPanel() {
 
           <div
             ref={sliderRef}
-            className="grid grid-flow-col auto-cols-[100%] sm:auto-cols-[70%] md:auto-cols-[72px] gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
+            className="grid grid-flow-col auto-cols-[56px] sm:auto-cols-[64px] md:auto-cols-[72px] gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
             style={{ scrollSnapType: 'x mandatory' }}
           >
             {sliderDates.map((date) => {
@@ -1379,7 +1479,7 @@ export default function SatinAlmaPanel() {
                   onClick={() => setSelectedDate(date)}
                   style={{ scrollSnapAlign: 'center' }}
                   className={cn(
-                    'shrink-0 w-full md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center justify-center rounded-2xl py-3 transition-all duration-200',
+                    'shrink-0 w-[56px] sm:w-[64px] md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center justify-center rounded-2xl py-2.5 transition-all duration-200',
                     isSelected
                       ? `${ACCENT_BG} text-zinc-900 shadow-lg shadow-[#d4ec00]/20 scale-105 z-10`
                       : today
