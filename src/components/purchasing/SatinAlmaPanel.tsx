@@ -2127,6 +2127,9 @@ function TaskCard({
   const [commentInput, setCommentInput] = useState('');
   const [showActivityLogs, setShowActivityLogs] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
 
   const submitComment = () => {
     const trimmed = commentInput.trim();
@@ -2140,6 +2143,24 @@ function TaskCard({
 
   const handleTouchStart = (e: React.TouchEvent) => {
     setTouchStartX(e.touches[0]?.clientX ?? null);
+    setTouchStartY(e.touches[0]?.clientY ?? null);
+    setIsSwiping(true);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartX === null || touchStartY === null) return;
+    const currX = e.touches[0]?.clientX ?? touchStartX;
+    const currY = e.touches[0]?.clientY ?? touchStartY;
+    const deltaX = currX - touchStartX;
+    const deltaY = currY - touchStartY;
+
+    if (Math.abs(deltaY) > Math.abs(deltaX)) {
+      setSwipeOffset(0);
+      return;
+    }
+
+    const clamped = Math.max(-120, Math.min(120, deltaX));
+    setSwipeOffset(clamped);
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -2147,24 +2168,51 @@ function TaskCard({
     const endX = e.changedTouches[0]?.clientX ?? touchStartX;
     const delta = endX - touchStartX;
     setTouchStartX(null);
-    if (delta > 80) {
+    setTouchStartY(null);
+    setIsSwiping(false);
+
+    if (delta > 85) {
+      setSwipeOffset(110);
+      setTimeout(() => setSwipeOffset(0), 140);
       onToggle();
       toast.success('Sağa kaydırıldı: görev tamamlandı');
-    } else if (delta < -80) {
+      return;
+    }
+
+    if (delta < -85) {
+      setSwipeOffset(-110);
+      setTimeout(() => setSwipeOffset(0), 140);
       onPostpone();
       toast.success('Sola kaydırıldı: görev ertelendi');
+      return;
     }
+
+    setSwipeOffset(0);
   };
   return (
-    <div
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      className={cn(
-        'group relative flex items-start gap-3 p-4 rounded-2xl border-l-[3px] border border-border transition-all duration-200',
-        priorityConf.border,
-        task.completed ? 'bg-card/50 border-border/50' : 'bg-card hover:border-muted-foreground/30'
-      )}
-    >
+    <div className="relative overflow-hidden rounded-2xl">
+      <div
+        className={cn(
+          'absolute inset-0 flex items-center justify-between px-3 text-[11px] font-semibold',
+          swipeOffset > 0 ? 'bg-emerald-500/15 text-emerald-600' : swipeOffset < 0 ? 'bg-amber-500/15 text-amber-600' : 'bg-transparent text-transparent'
+        )}
+      >
+        <span>{swipeOffset > 0 ? '✔ Tamamlanacak' : ''}</span>
+        <span>{swipeOffset < 0 ? '↪ Ertelenecek' : ''}</span>
+      </div>
+
+      <div
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{ transform: `translateX(${swipeOffset}px)` }}
+        className={cn(
+          'group relative flex items-start gap-3 p-4 rounded-2xl border-l-[3px] border border-border',
+          isSwiping ? 'transition-none' : 'transition-transform duration-200',
+          priorityConf.border,
+          task.completed ? 'bg-card/50 border-border/50' : 'bg-card hover:border-muted-foreground/30'
+        )}
+      >
       {/* Drag handle */}
       <div className="shrink-0 mt-1 p-0.5 rounded cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground">
         <GripVertical className="w-4 h-4" />
@@ -2399,6 +2447,82 @@ function TaskCard({
         <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-red-400 transition-all">
           <Trash2 className="w-3.5 h-3.5" />
         </button>
+      </div>
+      </div>
+    </div>
+  );
+}
+
+
+function TaskDefinitionsModal({
+  definitions,
+  onClose,
+  onCreate,
+  onDelete,
+}: {
+  definitions: PurchasingTaskDefinition[];
+  onClose: () => void;
+  onCreate: (name: string, requiresLaboratory: boolean) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [name, setName] = useState('');
+  const [requiresLaboratory, setRequiresLaboratory] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleCreate = async () => {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    try {
+      await onCreate(name, requiresLaboratory);
+      setName('');
+      setRequiresLaboratory(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold">Görev Tanımları</h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          {definitions.map((def) => (
+            <div key={def.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary border border-border">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-foreground truncate">{def.name}</p>
+                {def.requiresLaboratory && <p className="text-[10px] text-muted-foreground">Laboratuvar seçimi zorunlu</p>}
+              </div>
+              <button onClick={() => onDelete(def.id)} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          {definitions.length === 0 && <p className="text-xs text-muted-foreground">Henüz tanım yok.</p>}
+        </div>
+
+        <div className="space-y-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Yeni görev tanımı"
+            className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-sm outline-none"
+          />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={requiresLaboratory} onChange={(e) => setRequiresLaboratory(e.target.checked)} />
+            Bu tanım laboratuvar gerektirir (kurum ziyareti benzeri)
+          </label>
+          <button
+            onClick={handleCreate}
+            disabled={!name.trim() || saving}
+            className={cn('w-full py-2.5 rounded-xl text-sm font-semibold', name.trim() && !saving ? `${ACCENT_BG} text-zinc-900` : 'bg-secondary text-muted-foreground')}
+          >
+            Tanım Ekle
+          </button>
+        </div>
       </div>
     </div>
   );
