@@ -1,6 +1,7 @@
 'use server';
 import * as admin from 'firebase-admin';
 import { onDocumentCreated, FirestoreEvent, QueryDocumentSnapshot } from 'firebase-functions/v2/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 import * as functions from 'firebase-functions';
 import type { NotificationDoc } from './lib/notifications';
@@ -158,3 +159,57 @@ export const sendFaultReportEmail = functions
             logger.error('Mail sending failed', error);
         }
     });
+
+// --- İRSALİYE DOSYA TEMİZLEME (1 hafta sonra otomatik silme) ---
+// Her gün gece yarısı çalışır (Europe/Istanbul timezone)
+export const cleanupExpiredIrsaliyeDosyalari = onSchedule(
+    {
+        schedule: 'every day 02:00',
+        timeZone: 'Europe/Istanbul',
+        region: 'europe-west1',
+        timeoutSeconds: 120,
+        memory: '256MiB',
+    },
+    async () => {
+        const now = admin.firestore.Timestamp.now();
+        const bucket = admin.storage().bucket();
+
+        try {
+            const expiredDocs = await db
+                .collection('irsaliyeDosyalari')
+                .where('expiresAt', '<=', now)
+                .get();
+
+            if (expiredDocs.empty) {
+                logger.info('No expired invoice files found.');
+                return;
+            }
+
+            logger.info(`Found ${expiredDocs.size} expired invoice files to clean up.`);
+
+            const batches = chunk(expiredDocs.docs);
+            for (const batch of batches) {
+                const writeBatch = db.batch();
+                for (const docSnap of batch) {
+                    const data = docSnap.data();
+                    // Delete from Storage
+                    if (data.storagePath) {
+                        try {
+                            await bucket.file(data.storagePath).delete();
+                            logger.info(`Deleted storage file: ${data.storagePath}`);
+                        } catch (e) {
+                            logger.warn(`Storage file not found or already deleted: ${data.storagePath}`);
+                        }
+                    }
+                    // Delete from Firestore
+                    writeBatch.delete(docSnap.ref);
+                }
+                await writeBatch.commit();
+            }
+
+            logger.info(`Successfully cleaned up ${expiredDocs.size} expired invoice files.`);
+        } catch (error) {
+            logger.error('Error cleaning up expired invoice files:', error);
+        }
+    }
+);

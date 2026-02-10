@@ -3,13 +3,26 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Upload, Camera, FileText, Scan, CheckCircle, AlertTriangle, Trash2, UploadCloud } from 'lucide-react';
+import { Loader2, Upload, Camera, FileText, Scan, CheckCircle, AlertTriangle, Trash2, UploadCloud, FolderOpen, FileSpreadsheet, Clock } from 'lucide-react';
 import { extractTextFromPdf, renderFirstPageToBlob, ocrBlob } from '@/lib/pdf';
 import { parseIrsaliyeText, IrsaliyeParseResult } from '@/lib/irsaliye-parser';
 import type { ProductCode } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { db } from '@/lib/firebase';
+import { collection, query, orderBy, onSnapshot, Timestamp, where } from 'firebase/firestore';
+
+interface SavedIrsaliyeFile {
+  id: string;
+  fileName: string;
+  fileType: 'pdf' | 'xlsx' | 'xls';
+  fileSize: number;
+  downloadURL: string;
+  uploadedByName: string;
+  uploadedAt: Timestamp;
+  expiresAt: Timestamp;
+}
 
 interface IrsaliyeOcrModalProps {
   isOpen: boolean;
@@ -32,12 +45,45 @@ export default function IrsaliyeOcrModal({
   const [showCamera, setShowCamera] = useState(false);
   const [detectedItems, setDetectedItems] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'camera' | 'pdf'>('camera');
+  const [pdfSource, setPdfSource] = useState<'upload' | 'files'>('upload');
+  const [savedFiles, setSavedFiles] = useState<SavedIrsaliyeFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+
+  // Load saved invoice files when PDF tab is active and "files" source is selected
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setLoadingFiles(true);
+    const now = Timestamp.now();
+    const q = query(
+      collection(db, 'irsaliyeDosyalari'),
+      orderBy('uploadedAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const files: SavedIrsaliyeFile[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        // Only show non-expired files
+        if (data.expiresAt && data.expiresAt.toMillis() > Date.now()) {
+          files.push({ id: docSnap.id, ...data } as SavedIrsaliyeFile);
+        }
+      });
+      setSavedFiles(files);
+      setLoadingFiles(false);
+    }, () => {
+      setLoadingFiles(false);
+    });
+
+    return () => unsubscribe();
+  }, [isOpen]);
 
 
   const processExtractedText = (text: string, source: 'Camera' | 'PDF') => {
     setOcrText(text);
     const rawItems = parseIrsaliyeText(text, productCodes);
-    
+
     const processedItems = rawItems.map(item => {
         const product = productCodes.find(p => p.stokKodu === item.stokKodu);
         let finalQuantity = item.quantity || 1;
@@ -61,7 +107,7 @@ export default function IrsaliyeOcrModal({
     });
 
     setDetectedItems((prev: any[]) => [...prev, ...processedItems]);
-    
+
     if (processedItems.length === 0) {
         toast({ title: `${source} tarandı ancak ürün/miktar eşleşmesi bulunamadı.`, variant: "default" });
     } else {
@@ -72,7 +118,7 @@ export default function IrsaliyeOcrModal({
   const handleCapture = async (blob: Blob | null) => {
     setShowCamera(false);
     if (!blob) return;
-    
+
     setProcessing(true);
     setImagePreview(URL.createObjectURL(blob));
     toast({ title: 'İşleniyor', description: 'Çekilen fotoğraf analiz ediliyor...' });
@@ -86,7 +132,7 @@ export default function IrsaliyeOcrModal({
       setProcessing(false);
     }
   };
-  
+
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -103,20 +149,59 @@ export default function IrsaliyeOcrModal({
       toast({ title: 'PDF Okuma Hatası', description: error.message, variant: 'destructive' });
     } finally {
       setProcessing(false);
-      e.target.value = ''; 
+      e.target.value = '';
+    }
+  };
+
+  const handleSelectSavedFile = async (file: SavedIrsaliyeFile) => {
+    if (file.fileType !== 'pdf') {
+      toast({
+        title: 'Desteklenmiyor',
+        description: 'OCR taraması sadece PDF dosyaları için desteklenmektedir.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setProcessing(true);
+    setSelectedFileId(file.id);
+    setDetectedItems([]);
+    toast({ title: 'İşleniyor', description: `${file.fileName} okunuyor...` });
+
+    try {
+      // Fetch the PDF from the download URL
+      const response = await fetch(file.downloadURL);
+      if (!response.ok) throw new Error('Dosya indirilemedi');
+      const blob = await response.blob();
+      const pdfFile = new File([blob], file.fileName, { type: 'application/pdf' });
+
+      const text = await extractTextFromPdf(pdfFile);
+      processExtractedText(text, 'PDF');
+    } catch (error: any) {
+      console.error("Saved PDF Error:", error);
+      toast({
+        title: 'PDF Okuma Hatası',
+        description: error.message || 'Kayıtlı dosya işlenirken bir hata oluştu.',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessing(false);
+      setSelectedFileId(null);
     }
   };
 
   const removeItem = (index: number) => {
     setDetectedItems((prev: any[]) => prev.filter((_: any, i: number) => i !== index));
   };
-  
+
   const handleModalClose = () => {
     setShowCamera(false);
     setProcessing(false);
     setImagePreview(null);
     setOcrText('');
     setDetectedItems([]);
+    setPdfSource('upload');
+    setSelectedFileId(null);
     onClose();
   };
 
@@ -124,6 +209,14 @@ export default function IrsaliyeOcrModal({
     onResults(detectedItems);
     handleModalClose();
   };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const pdfFiles = savedFiles.filter(f => f.fileType === 'pdf');
 
   return (
     <Dialog open={isOpen} onOpenChange={handleModalClose}>
@@ -150,16 +243,90 @@ export default function IrsaliyeOcrModal({
                   {processing ? "İşleniyor..." : "Kamerayı Aç"}
                 </Button>
               </TabsContent>
-              <TabsContent value="pdf" className="py-8 flex justify-center">
-                <div className="flex items-center justify-center w-full max-w-md">
-                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-slate-50 border-slate-300">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                      <UploadCloud className="w-8 h-8 mb-3 text-slate-400" />
-                      <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">PDF Yüklemek için Tıkla</span></p>
-                    </div>
-                    <input type="file" ref={fileInputRef} className="hidden" accept=".pdf" onChange={handlePdfUpload} disabled={processing} />
-                  </label>
+              <TabsContent value="pdf" className="py-4">
+                {/* PDF Source Toggle */}
+                <div className="flex gap-2 mb-4 justify-center">
+                  <Button
+                    variant={pdfSource === 'upload' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setPdfSource('upload')}
+                    className="gap-2"
+                  >
+                    <UploadCloud className="h-4 w-4" />
+                    Dosya Yükle
+                  </Button>
+                  <Button
+                    variant={pdfSource === 'files' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setPdfSource('files')}
+                    className="gap-2"
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    Dosyalardan Seç
+                    {pdfFiles.length > 0 && (
+                      <span className="ml-1 bg-primary-foreground text-primary text-xs px-1.5 py-0.5 rounded-full">
+                        {pdfFiles.length}
+                      </span>
+                    )}
+                  </Button>
                 </div>
+
+                {pdfSource === 'upload' ? (
+                  <div className="flex items-center justify-center w-full max-w-md mx-auto">
+                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-600">
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <UploadCloud className="w-8 h-8 mb-3 text-slate-400" />
+                        <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">PDF Yüklemek için Tıkla</span></p>
+                      </div>
+                      <input type="file" ref={fileInputRef} className="hidden" accept=".pdf" onChange={handlePdfUpload} disabled={processing} />
+                    </label>
+                  </div>
+                ) : (
+                  <div className="w-full max-w-md mx-auto">
+                    {loadingFiles ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : pdfFiles.length === 0 ? (
+                      <div className="text-center py-8 border-2 border-dashed rounded-lg border-slate-300 dark:border-slate-600">
+                        <FolderOpen className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+                        <p className="text-sm text-muted-foreground mb-2">
+                          Kayıtlı PDF dosyası bulunamadı.
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Raporlama &gt; Dosya Yönetimi panelinden irsaliye yükleyebilirsiniz.
+                        </p>
+                      </div>
+                    ) : (
+                      <ScrollArea className="max-h-[200px] border rounded-lg">
+                        <div className="divide-y">
+                          {pdfFiles.map((file) => (
+                            <button
+                              key={file.id}
+                              className="flex items-center gap-3 w-full p-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left disabled:opacity-50"
+                              onClick={() => handleSelectSavedFile(file)}
+                              disabled={processing}
+                            >
+                              <FileText className="h-6 w-6 text-red-500 shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium truncate">{file.fileName}</p>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>{formatFileSize(file.fileSize)}</span>
+                                  <span>{file.uploadedByName}</span>
+                                </div>
+                              </div>
+                              {selectedFileId === file.id && processing ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                              ) : (
+                                <Scan className="h-4 w-4 text-muted-foreground shrink-0" />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    )}
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
             {processing && (
@@ -169,8 +336,8 @@ export default function IrsaliyeOcrModal({
                 {imagePreview && <img src={imagePreview} alt="Preview" className="max-w-xs rounded-md" />}
               </div>
             )}
-            <div className="flex-1 overflow-hidden flex flex-col bg-slate-50 rounded-lg border">
-              <div className="p-3 border-b bg-white font-semibold flex justify-between items-center">
+            <div className="flex-1 overflow-hidden flex flex-col bg-slate-50 dark:bg-slate-900 rounded-lg border">
+              <div className="p-3 border-b bg-white dark:bg-slate-800 font-semibold flex justify-between items-center">
                 <span>Tespit Edilen Kalemler ({detectedItems.length})</span>
                 {detectedItems.length > 0 && (
                   <Button variant="ghost" size="sm" onClick={() => setDetectedItems([])} className="text-red-500 h-8">
@@ -186,26 +353,26 @@ export default function IrsaliyeOcrModal({
                 ) : (
                   <div className="space-y-3">
                     {detectedItems.map((item: any, idx: number) => (
-                      <div key={idx} className="bg-white p-3 rounded border shadow-sm flex flex-col gap-2 relative group">
+                      <div key={idx} className="bg-white dark:bg-slate-800 p-3 rounded border shadow-sm flex flex-col gap-2 relative group">
                         <div className="flex justify-between items-start">
                           <div>
                             <div className="font-bold text-primary text-lg">{item.stokKodu}</div>
-                            <div className="text-sm text-slate-700">{item.productName}</div>
+                            <div className="text-sm text-slate-700 dark:text-slate-300">{item.productName}</div>
                           </div>
                           <div className="text-right">
-                            <div className="font-bold text-lg bg-green-50 text-green-700 px-2 py-1 rounded inline-block">
+                            <div className="font-bold text-lg bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded inline-block">
                               {item.quantity} {item.unit}
                             </div>
                           </div>
                         </div>
                         <div className="flex gap-4 text-xs text-slate-500 border-t pt-2 mt-1">
                           {item.lot && (
-                            <div className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded">
+                            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
                               <span className="font-semibold">Lot:</span> {item.lot}
                             </div>
                           )}
                           {item.miad && (
-                            <div className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded">
+                            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
                               <span className="font-semibold">SKT:</span> {item.miad}
                             </div>
                           )}
