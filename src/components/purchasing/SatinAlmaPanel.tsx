@@ -128,6 +128,14 @@ function getOccupancyRingColor(pct: number): string {
   return 'text-zinc-400 dark:text-zinc-600';
 }
 
+function getHeatColor(value: number, max: number): string {
+  if (value === 0) return 'bg-emerald-500/15 border-emerald-500/20';
+  const ratio = max > 0 ? value / max : 0;
+  if (ratio < 0.34) return 'bg-yellow-500/25 border-yellow-500/30';
+  if (ratio < 0.67) return 'bg-orange-500/35 border-orange-500/40';
+  return 'bg-red-500/45 border-red-500/50';
+}
+
 // Accent color helpers
 const ACCENT = 'text-[#7a8a00] dark:text-[#d4ec00]';
 const ACCENT_BG = 'bg-[#d4ec00]';
@@ -306,6 +314,41 @@ function hasTimeConflict(tasks: PurchasingTask[], payload: { date: string; start
   });
 }
 
+
+interface TimelineLayoutItem {
+  task: PurchasingTask;
+  column: number;
+  columnCount: number;
+}
+
+function buildTimelineLayout(dayTasks: PurchasingTask[]): TimelineLayoutItem[] {
+  const sorted = [...dayTasks].sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+  const items: Array<TimelineLayoutItem & { end: number }> = [];
+
+  for (const task of sorted) {
+    const start = parseTime(task.startTime);
+    const end = parseTime(task.endTime);
+    let column = 0;
+    while (items.some((i) => i.column === column && start < i.end && end > parseTime(i.task.startTime))) {
+      column += 1;
+    }
+    items.push({ task, column, columnCount: column + 1, end });
+  }
+
+  for (const item of items) {
+    const overlaps = items.filter((i) => {
+      const s1 = parseTime(item.task.startTime);
+      const e1 = parseTime(item.task.endTime);
+      const s2 = parseTime(i.task.startTime);
+      const e2 = parseTime(i.task.endTime);
+      return s1 < e2 && e1 > s2;
+    });
+    item.columnCount = Math.max(1, ...overlaps.map((o) => o.column + 1));
+  }
+
+  return items.map(({ end, ...rest }) => rest);
+}
+
 // ==========================================
 // Form data interface (shared between add & edit)
 // ==========================================
@@ -345,7 +388,8 @@ export default function SatinAlmaPanel() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
-  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap'>('daily');
+  const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [tasksLoading, setTasksLoading] = useState(true);
   const [taskDefinitions, setTaskDefinitions] = useState<PurchasingTaskDefinition[]>([]);
   const [showTaskDefinitionModal, setShowTaskDefinitionModal] = useState(false);
@@ -357,6 +401,7 @@ export default function SatinAlmaPanel() {
 
   const sliderRef = useRef<HTMLDivElement>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [draggedTimelineTask, setDraggedTimelineTask] = useState<PurchasingTask | null>(null);
 
   // Firestore listener
   useEffect(() => {
@@ -471,6 +516,52 @@ export default function SatinAlmaPanel() {
       toast.error('Görev güncellenemedi');
     }
   }, [currentUserProfile]);
+
+
+  const postponeTaskToTomorrow = useCallback(async (task: PurchasingTask) => {
+    const tomorrow = format(addDays(parseISO(task.date), 1), 'yyyy-MM-dd');
+    const prevDate = task.date;
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, date: tomorrow } : t)));
+    try {
+      const log = currentUserProfile
+        ? createActivityLog('postponed', `Görev ertelendi (${prevDate} -> ${tomorrow})`, currentUserProfile)
+        : null;
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        date: tomorrow,
+        ...(log ? { activityLogs: arrayUnion(log) } : {}),
+        updatedAt: Timestamp.now(),
+      });
+      toast.success('Görev yarına ertelendi');
+    } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, date: prevDate } : t)));
+      console.error('Error postponing task', err);
+      toast.error('Görev ertelenemedi');
+    }
+  }, [currentUserProfile]);
+
+  const moveTaskTime = useCallback(async (task: PurchasingTask, date: string, startHour: number) => {
+    const duration = parseTime(task.endTime) - parseTime(task.startTime);
+    const startMin = Math.max(WORK_START_HOUR * 60, startHour * 60);
+    const endMin = Math.min(WORK_END_HOUR * 60, startMin + duration);
+    const safeStart = `${Math.floor(startMin / 60).toString().padStart(2, '0')}:${(startMin % 60).toString().padStart(2, '0')}`;
+    const safeEnd = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`;
+    const prev = { date: task.date, startTime: task.startTime, endTime: task.endTime };
+
+    setTasks((prevTasks) => prevTasks.map((t) => (t.id === task.id ? { ...t, date, startTime: safeStart, endTime: safeEnd } : t)));
+
+    try {
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        date,
+        startTime: safeStart,
+        endTime: safeEnd,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (err) {
+      setTasks((prevTasks) => prevTasks.map((t) => (t.id === task.id ? { ...t, ...prev } : t)));
+      console.error('Error moving task in timeline', err);
+      toast.error('Görev zamanı güncellenemedi');
+    }
+  }, []);
 
   // Toggle subtask
   const toggleSubtask = useCallback(async (task: PurchasingTask, subtaskId: string) => {
@@ -797,6 +888,32 @@ export default function SatinAlmaPanel() {
     return eachDayOfInterval({ start: calStart, end: calEnd });
   }, [selectedDate]);
 
+
+  const timelineDays = useMemo(() => {
+    if (timelineScope === 'daily') return [selectedDate];
+    if (timelineScope === 'weekly') return weekDays;
+    return monthDays.filter((d) => isSameMonth(d, selectedDate));
+  }, [timelineScope, selectedDate, weekDays, monthDays]);
+
+  const heatmapData = useMemo(() => {
+    const days = timelineScope === 'daily' ? [selectedDate] : timelineScope === 'weekly' ? weekDays : monthDays.filter((d) => isSameMonth(d, selectedDate));
+    const matrix = days.map((day) => {
+      const dayStr = format(day, 'yyyy-MM-dd');
+      return Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
+        const hour = WORK_START_HOUR + idx;
+        const slotStart = hour * 60;
+        const slotEnd = (hour + 1) * 60;
+        return tasks.filter((t) => {
+          if (t.date !== dayStr || t.completed) return false;
+          const ts = parseTime(t.startTime);
+          const te = parseTime(t.endTime);
+          return slotStart < te && slotEnd > ts;
+        }).length;
+      });
+    });
+    const max = Math.max(0, ...matrix.flat());
+    return { days, matrix, max };
+  }, [tasks, timelineScope, selectedDate, weekDays, monthDays]);
   useEffect(() => {
     if (sliderRef.current) {
       const container = sliderRef.current;
@@ -860,7 +977,7 @@ export default function SatinAlmaPanel() {
 
           <div
             ref={sliderRef}
-            className="flex flex-nowrap gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
+            className="grid grid-flow-col auto-cols-[60px] md:auto-cols-[72px] gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
             style={{ scrollSnapType: 'x mandatory' }}
           >
             {sliderDates.map((date) => {
@@ -1034,6 +1151,8 @@ export default function SatinAlmaPanel() {
               ['daily', 'Günlük'],
               ['weekly', 'Haftalık'],
               ['monthly', 'Aylık'],
+              ['timeline', 'Timeline'],
+              ['heatmap', 'Heatmap'],
             ] as const).map(([mode, label]) => (
               <button
                 key={mode}
@@ -1074,6 +1193,7 @@ export default function SatinAlmaPanel() {
                     onEdit={() => setEditingTask(task)}
                     onDelete={() => deleteTask(task)}
                     onAddComment={(message) => addTaskComment(task, message)}
+                    onPostpone={() => postponeTaskToTomorrow(task)}
                   />
                 </div>
               ))}
@@ -1082,12 +1202,14 @@ export default function SatinAlmaPanel() {
         )}
 
         {viewMode === 'weekly' && (
-          <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-2"> 
             {weekDays.map((day) => {
               const dayStr = format(day, 'yyyy-MM-dd');
               const dayTasksForWeek = tasks
                 .filter((t) => t.date === dayStr)
                 .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+              const layout = buildTimelineLayout(dayTasksForWeek);
+
               return (
                 <div key={dayStr} className={cn('rounded-xl border p-2', isSameDay(day, selectedDate) ? `${ACCENT_BORDER} bg-card` : 'border-border bg-card')}>
                   <button onClick={() => setSelectedDate(day)} className="w-full text-left mb-2">
@@ -1098,18 +1220,46 @@ export default function SatinAlmaPanel() {
                     {[9, 11, 13, 15, 17].map((h) => (
                       <div key={h} className="absolute left-0 right-0 border-t border-border/60" style={{ top: `${((h - 9) / 8) * 100}%` }} />
                     ))}
-                    {dayTasksForWeek.map((task) => {
+
+                    {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
+                      const hour = WORK_START_HOUR + idx;
+                      const top = ((hour - WORK_START_HOUR) / (WORK_END_HOUR - WORK_START_HOUR)) * 100;
+                      return (
+                        <div
+                          key={`drop-${dayStr}-${hour}`}
+                          className="absolute left-0 right-0 h-[12.5%] z-10"
+                          style={{ top: `${top}%` }}
+                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (!draggedTimelineTask) return;
+                            moveTaskTime(draggedTimelineTask, dayStr, hour);
+                            setDraggedTimelineTask(null);
+                          }}
+                        />
+                      );
+                    })}
+
+                    {layout.map((item) => {
+                      const task = item.task;
                       const start = Math.max(parseTime(task.startTime), WORK_START_HOUR * 60);
                       const end = Math.min(parseTime(task.endTime), WORK_END_HOUR * 60);
                       if (end <= start) return null;
                       const topPct = ((start - WORK_START_HOUR * 60) / TOTAL_WORK_MINUTES) * 100;
                       const heightPct = ((end - start) / TOTAL_WORK_MINUTES) * 100;
+                      const widthPct = 100 / item.columnCount;
+                      const leftPct = item.column * widthPct;
+
                       return (
                         <button
                           key={task.id}
+                          draggable
+                          onDragStart={(e) => { setDraggedTimelineTask(task); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragEnd={() => setDraggedTimelineTask(null)}
                           onClick={() => setEditingTask(task)}
-                          className={cn('absolute left-1 right-1 rounded-md px-2 py-1 text-left border-l-2 text-[10px] overflow-hidden', task.completed ? 'bg-muted/60 border-muted-foreground/40 text-muted-foreground' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border} text-foreground`)}
-                          style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 8)}%` }}
+                          className={cn('absolute rounded-md px-1.5 py-1 text-left border-l-2 text-[10px] overflow-hidden z-20', task.completed ? 'bg-muted/60 border-muted-foreground/40 text-muted-foreground' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border} text-foreground`)}
+                          style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 8)}%`, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)` }}
+                          title="Sürükleyip saat/gün değiştirin"
                         >
                           <p className="truncate font-medium">{task.title}</p>
                           <p className="truncate opacity-70">{task.startTime} - {task.endTime}</p>
@@ -1120,6 +1270,96 @@ export default function SatinAlmaPanel() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {viewMode === 'timeline' && (
+          <div className="rounded-2xl border border-border bg-card p-3">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <h4 className="text-xs font-semibold text-muted-foreground">Zaman Çizelgesi (Gantt)</h4>
+              <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
+                {(['daily', 'weekly', 'monthly'] as const).map((scope) => (
+                  <button
+                    key={scope}
+                    onClick={() => setTimelineScope(scope)}
+                    className={cn('px-2 py-1 text-[10px] rounded-lg', timelineScope === scope ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground')}
+                  >
+                    {scope === 'daily' ? 'Günlük' : scope === 'weekly' ? 'Haftalık' : 'Aylık'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className="grid gap-2" style={{ gridTemplateColumns: `80px repeat(${timelineDays.length}, minmax(120px, 1fr))` }}>
+                <div />
+                {timelineDays.map((day) => (
+                  <div key={day.toISOString()} className="text-[10px] text-center text-muted-foreground">{format(day, 'd MMM', { locale: tr })}</div>
+                ))}
+
+                {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
+                  const hour = WORK_START_HOUR + idx;
+                  return (
+                    <React.Fragment key={`r-${hour}`}>
+                      <div className="text-[10px] text-muted-foreground pr-2">{`${hour.toString().padStart(2, '0')}:00`}</div>
+                      {timelineDays.map((day) => {
+                        const dayStr = format(day, 'yyyy-MM-dd');
+                        const cnt = tasks.filter((t) => {
+                          if (t.date !== dayStr) return false;
+                          const s = parseTime(t.startTime);
+                          const e = parseTime(t.endTime);
+                          const ss = hour * 60;
+                          const ee = (hour + 1) * 60;
+                          return ss < e && ee > s;
+                        }).length;
+                        return <div key={`${dayStr}-${hour}`} className={cn('h-8 border rounded', cnt > 0 ? 'bg-[#d4ec00]/20 border-[#d4ec00]/30' : 'bg-secondary/30 border-border')} />;
+                      })}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">Çakışan görevler aynı satırda birden fazla blok olarak gösterilir; haftalık görünümde blokları sürükleyip saat/gün değiştirin.</p>
+          </div>
+        )}
+
+        {viewMode === 'heatmap' && (
+          <div className="rounded-2xl border border-border bg-card p-3">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-semibold text-muted-foreground">Personel Aktivite Haritası</h4>
+              <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
+                {(['weekly', 'monthly'] as const).map((scope) => (
+                  <button
+                    key={scope}
+                    onClick={() => setTimelineScope(scope)}
+                    className={cn('px-2 py-1 text-[10px] rounded-lg', timelineScope === scope ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground')}
+                  >
+                    {scope === 'weekly' ? 'Haftalık' : 'Aylık'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <div className="grid gap-1" style={{ gridTemplateColumns: `60px repeat(${heatmapData.days.length}, minmax(18px, 1fr))` }}>
+                <div />
+                {heatmapData.days.map((d) => (
+                  <div key={d.toISOString()} className="text-[9px] text-center text-muted-foreground">{timelineScope === 'weekly' ? format(d, 'EEE', { locale: tr }) : format(d, 'd')}</div>
+                ))}
+                {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
+                  const hour = WORK_START_HOUR + idx;
+                  return (
+                    <React.Fragment key={`h-${hour}`}>
+                      <div className="text-[9px] text-muted-foreground">{hour}:00</div>
+                      {heatmapData.days.map((_, di) => {
+                        const val = heatmapData.matrix[di]?.[idx] || 0;
+                        return <div key={`${di}-${idx}`} className={cn('h-5 border rounded-sm', getHeatColor(val, heatmapData.max))} title={`${val} görev`} />;
+                      })}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">Boş zaman blokları yeşil, yoğun bloklar kırmızıya yakın tonlarda gösterilir.</p>
           </div>
         )}
 
@@ -1255,6 +1495,7 @@ function TaskCard({
   onEdit,
   onDelete,
   onAddComment,
+  onPostpone,
 }: {
   task: PurchasingTask;
   onToggle: () => void;
@@ -1262,6 +1503,7 @@ function TaskCard({
   onEdit: () => void;
   onDelete: () => void;
   onAddComment: (message: string) => void;
+  onPostpone: () => void;
 }) {
   const durationMin = parseTime(task.endTime) - parseTime(task.startTime);
   const hours = Math.floor(durationMin / 60);
@@ -1285,6 +1527,7 @@ function TaskCard({
   const [showComments, setShowComments] = useState(false);
   const [commentInput, setCommentInput] = useState('');
   const [showActivityLogs, setShowActivityLogs] = useState(false);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   const submitComment = () => {
     const trimmed = commentInput.trim();
@@ -1294,8 +1537,29 @@ function TaskCard({
     setShowComments(true);
   };
 
+
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0]?.clientX ?? null);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const endX = e.changedTouches[0]?.clientX ?? touchStartX;
+    const delta = endX - touchStartX;
+    setTouchStartX(null);
+    if (delta > 80) {
+      onToggle();
+      toast.success('Sağa kaydırıldı: görev tamamlandı');
+    } else if (delta < -80) {
+      onPostpone();
+      toast.success('Sola kaydırıldı: görev ertelendi');
+    }
+  };
   return (
     <div
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       className={cn(
         'group relative flex items-start gap-3 p-4 rounded-2xl border-l-[3px] border border-border transition-all duration-200',
         priorityConf.border,
