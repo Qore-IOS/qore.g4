@@ -373,6 +373,109 @@ interface TaskFormData {
   recurring?: PurchasingTaskRecurrence;
 }
 
+
+function nextWeekdayDate(targetWeekday: number): Date {
+  const today = new Date();
+  const current = today.getDay(); // 0..6 Sun..Sat
+  const delta = (targetWeekday - current + 7) % 7 || 7;
+  const d = new Date(today);
+  d.setDate(today.getDate() + delta);
+  return d;
+}
+
+function parseNaturalTaskInput(
+  input: string,
+  labs: Hospital[]
+): {
+  title: string;
+  description: string;
+  taskType: string;
+  taskTypeLabel?: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  priority: Priority;
+  laboratoryId?: string;
+  laboratoryName?: string;
+  recurring?: PurchasingTaskRecurrence;
+} {
+  const raw = input.trim();
+  const lower = raw.toLowerCase('tr-TR');
+  const now = new Date();
+
+  let date = format(now, 'yyyy-MM-dd');
+  if (lower.includes('yarın')) date = format(addDays(now, 1), 'yyyy-MM-dd');
+  else if (lower.includes('gelecek hafta')) date = format(addWeeks(now, 1), 'yyyy-MM-dd');
+
+  const weekdays: Record<string, number> = {
+    pazar: 0,
+    pazartesi: 1,
+    salı: 2,
+    çarşamba: 3,
+    perşembe: 4,
+    cuma: 5,
+    cumartesi: 6,
+  };
+
+  let recurring: PurchasingTaskRecurrence | undefined;
+  for (const [name, idx] of Object.entries(weekdays)) {
+    if (lower.includes(`her ${name}`)) {
+      date = format(nextWeekdayDate(idx), 'yyyy-MM-dd');
+      recurring = { type: 'weekly', interval: 1, daysOfWeek: [idx] };
+      break;
+    }
+  }
+  if (lower.includes('her ay')) recurring = { type: 'monthly', interval: 1 };
+
+  const rangeMatch = raw.match(/(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/);
+  const singleMatch = raw.match(/saat\s*(\d{1,2})(?::(\d{2}))?/i) || raw.match(/(\d{1,2}):(\d{2})/);
+
+  let startTime = '09:00';
+  let endTime = '10:00';
+  if (rangeMatch) {
+    const sh = parseInt(rangeMatch[1]);
+    const sm = parseInt(rangeMatch[2] || '0');
+    const eh = parseInt(rangeMatch[3]);
+    const em = parseInt(rangeMatch[4] || '0');
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+  } else if (singleMatch) {
+    const sh = parseInt(singleMatch[1]);
+    const sm = parseInt(singleMatch[2] || '0');
+    const eh = Math.min(sh + 1, 23);
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+  }
+
+  let priority: Priority = 'normal';
+  if (lower.includes('#acil')) priority = 'urgent';
+  else if (lower.includes('#önemli')) priority = 'high';
+
+  const matchedLab = labs.find((l) => lower.includes((l.name || '').toLowerCase('tr-TR')));
+  const isVisit = !!matchedLab || lower.includes('ziyaret');
+
+  const cleanTitle = raw
+    .replace(/#\S+/g, '')
+    .replace(/yarın|bugün|gelecek hafta/gi, '')
+    .replace(/her\s+(pazar|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|ay)/gi, '')
+    .replace(/saat\s*\d{1,2}(:\d{2})?/gi, '')
+    .replace(/\d{1,2}(:\d{2})?\s*[-–]\s*\d{1,2}(:\d{2})?/g, '')
+    .trim();
+
+  return {
+    title: isVisit ? (matchedLab?.name ? `${matchedLab.name} Ziyareti` : 'Kurum Ziyareti') : (cleanTitle || 'Yeni Görev'),
+    description: raw,
+    taskType: isVisit ? 'kurum_ziyareti' : 'custom',
+    taskTypeLabel: isVisit ? 'Kurum Ziyareti' : 'Serbest Görev',
+    date,
+    startTime,
+    endTime,
+    priority,
+    ...(matchedLab && { laboratoryId: matchedLab.id, laboratoryName: matchedLab.name }),
+    ...(recurring && { recurring }),
+  };
+}
+
 // ==========================================
 // Main Panel Component
 // ==========================================
@@ -388,11 +491,14 @@ export default function SatinAlmaPanel() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
-  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap'>('daily');
+  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [tasksLoading, setTasksLoading] = useState(true);
   const [taskDefinitions, setTaskDefinitions] = useState<PurchasingTaskDefinition[]>([]);
   const [showTaskDefinitionModal, setShowTaskDefinitionModal] = useState(false);
+  const [myDayTaskIds, setMyDayTaskIds] = useState<string[]>([]);
+  const [naturalInput, setNaturalInput] = useState('');
+  const [naturalSubmitting, setNaturalSubmitting] = useState(false);
 
   // Reference data
   const [laboratories, setLaboratories] = useState<Hospital[]>([]);
@@ -895,6 +1001,77 @@ export default function SatinAlmaPanel() {
     return monthDays.filter((d) => isSameMonth(d, selectedDate));
   }, [timelineScope, selectedDate, weekDays, monthDays]);
 
+
+  const myDayStorageKey = useMemo(() => {
+    if (!currentUserProfile?.uid) return '';
+    return `myday:${currentUserProfile.uid}:${format(new Date(), 'yyyy-MM-dd')}`;
+  }, [currentUserProfile?.uid]);
+
+  useEffect(() => {
+    if (!myDayStorageKey) return;
+    try {
+      const raw = localStorage.getItem(myDayStorageKey);
+      setMyDayTaskIds(raw ? JSON.parse(raw) : []);
+    } catch {
+      setMyDayTaskIds([]);
+    }
+  }, [myDayStorageKey]);
+
+  useEffect(() => {
+    if (!myDayStorageKey) return;
+    localStorage.setItem(myDayStorageKey, JSON.stringify(myDayTaskIds));
+  }, [myDayStorageKey, myDayTaskIds]);
+
+  const myDaySuggestions = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    return tasks
+      .filter((t) => !t.completed)
+      .filter((t) => t.date < today || t.date <= format(addDays(new Date(), 2), 'yyyy-MM-dd') || !!t.recurring)
+      .sort((a, b) => (a.date > b.date ? 1 : -1));
+  }, [tasks]);
+
+  const myDayTasks = useMemo(() => {
+    const setIds = new Set(myDayTaskIds);
+    return tasks.filter((t) => setIds.has(t.id));
+  }, [tasks, myDayTaskIds]);
+
+  const addToMyDay = (taskId: string) => {
+    setMyDayTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
+  };
+
+  const removeFromMyDay = (taskId: string) => {
+    setMyDayTaskIds((prev) => prev.filter((id) => id !== taskId));
+  };
+
+  const handleNaturalQuickAdd = useCallback(async () => {
+    const trimmed = naturalInput.trim();
+    if (!trimmed || naturalSubmitting) return;
+    try {
+      setNaturalSubmitting(true);
+      const parsed = parseNaturalTaskInput(trimmed, mainLaboratories);
+      await handleAddTask({
+        title: parsed.title,
+        description: parsed.description,
+        taskType: parsed.taskType,
+        taskTypeLabel: parsed.taskTypeLabel,
+        date: parsed.date,
+        startTime: parsed.startTime,
+        endTime: parsed.endTime,
+        priority: parsed.priority,
+        laboratoryId: parsed.laboratoryId,
+        laboratoryName: parsed.laboratoryName,
+        recurring: parsed.recurring,
+      });
+      setNaturalInput('');
+      toast.success('Doğal dilden görev oluşturuldu');
+    } catch (err) {
+      console.error('Natural quick add error', err);
+      toast.error('Görev oluşturulamadı');
+    } finally {
+      setNaturalSubmitting(false);
+    }
+  }, [naturalInput, naturalSubmitting, mainLaboratories, handleAddTask]);
+
   const heatmapData = useMemo(() => {
     const days = timelineScope === 'daily' ? [selectedDate] : timelineScope === 'weekly' ? weekDays : monthDays.filter((d) => isSameMonth(d, selectedDate));
     const matrix = days.map((day) => {
@@ -1133,6 +1310,28 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
+      {/* Natural Language Quick Add */}
+      <div className="px-4 md:px-8 mt-5">
+        <div className="rounded-2xl border border-border bg-card p-3">
+          <p className="text-xs text-muted-foreground mb-2">Doğal dil ile hızlı görev girişi</p>
+          <div className="flex gap-2">
+            <input
+              value={naturalInput}
+              onChange={(e) => setNaturalInput(e.target.value)}
+              placeholder="Örn: 'Yarın saat 14:00'da Merkez Lab ziyareti #acil"
+              className="flex-1 px-3 py-2 bg-secondary border border-border rounded-xl text-sm outline-none"
+            />
+            <button
+              onClick={handleNaturalQuickAdd}
+              disabled={!naturalInput.trim() || naturalSubmitting}
+              className={cn('px-3 py-2 rounded-xl text-sm font-medium', naturalInput.trim() && !naturalSubmitting ? `${ACCENT_BG} text-zinc-900` : 'bg-secondary text-muted-foreground')}
+            >
+              {naturalSubmitting ? 'Ekleniyor...' : 'Ekle'}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Task Views */}
       <div className="px-4 md:px-8 mt-6">
         {tasksLoading ? (
@@ -1144,7 +1343,7 @@ export default function SatinAlmaPanel() {
         <>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-semibold text-muted-foreground">
-            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : 'Aylık Görev Görünümü'}
+            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : viewMode === 'monthly' ? 'Aylık Görev Görünümü' : viewMode === 'timeline' ? 'Timeline / Gantt' : viewMode === 'heatmap' ? 'Personel Aktivite Haritası' : 'Bugünüm'}
           </h3>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
             {([
@@ -1153,6 +1352,7 @@ export default function SatinAlmaPanel() {
               ['monthly', 'Aylık'],
               ['timeline', 'Timeline'],
               ['heatmap', 'Heatmap'],
+              ['myday', 'Bugünüm'],
             ] as const).map(([mode, label]) => (
               <button
                 key={mode}
@@ -1164,6 +1364,57 @@ export default function SatinAlmaPanel() {
             ))}
           </div>
         </div>
+
+        {viewMode === 'myday' && (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-border bg-card p-3">
+              <h4 className="text-sm font-semibold mb-2">Bugünüm</h4>
+              {myDayTasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Bugün için henüz görev seçmediniz.</p>
+              ) : (
+                <div className="space-y-2">
+                  {myDayTasks.map((task) => (
+                    <div key={task.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/50 border border-border">
+                      <div className="min-w-0">
+                        <p className="text-sm truncate">{task.title}</p>
+                        <p className="text-[11px] text-muted-foreground">{task.date} • {task.startTime}-{task.endTime}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setEditingTask(task)} className="text-[11px] px-2 py-1 rounded bg-secondary border border-border">Aç</button>
+                        <button onClick={() => removeFromMyDay(task.id)} className="text-[11px] px-2 py-1 rounded bg-secondary border border-border text-muted-foreground">Çıkar</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-3">
+              <h4 className="text-sm font-semibold mb-2">Akıllı Öneriler</h4>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {myDaySuggestions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Önerilecek görev bulunamadı.</p>
+                ) : (
+                  myDaySuggestions.map((task) => (
+                    <div key={task.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/40 border border-border">
+                      <div className="min-w-0">
+                        <p className="text-sm truncate">{task.title}</p>
+                        <p className="text-[11px] text-muted-foreground">{task.date} • {task.startTime}-{task.endTime}{task.recurring ? ' • Tekrarlı' : ''}</p>
+                      </div>
+                      <button
+                        onClick={() => addToMyDay(task.id)}
+                        disabled={myDayTaskIds.includes(task.id)}
+                        className={cn('text-[11px] px-2 py-1 rounded border', myDayTaskIds.includes(task.id) ? 'bg-secondary text-muted-foreground border-border' : `${ACCENT_BG_SUBTLE} ${ACCENT} ${ACCENT_BORDER}`)}
+                      >
+                        {myDayTaskIds.includes(task.id) ? 'Eklendi' : 'Bugüne ekle'}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {viewMode === 'daily' && (
           dayTasks.length === 0 ? (
