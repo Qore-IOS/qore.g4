@@ -80,21 +80,6 @@ import {
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import {
-  DndContext,
-  closestCenter,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-  arrayMove,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
 // ==========================================
 // Helper: Occupancy calculation (9-5, 8 hours)
@@ -289,11 +274,7 @@ export default function SatinAlmaPanel() {
   const [personnel, setPersonnel] = useState<User[]>([]);
 
   const sliderRef = useRef<HTMLDivElement>(null);
-
-  // DnD sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  );
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
   // Firestore listener
   useEffect(() => {
@@ -539,18 +520,28 @@ export default function SatinAlmaPanel() {
     [editingTask]
   );
 
-  // Drag & drop reorder
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
+  // Drag & drop reorder (native HTML5 DnD)
+  const handleDragOver = useCallback((e: React.DragEvent, targetTaskId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
 
-      const oldIndex = dayTasks.findIndex((t) => t.id === active.id);
-      const newIndex = dayTasks.findIndex((t) => t.id === over.id);
+  const handleDrop = useCallback(
+    async (e: React.DragEvent, targetTaskId: string) => {
+      e.preventDefault();
+      const sourceId = draggedTaskId;
+      setDraggedTaskId(null);
+      if (!sourceId || sourceId === targetTaskId) return;
+
+      const oldIndex = dayTasks.findIndex((t) => t.id === sourceId);
+      const newIndex = dayTasks.findIndex((t) => t.id === targetTaskId);
       if (oldIndex === -1 || newIndex === -1) return;
 
-      const reordered = arrayMove(dayTasks, oldIndex, newIndex);
-      // Update sortOrder in Firestore
+      // arrayMove
+      const reordered = [...dayTasks];
+      const [moved] = reordered.splice(oldIndex, 1);
+      reordered.splice(newIndex, 0, moved);
+
       const batch = writeBatch(db);
       reordered.forEach((task, idx) => {
         batch.update(doc(db, 'purchasingTasks', task.id), { sortOrder: idx });
@@ -561,7 +552,7 @@ export default function SatinAlmaPanel() {
         console.error('Error reordering', err);
       }
     },
-    [dayTasks]
+    [dayTasks, draggedTaskId]
   );
 
   const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
@@ -783,22 +774,27 @@ export default function SatinAlmaPanel() {
             </button>
           </div>
         ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={dayTasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2">
-                {dayTasks.map((task) => (
-                  <SortableTaskCard
-                    key={task.id}
-                    task={task}
-                    onToggle={() => toggleTask(task)}
-                    onToggleSubtask={(stId) => toggleSubtask(task, stId)}
-                    onEdit={() => setEditingTask(task)}
-                    onDelete={() => deleteTask(task)}
-                  />
-                ))}
+          <div className="space-y-2">
+            {dayTasks.map((task) => (
+              <div
+                key={task.id}
+                draggable
+                onDragStart={(e) => { setDraggedTaskId(task.id); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragEnd={() => setDraggedTaskId(null)}
+                onDragOver={(e) => handleDragOver(e, task.id)}
+                onDrop={(e) => handleDrop(e, task.id)}
+                className={cn(draggedTaskId === task.id && 'opacity-50')}
+              >
+                <TaskCard
+                  task={task}
+                  onToggle={() => toggleTask(task)}
+                  onToggleSubtask={(stId) => toggleSubtask(task, stId)}
+                  onEdit={() => setEditingTask(task)}
+                  onDelete={() => deleteTask(task)}
+                />
               </div>
-            </SortableContext>
-          </DndContext>
+            ))}
+          </div>
         )}
       </div>
 
@@ -843,32 +839,6 @@ export default function SatinAlmaPanel() {
 }
 
 // ==========================================
-// Sortable Task Card wrapper
-// ==========================================
-
-function SortableTaskCard(props: {
-  task: PurchasingTask;
-  onToggle: () => void;
-  onToggleSubtask: (subtaskId: string) => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.task.id });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 50 : undefined,
-  };
-
-  return (
-    <div ref={setNodeRef} style={style}>
-      <TaskCard {...props} dragListeners={listeners} dragAttributes={attributes} />
-    </div>
-  );
-}
-
-// ==========================================
 // Task Card
 // ==========================================
 
@@ -878,16 +848,12 @@ function TaskCard({
   onToggleSubtask,
   onEdit,
   onDelete,
-  dragListeners,
-  dragAttributes,
 }: {
   task: PurchasingTask;
   onToggle: () => void;
   onToggleSubtask: (subtaskId: string) => void;
   onEdit: () => void;
   onDelete: () => void;
-  dragListeners?: Record<string, any>;
-  dragAttributes?: Record<string, any>;
 }) {
   const durationMin = parseTime(task.endTime) - parseTime(task.startTime);
   const hours = Math.floor(durationMin / 60);
@@ -907,13 +873,9 @@ function TaskCard({
       )}
     >
       {/* Drag handle */}
-      <button
-        className="shrink-0 mt-1 p-0.5 rounded cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground touch-none"
-        {...dragListeners}
-        {...dragAttributes}
-      >
+      <div className="shrink-0 mt-1 p-0.5 rounded cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground">
         <GripVertical className="w-4 h-4" />
-      </button>
+      </div>
 
       {/* Checkbox */}
       <button

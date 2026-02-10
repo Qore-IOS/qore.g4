@@ -29,9 +29,6 @@ const config = {
     ignoreBuildErrors: true,
   },
 
-  // Transpile packages that need it (fixes turbopack resolution)
-  transpilePackages: ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
-
   // Image optimization configuration
   images: {
     remotePatterns: [
