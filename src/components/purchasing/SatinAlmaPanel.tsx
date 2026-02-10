@@ -2163,6 +2163,12 @@ function TaskCard({
     setSwipeOffset(clamped);
   };
 
+  const triggerHaptic = (pattern: number | number[]) => {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate(pattern);
+    }
+  };
+
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (touchStartX === null) return;
     const endX = e.changedTouches[0]?.clientX ?? touchStartX;
@@ -2175,6 +2181,7 @@ function TaskCard({
       setSwipeOffset(110);
       setTimeout(() => setSwipeOffset(0), 140);
       onToggle();
+      triggerHaptic([12, 30, 18]);
       toast.success('Sağa kaydırıldı: görev tamamlandı');
       return;
     }
@@ -2183,6 +2190,7 @@ function TaskCard({
       setSwipeOffset(-110);
       setTimeout(() => setSwipeOffset(0), 140);
       onPostpone();
+      triggerHaptic([10, 24, 10]);
       toast.success('Sola kaydırıldı: görev ertelendi');
       return;
     }
@@ -2448,81 +2456,6 @@ function TaskCard({
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
-      </div>
-    </div>
-  );
-}
-
-
-function TaskDefinitionsModal({
-  definitions,
-  onClose,
-  onCreate,
-  onDelete,
-}: {
-  definitions: PurchasingTaskDefinition[];
-  onClose: () => void;
-  onCreate: (name: string, requiresLaboratory: boolean) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-}) {
-  const [name, setName] = useState('');
-  const [requiresLaboratory, setRequiresLaboratory] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const handleCreate = async () => {
-    if (!name.trim() || saving) return;
-    setSaving(true);
-    try {
-      await onCreate(name, requiresLaboratory);
-      setName('');
-      setRequiresLaboratory(false);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold">Görev Tanımları</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent"><X className="w-5 h-5" /></button>
-        </div>
-
-        <div className="space-y-2 mb-4">
-          {definitions.map((def) => (
-            <div key={def.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary border border-border">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-foreground truncate">{def.name}</p>
-                {def.requiresLaboratory && <p className="text-[10px] text-muted-foreground">Laboratuvar seçimi zorunlu</p>}
-              </div>
-              <button onClick={() => onDelete(def.id)} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
-          {definitions.length === 0 && <p className="text-xs text-muted-foreground">Henüz tanım yok.</p>}
-        </div>
-
-        <div className="space-y-3">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Yeni görev tanımı"
-            className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-sm outline-none"
-          />
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            <input type="checkbox" checked={requiresLaboratory} onChange={(e) => setRequiresLaboratory(e.target.checked)} />
-            Bu tanım laboratuvar gerektirir (kurum ziyareti benzeri)
-          </label>
-          <button
-            onClick={handleCreate}
-            disabled={!name.trim() || saving}
-            className={cn('w-full py-2.5 rounded-xl text-sm font-semibold', name.trim() && !saving ? `${ACCENT_BG} text-zinc-900` : 'bg-secondary text-muted-foreground')}
-          >
-            Tanım Ekle
-          </button>
-        </div>
       </div>
     </div>
   );
