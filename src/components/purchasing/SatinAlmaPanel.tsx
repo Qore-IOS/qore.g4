@@ -789,6 +789,10 @@ export default function SatinAlmaPanel() {
       .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
   }, [mobileMonthModalDate, tasks]);
 
+  // NOTE: keep an explicit alias to avoid runtime regressions from stale refs (`myTasks`)
+  // in dependency arrays after merges/cherry-picks.
+  const myTasks = tasks;
+
   // Day tasks sorted by sortOrder then startTime
   const dayTasks = useMemo(() => {
     const filtered = myTasks.filter((t) => t.date === selectedDateStr);
