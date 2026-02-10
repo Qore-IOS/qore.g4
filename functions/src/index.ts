@@ -31,7 +31,7 @@ function chunk<T>(arr: T[], size = 500): T[][] {
   return out;
 }
 
-export const deliverPushNotifications = functions
+export const onNotificationCreated = functions
   .region('europe-west1')
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
   .firestore.document('notifications/{id}')
