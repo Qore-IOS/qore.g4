@@ -28,7 +28,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var _a, _b;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.sendFaultReportEmail = exports.fanOutNotifications = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.sendFaultReportEmail = exports.deliverPushNotifications = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -62,13 +62,12 @@ function chunk(arr, size = 500) {
         out.push(arr.slice(i, i + size));
     return out;
 }
-exports.fanOutNotifications = (0, firestore_1.onDocumentCreated)({
+exports.deliverPushNotifications = (0, firestore_1.onDocumentCreated)({
     document: 'notifications/{id}',
     region: 'europe-west1',
     timeoutSeconds: 60,
     memory: '256MiB',
 }, async (event) => {
-    var _a;
     const snap = event.data;
     if (!snap)
         return;
@@ -118,9 +117,6 @@ exports.fanOutNotifications = (0, firestore_1.onDocumentCreated)({
             for (const tokenDoc of tokensSnap.docs) {
                 const td = tokenDoc.data();
                 if (td.token && !tokenMap.has(td.token)) {
-                    // Don't send notification to the actor themselves
-                    if (td.uid && ((_a = data.actor) === null || _a === void 0 ? void 0 : _a.uid) && td.uid === data.actor.uid)
-                        continue;
                     tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
                 }
             }
