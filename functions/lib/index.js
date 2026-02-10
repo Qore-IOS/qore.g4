@@ -30,7 +30,6 @@ var _a, _b;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.cleanupExpiredIrsaliyeDosyalari = exports.sendFaultReportEmail = exports.deliverPushNotifications = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
-const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
 const functions = __importStar(require("firebase-functions"));
@@ -62,16 +61,12 @@ function chunk(arr, size = 500) {
         out.push(arr.slice(i, i + size));
     return out;
 }
-exports.deliverPushNotifications = (0, firestore_1.onDocumentCreated)({
-    document: 'notifications/{id}',
-    region: 'europe-west1',
-    timeoutSeconds: 60,
-    memory: '256MiB',
-}, async (event) => {
-    const snap = event.data;
-    if (!snap)
-        return;
-    const notificationId = snap.id;
+exports.deliverPushNotifications = functions
+    .region('europe-west1')
+    .runWith({ timeoutSeconds: 60, memory: '256MB' })
+    .firestore.document('notifications/{id}')
+    .onCreate(async (snap, context) => {
+    const notificationId = context.params.id;
     const data = snap.data();
     // Prepare log entry
     const logEntry = {
