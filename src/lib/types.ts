@@ -1157,12 +1157,35 @@ export interface PurchasingTask {
   createdByUid: string;
   createdByName: string;
   updatedAt?: TimestampLike;
+  // Priority system
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+  // Sort order within a day
+  sortOrder?: number;
+  // Recurring tasks
+  recurring?: PurchasingTaskRecurrence;
+  recurringGroupId?: string;   // groups recurring task instances
+  // Subtasks / checklist
+  subtasks?: PurchasingSubtask[];
   // Kurum Ziyareti specific fields
   laboratoryId?: string;
   laboratoryName?: string;
   accompanyingPersonnel?: { uid: string; name: string }[];
   // File attachments
   attachments?: PurchasingTaskAttachment[];
+}
+
+export interface PurchasingSubtask {
+  id: string;
+  title: string;
+  completed: boolean;
+}
+
+export interface PurchasingTaskRecurrence {
+  type: 'daily' | 'weekly' | 'monthly';
+  interval: number;           // every N days/weeks/months
+  endDate?: string;           // optional end date (YYYY-MM-DD)
+  daysOfWeek?: number[];      // 0=Sun..6=Sat (for weekly)
+  dayOfMonth?: number;        // 1-31 (for monthly)
 }
 
 export interface PurchasingTaskAttachment {
