@@ -1,6 +1,5 @@
 'use server';
 import * as admin from 'firebase-admin';
-import { onDocumentCreated, FirestoreEvent, QueryDocumentSnapshot } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 import * as functions from 'firebase-functions';
@@ -32,17 +31,12 @@ function chunk<T>(arr: T[], size = 500): T[][] {
   return out;
 }
 
-export const deliverPushNotifications = onDocumentCreated(
-  {
-    document: 'notifications/{id}',
-    region: 'europe-west1',
-    timeoutSeconds: 60,
-    memory: '256MiB',
-  },
-  async (event: FirestoreEvent<QueryDocumentSnapshot | undefined, { id: string }>) => {
-    const snap = event.data;
-    if (!snap) return;
-    const notificationId = snap.id;
+export const deliverPushNotifications = functions
+  .region('europe-west1')
+  .runWith({ timeoutSeconds: 60, memory: '256MB' })
+  .firestore.document('notifications/{id}')
+  .onCreate(async (snap, context) => {
+    const notificationId = context.params.id;
     const data = snap.data() as NotificationDoc;
 
     // Prepare log entry
