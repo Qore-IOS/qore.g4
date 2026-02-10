@@ -37,6 +37,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar as CalendarIcon,
+  CalendarClock,
   Clock,
   Trash2,
   X,
@@ -823,6 +824,16 @@ export default function SatinAlmaPanel() {
             >
               <Settings className="w-3.5 h-3.5" />
             </button>
+            <Link
+              href="/satin-alma/analiz-planlama"
+              className={cn(
+                'shrink-0 mt-1 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-all',
+                'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'
+              )}
+            >
+              <CalendarClock className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Analiz Planlama</span>
+            </Link>
             <Link
               href="/satin-alma/tum-islemler"
               className={cn(
