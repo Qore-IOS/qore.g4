@@ -17,12 +17,14 @@ import {
   getDocs,
   Timestamp,
   writeBatch,
+  arrayUnion,
 } from 'firebase/firestore';
 import type {
   PurchasingTask,
   PurchasingTaskAttachment,
   PurchasingSubtask,
   PurchasingTaskRecurrence,
+  PurchasingTaskComment,
   Hospital,
   LabPool,
   User,
@@ -58,6 +60,8 @@ import {
   ArrowDown,
   Square,
   CheckSquare,
+  MessageSquare,
+  Send,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -245,6 +249,7 @@ interface TaskFormData {
   laboratoryId?: string;
   laboratoryName?: string;
   accompanyingPersonnel?: { uid: string; name: string }[];
+  assignedPersonnel?: { uid: string; name: string }[];
   files?: File[];
   existingAttachments?: PurchasingTaskAttachment[];
   removedAttachments?: PurchasingTaskAttachment[];
@@ -267,6 +272,7 @@ export default function SatinAlmaPanel() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
   // Reference data
   const [laboratories, setLaboratories] = useState<Hospital[]>([]);
@@ -367,6 +373,28 @@ export default function SatinAlmaPanel() {
     }
   }, []);
 
+  const addTaskComment = useCallback(async (task: PurchasingTask, message: string) => {
+    if (!currentUserProfile) return;
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    const comment: PurchasingTaskComment = {
+      id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      message: trimmed,
+      createdAt: Timestamp.now(),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || currentUserProfile.email || 'Kullanıcı',
+    };
+    try {
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        comments: arrayUnion(comment),
+        updatedAt: Timestamp.now(),
+      });
+    } catch (err) {
+      console.error('Error adding task comment', err);
+      toast.error('Yorum eklenemedi');
+    }
+  }, [currentUserProfile]);
+
   // Delete task
   const deleteTask = useCallback(async (task: PurchasingTask) => {
     try {
@@ -409,6 +437,8 @@ export default function SatinAlmaPanel() {
           if (data.laboratoryName) taskDoc.laboratoryName = data.laboratoryName;
           if (data.accompanyingPersonnel?.length) taskDoc.accompanyingPersonnel = data.accompanyingPersonnel;
         }
+
+        if (data.assignedPersonnel?.length) taskDoc.assignedPersonnel = data.assignedPersonnel;
 
         if (data.subtasks?.length) taskDoc.subtasks = data.subtasks;
         if (data.recurring) {
@@ -484,6 +514,8 @@ export default function SatinAlmaPanel() {
           updates.laboratoryName = null;
           updates.accompanyingPersonnel = null;
         }
+
+        updates.assignedPersonnel = data.assignedPersonnel?.length ? data.assignedPersonnel : null;
 
         updates.subtasks = data.subtasks?.length ? data.subtasks : null;
 
@@ -570,6 +602,20 @@ export default function SatinAlmaPanel() {
     const calEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
     return eachDayOfInterval({ start: calStart, end: calEnd });
   }, [calendarMonth]);
+
+  const weekDays = useMemo(() => {
+    const start = startOfWeek(selectedDate, { weekStartsOn: 1 });
+    const end = endOfWeek(selectedDate, { weekStartsOn: 1 });
+    return eachDayOfInterval({ start, end });
+  }, [selectedDate]);
+
+  const monthDays = useMemo(() => {
+    const monthStart = startOfMonth(selectedDate);
+    const monthEnd = endOfMonth(selectedDate);
+    const calStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+    return eachDayOfInterval({ start: calStart, end: calEnd });
+  }, [selectedDate]);
 
   useEffect(() => {
     if (sliderRef.current) {
@@ -759,41 +805,143 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
-      {/* Task List with DnD */}
+      {/* Task Views */}
       <div className="px-4 md:px-8 mt-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-muted-foreground">Görevler ({dayTasks.length})</h3>
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <h3 className="text-sm font-semibold text-muted-foreground">
+            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : 'Aylık Görev Görünümü'}
+          </h3>
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
+            {([
+              ['daily', 'Günlük'],
+              ['weekly', 'Haftalık'],
+              ['monthly', 'Aylık'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={cn('px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all', viewMode === mode ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground hover:text-foreground')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {dayTasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <CalendarIcon className="w-10 h-10 mb-3 opacity-40" />
-            <p className="text-sm">Bu güne ait görev bulunmuyor</p>
-            <button onClick={() => setShowAddModal(true)} className={cn('mt-3 text-xs hover:underline', ACCENT)}>
-              Yeni görev ekle
-            </button>
+        {viewMode === 'daily' && (
+          dayTasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <CalendarIcon className="w-10 h-10 mb-3 opacity-40" />
+              <p className="text-sm">Bu güne ait görev bulunmuyor</p>
+              <button onClick={() => setShowAddModal(true)} className={cn('mt-3 text-xs hover:underline', ACCENT)}>
+                Yeni görev ekle
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {dayTasks.map((task) => (
+                <div
+                  key={task.id}
+                  draggable
+                  onDragStart={(e) => { setDraggedTaskId(task.id); e.dataTransfer.effectAllowed = 'move'; }}
+                  onDragEnd={() => setDraggedTaskId(null)}
+                  onDragOver={(e) => handleDragOver(e, task.id)}
+                  onDrop={(e) => handleDrop(e, task.id)}
+                  className={cn(draggedTaskId === task.id && 'opacity-50')}
+                >
+                  <TaskCard
+                    task={task}
+                    onToggle={() => toggleTask(task)}
+                    onToggleSubtask={(stId) => toggleSubtask(task, stId)}
+                    onEdit={() => setEditingTask(task)}
+                    onDelete={() => deleteTask(task)}
+                    onAddComment={(message) => addTaskComment(task, message)}
+                  />
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {viewMode === 'weekly' && (
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
+            {weekDays.map((day) => {
+              const dayStr = format(day, 'yyyy-MM-dd');
+              const dayTasksForWeek = tasks
+                .filter((t) => t.date === dayStr)
+                .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+              return (
+                <div key={dayStr} className={cn('rounded-xl border p-2', isSameDay(day, selectedDate) ? `${ACCENT_BORDER} bg-card` : 'border-border bg-card')}>
+                  <button onClick={() => setSelectedDate(day)} className="w-full text-left mb-2">
+                    <p className="text-[11px] text-muted-foreground uppercase">{format(day, 'EEE', { locale: tr })}</p>
+                    <p className={cn('text-sm font-semibold', isToday(day) && ACCENT)}>{format(day, 'd MMM', { locale: tr })}</p>
+                  </button>
+                  <div className="relative h-[420px] rounded-lg bg-secondary/40 border border-border overflow-hidden">
+                    {[9, 11, 13, 15, 17].map((h) => (
+                      <div key={h} className="absolute left-0 right-0 border-t border-border/60" style={{ top: `${((h - 9) / 8) * 100}%` }} />
+                    ))}
+                    {dayTasksForWeek.map((task) => {
+                      const start = Math.max(parseTime(task.startTime), WORK_START_HOUR * 60);
+                      const end = Math.min(parseTime(task.endTime), WORK_END_HOUR * 60);
+                      if (end <= start) return null;
+                      const topPct = ((start - WORK_START_HOUR * 60) / TOTAL_WORK_MINUTES) * 100;
+                      const heightPct = ((end - start) / TOTAL_WORK_MINUTES) * 100;
+                      return (
+                        <button
+                          key={task.id}
+                          onClick={() => setEditingTask(task)}
+                          className={cn('absolute left-1 right-1 rounded-md px-2 py-1 text-left border-l-2 text-[10px] overflow-hidden', task.completed ? 'bg-muted/60 border-muted-foreground/40 text-muted-foreground' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border} text-foreground`)}
+                          style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 8)}%` }}
+                        >
+                          <p className="truncate font-medium">{task.title}</p>
+                          <p className="truncate opacity-70">{task.startTime} - {task.endTime}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ) : (
-          <div className="space-y-2">
-            {dayTasks.map((task) => (
-              <div
-                key={task.id}
-                draggable
-                onDragStart={(e) => { setDraggedTaskId(task.id); e.dataTransfer.effectAllowed = 'move'; }}
-                onDragEnd={() => setDraggedTaskId(null)}
-                onDragOver={(e) => handleDragOver(e, task.id)}
-                onDrop={(e) => handleDrop(e, task.id)}
-                className={cn(draggedTaskId === task.id && 'opacity-50')}
-              >
-                <TaskCard
-                  task={task}
-                  onToggle={() => toggleTask(task)}
-                  onToggleSubtask={(stId) => toggleSubtask(task, stId)}
-                  onEdit={() => setEditingTask(task)}
-                  onDelete={() => deleteTask(task)}
-                />
-              </div>
-            ))}
+        )}
+
+        {viewMode === 'monthly' && (
+          <div className="bg-card border border-border rounded-2xl p-3">
+            <div className="grid grid-cols-7 gap-1 mb-1">
+              {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((d) => (
+                <div key={d} className="text-center text-[10px] text-muted-foreground font-medium py-1">{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {monthDays.map((day) => {
+                const dayStr = format(day, 'yyyy-MM-dd');
+                const cellTasks = tasks.filter((t) => t.date === dayStr).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+                const inMonth = isSameMonth(day, selectedDate);
+                const selected = isSameDay(day, selectedDate);
+                return (
+                  <button
+                    key={dayStr}
+                    onClick={() => setSelectedDate(day)}
+                    className={cn('min-h-[110px] rounded-xl border p-1.5 text-left transition-colors', selected ? `${ACCENT_BORDER} ring-1 ${ACCENT_RING}` : 'border-border hover:bg-accent/40', !inMonth && 'opacity-40')}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={cn('text-[11px] font-semibold', isToday(day) && ACCENT)}>{format(day, 'd')}</span>
+                      {cellTasks.length > 0 && <span className="text-[9px] text-muted-foreground">{cellTasks.length} görev</span>}
+                    </div>
+                    <div className="space-y-1">
+                      {cellTasks.slice(0, 3).map((task) => (
+                        <div key={task.id} className={cn('text-[10px] rounded px-1 py-0.5 truncate border-l-2', task.completed ? 'bg-secondary text-muted-foreground border-muted-foreground/40' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border}`)}>
+                          {task.startTime} {task.title}
+                        </div>
+                      ))}
+                      {cellTasks.length > 3 && (
+                        <p className="text-[10px] text-muted-foreground">+{cellTasks.length - 3} daha</p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
@@ -848,12 +996,14 @@ function TaskCard({
   onToggleSubtask,
   onEdit,
   onDelete,
+  onAddComment,
 }: {
   task: PurchasingTask;
   onToggle: () => void;
   onToggleSubtask: (subtaskId: string) => void;
   onEdit: () => void;
   onDelete: () => void;
+  onAddComment: (message: string) => void;
 }) {
   const durationMin = parseTime(task.endTime) - parseTime(task.startTime);
   const hours = Math.floor(durationMin / 60);
@@ -863,6 +1013,22 @@ function TaskCard({
   const priorityConf = PRIORITY_CONFIG[priority];
   const completedSubtasks = task.subtasks?.filter((s) => s.completed).length || 0;
   const totalSubtasks = task.subtasks?.length || 0;
+  const assignedPersonnel = task.assignedPersonnel || [];
+  const comments = (task.comments || []).slice().sort((a, b) => {
+    const ta = 'seconds' in (a.createdAt as any) ? (a.createdAt as any).seconds : 0;
+    const tb = 'seconds' in (b.createdAt as any) ? (b.createdAt as any).seconds : 0;
+    return ta - tb;
+  });
+  const [showComments, setShowComments] = useState(false);
+  const [commentInput, setCommentInput] = useState('');
+
+  const submitComment = () => {
+    const trimmed = commentInput.trim();
+    if (!trimmed) return;
+    onAddComment(trimmed);
+    setCommentInput('');
+    setShowComments(true);
+  };
 
   return (
     <div
@@ -930,6 +1096,13 @@ function TaskCard({
           </div>
         )}
 
+        {assignedPersonnel.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <Users className="w-3 h-3 text-muted-foreground" />
+            <span className="text-[11px] text-muted-foreground">Takipçiler: {assignedPersonnel.map((p) => p.name).join(', ')}</span>
+          </div>
+        )}
+
         {/* Subtasks */}
         {task.subtasks && task.subtasks.length > 0 && (
           <div className="mt-2 space-y-1">
@@ -993,6 +1166,63 @@ function TaskCard({
             {hours > 0 ? `${hours}s ` : ''}{mins > 0 ? `${mins}dk` : ''}
           </span>
         </div>
+
+        <div className="mt-3 border-t border-border/60 pt-2" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => setShowComments((v) => !v)}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Notlar ({comments.length})</span>
+          </button>
+
+          {showComments && (
+            <div className="mt-2 space-y-2">
+              {comments.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">Henüz not eklenmedi.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  {comments.map((comment) => (
+                    <div key={comment.id} className="rounded-lg bg-secondary/70 px-2.5 py-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-medium text-foreground/90">{comment.createdByName}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {comment.createdAt && 'seconds' in (comment.createdAt as any)
+                            ? format(new Date((comment.createdAt as any).seconds * 1000), 'dd.MM HH:mm')
+                            : '-'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-foreground/80 mt-0.5 whitespace-pre-wrap">{comment.message}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5">
+                <input
+                  value={commentInput}
+                  onChange={(e) => setCommentInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      submitComment();
+                    }
+                  }}
+                  placeholder="Göreve not ekleyin..."
+                  className="flex-1 h-8 px-2.5 bg-secondary border border-border rounded-lg text-[11px] text-foreground placeholder:text-muted-foreground outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={submitComment}
+                  className={cn('h-8 w-8 rounded-lg flex items-center justify-center', ACCENT_BG, 'text-zinc-900')}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Time bar */}
@@ -1055,10 +1285,14 @@ function TaskFormModal({
   const [selectedPersonnel, setSelectedPersonnel] = useState<{ uid: string; name: string }[]>(
     isEdit ? task.accompanyingPersonnel || [] : []
   );
+  const [assignedPersonnel, setAssignedPersonnel] = useState<{ uid: string; name: string }[]>(
+    isEdit ? task.assignedPersonnel || [] : []
+  );
   const [labSearchQuery, setLabSearchQuery] = useState('');
   const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
   const [showLabDropdown, setShowLabDropdown] = useState(false);
   const [showPersonnelDropdown, setShowPersonnelDropdown] = useState(false);
+  const [showAssignedDropdown, setShowAssignedDropdown] = useState(false);
 
   // Files
   const [files, setFiles] = useState<File[]>([]);
@@ -1080,11 +1314,13 @@ function TaskFormModal({
 
   const labDropdownRef = useRef<HTMLDivElement>(null);
   const personnelDropdownRef = useRef<HTMLDivElement>(null);
+  const assignedDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (labDropdownRef.current && !labDropdownRef.current.contains(e.target as Node)) setShowLabDropdown(false);
       if (personnelDropdownRef.current && !personnelDropdownRef.current.contains(e.target as Node)) setShowPersonnelDropdown(false);
+      if (assignedDropdownRef.current && !assignedDropdownRef.current.contains(e.target as Node)) setShowAssignedDropdown(false);
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -1113,6 +1349,14 @@ function TaskFormModal({
 
   const togglePersonnel = (user: User) => {
     setSelectedPersonnel((prev) => {
+      const exists = prev.find((p) => p.uid === user.uid);
+      if (exists) return prev.filter((p) => p.uid !== user.uid);
+      return [...prev, { uid: user.uid, name: user.name || user.email || '' }];
+    });
+  };
+
+  const toggleAssignedPersonnel = (user: User) => {
+    setAssignedPersonnel((prev) => {
       const exists = prev.find((p) => p.uid === user.uid);
       if (exists) return prev.filter((p) => p.uid !== user.uid);
       return [...prev, { uid: user.uid, name: user.name || user.email || '' }];
@@ -1167,6 +1411,7 @@ function TaskFormModal({
         laboratoryName: selectedLab?.name || '',
         accompanyingPersonnel: selectedPersonnel.length > 0 ? selectedPersonnel : undefined,
       }),
+      assignedPersonnel: assignedPersonnel.length > 0 ? assignedPersonnel : undefined,
       files: files.length > 0 ? files : undefined,
       existingAttachments: existingAttachments.length > 0 ? existingAttachments : undefined,
       removedAttachments: removedAttachments.length > 0 ? removedAttachments : undefined,
@@ -1278,7 +1523,7 @@ function TaskFormModal({
               <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Kurum (Laboratuvar) *</label>
               <button
                 type="button"
-                onClick={() => { setShowLabDropdown((v) => !v); setShowPersonnelDropdown(false); }}
+                onClick={() => { setShowLabDropdown((v) => !v); setShowPersonnelDropdown(false); setShowAssignedDropdown(false); }}
                 className={cn(dropdownTriggerCls, showLabDropdown ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40` : 'border-border', selectedLabId ? 'text-foreground' : 'text-muted-foreground')}
               >
                 <span className="truncate">{selectedLab?.name || 'Laboratuvar seçin'}</span>
@@ -1316,13 +1561,66 @@ function TaskFormModal({
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Açıklama girin" rows={2} className={cn(inputCls, 'resize-none')} />
           </div>
 
+          {/* Task Followers / Assignees */}
+          <div ref={assignedDropdownRef} className="relative">
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görevi Takip Edecek Personeller</label>
+            <button
+              type="button"
+              onClick={() => { setShowAssignedDropdown((v) => !v); setShowLabDropdown(false); setShowPersonnelDropdown(false); }}
+              className={cn(dropdownTriggerCls, showAssignedDropdown ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40` : 'border-border', assignedPersonnel.length > 0 ? 'text-foreground' : 'text-muted-foreground')}
+            >
+              <span className="truncate">{assignedPersonnel.length > 0 ? `${assignedPersonnel.length} kişi seçildi` : 'Personel seçin (opsiyonel)'}</span>
+              <ChevronDown className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', showAssignedDropdown && 'rotate-180')} />
+            </button>
+            {assignedPersonnel.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {assignedPersonnel.map((p) => (
+                  <span key={p.uid} className="inline-flex items-center gap-1 px-2 py-1 bg-secondary border border-border rounded-lg text-[11px] text-foreground">
+                    {p.name}
+                    <button type="button" onClick={() => setAssignedPersonnel((prev) => prev.filter((x) => x.uid !== p.uid))} className="text-muted-foreground hover:text-red-400 transition-colors"><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {showAssignedDropdown && (
+              <div className="absolute z-20 mt-1 w-full bg-popover border border-border rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
+                <div className="p-2 border-b border-border">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
+                    <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                    <input type="text" value={personnelSearchQuery} onChange={(e) => setPersonnelSearchQuery(e.target.value)} placeholder="Personel ara..." className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none" autoFocus />
+                  </div>
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  {filteredPersonnel.length === 0 ? (
+                    <div className="px-4 py-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
+                  ) : (
+                    filteredPersonnel.map((user) => {
+                      const isSelected = assignedPersonnel.some((p) => p.uid === user.uid);
+                      return (
+                        <button key={user.uid} type="button" onClick={() => toggleAssignedPersonnel(user)} className={cn('w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent transition-colors text-left', isSelected ? 'bg-accent/50' : '')}>
+                          <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all', isSelected ? `${ACCENT_BG} border-[#d4ec00]` : 'border-muted-foreground/40')}>
+                            {isSelected && <Check className="w-2.5 h-2.5 text-zinc-900" strokeWidth={3} />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>{user.name || user.email}</span>
+                            <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Satın Alma'}</span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Accompanying Personnel (kurum_ziyareti only) */}
           {taskType === 'kurum_ziyareti' && (
             <div ref={personnelDropdownRef} className="relative">
               <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Eşlik Eden Personel</label>
               <button
                 type="button"
-                onClick={() => { setShowPersonnelDropdown((v) => !v); setShowLabDropdown(false); }}
+                onClick={() => { setShowPersonnelDropdown((v) => !v); setShowLabDropdown(false); setShowAssignedDropdown(false); }}
                 className={cn(dropdownTriggerCls, showPersonnelDropdown ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40` : 'border-border', selectedPersonnel.length > 0 ? 'text-foreground' : 'text-muted-foreground')}
               >
                 <span className="truncate">{selectedPersonnel.length > 0 ? `${selectedPersonnel.length} kişi seçildi` : 'Personel seçin (opsiyonel)'}</span>
