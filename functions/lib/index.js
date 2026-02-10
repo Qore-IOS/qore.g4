@@ -28,7 +28,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var _a, _b;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.sendFaultReportEmail = exports.fanOutNotifications = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.sendFaultReportEmail = exports.deliverPushNotifications = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -62,7 +62,7 @@ function chunk(arr, size = 500) {
         out.push(arr.slice(i, i + size));
     return out;
 }
-exports.fanOutNotifications = (0, firestore_1.onDocumentCreated)({
+exports.deliverPushNotifications = (0, firestore_1.onDocumentCreated)({
     document: 'notifications/{id}',
     region: 'europe-west1',
     timeoutSeconds: 60,

@@ -32,7 +32,7 @@ function chunk<T>(arr: T[], size = 500): T[][] {
   return out;
 }
 
-export const fanOutNotifications = onDocumentCreated(
+export const deliverPushNotifications = onDocumentCreated(
   {
     document: 'notifications/{id}',
     region: 'europe-west1',
