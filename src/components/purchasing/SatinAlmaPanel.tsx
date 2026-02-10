@@ -23,6 +23,8 @@ import type {
   PurchasingTaskAttachment,
   PurchasingSubtask,
   PurchasingTaskRecurrence,
+  PurchasingTaskComment,
+  PurchasingTaskActivity,
   Hospital,
   LabPool,
   User,
@@ -58,6 +60,11 @@ import {
   ArrowDown,
   Square,
   CheckSquare,
+  MessageSquare,
+  Send,
+  UserPlus,
+  History,
+  AtSign,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -245,11 +252,16 @@ interface TaskFormData {
   laboratoryId?: string;
   laboratoryName?: string;
   accompanyingPersonnel?: { uid: string; name: string }[];
+  assignedTo?: { uid: string; name: string }[];
   files?: File[];
   existingAttachments?: PurchasingTaskAttachment[];
   removedAttachments?: PurchasingTaskAttachment[];
   subtasks?: PurchasingSubtask[];
   recurring?: PurchasingTaskRecurrence;
+}
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
 }
 
 // ==========================================
@@ -266,6 +278,7 @@ export default function SatinAlmaPanel() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
+  const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
 
   // Reference data
@@ -327,29 +340,52 @@ export default function SatinAlmaPanel() {
 
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
 
+  // Filter tasks visible to current user (creator or assigned)
+  const myTasks = useMemo(() => {
+    if (!currentUserProfile) return tasks;
+    const uid = currentUserProfile.uid;
+    return tasks.filter((t) =>
+      t.createdByUid === uid ||
+      t.assignedTo?.some((a) => a.uid === uid) ||
+      // Show all tasks if no assignedTo (backwards compat)
+      !t.assignedTo || t.assignedTo.length === 0
+    );
+  }, [tasks, currentUserProfile]);
+
   // Day tasks sorted by sortOrder then startTime
   const dayTasks = useMemo(() => {
-    const filtered = tasks.filter((t) => t.date === selectedDateStr);
+    const filtered = myTasks.filter((t) => t.date === selectedDateStr);
     return filtered.sort((a, b) => {
       const orderA = a.sortOrder ?? 999999;
       const orderB = b.sortOrder ?? 999999;
       if (orderA !== orderB) return orderA - orderB;
       return parseTime(a.startTime) - parseTime(b.startTime);
     });
-  }, [tasks, selectedDateStr]);
+  }, [myTasks, selectedDateStr]);
 
   // Toggle completion
   const toggleTask = useCallback(async (task: PurchasingTask) => {
+    if (!currentUserProfile) return;
+    const newStatus = !task.completed;
+    const activity: PurchasingTaskActivity = {
+      id: generateId(),
+      action: newStatus ? 'completed' : 'reopened',
+      userId: currentUserProfile.uid,
+      userName: currentUserProfile.name || '',
+      details: newStatus ? 'Görev tamamlandı' : 'Görev yeniden açıldı',
+      createdAt: new Date().toISOString(),
+    };
     try {
       await updateDoc(doc(db, 'purchasingTasks', task.id), {
-        completed: !task.completed,
+        completed: newStatus,
         updatedAt: Timestamp.now(),
+        activities: [...(task.activities || []), activity],
       });
     } catch (err) {
       console.error('Error toggling task', err);
       toast.error('Görev güncellenemedi');
     }
-  }, []);
+  }, [currentUserProfile]);
 
   // Toggle subtask
   const toggleSubtask = useCallback(async (task: PurchasingTask, subtaskId: string) => {
@@ -389,6 +425,15 @@ export default function SatinAlmaPanel() {
     async (data: TaskFormData) => {
       if (!currentUserProfile) return;
       try {
+        const createdActivity: PurchasingTaskActivity = {
+          id: generateId(),
+          action: 'created',
+          userId: currentUserProfile.uid,
+          userName: currentUserProfile.name || '',
+          details: 'Görev oluşturuldu',
+          createdAt: new Date().toISOString(),
+        };
+
         const taskDoc: Record<string, any> = {
           title: data.title,
           description: data.description,
@@ -402,7 +447,21 @@ export default function SatinAlmaPanel() {
           createdByUid: currentUserProfile.uid,
           createdByName: currentUserProfile.name || '',
           sortOrder: Date.now(),
+          activities: [createdActivity],
         };
+
+        if (data.assignedTo?.length) {
+          taskDoc.assignedTo = data.assignedTo;
+          const names = data.assignedTo.map((a) => a.name).join(', ');
+          taskDoc.activities.push({
+            id: generateId(),
+            action: 'assigned',
+            userId: currentUserProfile.uid,
+            userName: currentUserProfile.name || '',
+            details: `Atanan kişiler: ${names}`,
+            createdAt: new Date().toISOString(),
+          });
+        }
 
         if (data.taskType === 'kurum_ziyareti') {
           if (data.laboratoryId) taskDoc.laboratoryId = data.laboratoryId;
@@ -459,11 +518,75 @@ export default function SatinAlmaPanel() {
     [currentUserProfile]
   );
 
+  // Add comment to a task
+  const handleAddComment = useCallback(
+    async (task: PurchasingTask, text: string) => {
+      if (!currentUserProfile || !text.trim()) return;
+      const comment: PurchasingTaskComment = {
+        id: generateId(),
+        userId: currentUserProfile.uid,
+        userName: currentUserProfile.name || '',
+        text: text.trim(),
+        createdAt: new Date().toISOString(),
+      };
+      const activity: PurchasingTaskActivity = {
+        id: generateId(),
+        action: 'comment_added',
+        userId: currentUserProfile.uid,
+        userName: currentUserProfile.name || '',
+        details: `Yorum ekledi: "${text.trim().substring(0, 60)}${text.trim().length > 60 ? '...' : ''}"`,
+        createdAt: new Date().toISOString(),
+      };
+      try {
+        await updateDoc(doc(db, 'purchasingTasks', task.id), {
+          comments: [...(task.comments || []), comment],
+          activities: [...(task.activities || []), activity],
+          updatedAt: Timestamp.now(),
+        });
+        toast.success('Yorum eklendi');
+      } catch (err) {
+        console.error('Error adding comment', err);
+        toast.error('Yorum eklenemedi');
+      }
+    },
+    [currentUserProfile]
+  );
+
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
-      if (!editingTask) return;
+      if (!editingTask || !currentUserProfile) return;
       try {
+        const activities = [...(editingTask.activities || [])];
+
+        // Track changes for activity log
+        const changes: string[] = [];
+        if (editingTask.title !== data.title) changes.push(`Başlık: "${editingTask.title}" → "${data.title}"`);
+        if (editingTask.startTime !== data.startTime || editingTask.endTime !== data.endTime) {
+          changes.push(`Saat: ${editingTask.startTime}-${editingTask.endTime} → ${data.startTime}-${data.endTime}`);
+        }
+        if (editingTask.date !== data.date) changes.push(`Tarih: ${editingTask.date} → ${data.date}`);
+        if ((editingTask.priority || 'normal') !== data.priority) changes.push(`Öncelik değiştirildi: ${data.priority}`);
+
+        // Track assignedTo changes
+        const oldAssigned = (editingTask.assignedTo || []).map((a) => a.uid).sort().join(',');
+        const newAssigned = (data.assignedTo || []).map((a) => a.uid).sort().join(',');
+        if (oldAssigned !== newAssigned) {
+          const names = (data.assignedTo || []).map((a) => a.name).join(', ') || 'Kimse';
+          changes.push(`Atanan kişiler: ${names}`);
+        }
+
+        if (changes.length > 0) {
+          activities.push({
+            id: generateId(),
+            action: 'updated',
+            userId: currentUserProfile.uid,
+            userName: currentUserProfile.name || '',
+            details: changes.join(' | '),
+            createdAt: new Date().toISOString(),
+          });
+        }
+
         const updates: Record<string, any> = {
           title: data.title,
           description: data.description,
@@ -473,6 +596,8 @@ export default function SatinAlmaPanel() {
           endTime: data.endTime,
           priority: data.priority,
           updatedAt: Timestamp.now(),
+          assignedTo: data.assignedTo?.length ? data.assignedTo : null,
+          activities,
         };
 
         if (data.taskType === 'kurum_ziyareti') {
@@ -517,7 +642,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev güncellenemedi');
       }
     },
-    [editingTask]
+    [editingTask, currentUserProfile]
   );
 
   // Drag & drop reorder (native HTML5 DnD)
@@ -555,7 +680,7 @@ export default function SatinAlmaPanel() {
     [dayTasks, draggedTaskId]
   );
 
-  const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
+  const selectedOccupancy = getOccupancyForDay(myTasks, selectedDateStr);
 
   const sliderDates = useMemo(() => {
     const dates: Date[] = [];
@@ -622,8 +747,8 @@ export default function SatinAlmaPanel() {
               const dateStr = format(date, 'yyyy-MM-dd');
               const isSelected = isSameDay(date, selectedDate);
               const today = isToday(date);
-              const occupancy = getOccupancyForDay(tasks, dateStr);
-              const dayTaskCount = tasks.filter((t) => t.date === dateStr).length;
+              const occupancy = getOccupancyForDay(myTasks, dateStr);
+              const dayTaskCount = myTasks.filter((t) => t.date === dateStr).length;
 
               return (
                 <button
@@ -712,8 +837,8 @@ export default function SatinAlmaPanel() {
                 const isSelected = isSameDay(day, selectedDate);
                 const today = isToday(day);
                 const inMonth = isSameMonth(day, calendarMonth);
-                const occupancy = getOccupancyForDay(tasks, dayStr);
-                const hasTasks = tasks.some((t) => t.date === dayStr);
+                const occupancy = getOccupancyForDay(myTasks, dayStr);
+                const hasTasks = myTasks.some((t) => t.date === dayStr);
                 return (
                   <button
                     key={dayStr}
@@ -789,6 +914,7 @@ export default function SatinAlmaPanel() {
                   task={task}
                   onToggle={() => toggleTask(task)}
                   onToggleSubtask={(stId) => toggleSubtask(task, stId)}
+                  onOpenDetail={() => setDetailTask(task)}
                   onEdit={() => setEditingTask(task)}
                   onDelete={() => deleteTask(task)}
                 />

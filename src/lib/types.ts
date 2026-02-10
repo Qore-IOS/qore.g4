@@ -1172,6 +1172,12 @@ export interface PurchasingTask {
   accompanyingPersonnel?: { uid: string; name: string }[];
   // File attachments
   attachments?: PurchasingTaskAttachment[];
+  // Multi-user assignment
+  assignedTo?: PurchasingTaskAssignee[];
+  // Comments / notes
+  comments?: PurchasingTaskComment[];
+  // Activity log
+  activities?: PurchasingTaskActivity[];
 }
 
 export interface PurchasingSubtask {
@@ -1194,4 +1200,26 @@ export interface PurchasingTaskAttachment {
   type: 'image' | 'pdf';
   size: number; // bytes
   storagePath: string;
+}
+
+export interface PurchasingTaskAssignee {
+  uid: string;
+  name: string;
+}
+
+export interface PurchasingTaskComment {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  createdAt: string;           // ISO datetime string
+}
+
+export interface PurchasingTaskActivity {
+  id: string;
+  action: string;              // e.g. 'created', 'updated', 'completed', 'comment_added'
+  userId: string;
+  userName: string;
+  details?: string;            // human-readable change description
+  createdAt: string;           // ISO datetime string
 }
