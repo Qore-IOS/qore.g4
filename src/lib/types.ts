@@ -1148,7 +1148,7 @@ export interface PurchasingTask {
   id: string;
   title: string;
   description: string;
-  taskType: 'custom' | 'kurum_ziyareti';
+  taskType: string;
   date: string;               // ISO date string (YYYY-MM-DD)
   startTime: string;           // HH:mm format
   endTime: string;             // HH:mm format
@@ -1166,6 +1166,7 @@ export interface PurchasingTask {
   recurringGroupId?: string;   // groups recurring task instances
   // Subtasks / checklist
   subtasks?: PurchasingSubtask[];
+  taskTypeLabel?: string;
   // Kurum Ziyareti specific fields
   laboratoryId?: string;
   laboratoryName?: string;
@@ -1217,4 +1218,13 @@ export interface PurchasingTaskActivityLog {
   createdAt: TimestampLike;
   createdByUid: string;
   createdByName: string;
+}
+
+
+export interface PurchasingTaskDefinition {
+  id: string;
+  name: string;
+  requiresLaboratory?: boolean;
+  active?: boolean;
+  createdAt?: TimestampLike;
 }

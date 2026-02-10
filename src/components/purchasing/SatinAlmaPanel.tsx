@@ -26,6 +26,7 @@ import type {
   PurchasingTaskRecurrence,
   PurchasingTaskComment,
   PurchasingTaskActivityLog,
+  PurchasingTaskDefinition,
   Hospital,
   LabPool,
   User,
@@ -63,6 +64,7 @@ import {
   CheckSquare,
   MessageSquare,
   Send,
+  Settings,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -186,6 +188,7 @@ const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; bg: stri
 const MAX_IMAGE_WIDTH = 1200;
 const MAX_IMAGE_HEIGHT = 1200;
 const JPEG_QUALITY = 0.7;
+const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 
 function compressImage(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -221,6 +224,7 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   const isImage = file.type.startsWith('image/');
   const isPdf = file.type === 'application/pdf';
   if (!isImage && !isPdf) throw new Error('Sadece resim ve PDF dosyaları yüklenebilir');
+  if (file.size > MAX_ATTACHMENT_SIZE_BYTES) throw new Error('Dosya boyutu 10MB sınırını aşıyor');
 
   const timestamp = Date.now();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -288,6 +292,19 @@ function getTaskChangeLogs(prev: PurchasingTask, next: TaskFormData, user: { uid
   return logs;
 }
 
+
+function hasTimeConflict(tasks: PurchasingTask[], payload: { date: string; startTime: string; endTime: string }, excludeTaskId?: string): PurchasingTask[] {
+  const start = parseTime(payload.startTime);
+  const end = parseTime(payload.endTime);
+  return tasks.filter((t) => {
+    if (excludeTaskId && t.id === excludeTaskId) return false;
+    if (t.date !== payload.date) return false;
+    const ts = parseTime(t.startTime);
+    const te = parseTime(t.endTime);
+    return start < te && end > ts;
+  });
+}
+
 // ==========================================
 // Form data interface (shared between add & edit)
 // ==========================================
@@ -295,7 +312,8 @@ function getTaskChangeLogs(prev: PurchasingTask, next: TaskFormData, user: { uid
 interface TaskFormData {
   title: string;
   description: string;
-  taskType: 'custom' | 'kurum_ziyareti';
+  taskType: string;
+  taskTypeLabel?: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -327,6 +345,9 @@ export default function SatinAlmaPanel() {
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [tasksLoading, setTasksLoading] = useState(true);
+  const [taskDefinitions, setTaskDefinitions] = useState<PurchasingTaskDefinition[]>([]);
+  const [showTaskDefinitionModal, setShowTaskDefinitionModal] = useState(false);
 
   // Reference data
   const [laboratories, setLaboratories] = useState<Hospital[]>([]);
@@ -344,8 +365,25 @@ export default function SatinAlmaPanel() {
       (snap) => {
         const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingTask[];
         setTasks(items);
+        setTasksLoading(false);
       },
-      (err) => console.error('PurchasingTasks listen error', err)
+      (err) => {
+        console.error('PurchasingTasks listen error', err);
+        setTasksLoading(false);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'purchasingTaskDefinitions'), orderBy('name', 'asc'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const defs = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingTaskDefinition[];
+        setTaskDefinitions(defs.filter((d) => d.active !== false));
+      },
+      (err) => console.error('TaskDefinitions listen error', err)
     );
     return () => unsub();
   }, []);
@@ -401,6 +439,17 @@ export default function SatinAlmaPanel() {
   // Toggle completion
   const toggleTask = useCallback(async (task: PurchasingTask) => {
     if (!currentUserProfile) return;
+    const newCompleted = !task.completed;
+    const log = createActivityLog(
+      newCompleted ? 'completed' : 'reopened',
+      newCompleted
+        ? `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`
+        : `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+      currentUserProfile
+    );
+
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: newCompleted } : t)));
+
     try {
       const newCompleted = !task.completed;
       const log = createActivityLog(
@@ -416,6 +465,7 @@ export default function SatinAlmaPanel() {
         updatedAt: Timestamp.now(),
       });
     } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: task.completed } : t)));
       console.error('Error toggling task', err);
       toast.error('Görev güncellenemedi');
     }
@@ -463,6 +513,12 @@ export default function SatinAlmaPanel() {
 
   // Delete task
   const deleteTask = useCallback(async (task: PurchasingTask) => {
+    const ok = typeof window !== 'undefined' ? window.confirm('Bu görevi silmek istediğinize emin misiniz?') : true;
+    if (!ok) return;
+
+    const prevTasks = tasks;
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+
     try {
       if (task.attachments && task.attachments.length > 0) {
         for (const att of task.attachments) {
@@ -473,20 +529,37 @@ export default function SatinAlmaPanel() {
       toast.success('Görev silindi');
       if (editingTask?.id === task.id) setEditingTask(null);
     } catch (err) {
+      setTasks(prevTasks);
       console.error('Error deleting task', err);
       toast.error('Görev silinemedi');
     }
-  }, [editingTask]);
+  }, [editingTask, tasks]);
 
   // Add task
   const handleAddTask = useCallback(
     async (data: TaskFormData) => {
       if (!currentUserProfile) return;
       try {
+        const specialDay = getSpecialDay(data.date);
+        if (specialDay?.type === 'holiday') {
+          toast.warning(`Seçilen tarih resmi tatil (${specialDay.name}). Bu güne görev oluşturulmadı.`);
+          return;
+        }
+
+        const conflicts = hasTimeConflict(tasks, { date: data.date, startTime: data.startTime, endTime: data.endTime });
+        if (conflicts.length > 0) {
+          const proceed = typeof window !== 'undefined'
+            ? window.confirm(`Aynı saat aralığında ${conflicts.length} görev var. Yine de eklemek istiyor musunuz?`)
+            : true;
+          if (!proceed) return;
+          toast.warning('Saat çakışması tespit edildi. Görev yine de eklendi.');
+        }
+
         const taskDoc: Record<string, any> = {
           title: data.title,
           description: data.description,
           taskType: data.taskType,
+          taskTypeLabel: data.taskTypeLabel || null,
           date: data.date,
           startTime: data.startTime,
           endTime: data.endTime,
@@ -505,7 +578,7 @@ export default function SatinAlmaPanel() {
           ],
         };
 
-        if (data.taskType === 'kurum_ziyareti') {
+        if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
           if (data.laboratoryId) taskDoc.laboratoryId = data.laboratoryId;
           if (data.laboratoryName) taskDoc.laboratoryName = data.laboratoryName;
           if (data.accompanyingPersonnel?.length) taskDoc.accompanyingPersonnel = data.accompanyingPersonnel;
@@ -573,7 +646,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev eklenemedi');
       }
     },
-    [currentUserProfile]
+    [currentUserProfile, tasks]
   );
 
   // Edit task
@@ -581,10 +654,24 @@ export default function SatinAlmaPanel() {
     async (data: TaskFormData) => {
       if (!editingTask) return;
       try {
+        const conflicts = hasTimeConflict(
+          tasks,
+          { date: data.date, startTime: data.startTime, endTime: data.endTime },
+          editingTask.id
+        );
+        if (conflicts.length > 0) {
+          const proceed = typeof window !== 'undefined'
+            ? window.confirm(`Aynı saat aralığında ${conflicts.length} görev var. Yine de güncellemek istiyor musunuz?`)
+            : true;
+          if (!proceed) return;
+          toast.warning('Saat çakışması tespit edildi. Görev yine de güncellendi.');
+        }
+
         const updates: Record<string, any> = {
           title: data.title,
           description: data.description,
           taskType: data.taskType,
+          taskTypeLabel: data.taskTypeLabel || null,
           date: data.date,
           startTime: data.startTime,
           endTime: data.endTime,
@@ -592,7 +679,7 @@ export default function SatinAlmaPanel() {
           updatedAt: Timestamp.now(),
         };
 
-        if (data.taskType === 'kurum_ziyareti') {
+        if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
           updates.laboratoryId = data.laboratoryId || null;
           updates.laboratoryName = data.laboratoryName || null;
           updates.accompanyingPersonnel = data.accompanyingPersonnel?.length ? data.accompanyingPersonnel : null;
@@ -641,7 +728,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev güncellenemedi');
       }
     },
-    [editingTask, currentUserProfile]
+    [editingTask, currentUserProfile, tasks]
   );
 
   // Drag & drop reorder (native HTML5 DnD)
@@ -728,16 +815,25 @@ export default function SatinAlmaPanel() {
               Merhaba, <span className={ACCENT}>{userName}</span>
             </h1>
           </div>
-          <Link
-            href="/satin-alma/tum-islemler"
-            className={cn(
-              'shrink-0 mt-1 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-all',
-              'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'
-            )}
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Tüm İşlemler</span>
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowTaskDefinitionModal(true)}
+              className="shrink-0 mt-1 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-all"
+              title="Görev tanımları"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
+            <Link
+              href="/satin-alma/tum-islemler"
+              className={cn(
+                'shrink-0 mt-1 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-all',
+                'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'
+              )}
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Tüm İşlemler</span>
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -911,6 +1007,13 @@ export default function SatinAlmaPanel() {
 
       {/* Task Views */}
       <div className="px-4 md:px-8 mt-6">
+        {tasksLoading ? (
+          <div className="flex items-center justify-center py-14 text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            Görevler yükleniyor...
+          </div>
+        ) : (
+        <>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-semibold text-muted-foreground">
             {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : 'Aylık Görev Görünümü'}
@@ -1054,6 +1157,8 @@ export default function SatinAlmaPanel() {
             </div>
           </div>
         )}
+        </>
+      )}
       </div>
 
       {/* Floating Add Button */}
@@ -1067,6 +1172,36 @@ export default function SatinAlmaPanel() {
         <Plus className="w-6 h-6" strokeWidth={2.5} />
       </button>
 
+
+      {showTaskDefinitionModal && (
+        <TaskDefinitionsModal
+          definitions={taskDefinitions}
+          onClose={() => setShowTaskDefinitionModal(false)}
+          onCreate={async (name, requiresLaboratory) => {
+            const trimmed = name.trim();
+            if (!trimmed) return;
+            const exists = taskDefinitions.some((d) => d.name.toLowerCase() === trimmed.toLowerCase());
+            if (exists) {
+              toast.error('Bu görev tanımı zaten mevcut');
+              return;
+            }
+            await addDoc(collection(db, 'purchasingTaskDefinitions'), {
+              name: trimmed,
+              requiresLaboratory,
+              active: true,
+              createdAt: Timestamp.now(),
+            });
+            toast.success('Görev tanımı eklendi');
+          }}
+          onDelete={async (id) => {
+            const ok = typeof window !== 'undefined' ? window.confirm('Görev tanımı silinsin mi?') : true;
+            if (!ok) return;
+            await deleteDoc(doc(db, 'purchasingTaskDefinitions', id));
+            toast.success('Görev tanımı silindi');
+          }}
+        />
+      )}
+
       {/* Add Modal */}
       {showAddModal && (
         <TaskFormModal
@@ -1074,6 +1209,7 @@ export default function SatinAlmaPanel() {
           defaultDate={selectedDateStr}
           laboratories={mainLaboratories}
           personnel={personnel}
+          taskDefinitions={taskDefinitions}
           onClose={() => setShowAddModal(false)}
           onSubmit={handleAddTask}
         />
@@ -1087,6 +1223,7 @@ export default function SatinAlmaPanel() {
           defaultDate={editingTask.date}
           laboratories={mainLaboratories}
           personnel={personnel}
+          taskDefinitions={taskDefinitions}
           onClose={() => setEditingTask(null)}
           onSubmit={handleEditTask}
           onDelete={() => deleteTask(editingTask)}
@@ -1118,7 +1255,7 @@ function TaskCard({
   const durationMin = parseTime(task.endTime) - parseTime(task.startTime);
   const hours = Math.floor(durationMin / 60);
   const mins = durationMin % 60;
-  const isVisit = task.taskType === 'kurum_ziyareti';
+  const isVisit = task.taskType === 'kurum_ziyareti' || !!task.laboratoryId;
   const priority = (task.priority || 'normal') as Priority;
   const priorityConf = PRIORITY_CONFIG[priority];
   const completedSubtasks = task.subtasks?.filter((s) => s.completed).length || 0;
@@ -1393,6 +1530,81 @@ function TaskCard({
   );
 }
 
+
+function TaskDefinitionsModal({
+  definitions,
+  onClose,
+  onCreate,
+  onDelete,
+}: {
+  definitions: PurchasingTaskDefinition[];
+  onClose: () => void;
+  onCreate: (name: string, requiresLaboratory: boolean) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [name, setName] = useState('');
+  const [requiresLaboratory, setRequiresLaboratory] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleCreate = async () => {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    try {
+      await onCreate(name, requiresLaboratory);
+      setName('');
+      setRequiresLaboratory(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold">Görev Tanımları</h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          {definitions.map((def) => (
+            <div key={def.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary border border-border">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-foreground truncate">{def.name}</p>
+                {def.requiresLaboratory && <p className="text-[10px] text-muted-foreground">Laboratuvar seçimi zorunlu</p>}
+              </div>
+              <button onClick={() => onDelete(def.id)} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          {definitions.length === 0 && <p className="text-xs text-muted-foreground">Henüz tanım yok.</p>}
+        </div>
+
+        <div className="space-y-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Yeni görev tanımı"
+            className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-sm outline-none"
+          />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={requiresLaboratory} onChange={(e) => setRequiresLaboratory(e.target.checked)} />
+            Bu tanım laboratuvar gerektirir (kurum ziyareti benzeri)
+          </label>
+          <button
+            onClick={handleCreate}
+            disabled={!name.trim() || saving}
+            className={cn('w-full py-2.5 rounded-xl text-sm font-semibold', name.trim() && !saving ? `${ACCENT_BG} text-zinc-900` : 'bg-secondary text-muted-foreground')}
+          >
+            Tanım Ekle
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==========================================
 // Task Form Modal (Add & Edit)
 // ==========================================
@@ -1403,6 +1615,7 @@ function TaskFormModal({
   defaultDate,
   laboratories,
   personnel,
+  taskDefinitions,
   onClose,
   onSubmit,
   onDelete,
@@ -1412,14 +1625,15 @@ function TaskFormModal({
   defaultDate: string;
   laboratories: Hospital[];
   personnel: User[];
+  taskDefinitions: PurchasingTaskDefinition[];
   onClose: () => void;
   onSubmit: (data: TaskFormData) => void;
   onDelete?: () => void;
 }) {
   const isEdit = mode === 'edit' && task;
 
-  const [taskType, setTaskType] = useState<'custom' | 'kurum_ziyareti'>(isEdit ? task.taskType || 'custom' : 'custom');
-  const [title, setTitle] = useState(isEdit ? (task.taskType === 'kurum_ziyareti' ? '' : task.title) : '');
+  const [taskType, setTaskType] = useState<string>(isEdit ? task.taskType || 'custom' : (taskDefinitions[0]?.id || 'custom'));
+  const [title, setTitle] = useState(isEdit ? ((task.taskType || 'custom') === 'kurum_ziyareti' ? '' : task.title) : '');
   const [description, setDescription] = useState(isEdit ? task.description || '' : '');
   const [date, setDate] = useState(isEdit ? task.date : defaultDate);
   const [startTime, setStartTime] = useState(isEdit ? task.startTime : '09:00');
@@ -1473,8 +1687,18 @@ function TaskFormModal({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const effectiveTitle = taskType === 'kurum_ziyareti' ? 'Kurum Ziyareti' : title;
+  const selectedDefinition = taskDefinitions.find((d) => d.id === taskType);
+  const isVisitType = taskType === 'kurum_ziyareti' || !!selectedDefinition?.requiresLaboratory;
+  const effectiveTitle = isVisitType ? (selectedDefinition?.name || 'Kurum Ziyareti') : title;
   const selectedLab = laboratories.find((l) => l.id === selectedLabId);
+
+
+  useEffect(() => {
+    if (!isVisitType) {
+      setSelectedLabId('');
+      setSelectedPersonnel([]);
+    }
+  }, [isVisitType]);
 
   const filteredLabs = useMemo(() => {
     if (!labSearchQuery.trim()) return laboratories;
@@ -1490,8 +1714,8 @@ function TaskFormModal({
 
   const timeValid = parseTime(endTime) > parseTime(startTime);
   const descriptionValid = description.trim().length > 0;
-  const titleValid = taskType === 'kurum_ziyareti' || title.trim().length > 0;
-  const labValid = taskType === 'custom' || selectedLabId !== '';
+  const titleValid = isVisitType || title.trim().length > 0;
+  const labValid = !isVisitType || selectedLabId !== '';
   const valid = titleValid && descriptionValid && timeValid && labValid;
 
   const togglePersonnel = (user: User) => {
@@ -1514,8 +1738,10 @@ function TaskFormModal({
     const selected = e.target.files;
     if (!selected) return;
     const allowed = Array.from(selected).filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf');
+    const sizeFiltered = Array.from(selected).filter((f) => f.size <= MAX_ATTACHMENT_SIZE_BYTES);
     if (allowed.length < selected.length) toast.error('Sadece resim ve PDF dosyaları yüklenebilir');
-    setFiles((prev) => [...prev, ...allowed]);
+    if (sizeFiltered.length < allowed.length) toast.error('10MB üzeri dosyalar eklenemez');
+    setFiles((prev) => [...prev, ...sizeFiltered.filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf')]);
     e.target.value = '';
   };
 
@@ -1549,11 +1775,12 @@ function TaskFormModal({
       title: effectiveTitle,
       description: description.trim(),
       taskType,
+      taskTypeLabel: selectedDefinition?.name || (taskType === 'custom' ? 'Serbest Görev' : taskType),
       date,
       startTime,
       endTime,
       priority,
-      ...(taskType === 'kurum_ziyareti' && {
+      ...(isVisitType && {
         laboratoryId: selectedLabId,
         laboratoryName: selectedLab?.name || '',
         accompanyingPersonnel: selectedPersonnel.length > 0 ? selectedPersonnel : undefined,
@@ -1610,27 +1837,24 @@ function TaskFormModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Task Type Selector */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görev Türü</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => { setTaskType('custom'); setTitle(''); setSelectedLabId(''); setSelectedPersonnel([]); }}
-                className={cn('flex-1 py-2.5 px-3 rounded-xl text-sm font-medium border transition-all', taskType === 'custom' ? cn(ACCENT_BG_SUBTLE, ACCENT_BORDER, ACCENT) : 'bg-secondary border-border text-muted-foreground hover:border-muted-foreground/40')}
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görev Tanımı</label>
+            <div className="relative">
+              <select
+                value={taskType}
+                onChange={(e) => setTaskType(e.target.value)}
+                className={cn(inputCls, 'pr-10 appearance-none')}
               >
-                Serbest Görev
-              </button>
-              <button
-                type="button"
-                onClick={() => { setTaskType('kurum_ziyareti'); setTitle('Kurum Ziyareti'); }}
-                className={cn('flex-1 py-2.5 px-3 rounded-xl text-sm font-medium border transition-all flex items-center justify-center gap-2', taskType === 'kurum_ziyareti' ? cn(ACCENT_BG_SUBTLE, ACCENT_BORDER, ACCENT) : 'bg-secondary border-border text-muted-foreground hover:border-muted-foreground/40')}
-              >
-                <Building2 className="w-4 h-4" />
-                Kurum Ziyareti
-              </button>
+                {taskDefinitions.length === 0 && <option value="custom">Serbest Görev</option>}
+                {taskDefinitions.map((def) => (
+                  <option key={def.id} value={def.id}>{def.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
+            <p className="text-[10px] text-muted-foreground mt-1">Yeni görev tanımları sol üstteki çark butonundan eklenebilir.</p>
           </div>
 
-          {/* Priority Selector */}
+{/* Priority Selector */}
           <div>
             <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Öncelik</label>
             <div className="grid grid-cols-4 gap-1.5">
@@ -1652,7 +1876,7 @@ function TaskFormModal({
           </div>
 
           {/* Title */}
-          {taskType === 'custom' ? (
+          {!isVisitType ? (
             <div>
               <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görev Adı *</label>
               <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Görev başlığı girin" className={inputCls} autoFocus />
@@ -1660,12 +1884,12 @@ function TaskFormModal({
           ) : (
             <div className={cn('flex items-center gap-2 px-4 py-3 rounded-xl border', ACCENT_BG_SUBTLE, 'border-border/50')}>
               <Building2 className={cn('w-4 h-4', ACCENT)} />
-              <span className="text-sm font-medium text-foreground">Kurum Ziyareti</span>
+              <span className="text-sm font-medium text-foreground">{selectedDefinition?.name || 'Kurum Ziyareti'}</span>
             </div>
           )}
 
           {/* Laboratory selector (kurum_ziyareti only) */}
-          {taskType === 'kurum_ziyareti' && (
+          {isVisitType && (
             <div ref={labDropdownRef} className="relative">
               <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Kurum (Laboratuvar) *</label>
               <button
@@ -1762,7 +1986,7 @@ function TaskFormModal({
           </div>
 
           {/* Accompanying Personnel (kurum_ziyareti only) */}
-          {taskType === 'kurum_ziyareti' && (
+          {isVisitType && (
             <div ref={personnelDropdownRef} className="relative">
               <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Eşlik Eden Personel</label>
               <button
