@@ -272,6 +272,7 @@ export default function SatinAlmaPanel() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
   // Reference data
   const [laboratories, setLaboratories] = useState<Hospital[]>([]);
@@ -602,6 +603,20 @@ export default function SatinAlmaPanel() {
     return eachDayOfInterval({ start: calStart, end: calEnd });
   }, [calendarMonth]);
 
+  const weekDays = useMemo(() => {
+    const start = startOfWeek(selectedDate, { weekStartsOn: 1 });
+    const end = endOfWeek(selectedDate, { weekStartsOn: 1 });
+    return eachDayOfInterval({ start, end });
+  }, [selectedDate]);
+
+  const monthDays = useMemo(() => {
+    const monthStart = startOfMonth(selectedDate);
+    const monthEnd = endOfMonth(selectedDate);
+    const calStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+    return eachDayOfInterval({ start: calStart, end: calEnd });
+  }, [selectedDate]);
+
   useEffect(() => {
     if (sliderRef.current) {
       const container = sliderRef.current;
@@ -790,42 +805,143 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
-      {/* Task List with DnD */}
+      {/* Task Views */}
       <div className="px-4 md:px-8 mt-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-muted-foreground">Görevler ({dayTasks.length})</h3>
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <h3 className="text-sm font-semibold text-muted-foreground">
+            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : 'Aylık Görev Görünümü'}
+          </h3>
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
+            {([
+              ['daily', 'Günlük'],
+              ['weekly', 'Haftalık'],
+              ['monthly', 'Aylık'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={cn('px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all', viewMode === mode ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground hover:text-foreground')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {dayTasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <CalendarIcon className="w-10 h-10 mb-3 opacity-40" />
-            <p className="text-sm">Bu güne ait görev bulunmuyor</p>
-            <button onClick={() => setShowAddModal(true)} className={cn('mt-3 text-xs hover:underline', ACCENT)}>
-              Yeni görev ekle
-            </button>
+        {viewMode === 'daily' && (
+          dayTasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <CalendarIcon className="w-10 h-10 mb-3 opacity-40" />
+              <p className="text-sm">Bu güne ait görev bulunmuyor</p>
+              <button onClick={() => setShowAddModal(true)} className={cn('mt-3 text-xs hover:underline', ACCENT)}>
+                Yeni görev ekle
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {dayTasks.map((task) => (
+                <div
+                  key={task.id}
+                  draggable
+                  onDragStart={(e) => { setDraggedTaskId(task.id); e.dataTransfer.effectAllowed = 'move'; }}
+                  onDragEnd={() => setDraggedTaskId(null)}
+                  onDragOver={(e) => handleDragOver(e, task.id)}
+                  onDrop={(e) => handleDrop(e, task.id)}
+                  className={cn(draggedTaskId === task.id && 'opacity-50')}
+                >
+                  <TaskCard
+                    task={task}
+                    onToggle={() => toggleTask(task)}
+                    onToggleSubtask={(stId) => toggleSubtask(task, stId)}
+                    onEdit={() => setEditingTask(task)}
+                    onDelete={() => deleteTask(task)}
+                    onAddComment={(message) => addTaskComment(task, message)}
+                  />
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {viewMode === 'weekly' && (
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
+            {weekDays.map((day) => {
+              const dayStr = format(day, 'yyyy-MM-dd');
+              const dayTasksForWeek = tasks
+                .filter((t) => t.date === dayStr)
+                .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+              return (
+                <div key={dayStr} className={cn('rounded-xl border p-2', isSameDay(day, selectedDate) ? `${ACCENT_BORDER} bg-card` : 'border-border bg-card')}>
+                  <button onClick={() => setSelectedDate(day)} className="w-full text-left mb-2">
+                    <p className="text-[11px] text-muted-foreground uppercase">{format(day, 'EEE', { locale: tr })}</p>
+                    <p className={cn('text-sm font-semibold', isToday(day) && ACCENT)}>{format(day, 'd MMM', { locale: tr })}</p>
+                  </button>
+                  <div className="relative h-[420px] rounded-lg bg-secondary/40 border border-border overflow-hidden">
+                    {[9, 11, 13, 15, 17].map((h) => (
+                      <div key={h} className="absolute left-0 right-0 border-t border-border/60" style={{ top: `${((h - 9) / 8) * 100}%` }} />
+                    ))}
+                    {dayTasksForWeek.map((task) => {
+                      const start = Math.max(parseTime(task.startTime), WORK_START_HOUR * 60);
+                      const end = Math.min(parseTime(task.endTime), WORK_END_HOUR * 60);
+                      if (end <= start) return null;
+                      const topPct = ((start - WORK_START_HOUR * 60) / TOTAL_WORK_MINUTES) * 100;
+                      const heightPct = ((end - start) / TOTAL_WORK_MINUTES) * 100;
+                      return (
+                        <button
+                          key={task.id}
+                          onClick={() => setEditingTask(task)}
+                          className={cn('absolute left-1 right-1 rounded-md px-2 py-1 text-left border-l-2 text-[10px] overflow-hidden', task.completed ? 'bg-muted/60 border-muted-foreground/40 text-muted-foreground' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border} text-foreground`)}
+                          style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 8)}%` }}
+                        >
+                          <p className="truncate font-medium">{task.title}</p>
+                          <p className="truncate opacity-70">{task.startTime} - {task.endTime}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ) : (
-          <div className="space-y-2">
-            {dayTasks.map((task) => (
-              <div
-                key={task.id}
-                draggable
-                onDragStart={(e) => { setDraggedTaskId(task.id); e.dataTransfer.effectAllowed = 'move'; }}
-                onDragEnd={() => setDraggedTaskId(null)}
-                onDragOver={(e) => handleDragOver(e, task.id)}
-                onDrop={(e) => handleDrop(e, task.id)}
-                className={cn(draggedTaskId === task.id && 'opacity-50')}
-              >
-                <TaskCard
-                  task={task}
-                  onToggle={() => toggleTask(task)}
-                  onToggleSubtask={(stId) => toggleSubtask(task, stId)}
-                  onEdit={() => setEditingTask(task)}
-                  onDelete={() => deleteTask(task)}
-                  onAddComment={(message) => addTaskComment(task, message)}
-                />
-              </div>
-            ))}
+        )}
+
+        {viewMode === 'monthly' && (
+          <div className="bg-card border border-border rounded-2xl p-3">
+            <div className="grid grid-cols-7 gap-1 mb-1">
+              {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((d) => (
+                <div key={d} className="text-center text-[10px] text-muted-foreground font-medium py-1">{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {monthDays.map((day) => {
+                const dayStr = format(day, 'yyyy-MM-dd');
+                const cellTasks = tasks.filter((t) => t.date === dayStr).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+                const inMonth = isSameMonth(day, selectedDate);
+                const selected = isSameDay(day, selectedDate);
+                return (
+                  <button
+                    key={dayStr}
+                    onClick={() => setSelectedDate(day)}
+                    className={cn('min-h-[110px] rounded-xl border p-1.5 text-left transition-colors', selected ? `${ACCENT_BORDER} ring-1 ${ACCENT_RING}` : 'border-border hover:bg-accent/40', !inMonth && 'opacity-40')}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={cn('text-[11px] font-semibold', isToday(day) && ACCENT)}>{format(day, 'd')}</span>
+                      {cellTasks.length > 0 && <span className="text-[9px] text-muted-foreground">{cellTasks.length} görev</span>}
+                    </div>
+                    <div className="space-y-1">
+                      {cellTasks.slice(0, 3).map((task) => (
+                        <div key={task.id} className={cn('text-[10px] rounded px-1 py-0.5 truncate border-l-2', task.completed ? 'bg-secondary text-muted-foreground border-muted-foreground/40' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border}`)}>
+                          {task.startTime} {task.title}
+                        </div>
+                      ))}
+                      {cellTasks.length > 3 && (
+                        <p className="text-[10px] text-muted-foreground">+{cellTasks.length - 3} daha</p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
