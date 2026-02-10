@@ -1,6 +1,7 @@
 'use server';
 import * as admin from 'firebase-admin';
 import { onDocumentCreated, FirestoreEvent, QueryDocumentSnapshot } from 'firebase-functions/v2/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 import * as functions from 'firebase-functions';
 import type { NotificationDoc } from './lib/notifications';
@@ -41,9 +42,176 @@ export const fanOutNotifications = onDocumentCreated(
   async (event: FirestoreEvent<QueryDocumentSnapshot | undefined, { id: string }>) => {
     const snap = event.data;
     if (!snap) return;
+    const notificationId = snap.id;
     const data = snap.data() as NotificationDoc;
-    if (!data?.targets || data.targets.length === 0) return;
-    logger.info('Notification processing started for ' + snap.id);
+
+    // Prepare log entry
+    const logEntry: Record<string, any> = {
+      notificationId,
+      type: data?.type || 'unknown',
+      channel: data?.channel || 'push',
+      title: data?.title || '',
+      targets: data?.targets || [],
+      actor: data?.actor || null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      status: 'processing',
+      tokensMatched: 0,
+      successCount: 0,
+      failureCount: 0,
+      errors: [] as string[],
+    };
+
+    try {
+      if (!data?.targets || data.targets.length === 0) {
+        logEntry.status = 'skipped';
+        logEntry.errors.push('No targets specified');
+        await db.collection('notificationLogs').add(logEntry);
+        return;
+      }
+
+      // Skip non-push channels (e.g. sms-only notifications)
+      if (data.channel && data.channel !== 'push') {
+        logEntry.status = 'skipped';
+        logEntry.errors.push(`Channel is "${data.channel}", skipping push delivery`);
+        await db.collection('notificationLogs').add(logEntry);
+        logger.info(`[fanOut] Skipping ${notificationId}: channel=${data.channel}`);
+        return;
+      }
+
+      logger.info(`[fanOut] Processing ${notificationId}, targets: ${data.targets.join(', ')}`);
+
+      // --- 1. Query pushTokens matching any of the targets ---
+      // Firestore array-contains-any supports max 30 values
+      const targetChunks = chunk(data.targets, 30);
+      const tokenMap = new Map<string, { token: string; uid: string | null }>();
+
+      for (const targetChunk of targetChunks) {
+        const tokensSnap = await db
+          .collection('pushTokens')
+          .where('membershipKeys', 'array-contains-any', targetChunk)
+          .where('enabled', '==', true)
+          .get();
+
+        for (const tokenDoc of tokensSnap.docs) {
+          const td = tokenDoc.data();
+          if (td.token && !tokenMap.has(td.token)) {
+            // Don't send notification to the actor themselves
+            if (td.uid && data.actor?.uid && td.uid === data.actor.uid) continue;
+            tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+          }
+        }
+      }
+
+      const tokens = Array.from(tokenMap.values());
+      logEntry.tokensMatched = tokens.length;
+
+      if (tokens.length === 0) {
+        logEntry.status = 'no_tokens';
+        logEntry.errors.push('No matching push tokens found for targets');
+        await db.collection('notificationLogs').add(logEntry);
+        logger.warn(`[fanOut] No tokens matched for ${notificationId}`);
+        return;
+      }
+
+      logger.info(`[fanOut] Found ${tokens.length} tokens for ${notificationId}`);
+
+      // --- 2. Build FCM message ---
+      const baseUrl = 'https://qorengine.com';
+      const fcmMessage: admin.messaging.MulticastMessage = {
+        tokens: tokens.map(t => t.token),
+        notification: {
+          title: data.title,
+          body: data.message,
+        },
+        data: {
+          notificationId,
+          type: data.type || '',
+          href: data.href || '/',
+          link: data.href ? `${baseUrl}${data.href}` : baseUrl,
+        },
+        webpush: {
+          notification: {
+            icon: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+            badge: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+            tag: notificationId,
+            requireInteraction: false,
+          },
+          fcmOptions: {
+            link: data.href ? `${baseUrl}${data.href}` : baseUrl,
+          },
+        },
+      };
+
+      // --- 3. Send via FCM (in batches of 500) ---
+      const tokenBatches = chunk(tokens.map(t => t.token), 500);
+      let totalSuccess = 0;
+      let totalFailure = 0;
+      const staleTokens: string[] = [];
+
+      for (const batch of tokenBatches) {
+        const batchMessage = { ...fcmMessage, tokens: batch };
+        const response = await admin.messaging().sendEachForMulticast(batchMessage);
+
+        totalSuccess += response.successCount;
+        totalFailure += response.failureCount;
+
+        // Collect stale/invalid tokens for cleanup
+        response.responses.forEach((resp, idx) => {
+          if (resp.error) {
+            const code = resp.error.code;
+            // These error codes indicate the token is no longer valid
+            if (
+              code === 'messaging/registration-token-not-registered' ||
+              code === 'messaging/invalid-registration-token' ||
+              code === 'messaging/invalid-argument'
+            ) {
+              staleTokens.push(batch[idx]);
+            }
+            // Log first few errors for debugging
+            if (logEntry.errors.length < 10) {
+              logEntry.errors.push(`Token ${batch[idx].slice(0, 8)}...: ${code} - ${resp.error.message}`);
+            }
+          }
+        });
+      }
+
+      logEntry.successCount = totalSuccess;
+      logEntry.failureCount = totalFailure;
+      logEntry.status = totalSuccess > 0 ? 'sent' : 'failed';
+      logEntry.staleTokensRemoved = staleTokens.length;
+
+      logger.info(`[fanOut] ${notificationId}: sent=${totalSuccess}, failed=${totalFailure}, stale=${staleTokens.length}`);
+
+      // --- 4. Cleanup stale tokens ---
+      if (staleTokens.length > 0) {
+        const cleanupBatches = chunk(staleTokens, 500);
+        for (const batch of cleanupBatches) {
+          const writeBatch = db.batch();
+          for (const token of batch) {
+            writeBatch.delete(db.collection('pushTokens').doc(token));
+            // Also try to clean from user subcollection
+            const tokenData = tokenMap.get(token);
+            if (tokenData?.uid) {
+              writeBatch.delete(db.doc(`users/${tokenData.uid}/pushTokens/${token}`));
+            }
+          }
+          await writeBatch.commit();
+        }
+        logger.info(`[fanOut] Cleaned up ${staleTokens.length} stale tokens`);
+      }
+
+    } catch (error: any) {
+      logEntry.status = 'error';
+      logEntry.errors.push(error.message || String(error));
+      logger.error(`[fanOut] Error processing ${notificationId}:`, error);
+    }
+
+    // --- 5. Write log entry ---
+    try {
+      await db.collection('notificationLogs').add(logEntry);
+    } catch (logError) {
+      logger.error(`[fanOut] Failed to write log for ${notificationId}:`, logError);
+    }
   }
 );
 
@@ -158,3 +326,57 @@ export const sendFaultReportEmail = functions
             logger.error('Mail sending failed', error);
         }
     });
+
+// --- İRSALİYE DOSYA TEMİZLEME (1 hafta sonra otomatik silme) ---
+// Her gün gece yarısı çalışır (Europe/Istanbul timezone)
+export const cleanupExpiredIrsaliyeDosyalari = onSchedule(
+    {
+        schedule: 'every day 02:00',
+        timeZone: 'Europe/Istanbul',
+        region: 'europe-west1',
+        timeoutSeconds: 120,
+        memory: '256MiB',
+    },
+    async () => {
+        const now = admin.firestore.Timestamp.now();
+        const bucket = admin.storage().bucket();
+
+        try {
+            const expiredDocs = await db
+                .collection('irsaliyeDosyalari')
+                .where('expiresAt', '<=', now)
+                .get();
+
+            if (expiredDocs.empty) {
+                logger.info('No expired invoice files found.');
+                return;
+            }
+
+            logger.info(`Found ${expiredDocs.size} expired invoice files to clean up.`);
+
+            const batches = chunk(expiredDocs.docs);
+            for (const batch of batches) {
+                const writeBatch = db.batch();
+                for (const docSnap of batch) {
+                    const data = docSnap.data();
+                    // Delete from Storage
+                    if (data.storagePath) {
+                        try {
+                            await bucket.file(data.storagePath).delete();
+                            logger.info(`Deleted storage file: ${data.storagePath}`);
+                        } catch (e) {
+                            logger.warn(`Storage file not found or already deleted: ${data.storagePath}`);
+                        }
+                    }
+                    // Delete from Firestore
+                    writeBatch.delete(docSnap.ref);
+                }
+                await writeBatch.commit();
+            }
+
+            logger.info(`Successfully cleaned up ${expiredDocs.size} expired invoice files.`);
+        } catch (error) {
+            logger.error('Error cleaning up expired invoice files:', error);
+        }
+    }
+);

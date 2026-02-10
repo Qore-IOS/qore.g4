@@ -33,6 +33,7 @@ import {
   Package,
   TrendingUp,
   ArrowLeftRight,
+  FolderOpen,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -131,6 +132,13 @@ export default function RaporlamaPanel() {
               </CardDescription>
             </div>
             <div className="flex gap-2 flex-wrap mt-4 sm:mt-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push('/dosya-yonetimi')}
+              >
+                <FolderOpen className="h-4 w-4 mr-2" /> Dosya Yönetimi
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
