@@ -15,6 +15,21 @@
         { "fieldPath": "depotId", "order": "ASCENDING" },
         { "fieldPath": "isShipped", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "pushTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "membershipKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "enabled", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notificationLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
