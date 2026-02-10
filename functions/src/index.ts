@@ -95,8 +95,6 @@ export const deliverPushNotifications = onDocumentCreated(
         for (const tokenDoc of tokensSnap.docs) {
           const td = tokenDoc.data();
           if (td.token && !tokenMap.has(td.token)) {
-            // Don't send notification to the actor themselves
-            if (td.uid && data.actor?.uid && td.uid === data.actor.uid) continue;
             tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
           }
         }
