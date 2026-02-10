@@ -533,6 +533,7 @@ export default function SatinAlmaPanel() {
   const [tasksLoading, setTasksLoading] = useState(true);
   const [taskDefinitions, setTaskDefinitions] = useState<PurchasingTaskDefinition[]>([]);
   const [showTaskDefinitionModal, setShowTaskDefinitionModal] = useState(false);
+  const [mobileMonthModalDate, setMobileMonthModalDate] = useState<Date | null>(null);
   const [myDayTaskIds, setMyDayTaskIds] = useState<string[]>([]);
   const [naturalInput, setNaturalInput] = useState('');
   const [naturalSubmitting, setNaturalSubmitting] = useState(false);
@@ -727,6 +728,21 @@ export default function SatinAlmaPanel() {
   }, [laboratories, labPools]);
 
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+
+  const handleMonthlyDayClick = useCallback((day: Date) => {
+    setSelectedDate(day);
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+      setMobileMonthModalDate(day);
+    }
+  }, []);
+
+  const mobileMonthModalTasks = useMemo(() => {
+    if (!mobileMonthModalDate) return [];
+    const dayStr = format(mobileMonthModalDate, 'yyyy-MM-dd');
+    return tasks
+      .filter((t) => t.date === dayStr)
+      .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+  }, [mobileMonthModalDate, tasks]);
 
   // Day tasks sorted by sortOrder then startTime
   const dayTasks = useMemo(() => {
@@ -1339,14 +1355,14 @@ export default function SatinAlmaPanel() {
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => setSelectedDate((d) => subDays(d, 1))}
-            className="shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
+            className="hidden md:block shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
           >
             <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </button>
 
           <div
             ref={sliderRef}
-            className="grid grid-flow-col auto-cols-[60px] md:auto-cols-[72px] gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
+            className="grid grid-flow-col auto-cols-[100%] sm:auto-cols-[70%] md:auto-cols-[72px] gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
             style={{ scrollSnapType: 'x mandatory' }}
           >
             {sliderDates.map((date) => {
@@ -1363,7 +1379,7 @@ export default function SatinAlmaPanel() {
                   onClick={() => setSelectedDate(date)}
                   style={{ scrollSnapAlign: 'center' }}
                   className={cn(
-                    'shrink-0 w-[60px] md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center justify-center rounded-2xl py-2.5 transition-all duration-200',
+                    'shrink-0 w-full md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center justify-center rounded-2xl py-3 transition-all duration-200',
                     isSelected
                       ? `${ACCENT_BG} text-zinc-900 shadow-lg shadow-[#d4ec00]/20 scale-105 z-10`
                       : today
@@ -1400,7 +1416,7 @@ export default function SatinAlmaPanel() {
 
           <button
             onClick={() => setSelectedDate((d) => addDays(d, 1))}
-            className="shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
+            className="hidden md:block shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
           >
             <ChevronRight className="w-5 h-5 text-muted-foreground" />
           </button>
@@ -1823,8 +1839,8 @@ export default function SatinAlmaPanel() {
                 return (
                   <button
                     key={dayStr}
-                    onClick={() => setSelectedDate(day)}
-                    className={cn('min-h-[110px] rounded-xl border p-1.5 text-left transition-colors', selected ? `${ACCENT_BORDER} ring-1 ${ACCENT_RING}` : 'border-border hover:bg-accent/40', !inMonth && 'opacity-40')}
+                    onClick={() => handleMonthlyDayClick(day)}
+                    className={cn('min-h-[84px] md:min-h-[110px] rounded-xl border p-1.5 text-left transition-colors', selected ? `${ACCENT_BORDER} ring-1 ${ACCENT_RING}` : 'border-border hover:bg-accent/40', !inMonth && 'opacity-40')}
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className={cn('text-[11px] font-semibold', isToday(day) && ACCENT)}>{format(day, 'd')}</span>
@@ -1854,6 +1870,46 @@ export default function SatinAlmaPanel() {
         </>
       )}
       </div>
+
+      {mobileMonthModalDate && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMonthModalDate(null)} />
+          <div className="absolute inset-x-3 bottom-4 top-20 bg-card border border-border rounded-2xl shadow-xl p-3 flex flex-col">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div>
+                <p className="text-xs text-muted-foreground">Günlük Görevler</p>
+                <h4 className="text-sm font-semibold">{format(mobileMonthModalDate, 'd MMMM EEEE', { locale: tr })}</h4>
+              </div>
+              <button
+                onClick={() => setMobileMonthModalDate(null)}
+                className="p-2 rounded-lg bg-secondary border border-border"
+                aria-label="Kapat"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="mt-3 overflow-y-auto flex-1 space-y-2">
+              {mobileMonthModalTasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Bu gün için görev bulunmuyor.</p>
+              ) : (
+                mobileMonthModalTasks.map((task) => (
+                  <button
+                    key={task.id}
+                    onClick={() => {
+                      setEditingTask(task);
+                      setMobileMonthModalDate(null);
+                    }}
+                    className="w-full text-left p-2 rounded-xl border border-border bg-secondary/40"
+                  >
+                    <p className="text-sm truncate">{task.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{task.startTime} - {task.endTime}</p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating Add Button */}
       <button
