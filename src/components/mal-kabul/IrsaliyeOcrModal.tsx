@@ -83,27 +83,18 @@ export default function IrsaliyeOcrModal({
 
   const processExtractedText = (text: string, source: 'Camera' | 'PDF') => {
     setOcrText(text);
+    console.log(`[OCR Modal] Processing ${source} text, length: ${text.length}`);
     const rawItems = parseIrsaliyeText(text, productCodes);
+    console.log(`[OCR Modal] Parser returned ${rawItems.length} items:`, rawItems);
 
     const processedItems = rawItems.map(item => {
         const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-        let finalQuantity = item.quantity || 1;
-        let note = "";
-
-        if (product && product.ambalajDegeri && product.ambalajDegeri > 1) {
-            if (finalQuantity >= product.ambalajDegeri && Number.isInteger(finalQuantity / product.ambalajDegeri)) {
-                const converted = finalQuantity / product.ambalajDegeri;
-                note = `Dönüşüm: ${finalQuantity} Adet -> ${converted} ${product.anaBirim || 'Kutu'}`;
-                finalQuantity = converted;
-            }
-        }
 
         return {
             ...item,
             productName: product?.stokAdi || "Bilinmeyen Ürün",
-            quantity: finalQuantity,
-            note: note,
-            unit: product?.anaBirim || "Adet"
+            quantity: item.quantity || 1,
+            unit: "Adet"
         };
     });
 
