@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
-import type { PurchasingTask } from '@/lib/types';
+import type { Hospital, PurchasingTask } from '@/lib/types';
 
 type AgentAction = {
   type: 'create_task' | 'update_task' | 'delete_task' | 'complete_task' | 'reopen_task' | 'add_assignee' | 'remove_assignee' | 'analyze';
@@ -15,35 +15,109 @@ type AgentPlan = {
   debug?: string;
 };
 
+const WORK_START_MIN = 9 * 60;
+const WORK_END_MIN = 17 * 60;
+
 function normalize(v?: string) {
   return (v || '').toLocaleLowerCase('tr-TR');
 }
 
-function parseRelativeDate(input: string): string | undefined {
+function formatLocalDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function addDaysLocal(base: Date, days: number): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function parseTimeToMin(v?: string): number {
+  if (!v || !/^\d{2}:\d{2}$/.test(v)) return 0;
+  const [h, m] = v.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function overlaps(startA: string, endA: string, startB: string, endB: string): boolean {
+  const a1 = parseTimeToMin(startA);
+  const a2 = parseTimeToMin(endA);
+  const b1 = parseTimeToMin(startB);
+  const b2 = parseTimeToMin(endB);
+  return a1 < b2 && b1 < a2;
+}
+
+function extractPersonName(message: string): string | undefined {
+  const withIle = message.match(/([A-ZÇĞİÖŞÜ][a-zçğıöşü]+\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+)\s+ile/u);
+  if (withIle?.[1]) return withIle[1];
+
+  const direct = message.match(/([A-ZÇĞİÖŞÜ][a-zçğıöşü]+\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+)/u);
+  return direct?.[1];
+}
+
+function parseRelativeOrAbsoluteDate(input: string): string | undefined {
   const lower = normalize(input);
   const now = new Date();
-  if (lower.includes('yarın')) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
+
+  if (lower.includes('yarından sonraki gün') || lower.includes('öbür gün')) {
+    return formatLocalDate(addDaysLocal(now, 2));
   }
-  if (lower.includes('bugün')) return now.toISOString().slice(0, 10);
+  if (lower.includes('yarın')) return formatLocalDate(addDaysLocal(now, 1));
+  if (lower.includes('bugün')) return formatLocalDate(now);
+
+  const monthMap: Record<string, number> = {
+    ocak: 0,
+    şubat: 1,
+    mart: 2,
+    nisan: 3,
+    mayıs: 4,
+    haziran: 5,
+    temmuz: 6,
+    ağustos: 7,
+    eylül: 8,
+    ekim: 9,
+    kasım: 10,
+    aralık: 11,
+  };
+
+  const m = lower.match(/(\d{1,2})\s*(ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)(?:\s*(\d{4}))?/u);
+  if (m) {
+    const day = Number(m[1]);
+    const month = monthMap[m[2]];
+    const year = m[3] ? Number(m[3]) : now.getFullYear();
+    if (month >= 0 && day >= 1 && day <= 31) {
+      return formatLocalDate(new Date(year, month, day));
+    }
+  }
+
   return undefined;
 }
 
 function extractTimeHint(input: string): string | undefined {
-  const m = input.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/);
-  if (!m) return undefined;
-  return `${m[1].padStart(2, '0')}:${m[2]}`;
+  const lower = normalize(input);
+  const direct = input.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/);
+  if (direct) return `${direct[1].padStart(2, '0')}:${direct[2]}`;
+
+  if (lower.includes('sabah')) return '09:00';
+  if (lower.includes('öğlen')) return '13:00';
+  if (lower.includes('akşam')) return '18:00';
+  return undefined;
+}
+
+function inferEndTime(startTime: string): string {
+  const [h, m] = startTime.split(':').map(Number);
+  const endH = String(Math.min(h + 1, 23)).padStart(2, '0');
+  return `${endH}:${String(m).padStart(2, '0')}`;
 }
 
 function parseJsonFromModelText(text: string): AgentPlan | null {
   const trimmed = text.trim();
-
   try {
     return JSON.parse(trimmed) as AgentPlan;
   } catch {
-    // try markdown fenced json
+    // try fallback parsing
   }
 
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -58,9 +132,8 @@ function parseJsonFromModelText(text: string): AgentPlan | null {
   const first = trimmed.indexOf('{');
   const last = trimmed.lastIndexOf('}');
   if (first >= 0 && last > first) {
-    const raw = trimmed.slice(first, last + 1);
     try {
-      return JSON.parse(raw) as AgentPlan;
+      return JSON.parse(trimmed.slice(first, last + 1)) as AgentPlan;
     } catch {
       return null;
     }
@@ -69,11 +142,28 @@ function parseJsonFromModelText(text: string): AgentPlan | null {
   return null;
 }
 
+function candidateGeminiModels(): string[] {
+  const fromEnv = [
+    process.env.GEMINI_MODEL,
+    process.env.GOOGLE_GENAI_MODEL,
+    process.env.NEXT_PUBLIC_GEMINI_MODEL,
+  ].filter(Boolean) as string[];
+
+  const defaults = [
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-001',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+  ];
+
+  return Array.from(new Set([...fromEnv, ...defaults]));
+}
+
 function matchTask(tasks: PurchasingTask[], action: AgentAction): PurchasingTask | undefined {
   if (action.taskId) return tasks.find((t) => t.id === action.taskId);
 
   const selector = normalize(action.selector || '');
-  const dateHint = parseRelativeDate(selector);
+  const dateHint = parseRelativeOrAbsoluteDate(selector);
   const timeHint = extractTimeHint(selector);
 
   let pool = [...tasks];
@@ -95,9 +185,10 @@ function matchTask(tasks: PurchasingTask[], action: AgentAction): PurchasingTask
       ].join(' '));
 
       let score = 0;
-      if (hay.includes(selector)) score += 5;
+      if (hay.includes(selector)) score += 7;
       if (selector.includes('öğlen') && t.startTime >= '12:00' && t.startTime <= '15:59') score += 3;
       if (selector.includes('sabah') && t.startTime < '12:00') score += 3;
+      if (selector.includes('akşam') && t.startTime >= '17:00') score += 3;
       return { t, score };
     })
     .sort((a, b) => b.score - a.score);
@@ -105,35 +196,43 @@ function matchTask(tasks: PurchasingTask[], action: AgentAction): PurchasingTask
   return scored[0]?.t;
 }
 
+function matchTasksByDate(tasks: PurchasingTask[], date: string): PurchasingTask[] {
+  return tasks.filter((t) => t.date === date);
+}
 
-function candidateGeminiModels(): string[] {
-  const fromEnv = [
-    process.env.GEMINI_MODEL,
-    process.env.GOOGLE_GENAI_MODEL,
-    process.env.NEXT_PUBLIC_GEMINI_MODEL,
-  ].filter(Boolean) as string[];
+function resolveHospitalFromText(message: string, hospitals: Hospital[]): Hospital | undefined {
+  const lower = normalize(message);
 
-  const defaults = [
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-001',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash',
-  ];
+  // direct contains check
+  const direct = hospitals.find((h) => normalize(h.name).includes(lower) || lower.includes(normalize(h.name)));
+  if (direct) return direct;
 
-  return Array.from(new Set([...fromEnv, ...defaults]));
+  // token overlap (for short/partial names: "Haydarpaşa" vs "Haydarpaşa Numune EAH")
+  const tokens = lower.split(/\s+/).filter((t) => t.length >= 3);
+  let best: { h: Hospital; score: number } | null = null;
+  for (const h of hospitals) {
+    const hname = normalize(h.name || '');
+    let score = 0;
+    for (const tk of tokens) {
+      if (hname.includes(tk)) score += 1;
+    }
+    if (!best || score > best.score) best = { h, score };
+  }
+
+  return best && best.score >= 1 ? best.h : undefined;
+}
+
+function hasMutationIntent(message: string): boolean {
+  const lower = normalize(message);
+  return ['ekle', 'oluştur', 'planla', 'sil', 'iptal', 'tamamla', 'yeniden aç', 'güncelle', 'değiştir', 'ata', 'çıkar']
+    .some((k) => lower.includes(k));
 }
 
 async function geminiPlan(message: string, tasks: PurchasingTask[]): Promise<AgentPlan | null> {
-  const apiKey =
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  if (!apiKey) return null;
 
-  if (!apiKey) {
-    return null;
-  }
-
-  const compactTasks = tasks.slice(0, 120).map((t) => ({
+  const compactTasks = tasks.slice(0, 160).map((t) => ({
     id: t.id,
     title: t.title,
     description: t.description,
@@ -142,59 +241,52 @@ async function geminiPlan(message: string, tasks: PurchasingTask[]): Promise<Age
     endTime: t.endTime,
     priority: t.priority,
     completed: t.completed,
+    taskType: t.taskType,
+    laboratoryName: t.laboratoryName,
     assignedPersonnel: t.assignedPersonnel || [],
   }));
 
-  const prompt = `Sen satın alma paneli görev ajanısın. Kullanıcı doğal dilde yazar, sen JSON action plan üretirsin.
-
-Sadece şu JSON'u döndür:
+  const prompt = `Sen Satın Alma paneli için görev ajanısın. Kullanıcı mesajını yorumlayıp JSON action plan döndür.
+Sadece JSON döndür:
 {
-  "reply": "kullanıcıya kısa Türkçe yanıt",
+  "reply": "kısa doğal Türkçe cevap",
   "actions": [
     {
       "type": "create_task|update_task|delete_task|complete_task|reopen_task|add_assignee|remove_assignee|analyze",
       "taskId": "opsiyonel",
-      "selector": "opsiyonel",
+      "selector": "opsiyonel doğal dil hedefi",
       "data": {}
     }
   ]
 }
 
-Kritik kurallar:
-- Kullanıcı görev eklemek istiyorsa create_task üret.
-- Zaman/değişiklik/iptal/personel ekleme gibi çoklu komutlarda actions dizisini sıralı doldur.
-- Belirsizse selector kullan ama analyze ile kaçma; mutasyon niyeti varsa mutasyon action üret.
-- Cevapta kesinlikle markdown yazma.
+Kurallar:
+- Mutasyon niyeti varsa (sil/iptal/ekle/güncelle/ata vb.) analyze dönme.
+- "yarınki bütün işleri iptal et" gibi komutlarda tek tek action üret veya delete_task içinde scope/date ver.
+- "20 şubat sabah 9 ahmet yılmazla toplantım var kurum ziyareti ..." gibi cümleleri create_task + add_assignee gibi action'lara böl.
+- Tarihleri YYYY-MM-DD, saatleri HH:mm formatında ver.
+- Tekrar: yalnızca JSON.
 
-Kullanıcı komutu: ${message}
+Kullanıcı mesajı: ${message}
 Görevler: ${JSON.stringify(compactTasks)}`;
 
   const models = candidateGeminiModels();
   let lastDebug = 'gemini_no_attempt';
 
   for (const model of models) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 1200,
-          },
-        }),
-      }
-    );
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.15, maxOutputTokens: 1400 },
+      }),
+    });
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       lastDebug = `gemini_http_${res.status}:${model}:${errText.slice(0, 180)}`;
-      // model not found / unsupported: try next candidate
-      if (res.status === 404 || res.status === 400) {
-        continue;
-      }
+      if (res.status === 400 || res.status === 404) continue;
       return { debug: lastDebug };
     }
 
@@ -217,79 +309,94 @@ Görevler: ${JSON.stringify(compactTasks)}`;
   return { debug: lastDebug };
 }
 
-function fallbackPlan(message: string, tasks: PurchasingTask[]): AgentPlan {
+function fallbackPlan(message: string, tasks: PurchasingTask[], hospitals: Hospital[]): AgentPlan {
   const lower = normalize(message);
   const actions: AgentAction[] = [];
+  const inferredDate = parseRelativeOrAbsoluteDate(message);
+  const inferredTime = extractTimeHint(message);
+  const person = extractPersonName(message);
+  const hospital = resolveHospitalFromText(message, hospitals);
 
-  // create intents
-  if ((lower.includes('ekle') || lower.includes('oluştur') || lower.includes('planla')) && (lower.includes('görev') || lower.includes('toplantı'))) {
-    const time = extractTimeHint(message) || (lower.includes('sabah') ? '10:00' : lower.includes('öğlen') ? '13:00' : '09:00');
-    const endHour = String(Math.min(parseInt(time.slice(0, 2), 10) + 1, 23)).padStart(2, '0');
+  // bulk cancellation
+  if ((lower.includes('bütün') || lower.includes('hepsini') || lower.includes('tüm')) && (lower.includes('iptal') || lower.includes('sil'))) {
+    const date = inferredDate || formatLocalDate(addDaysLocal(new Date(), 1));
+    actions.push({ type: 'delete_task', selector: message, data: { scope: 'all_on_date', date } });
+  }
+
+  // create
+  if ((lower.includes('ekle') || lower.includes('oluştur') || lower.includes('planla') || lower.includes('toplantım var')) && (lower.includes('görev') || lower.includes('toplantı') || lower.includes('ziyaret'))) {
+    const start = inferredTime || (lower.includes('sabah') ? '09:00' : lower.includes('öğlen') ? '13:00' : '09:00');
+    const date = inferredDate || formatLocalDate(new Date());
+    const isVisit = lower.includes('ziyaret') || !!hospital;
+    const title = isVisit
+      ? `${hospital?.name || 'Kurum'} Ziyareti`
+      : lower.includes('toplantı')
+        ? `${person || ''} Toplantısı`.trim() || 'Toplantı'
+        : 'Yeni Görev';
+
     actions.push({
       type: 'create_task',
       selector: message,
       data: {
-        title: lower.includes('toplantı') ? 'Toplantı' : 'Yeni Görev',
+        title,
         description: message,
-        date: parseRelativeDate(message) || new Date().toISOString().slice(0, 10),
-        startTime: time,
-        endTime: `${endHour}:${time.slice(3)}`,
+        date,
+        startTime: start,
+        endTime: inferEndTime(start),
+        taskType: isVisit ? 'kurum_ziyareti' : 'custom',
+        taskTypeLabel: isVisit ? 'Kurum Ziyareti' : 'Agent Görevi',
+        ...(hospital ? { laboratoryId: hospital.id, laboratoryName: hospital.name } : {}),
       },
     });
   }
 
-  // delete/cancel
-  if (lower.includes('iptal et') || lower.includes('sil')) {
+  // delete single
+  if (actions.length === 0 && (lower.includes('iptal et') || lower.includes('sil'))) {
     actions.push({ type: 'delete_task', selector: message });
   }
 
-  // completion
-  if (lower.includes('tamamla')) {
-    actions.push({ type: 'complete_task', selector: message });
+  // complete/reopen
+  if (lower.includes('tamamla')) actions.push({ type: 'complete_task', selector: message });
+  if (lower.includes('yeniden aç')) actions.push({ type: 'reopen_task', selector: message });
+
+  // assignee
+  if ((lower.includes('ekle') || lower.includes('ata')) && person) {
+    actions.push({ type: 'add_assignee', selector: message, data: { name: person } });
   }
-  if (lower.includes('yeniden aç')) {
-    actions.push({ type: 'reopen_task', selector: message });
+  if (lower.includes('çıkar') && person) {
+    actions.push({ type: 'remove_assignee', selector: message, data: { name: person } });
   }
 
-  // simple updates
-  if (lower.includes('güncelle') || lower.includes('değiştir')) {
-    const time = extractTimeHint(message);
-    actions.push({ type: 'update_task', selector: message, data: { ...(time ? { startTime: time } : {}) } });
-  }
+  // analysis intent
+  if (actions.length === 0 && (lower.includes('?') || lower.includes('yoğun') || lower.includes('müsait') || lower.includes('var mı'))) {
+    const date = inferredDate || formatLocalDate(new Date());
+    const dayTasks = tasks.filter((t) => t.date === date && !t.completed);
+    const totalMinutes = dayTasks.reduce((sum, t) => {
+      const start = Math.max(parseTimeToMin(t.startTime), WORK_START_MIN);
+      const end = Math.min(parseTimeToMin(t.endTime), WORK_END_MIN);
+      return end > start ? sum + (end - start) : sum;
+    }, 0);
+    const occupancy = Math.round((totalMinutes / (WORK_END_MIN - WORK_START_MIN)) * 100);
 
-  // assignee add/remove
-  const personMatch = message.match(/([A-ZÇĞİÖŞÜ][a-zçğıöşü]+\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+)/);
-  if (lower.includes('ekle') && (lower.includes('personel') || lower.includes('ata') || !!personMatch)) {
-    actions.push({
-      type: 'add_assignee',
-      selector: message,
-      data: { name: personMatch?.[1] || 'Belirtilen Personel' },
-    });
-  }
-  if (lower.includes('çıkar')) {
-    actions.push({
-      type: 'remove_assignee',
-      selector: message,
-      data: { name: personMatch?.[1] || '' },
-    });
-  }
+    const requestedTime = inferredTime || (lower.includes('saat 4') ? '16:00' : undefined);
+    let suggestion = '';
+    if (requestedTime) {
+      const proposedEnd = inferEndTime(requestedTime);
+      const hasConflict = dayTasks.some((t) => overlaps(requestedTime, proposedEnd, t.startTime, t.endTime));
+      suggestion = hasConflict
+        ? `Saat ${requestedTime} için çakışma görünüyor.`
+        : `Saat ${requestedTime} için uygun bir boşluk görünüyor.`;
+    }
 
-  // analysis / question intents
-  if (actions.length === 0 && (lower.includes('?') || lower.includes('var mı') || lower.includes('analiz'))) {
-    const date = parseRelativeDate(message);
-    const pool = date ? tasks.filter((t) => t.date === date) : tasks;
-    const open = pool.filter((t) => !t.completed).length;
-    const total = pool.length;
     return {
-      reply: `${date ? `${date} için` : 'Genel'} toplam ${total} görev var, ${open} tanesi açık görünüyor. İstersen bunu saat/öncelik bazında da yorumlayabilirim.`,
+      reply: `${date} için ${dayTasks.length} açık görev var, doluluk yaklaşık %${occupancy}. ${suggestion}`.trim(),
       actions: [{ type: 'analyze' }],
     };
   }
 
   if (actions.length === 0) {
     return {
-      reply:
-        'Komutu işleyemedim. Örn: “yarın 10:00 toplantı ekle”, “yarın öğlen görevini sil”, “bu göreve Ahmet Yılmaz ekle”.',
+      reply: 'Komutu işleyemedim. Örn: “yarınki bütün işleri iptal et”, “20 Şubat sabah 09:00 Ahmet Yılmaz ile toplantı ekle”.',
       actions: [{ type: 'analyze' }],
     };
   }
@@ -318,11 +425,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Mesaj boş olamaz' }, { status: 400 });
     }
 
-    const snap = await adminDb.collection('purchasingTasks').orderBy('date', 'asc').get();
-    const tasks = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PurchasingTask, 'id'>) })) as PurchasingTask[];
+    const [taskSnap, hospitalSnap] = await Promise.all([
+      adminDb.collection('purchasingTasks').orderBy('date', 'asc').get(),
+      adminDb.collection('hospitals').get(),
+    ]);
+
+    const tasks = taskSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PurchasingTask, 'id'>) })) as PurchasingTask[];
+    const hospitals = hospitalSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Hospital, 'id'>) })) as Hospital[];
 
     const gemini = await geminiPlan(message, tasks);
-    const planned = gemini?.actions && gemini.actions.length > 0 ? gemini : fallbackPlan(message, tasks);
+    const geminiHasActions = !!(gemini?.actions && gemini.actions.length > 0);
+    const geminiIsAnalyzeOnly = geminiHasActions && gemini!.actions!.every((a) => a.type === 'analyze');
+
+    const planned = geminiHasActions && !(geminiIsAnalyzeOnly && hasMutationIntent(message))
+      ? gemini!
+      : fallbackPlan(message, tasks, hospitals);
+
     const actions = planned.actions || [];
 
     let actionsApplied = 0;
@@ -331,19 +449,29 @@ export async function POST(req: NextRequest) {
     for (const action of actions) {
       if (action.type === 'analyze') continue;
 
+      if (action.type === 'delete_task' && action.data?.scope === 'all_on_date' && action.data?.date) {
+        const targets = matchTasksByDate(tasks, action.data.date);
+        for (const t of targets) {
+          await adminDb.collection('purchasingTasks').doc(t.id).delete();
+          actionsApplied += 1;
+        }
+        actionNotes.push(`${action.data.date} tarihindeki ${targets.length} görev silindi`);
+        continue;
+      }
+
       const target = matchTask(tasks, action);
 
       if (action.type === 'create_task') {
-        const date = action.data?.date || parseRelativeDate(message) || new Date().toISOString().slice(0, 10);
+        const date = action.data?.date || parseRelativeOrAbsoluteDate(message) || formatLocalDate(new Date());
         const startTime = action.data?.startTime || extractTimeHint(message) || '09:00';
-        const endTime = action.data?.endTime || '10:00';
+        const endTime = action.data?.endTime || inferEndTime(startTime);
         const title = action.data?.title || action.data?.taskTitle || 'Agent Görevi';
 
         await adminDb.collection('purchasingTasks').add({
           title,
           description: action.data?.description || message,
-          taskType: 'custom',
-          taskTypeLabel: 'Agent Görevi',
+          taskType: action.data?.taskType || 'custom',
+          taskTypeLabel: action.data?.taskTypeLabel || 'Agent Görevi',
           date,
           startTime,
           endTime,
@@ -353,6 +481,8 @@ export async function POST(req: NextRequest) {
           updatedAt: new Date(),
           createdByUid: userUid || 'agent',
           createdByName: userName || 'Satın Alma Agent',
+          ...(action.data?.laboratoryId ? { laboratoryId: action.data.laboratoryId } : {}),
+          ...(action.data?.laboratoryName ? { laboratoryName: action.data.laboratoryName } : {}),
           activityLogs: [activityLog('created', 'Agent tarafından oluşturuldu', userUid, userName)],
         });
         actionsApplied += 1;
@@ -381,12 +511,7 @@ export async function POST(req: NextRequest) {
           updatedAt: new Date(),
           activityLogs: [
             ...((target.activityLogs || []) as any[]),
-            activityLog(
-              nextCompleted ? 'completed' : 'reopened',
-              nextCompleted ? 'Agent görevi tamamladı' : 'Agent görevi yeniden açtı',
-              userUid,
-              userName
-            ),
+            activityLog(nextCompleted ? 'completed' : 'reopened', nextCompleted ? 'Agent görevi tamamladı' : 'Agent görevi yeniden açtı', userUid, userName),
           ],
         });
         actionsApplied += 1;
