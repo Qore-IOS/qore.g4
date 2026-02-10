@@ -1173,12 +1173,12 @@ export interface PurchasingTask {
   accompanyingPersonnel?: { uid: string; name: string }[];
   // File attachments
   attachments?: PurchasingTaskAttachment[];
-  // Task followers / assignees
-  assignedPersonnel?: { uid: string; name: string }[];
-  // Notes & comments for collaboration
+  // Multi-user assignment
+  assignedTo?: PurchasingTaskAssignee[];
+  // Comments / notes
   comments?: PurchasingTaskComment[];
-  // Immutable task activity history
-  activityLogs?: PurchasingTaskActivityLog[];
+  // Activity log
+  activities?: PurchasingTaskActivity[];
 }
 
 export interface PurchasingSubtask {
@@ -1203,28 +1203,24 @@ export interface PurchasingTaskAttachment {
   storagePath: string;
 }
 
+export interface PurchasingTaskAssignee {
+  uid: string;
+  name: string;
+}
+
 export interface PurchasingTaskComment {
   id: string;
-  message: string;
-  createdAt: TimestampLike;
-  createdByUid: string;
-  createdByName: string;
+  userId: string;
+  userName: string;
+  text: string;
+  createdAt: string;           // ISO datetime string
 }
 
-export interface PurchasingTaskActivityLog {
+export interface PurchasingTaskActivity {
   id: string;
-  action: string;
-  message: string;
-  createdAt: TimestampLike;
-  createdByUid: string;
-  createdByName: string;
-}
-
-
-export interface PurchasingTaskDefinition {
-  id: string;
-  name: string;
-  requiresLaboratory?: boolean;
-  active?: boolean;
-  createdAt?: TimestampLike;
+  action: string;              // e.g. 'created', 'updated', 'completed', 'comment_added'
+  userId: string;
+  userName: string;
+  details?: string;            // human-readable change description
+  createdAt: string;           // ISO datetime string
 }
