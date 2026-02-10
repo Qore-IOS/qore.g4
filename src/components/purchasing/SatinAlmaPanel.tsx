@@ -27,7 +27,8 @@ import type {
   PurchasingSubtask,
   PurchasingTaskRecurrence,
   PurchasingTaskComment,
-  PurchasingTaskActivity,
+  PurchasingTaskActivityLog,
+  PurchasingTaskDefinition,
   Hospital,
   LabPool,
   User,
@@ -66,9 +67,7 @@ import {
   CheckSquare,
   MessageSquare,
   Send,
-  UserPlus,
-  History,
-  AtSign,
+  Settings,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -91,6 +90,7 @@ import {
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import PurchasingAgentChat from '@/components/purchasing/PurchasingAgentChat';
 
 // ==========================================
 // Helper: Occupancy calculation (9-5, 8 hours)
@@ -403,7 +403,7 @@ interface TaskFormData {
   laboratoryId?: string;
   laboratoryName?: string;
   accompanyingPersonnel?: { uid: string; name: string }[];
-  assignedTo?: { uid: string; name: string }[];
+  assignedPersonnel?: { uid: string; name: string }[];
   files?: File[];
   existingAttachments?: PurchasingTaskAttachment[];
   removedAttachments?: PurchasingTaskAttachment[];
@@ -411,8 +411,107 @@ interface TaskFormData {
   recurring?: PurchasingTaskRecurrence;
 }
 
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+
+function nextWeekdayDate(targetWeekday: number): Date {
+  const today = new Date();
+  const current = today.getDay(); // 0..6 Sun..Sat
+  const delta = (targetWeekday - current + 7) % 7 || 7;
+  const d = new Date(today);
+  d.setDate(today.getDate() + delta);
+  return d;
+}
+
+function parseNaturalTaskInput(
+  input: string,
+  labs: Hospital[]
+): {
+  title: string;
+  description: string;
+  taskType: string;
+  taskTypeLabel?: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  priority: Priority;
+  laboratoryId?: string;
+  laboratoryName?: string;
+  recurring?: PurchasingTaskRecurrence;
+} {
+  const raw = input.trim();
+  const lower = raw.toLowerCase('tr-TR');
+  const now = new Date();
+
+  let date = format(now, 'yyyy-MM-dd');
+  if (lower.includes('yarın')) date = format(addDays(now, 1), 'yyyy-MM-dd');
+  else if (lower.includes('gelecek hafta')) date = format(addWeeks(now, 1), 'yyyy-MM-dd');
+
+  const weekdays: Record<string, number> = {
+    pazar: 0,
+    pazartesi: 1,
+    salı: 2,
+    çarşamba: 3,
+    perşembe: 4,
+    cuma: 5,
+    cumartesi: 6,
+  };
+
+  let recurring: PurchasingTaskRecurrence | undefined;
+  for (const [name, idx] of Object.entries(weekdays)) {
+    if (lower.includes(`her ${name}`)) {
+      date = format(nextWeekdayDate(idx), 'yyyy-MM-dd');
+      recurring = { type: 'weekly', interval: 1, daysOfWeek: [idx] };
+      break;
+    }
+  }
+  if (lower.includes('her ay')) recurring = { type: 'monthly', interval: 1 };
+
+  const rangeMatch = raw.match(/(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/);
+  const singleMatch = raw.match(/saat\s*(\d{1,2})(?::(\d{2}))?/i) || raw.match(/(\d{1,2}):(\d{2})/);
+
+  let startTime = '09:00';
+  let endTime = '10:00';
+  if (rangeMatch) {
+    const sh = parseInt(rangeMatch[1]);
+    const sm = parseInt(rangeMatch[2] || '0');
+    const eh = parseInt(rangeMatch[3]);
+    const em = parseInt(rangeMatch[4] || '0');
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+  } else if (singleMatch) {
+    const sh = parseInt(singleMatch[1]);
+    const sm = parseInt(singleMatch[2] || '0');
+    const eh = Math.min(sh + 1, 23);
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+  }
+
+  let priority: Priority = 'normal';
+  if (lower.includes('#acil')) priority = 'urgent';
+  else if (lower.includes('#önemli')) priority = 'high';
+
+  const matchedLab = labs.find((l) => lower.includes((l.name || '').toLowerCase('tr-TR')));
+  const isVisit = !!matchedLab || lower.includes('ziyaret');
+
+  const cleanTitle = raw
+    .replace(/#\S+/g, '')
+    .replace(/yarın|bugün|gelecek hafta/gi, '')
+    .replace(/her\s+(pazar|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|ay)/gi, '')
+    .replace(/saat\s*\d{1,2}(:\d{2})?/gi, '')
+    .replace(/\d{1,2}(:\d{2})?\s*[-–]\s*\d{1,2}(:\d{2})?/g, '')
+    .trim();
+
+  return {
+    title: isVisit ? (matchedLab?.name ? `${matchedLab.name} Ziyareti` : 'Kurum Ziyareti') : (cleanTitle || 'Yeni Görev'),
+    description: raw,
+    taskType: isVisit ? 'kurum_ziyareti' : 'custom',
+    taskTypeLabel: isVisit ? 'Kurum Ziyareti' : 'Serbest Görev',
+    date,
+    startTime,
+    endTime,
+    priority,
+    ...(matchedLab && { laboratoryId: matchedLab.id, laboratoryName: matchedLab.name }),
+    ...(recurring && { recurring }),
+  };
 }
 
 // ==========================================
@@ -633,17 +732,62 @@ export default function SatinAlmaPanel() {
 
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
 
-  // Filter tasks visible to current user (creator or assigned)
-  const myTasks = useMemo(() => {
-    if (!currentUserProfile) return tasks;
-    const uid = currentUserProfile.uid;
-    return tasks.filter((t) =>
-      t.createdByUid === uid ||
-      t.assignedTo?.some((a) => a.uid === uid) ||
-      // Show all tasks if no assignedTo (backwards compat)
-      !t.assignedTo || t.assignedTo.length === 0
-    );
-  }, [tasks, currentUserProfile]);
+  const normalizedSearchQuery = useMemo(() => globalSearchQuery.trim().toLocaleLowerCase('tr-TR'), [globalSearchQuery]);
+
+  const globalSearchResults = useMemo(() => {
+    if (!normalizedSearchQuery) return [] as PurchasingTask[];
+
+    return tasks
+      .filter((task) => {
+        const attachmentNames = (task.attachments || []).map((a) => a.name || '').join(' ');
+        const assignedNames = (task.assignedPersonnel || []).map((p) => p.name || '').join(' ');
+        const accompanyingNames = (task.accompanyingPersonnel || []).map((p) => p.name || '').join(' ');
+        const fields = [
+          task.date,
+          task.title,
+          task.description || '',
+          task.priority || '',
+          task.laboratoryName || '',
+          task.createdByName || '',
+          attachmentNames,
+          assignedNames,
+          accompanyingNames,
+        ]
+          .join(' ')
+          .toLocaleLowerCase('tr-TR');
+
+        return fields.includes(normalizedSearchQuery);
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date > b.date ? 1 : -1;
+        return parseTime(a.startTime) - parseTime(b.startTime);
+      });
+  }, [normalizedSearchQuery, tasks]);
+
+  const groupedSearchResults = useMemo(() => {
+    const grouped = new Map<string, PurchasingTask[]>();
+    for (const task of globalSearchResults) {
+      const arr = grouped.get(task.date) || [];
+      arr.push(task);
+      grouped.set(task.date, arr);
+    }
+    return Array.from(grouped.entries()).sort((a, b) => (a[0] > b[0] ? 1 : -1));
+  }, [globalSearchResults]);
+
+  const handleMonthlyDayClick = useCallback((day: Date) => {
+    setSelectedDate(day);
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+      setMobileMonthModalDate(day);
+    }
+  }, []);
+
+  const mobileMonthModalTasks = useMemo(() => {
+    if (!mobileMonthModalDate) return [];
+    const dayStr = format(mobileMonthModalDate, 'yyyy-MM-dd');
+    return tasks
+      .filter((t) => t.date === dayStr)
+      .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+  }, [mobileMonthModalDate, tasks]);
 
   // Day tasks sorted by sortOrder then startTime
   const dayTasks = useMemo(() => {
@@ -659,15 +803,17 @@ export default function SatinAlmaPanel() {
   // Toggle completion
   const toggleTask = useCallback(async (task: PurchasingTask) => {
     if (!currentUserProfile) return;
-    const newStatus = !task.completed;
-    const activity: PurchasingTaskActivity = {
-      id: generateId(),
-      action: newStatus ? 'completed' : 'reopened',
-      userId: currentUserProfile.uid,
-      userName: currentUserProfile.name || '',
-      details: newStatus ? 'Görev tamamlandı' : 'Görev yeniden açıldı',
-      createdAt: new Date().toISOString(),
-    };
+    const newCompleted = !task.completed;
+    const log = createActivityLog(
+      newCompleted ? 'completed' : 'reopened',
+      newCompleted
+        ? `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`
+        : `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+      currentUserProfile
+    );
+
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: newCompleted } : t)));
+
     try {
       const newCompleted = !task.completed;
       const log = createActivityLog(
@@ -678,7 +824,8 @@ export default function SatinAlmaPanel() {
         currentUserProfile
       );
       await updateDoc(doc(db, 'purchasingTasks', task.id), {
-        completed: newStatus,
+        completed: newCompleted,
+        activityLogs: arrayUnion(log),
         updatedAt: Timestamp.now(),
         activities: [...(task.activities || []), activity],
       });
@@ -688,6 +835,52 @@ export default function SatinAlmaPanel() {
       toast.error('Görev güncellenemedi');
     }
   }, [currentUserProfile]);
+
+
+  const postponeTaskToTomorrow = useCallback(async (task: PurchasingTask) => {
+    const tomorrow = format(addDays(parseISO(task.date), 1), 'yyyy-MM-dd');
+    const prevDate = task.date;
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, date: tomorrow } : t)));
+    try {
+      const log = currentUserProfile
+        ? createActivityLog('postponed', `Görev ertelendi (${prevDate} -> ${tomorrow})`, currentUserProfile)
+        : null;
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        date: tomorrow,
+        ...(log ? { activityLogs: arrayUnion(log) } : {}),
+        updatedAt: Timestamp.now(),
+      });
+      toast.success('Görev yarına ertelendi');
+    } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, date: prevDate } : t)));
+      console.error('Error postponing task', err);
+      toast.error('Görev ertelenemedi');
+    }
+  }, [currentUserProfile]);
+
+  const moveTaskTime = useCallback(async (task: PurchasingTask, date: string, startHour: number) => {
+    const duration = parseTime(task.endTime) - parseTime(task.startTime);
+    const startMin = Math.max(WORK_START_HOUR * 60, startHour * 60);
+    const endMin = Math.min(WORK_END_HOUR * 60, startMin + duration);
+    const safeStart = `${Math.floor(startMin / 60).toString().padStart(2, '0')}:${(startMin % 60).toString().padStart(2, '0')}`;
+    const safeEnd = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`;
+    const prev = { date: task.date, startTime: task.startTime, endTime: task.endTime };
+
+    setTasks((prevTasks) => prevTasks.map((t) => (t.id === task.id ? { ...t, date, startTime: safeStart, endTime: safeEnd } : t)));
+
+    try {
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        date,
+        startTime: safeStart,
+        endTime: safeEnd,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (err) {
+      setTasks((prevTasks) => prevTasks.map((t) => (t.id === task.id ? { ...t, ...prev } : t)));
+      console.error('Error moving task in timeline', err);
+      toast.error('Görev zamanı güncellenemedi');
+    }
+  }, []);
 
   // Toggle subtask
   const toggleSubtask = useCallback(async (task: PurchasingTask, subtaskId: string) => {
@@ -765,14 +958,20 @@ export default function SatinAlmaPanel() {
     async (data: TaskFormData) => {
       if (!currentUserProfile) return;
       try {
-        const createdActivity: PurchasingTaskActivity = {
-          id: generateId(),
-          action: 'created',
-          userId: currentUserProfile.uid,
-          userName: currentUserProfile.name || '',
-          details: 'Görev oluşturuldu',
-          createdAt: new Date().toISOString(),
-        };
+        const specialDay = getSpecialDay(data.date);
+        if (specialDay?.type === 'holiday') {
+          toast.warning(`Seçilen tarih resmi tatil (${specialDay.name}). Bu güne görev oluşturulmadı.`);
+          return;
+        }
+
+        const conflicts = hasTimeConflict(tasks, { date: data.date, startTime: data.startTime, endTime: data.endTime });
+        if (conflicts.length > 0) {
+          const proceed = typeof window !== 'undefined'
+            ? window.confirm(`Aynı saat aralığında ${conflicts.length} görev var. Yine de eklemek istiyor musunuz?`)
+            : true;
+          if (!proceed) return;
+          toast.warning('Saat çakışması tespit edildi. Görev yine de eklendi.');
+        }
 
         const taskDoc: Record<string, any> = {
           title: data.title,
@@ -789,23 +988,16 @@ export default function SatinAlmaPanel() {
           createdByName: currentUserProfile.name || '',
           updatedAt: Timestamp.now(),
           sortOrder: Date.now(),
-          activities: [createdActivity],
+          activityLogs: [
+            createActivityLog(
+              'created',
+              `Görev oluşturuldu (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+              currentUserProfile
+            ),
+          ],
         };
 
-        if (data.assignedTo?.length) {
-          taskDoc.assignedTo = data.assignedTo;
-          const names = data.assignedTo.map((a) => a.name).join(', ');
-          taskDoc.activities.push({
-            id: generateId(),
-            action: 'assigned',
-            userId: currentUserProfile.uid,
-            userName: currentUserProfile.name || '',
-            details: `Atanan kişiler: ${names}`,
-            createdAt: new Date().toISOString(),
-          });
-        }
-
-        if (data.taskType === 'kurum_ziyareti') {
+        if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
           if (data.laboratoryId) taskDoc.laboratoryId = data.laboratoryId;
           if (data.laboratoryName) taskDoc.laboratoryName = data.laboratoryName;
           if (data.accompanyingPersonnel?.length) taskDoc.accompanyingPersonnel = data.accompanyingPersonnel;
@@ -889,73 +1081,22 @@ export default function SatinAlmaPanel() {
     [currentUserProfile, tasks, enqueueMutation]
   );
 
-  // Add comment to a task
-  const handleAddComment = useCallback(
-    async (task: PurchasingTask, text: string) => {
-      if (!currentUserProfile || !text.trim()) return;
-      const comment: PurchasingTaskComment = {
-        id: generateId(),
-        userId: currentUserProfile.uid,
-        userName: currentUserProfile.name || '',
-        text: text.trim(),
-        createdAt: new Date().toISOString(),
-      };
-      const activity: PurchasingTaskActivity = {
-        id: generateId(),
-        action: 'comment_added',
-        userId: currentUserProfile.uid,
-        userName: currentUserProfile.name || '',
-        details: `Yorum ekledi: "${text.trim().substring(0, 60)}${text.trim().length > 60 ? '...' : ''}"`,
-        createdAt: new Date().toISOString(),
-      };
-      try {
-        await updateDoc(doc(db, 'purchasingTasks', task.id), {
-          comments: [...(task.comments || []), comment],
-          activities: [...(task.activities || []), activity],
-          updatedAt: Timestamp.now(),
-        });
-        toast.success('Yorum eklendi');
-      } catch (err) {
-        console.error('Error adding comment', err);
-        toast.error('Yorum eklenemedi');
-      }
-    },
-    [currentUserProfile]
-  );
-
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
       if (!editingTask || !currentUserProfile) return;
       try {
-        const activities = [...(editingTask.activities || [])];
-
-        // Track changes for activity log
-        const changes: string[] = [];
-        if (editingTask.title !== data.title) changes.push(`Başlık: "${editingTask.title}" → "${data.title}"`);
-        if (editingTask.startTime !== data.startTime || editingTask.endTime !== data.endTime) {
-          changes.push(`Saat: ${editingTask.startTime}-${editingTask.endTime} → ${data.startTime}-${data.endTime}`);
-        }
-        if (editingTask.date !== data.date) changes.push(`Tarih: ${editingTask.date} → ${data.date}`);
-        if ((editingTask.priority || 'normal') !== data.priority) changes.push(`Öncelik değiştirildi: ${data.priority}`);
-
-        // Track assignedTo changes
-        const oldAssigned = (editingTask.assignedTo || []).map((a) => a.uid).sort().join(',');
-        const newAssigned = (data.assignedTo || []).map((a) => a.uid).sort().join(',');
-        if (oldAssigned !== newAssigned) {
-          const names = (data.assignedTo || []).map((a) => a.name).join(', ') || 'Kimse';
-          changes.push(`Atanan kişiler: ${names}`);
-        }
-
-        if (changes.length > 0) {
-          activities.push({
-            id: generateId(),
-            action: 'updated',
-            userId: currentUserProfile.uid,
-            userName: currentUserProfile.name || '',
-            details: changes.join(' | '),
-            createdAt: new Date().toISOString(),
-          });
+        const conflicts = hasTimeConflict(
+          tasks,
+          { date: data.date, startTime: data.startTime, endTime: data.endTime },
+          editingTask.id
+        );
+        if (conflicts.length > 0) {
+          const proceed = typeof window !== 'undefined'
+            ? window.confirm(`Aynı saat aralığında ${conflicts.length} görev var. Yine de güncellemek istiyor musunuz?`)
+            : true;
+          if (!proceed) return;
+          toast.warning('Saat çakışması tespit edildi. Görev yine de güncellendi.');
         }
 
         const updates: Record<string, any> = {
@@ -1032,7 +1173,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev güncellenemedi');
       }
     },
-    [editingTask, currentUserProfile]
+    [editingTask, currentUserProfile, tasks, enqueueMutation]
   );
 
   // Drag & drop reorder (native HTML5 DnD)
@@ -1333,8 +1474,9 @@ export default function SatinAlmaPanel() {
               const dateStr = format(date, 'yyyy-MM-dd');
               const isSelected = isSameDay(date, selectedDate);
               const today = isToday(date);
-              const occupancy = getOccupancyForDay(myTasks, dateStr);
-              const dayTaskCount = myTasks.filter((t) => t.date === dateStr).length;
+              const occupancy = getOccupancyForDay(tasks, dateStr);
+              const dayTaskCount = tasks.filter((t) => t.date === dateStr).length;
+              const specialDay = getSpecialDay(dateStr);
 
               return (
                 <button
@@ -1428,8 +1570,9 @@ export default function SatinAlmaPanel() {
                 const isSelected = isSameDay(day, selectedDate);
                 const today = isToday(day);
                 const inMonth = isSameMonth(day, calendarMonth);
-                const occupancy = getOccupancyForDay(myTasks, dayStr);
-                const hasTasks = myTasks.some((t) => t.date === dayStr);
+                const occupancy = getOccupancyForDay(tasks, dayStr);
+                const hasTasks = tasks.some((t) => t.date === dayStr);
+                const specialDay = getSpecialDay(dayStr);
                 return (
                   <button
                     key={dayStr}
@@ -1529,15 +1672,8 @@ export default function SatinAlmaPanel() {
                 onClick={() => setViewMode(mode)}
                 className={cn('px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all', viewMode === mode ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground hover:text-foreground')}
               >
-                <TaskCard
-                  task={task}
-                  onToggle={() => toggleTask(task)}
-                  onToggleSubtask={(stId) => toggleSubtask(task, stId)}
-                  onOpenDetail={() => setDetailTask(task)}
-                  onEdit={() => setEditingTask(task)}
-                  onDelete={() => deleteTask(task)}
-                />
-              </div>
+                {label}
+              </button>
             ))}
           </div>
         </div>
@@ -1879,6 +2015,11 @@ export default function SatinAlmaPanel() {
           </div>
         </div>
       )}
+
+      <PurchasingAgentChat
+        userUid={currentUserProfile?.uid}
+        userName={currentUserProfile?.name || currentUserProfile?.email || 'Kullanıcı'}
+      />
 
       {/* Floating Add Button */}
       <button
