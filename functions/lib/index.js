@@ -125,11 +125,57 @@ exports.onNotificationCreated = functions
             firebase_functions_1.logger.warn(`[fanOut] No tokens matched for ${notificationId}`);
             return;
         }
-        firebase_functions_1.logger.info(`[fanOut] Found ${tokens.length} tokens for ${notificationId}`);
+        // --- 2. Filter tokens by user notification preferences ---
+        const notificationType = data.type || '';
+        const uniqueUids = new Set(tokens.map(t => t.uid).filter((uid) => !!uid));
+        const userPrefsMap = new Map();
+        // Batch-fetch user profiles (max 30 per getAll call)
+        const uidArr = Array.from(uniqueUids);
+        const uidBatches = chunk(uidArr, 30);
+        for (const uidBatch of uidBatches) {
+            const refs = uidBatch.map(uid => db.collection('users').doc(uid));
+            const docs = await db.getAll(...refs);
+            for (const userDoc of docs) {
+                if (userDoc.exists) {
+                    const ud = userDoc.data();
+                    userPrefsMap.set(userDoc.id, {
+                        enabled: ud.notificationsEnabled !== false,
+                        prefs: ud.notificationPreferences || [], // empty = all allowed
+                    });
+                }
+            }
+        }
+        // Filter: remove tokens for users who disabled notifications or excluded this type
+        const filteredTokens = tokens.filter(t => {
+            if (!t.uid)
+                return true; // No uid = allow (anonymous token)
+            const prefs = userPrefsMap.get(t.uid);
+            if (!prefs)
+                return true; // No user doc found = allow
+            // User explicitly disabled all notifications
+            if (!prefs.enabled)
+                return false;
+            // If user has specific preferences set, check if this type is included
+            // Empty prefs array = no preferences set = allow all (for backwards compatibility)
+            if (prefs.prefs.length > 0 && notificationType !== 'custom' && !prefs.prefs.includes(notificationType)) {
+                return false;
+            }
+            return true;
+        });
+        logEntry.tokensAfterPrefs = filteredTokens.length;
+        logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
+        if (filteredTokens.length === 0) {
+            logEntry.status = 'filtered_by_prefs';
+            logEntry.errors.push('All tokens filtered out by user notification preferences');
+            await db.collection('notificationLogs').add(logEntry);
+            firebase_functions_1.logger.info(`[fanOut] All ${tokens.length} tokens filtered by preferences for ${notificationId}`);
+            return;
+        }
+        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
         // --- 2. Build FCM message ---
         const baseUrl = 'https://qorengine.com';
         const fcmMessage = {
-            tokens: tokens.map(t => t.token),
+            tokens: filteredTokens.map(t => t.token),
             notification: {
                 title: data.title,
                 body: data.message,
@@ -153,7 +199,7 @@ exports.onNotificationCreated = functions
             },
         };
         // --- 3. Send via FCM (in batches of 500) ---
-        const tokenBatches = chunk(tokens.map(t => t.token), 500);
+        const tokenBatches = chunk(filteredTokens.map(t => t.token), 500);
         let totalSuccess = 0;
         let totalFailure = 0;
         const staleTokens = [];
