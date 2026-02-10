@@ -497,6 +497,14 @@ export default function SatinAlmaPanel() {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: newCompleted } : t)));
 
     try {
+      const newCompleted = !task.completed;
+      const log = createActivityLog(
+        newCompleted ? 'completed' : 'reopened',
+        newCompleted
+          ? `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`
+          : `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+        currentUserProfile
+      );
       await updateDoc(doc(db, 'purchasingTasks', task.id), {
         completed: newCompleted,
         activityLogs: arrayUnion(log),
