@@ -105,6 +105,24 @@ function matchTask(tasks: PurchasingTask[], action: AgentAction): PurchasingTask
   return scored[0]?.t;
 }
 
+
+function candidateGeminiModels(): string[] {
+  const fromEnv = [
+    process.env.GEMINI_MODEL,
+    process.env.GOOGLE_GENAI_MODEL,
+    process.env.NEXT_PUBLIC_GEMINI_MODEL,
+  ].filter(Boolean) as string[];
+
+  const defaults = [
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-001',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+  ];
+
+  return Array.from(new Set([...fromEnv, ...defaults]));
+}
+
 async function geminiPlan(message: string, tasks: PurchasingTask[]): Promise<AgentPlan | null> {
   const apiKey =
     process.env.GEMINI_API_KEY ||
@@ -151,36 +169,52 @@ Kritik kurallar:
 Kullanıcı komutu: ${message}
 Görevler: ${JSON.stringify(compactTasks)}`;
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 1200,
-        },
-      }),
+  const models = candidateGeminiModels();
+  let lastDebug = 'gemini_no_attempt';
+
+  for (const model of models) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 1200,
+          },
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      lastDebug = `gemini_http_${res.status}:${model}:${errText.slice(0, 180)}`;
+      // model not found / unsupported: try next candidate
+      if (res.status === 404 || res.status === 400) {
+        continue;
+      }
+      return { debug: lastDebug };
     }
-  );
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    return { debug: `gemini_http_${res.status}:${errText.slice(0, 180)}` };
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      lastDebug = `gemini_empty_response:${model}`;
+      continue;
+    }
+
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed) {
+      lastDebug = `gemini_parse_failed:${model}:${text.slice(0, 180)}`;
+      continue;
+    }
+
+    return parsed;
   }
 
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) return { debug: 'gemini_empty_response' };
-
-  const parsed = parseJsonFromModelText(text);
-  if (!parsed) {
-    return { debug: `gemini_parse_failed:${text.slice(0, 180)}` };
-  }
-
-  return parsed;
+  return { debug: lastDebug };
 }
 
 function fallbackPlan(message: string, tasks: PurchasingTask[]): AgentPlan {
