@@ -67,16 +67,26 @@ exports.revokeUserSessions = WITH_REGION.https.onCall(async (data, context) => {
         if (!Array.isArray(uids) || uids.length === 0 || uids.some((x) => typeof x !== 'string' || !x)) {
             throw new functions.https.HttpsError('invalid-argument', 'Geçerli bir uid listesi (string[]) gönderin.');
         }
-        // 4) Do work
+        // 4) Do work - revoke tokens AND set forceLogout flag
         const failed = [];
+        const db = admin.firestore();
+        const batch = db.batch();
         await Promise.all(uids.map(async (id) => {
             try {
+                // Revoke refresh tokens
                 await admin.auth().revokeRefreshTokens(id);
+                // Set forceLogout flag in Firestore for immediate client-side logout
+                const userRef = db.doc(`users/${id}`);
+                batch.update(userRef, {
+                    forceLogout: admin.firestore.FieldValue.serverTimestamp()
+                });
             }
             catch (e) {
                 failed.push(id);
             }
         }));
+        // Commit all forceLogout updates
+        await batch.commit();
         return {
             success: failed.length === 0,
             processed: uids.length - failed.length,
