@@ -10,14 +10,16 @@ import type { ProductCode } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp, where } from 'firebase/firestore';
+import { ref, getBlob } from 'firebase/storage';
 
 interface SavedIrsaliyeFile {
   id: string;
   fileName: string;
   fileType: 'pdf' | 'xlsx' | 'xls';
   fileSize: number;
+  storagePath: string;
   downloadURL: string;
   uploadedByName: string;
   uploadedAt: Timestamp;
@@ -169,10 +171,9 @@ export default function IrsaliyeOcrModal({
     toast({ title: 'İşleniyor', description: `${file.fileName} okunuyor...` });
 
     try {
-      // Fetch the PDF from the download URL
-      const response = await fetch(file.downloadURL);
-      if (!response.ok) throw new Error('Dosya indirilemedi');
-      const blob = await response.blob();
+      // Use Firebase Storage SDK to download the file (avoids CORS issues)
+      const storageRef = ref(storage, file.storagePath);
+      const blob = await getBlob(storageRef);
       const pdfFile = new File([blob], file.fileName, { type: 'application/pdf' });
 
       const text = await extractTextFromPdf(pdfFile);
