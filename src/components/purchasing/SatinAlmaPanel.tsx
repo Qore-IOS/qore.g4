@@ -25,6 +25,7 @@ import type {
   PurchasingSubtask,
   PurchasingTaskRecurrence,
   PurchasingTaskComment,
+  PurchasingTaskActivityLog,
   Hospital,
   LabPool,
   User,
@@ -131,6 +132,40 @@ const ACCENT_BG_SUBTLE = 'bg-[#d4ec00]/10 dark:bg-[#d4ec00]/10';
 const ACCENT_BORDER = 'border-[#d4ec00]/40';
 const ACCENT_RING = 'ring-[#d4ec00]/30';
 
+
+interface CalendarSpecialDay {
+  monthDay: string; // MM-dd
+  name: string;
+  type: 'holiday' | 'special';
+}
+
+const CALENDAR_SPECIAL_DAYS: CalendarSpecialDay[] = [
+  { monthDay: '01-01', name: 'Yılbaşı', type: 'holiday' },
+  { monthDay: '04-23', name: '23 Nisan', type: 'holiday' },
+  { monthDay: '05-01', name: 'Emek ve Dayanışma Günü', type: 'holiday' },
+  { monthDay: '05-19', name: '19 Mayıs', type: 'holiday' },
+  { monthDay: '07-15', name: '15 Temmuz', type: 'holiday' },
+  { monthDay: '08-30', name: '30 Ağustos', type: 'holiday' },
+  { monthDay: '10-29', name: '29 Ekim', type: 'holiday' },
+  { monthDay: '03-14', name: 'Tıp Bayramı', type: 'special' },
+];
+
+function getSpecialDay(dateStr: string): CalendarSpecialDay | undefined {
+  const monthDay = dateStr.slice(5);
+  return CALENDAR_SPECIAL_DAYS.find((d) => d.monthDay === monthDay);
+}
+
+function createActivityLog(action: string, message: string, user: { uid: string; name?: string; email?: string }): PurchasingTaskActivityLog {
+  return {
+    id: `al_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    action,
+    message,
+    createdAt: Timestamp.now(),
+    createdByUid: user.uid,
+    createdByName: user.name || user.email || 'Kullanıcı',
+  };
+}
+
 // ==========================================
 // Priority helpers
 // ==========================================
@@ -232,6 +267,25 @@ function generateRecurringDates(
 
 function generateSubtaskId(): string {
   return Math.random().toString(36).substring(2, 10);
+}
+
+
+function getTaskChangeLogs(prev: PurchasingTask, next: TaskFormData, user: { uid: string; name?: string; email?: string }): PurchasingTaskActivityLog[] {
+  const logs: PurchasingTaskActivityLog[] = [];
+  if (prev.startTime !== next.startTime || prev.endTime !== next.endTime) {
+    logs.push(createActivityLog('time_changed', `Saat ${prev.startTime}-${prev.endTime} -> ${next.startTime}-${next.endTime} olarak değiştirildi`, user));
+  }
+  if (prev.date !== next.date) {
+    logs.push(createActivityLog('date_changed', `Tarih ${prev.date} -> ${next.date} olarak değiştirildi`, user));
+  }
+  if ((prev.priority || 'normal') !== next.priority) {
+    logs.push(createActivityLog('priority_changed', `Öncelik ${(prev.priority || 'normal')} -> ${next.priority} olarak değiştirildi`, user));
+  }
+  if ((prev.assignedPersonnel || []).map((p) => p.uid).sort().join(',') !== (next.assignedPersonnel || []).map((p) => p.uid).sort().join(',')) {
+    const names = (next.assignedPersonnel || []).map((p) => p.name).join(', ');
+    logs.push(createActivityLog('assignee_changed', names ? `Takipçi personeller güncellendi: ${names}` : 'Takipçi personeller temizlendi', user));
+  }
+  return logs;
 }
 
 // ==========================================
@@ -346,16 +400,26 @@ export default function SatinAlmaPanel() {
 
   // Toggle completion
   const toggleTask = useCallback(async (task: PurchasingTask) => {
+    if (!currentUserProfile) return;
     try {
+      const newCompleted = !task.completed;
+      const log = createActivityLog(
+        newCompleted ? 'completed' : 'reopened',
+        newCompleted
+          ? `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`
+          : `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+        currentUserProfile
+      );
       await updateDoc(doc(db, 'purchasingTasks', task.id), {
-        completed: !task.completed,
+        completed: newCompleted,
+        activityLogs: arrayUnion(log),
         updatedAt: Timestamp.now(),
       });
     } catch (err) {
       console.error('Error toggling task', err);
       toast.error('Görev güncellenemedi');
     }
-  }, []);
+  }, [currentUserProfile]);
 
   // Toggle subtask
   const toggleSubtask = useCallback(async (task: PurchasingTask, subtaskId: string) => {
@@ -385,8 +449,10 @@ export default function SatinAlmaPanel() {
       createdByName: currentUserProfile.name || currentUserProfile.email || 'Kullanıcı',
     };
     try {
+      const log = createActivityLog('comment_added', 'Göreve not eklendi', currentUserProfile);
       await updateDoc(doc(db, 'purchasingTasks', task.id), {
         comments: arrayUnion(comment),
+        activityLogs: arrayUnion(log),
         updatedAt: Timestamp.now(),
       });
     } catch (err) {
@@ -430,6 +496,13 @@ export default function SatinAlmaPanel() {
           createdByUid: currentUserProfile.uid,
           createdByName: currentUserProfile.name || '',
           sortOrder: Date.now(),
+          activityLogs: [
+            createActivityLog(
+              'created',
+              `Görev oluşturuldu (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+              currentUserProfile
+            ),
+          ],
         };
 
         if (data.taskType === 'kurum_ziyareti') {
@@ -467,15 +540,29 @@ export default function SatinAlmaPanel() {
         // Create recurring instances
         if (data.recurring) {
           const futureDates = generateRecurringDates(data.date, data.recurring);
-          if (futureDates.length > 0) {
+          const filteredFutureDates = futureDates.filter((dateStr) => getSpecialDay(dateStr)?.type !== 'holiday');
+          const skippedDates = futureDates.length - filteredFutureDates.length;
+          if (filteredFutureDates.length > 0) {
             const batch = writeBatch(db);
-            for (const futureDate of futureDates) {
-              const recurDoc = { ...taskDoc, date: futureDate, createdAt: Timestamp.now() };
+            for (const futureDate of filteredFutureDates) {
+              const recurDoc = {
+                ...taskDoc,
+                date: futureDate,
+                createdAt: Timestamp.now(),
+                activityLogs: [
+                  createActivityLog(
+                    'created',
+                    `Görev oluşturuldu (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+                    currentUserProfile
+                  ),
+                ],
+              };
               batch.set(doc(collection(db, 'purchasingTasks')), recurDoc);
             }
             await batch.commit();
-            toast.success(`${futureDates.length} tekrarlayan görev oluşturuldu`);
+            toast.success(`${filteredFutureDates.length} tekrarlayan görev oluşturuldu`);
           }
+          if (skippedDates > 0) toast.info(`${skippedDates} görev resmi tatil nedeniyle oluşturulmadı`);
         }
 
         toast.success('Görev eklendi');
@@ -519,6 +606,11 @@ export default function SatinAlmaPanel() {
 
         updates.subtasks = data.subtasks?.length ? data.subtasks : null;
 
+        if (currentUserProfile) {
+          const changeLogs = getTaskChangeLogs(editingTask, data, currentUserProfile);
+          if (changeLogs.length > 0) updates.activityLogs = arrayUnion(...changeLogs);
+        }
+
         // Remove deleted attachments from storage
         if (data.removedAttachments?.length) {
           for (const att of data.removedAttachments) {
@@ -549,7 +641,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev güncellenemedi');
       }
     },
-    [editingTask]
+    [editingTask, currentUserProfile]
   );
 
   // Drag & drop reorder (native HTML5 DnD)
@@ -670,6 +762,7 @@ export default function SatinAlmaPanel() {
               const today = isToday(date);
               const occupancy = getOccupancyForDay(tasks, dateStr);
               const dayTaskCount = tasks.filter((t) => t.date === dateStr).length;
+              const specialDay = getSpecialDay(dateStr);
 
               return (
                 <button
@@ -694,6 +787,11 @@ export default function SatinAlmaPanel() {
                   <span className="text-[10px] opacity-60">
                     {format(date, 'MMM', { locale: tr })}
                   </span>
+                  {specialDay && (
+                    <span className={cn('mt-1 text-[9px] px-1 rounded-full', specialDay.type === 'holiday' ? 'bg-red-500/15 text-red-500' : 'bg-blue-500/15 text-blue-500')}>
+                      {specialDay.name}
+                    </span>
+                  )}
                   {dayTaskCount > 0 && (
                     <div className="mt-1 flex items-center gap-0.5">
                       <div className={cn('w-1.5 h-1.5 rounded-full', isSelected ? 'bg-zinc-900/60' : getOccupancyColor(occupancy))} />
@@ -760,6 +858,7 @@ export default function SatinAlmaPanel() {
                 const inMonth = isSameMonth(day, calendarMonth);
                 const occupancy = getOccupancyForDay(tasks, dayStr);
                 const hasTasks = tasks.some((t) => t.date === dayStr);
+                const specialDay = getSpecialDay(dayStr);
                 return (
                   <button
                     key={dayStr}
@@ -771,6 +870,11 @@ export default function SatinAlmaPanel() {
                     )}
                   >
                     <span>{format(day, 'd')}</span>
+                    {specialDay && (
+                      <span className={cn('text-[9px] mt-0.5 px-1 rounded', specialDay.type === 'holiday' ? 'bg-red-500/20 text-red-500' : 'bg-blue-500/20 text-blue-500')}>
+                        •
+                      </span>
+                    )}
                     {hasTasks && (
                       <div className="flex items-center gap-0.5 mt-0.5">
                         <div className={cn('w-1 h-1 rounded-full', isSelected ? 'bg-zinc-900/60' : getOccupancyColor(occupancy))} />
@@ -918,6 +1022,7 @@ export default function SatinAlmaPanel() {
                 const cellTasks = tasks.filter((t) => t.date === dayStr).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
                 const inMonth = isSameMonth(day, selectedDate);
                 const selected = isSameDay(day, selectedDate);
+                const specialDay = getSpecialDay(dayStr);
                 return (
                   <button
                     key={dayStr}
@@ -928,6 +1033,11 @@ export default function SatinAlmaPanel() {
                       <span className={cn('text-[11px] font-semibold', isToday(day) && ACCENT)}>{format(day, 'd')}</span>
                       {cellTasks.length > 0 && <span className="text-[9px] text-muted-foreground">{cellTasks.length} görev</span>}
                     </div>
+                    {specialDay && (
+                      <p className={cn('text-[9px] mb-1 truncate', specialDay.type === 'holiday' ? 'text-red-500' : 'text-blue-500')}>
+                        {specialDay.name}
+                      </p>
+                    )}
                     <div className="space-y-1">
                       {cellTasks.slice(0, 3).map((task) => (
                         <div key={task.id} className={cn('text-[10px] rounded px-1 py-0.5 truncate border-l-2', task.completed ? 'bg-secondary text-muted-foreground border-muted-foreground/40' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border}`)}>
@@ -1019,8 +1129,14 @@ function TaskCard({
     const tb = 'seconds' in (b.createdAt as any) ? (b.createdAt as any).seconds : 0;
     return ta - tb;
   });
+  const activityLogs = (task.activityLogs || []).slice().sort((a, b) => {
+    const ta = 'seconds' in (a.createdAt as any) ? (a.createdAt as any).seconds : 0;
+    const tb = 'seconds' in (b.createdAt as any) ? (b.createdAt as any).seconds : 0;
+    return tb - ta;
+  });
   const [showComments, setShowComments] = useState(false);
   const [commentInput, setCommentInput] = useState('');
+  const [showActivityLogs, setShowActivityLogs] = useState(false);
 
   const submitComment = () => {
     const trimmed = commentInput.trim();
@@ -1170,8 +1286,39 @@ function TaskCard({
         <div className="mt-3 border-t border-border/60 pt-2" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            onClick={() => setShowComments((v) => !v)}
+            onClick={() => setShowActivityLogs((v) => !v)}
             className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Geçmiş ({activityLogs.length})</span>
+          </button>
+
+          {showActivityLogs && (
+            <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+              {activityLogs.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">Henüz hareket kaydı yok.</p>
+              ) : (
+                activityLogs.map((log) => (
+                  <div key={log.id} className="rounded-lg bg-secondary/70 px-2.5 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-medium text-foreground/90">{log.createdByName}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {log.createdAt && 'seconds' in (log.createdAt as any)
+                          ? format(new Date((log.createdAt as any).seconds * 1000), 'dd.MM HH:mm')
+                          : '-'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-foreground/80 mt-0.5 whitespace-pre-wrap">{log.message}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowComments((v) => !v)}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors mt-2"
           >
             <MessageSquare className="w-3.5 h-3.5" />
             <span>Notlar ({comments.length})</span>

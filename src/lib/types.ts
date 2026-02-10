@@ -1176,6 +1176,8 @@ export interface PurchasingTask {
   assignedPersonnel?: { uid: string; name: string }[];
   // Notes & comments for collaboration
   comments?: PurchasingTaskComment[];
+  // Immutable task activity history
+  activityLogs?: PurchasingTaskActivityLog[];
 }
 
 export interface PurchasingSubtask {
@@ -1202,6 +1204,15 @@ export interface PurchasingTaskAttachment {
 
 export interface PurchasingTaskComment {
   id: string;
+  message: string;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+}
+
+export interface PurchasingTaskActivityLog {
+  id: string;
+  action: string;
   message: string;
   createdAt: TimestampLike;
   createdByUid: string;
