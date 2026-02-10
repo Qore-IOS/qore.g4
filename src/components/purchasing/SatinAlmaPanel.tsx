@@ -15,6 +15,8 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  getDoc,
+  setDoc,
   Timestamp,
   writeBatch,
   arrayUnion,
@@ -96,6 +98,41 @@ import { toast } from 'sonner';
 const WORK_START_HOUR = 9;
 const WORK_END_HOUR = 17;
 const TOTAL_WORK_MINUTES = (WORK_END_HOUR - WORK_START_HOUR) * 60;
+const TASK_CACHE_KEY = 'purchasing:tasks:cache:v1';
+const TASK_MUTATION_QUEUE_KEY = 'purchasing:tasks:queue:v1';
+
+type OfflineMutation = {
+  id: string;
+  action: 'create' | 'update' | 'delete';
+  taskId: string;
+  payload?: Record<string, any>;
+  baseUpdatedAtMs?: number;
+};
+
+function serializeForCache<T>(value: T): T {
+  if (value instanceof Timestamp) return { __ts: value.toMillis() } as T;
+  if (Array.isArray(value)) return value.map((v) => serializeForCache(v)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, any>).map(([k, v]) => [k, serializeForCache(v)])) as T;
+  }
+  return value;
+}
+
+function hydrateFromCache<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => hydrateFromCache(v)) as T;
+  if (value && typeof value === 'object') {
+    if ('__ts' in (value as Record<string, any>)) return Timestamp.fromMillis((value as any).__ts) as T;
+    return Object.fromEntries(Object.entries(value as Record<string, any>).map(([k, v]) => [k, hydrateFromCache(v)])) as T;
+  }
+  return value;
+}
+
+function getUpdatedAtMs(task?: PurchasingTask): number {
+  const updated = task?.updatedAt as any;
+  if (updated?.toMillis) return updated.toMillis();
+  if (updated?.seconds) return updated.seconds * 1000;
+  return 0;
+}
 
 function parseTime(t: string): number {
   const [h, m] = t.split(':').map(Number);
@@ -499,6 +536,35 @@ export default function SatinAlmaPanel() {
   const [myDayTaskIds, setMyDayTaskIds] = useState<string[]>([]);
   const [naturalInput, setNaturalInput] = useState('');
   const [naturalSubmitting, setNaturalSubmitting] = useState(false);
+  const [isOffline, setIsOffline] = useState<boolean>(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+  const [pendingMutations, setPendingMutations] = useState(0);
+  const [syncInProgress, setSyncInProgress] = useState(false);
+  const syncRef = useRef(false);
+
+  const loadQueue = useCallback((): OfflineMutation[] => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(TASK_MUTATION_QUEUE_KEY);
+      const queue: OfflineMutation[] = raw ? JSON.parse(raw) : [];
+      setPendingMutations(queue.length);
+      return queue;
+    } catch {
+      setPendingMutations(0);
+      return [];
+    }
+  }, []);
+
+  const saveQueue = useCallback((queue: OfflineMutation[]) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(TASK_MUTATION_QUEUE_KEY, JSON.stringify(queue));
+    setPendingMutations(queue.length);
+  }, []);
+
+  const enqueueMutation = useCallback((mutation: Omit<OfflineMutation, 'id'>) => {
+    const queue = loadQueue();
+    queue.push({ ...mutation, id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` });
+    saveQueue(queue);
+  }, [loadQueue, saveQueue]);
 
   // Reference data
   const [laboratories, setLaboratories] = useState<Hospital[]>([]);
@@ -518,14 +584,99 @@ export default function SatinAlmaPanel() {
         const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingTask[];
         setTasks(items);
         setTasksLoading(false);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(TASK_CACHE_KEY, JSON.stringify(serializeForCache(items)));
+        }
       },
       (err) => {
         console.error('PurchasingTasks listen error', err);
+        if (typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem(TASK_CACHE_KEY);
+            if (raw) {
+              setTasks(hydrateFromCache(JSON.parse(raw)) as PurchasingTask[]);
+            }
+          } catch (cacheErr) {
+            console.error('Task cache load failed', cacheErr);
+          }
+        }
         setTasksLoading(false);
       }
     );
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(TASK_CACHE_KEY);
+      if (raw) {
+        const cached = hydrateFromCache(JSON.parse(raw)) as PurchasingTask[];
+        if (cached.length > 0) setTasks((prev) => (prev.length > 0 ? prev : cached));
+      }
+      loadQueue();
+    } catch {
+      // no-op
+    }
+  }, [loadQueue]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onOnline = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  const syncOfflineMutations = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.onLine || syncRef.current) return;
+    const queue = loadQueue();
+    if (queue.length === 0) return;
+
+    syncRef.current = true;
+    setSyncInProgress(true);
+    const remaining: OfflineMutation[] = [];
+
+    for (const mutation of queue) {
+      try {
+        const taskRef = doc(db, 'purchasingTasks', mutation.taskId);
+        if (mutation.action === 'create' && mutation.payload) {
+          await setDoc(taskRef, mutation.payload, { merge: true });
+        } else if (mutation.action === 'update' && mutation.payload) {
+          const remote = await getDoc(taskRef);
+          if (!remote.exists()) {
+            await setDoc(taskRef, mutation.payload, { merge: true });
+          } else {
+            const remoteData = remote.data() as PurchasingTask;
+            const remoteUpdatedAtMs = getUpdatedAtMs(remoteData);
+            if (mutation.baseUpdatedAtMs && remoteUpdatedAtMs > mutation.baseUpdatedAtMs) {
+              await setDoc(taskRef, { ...mutation.payload, updatedAt: Timestamp.now(), conflictResolvedAt: Timestamp.now() }, { merge: true });
+            } else {
+              await updateDoc(taskRef, { ...mutation.payload, updatedAt: Timestamp.now() });
+            }
+          }
+        } else if (mutation.action === 'delete') {
+          await deleteDoc(taskRef);
+        }
+      } catch (err) {
+        console.error('Offline mutation sync failed', err);
+        remaining.push(mutation);
+      }
+    }
+
+    saveQueue(remaining);
+    if (queue.length > 0 && remaining.length === 0) toast.success('Çevrimdışı değişiklikler senkronize edildi');
+    syncRef.current = false;
+    setSyncInProgress(false);
+  }, [loadQueue, saveQueue]);
+
+  useEffect(() => {
+    if (!isOffline) syncOfflineMutations();
+  }, [isOffline, syncOfflineMutations]);
 
   useEffect(() => {
     const q = query(collection(db, 'purchasingTaskDefinitions'), orderBy('name', 'asc'));
@@ -717,6 +868,13 @@ export default function SatinAlmaPanel() {
     const prevTasks = tasks;
     setTasks((prev) => prev.filter((t) => t.id !== task.id));
 
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      enqueueMutation({ action: 'delete', taskId: task.id, baseUpdatedAtMs: getUpdatedAtMs(task) });
+      toast.info('Çevrimdışı: silme işlemi sıraya alındı');
+      if (editingTask?.id === task.id) setEditingTask(null);
+      return;
+    }
+
     try {
       if (task.attachments && task.attachments.length > 0) {
         for (const att of task.attachments) {
@@ -731,7 +889,7 @@ export default function SatinAlmaPanel() {
       console.error('Error deleting task', err);
       toast.error('Görev silinemedi');
     }
-  }, [editingTask, tasks]);
+  }, [editingTask, tasks, enqueueMutation]);
 
   // Add task
   const handleAddTask = useCallback(
@@ -766,6 +924,7 @@ export default function SatinAlmaPanel() {
           createdAt: Timestamp.now(),
           createdByUid: currentUserProfile.uid,
           createdByName: currentUserProfile.name || '',
+          updatedAt: Timestamp.now(),
           sortOrder: Date.now(),
           activityLogs: [
             createActivityLog(
@@ -785,31 +944,44 @@ export default function SatinAlmaPanel() {
         if (data.assignedPersonnel?.length) taskDoc.assignedPersonnel = data.assignedPersonnel;
 
         if (data.subtasks?.length) taskDoc.subtasks = data.subtasks;
-        if (data.recurring) {
+        if (data.recurring && (typeof navigator === 'undefined' || navigator.onLine)) {
           taskDoc.recurring = data.recurring;
           taskDoc.recurringGroupId = `rg_${Date.now()}`;
         }
 
-        const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
-
-        // Upload files
-        if (data.files?.length) {
-          const attachments: PurchasingTaskAttachment[] = [];
-          for (const file of data.files) {
-            try {
-              attachments.push(await uploadAttachment(file, docRef.id));
-            } catch (err) {
-              console.error('File upload error:', err);
-              toast.error(`"${file.name}" yüklenemedi`);
-            }
+        let createdTaskId = '';
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          createdTaskId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const localTask = { ...taskDoc, id: createdTaskId } as PurchasingTask;
+          setTasks((prev) => [...prev, localTask]);
+          enqueueMutation({ action: 'create', taskId: createdTaskId, payload: taskDoc });
+          if (data.files?.length) {
+            toast.warning('Çevrimdışı modda dosya yükleme desteklenmiyor. İnternete bağlanınca düzenleyip ekleyebilirsiniz.');
           }
-          if (attachments.length > 0) {
-            await updateDoc(doc(db, 'purchasingTasks', docRef.id), { attachments });
+          toast.info('Çevrimdışı: görev yerel olarak kaydedildi ve senkron kuyruğuna alındı');
+        } else {
+          const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
+          createdTaskId = docRef.id;
+
+          // Upload files
+          if (data.files?.length) {
+            const attachments: PurchasingTaskAttachment[] = [];
+            for (const file of data.files) {
+              try {
+                attachments.push(await uploadAttachment(file, docRef.id));
+              } catch (err) {
+                console.error('File upload error:', err);
+                toast.error(`"${file.name}" yüklenemedi`);
+              }
+            }
+            if (attachments.length > 0) {
+              await updateDoc(doc(db, 'purchasingTasks', docRef.id), { attachments });
+            }
           }
         }
 
         // Create recurring instances
-        if (data.recurring) {
+        if (data.recurring && (typeof navigator === 'undefined' || navigator.onLine)) {
           const futureDates = generateRecurringDates(data.date, data.recurring);
           const filteredFutureDates = futureDates.filter((dateStr) => getSpecialDay(dateStr)?.type !== 'holiday');
           const skippedDates = futureDates.length - filteredFutureDates.length;
@@ -844,7 +1016,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev eklenemedi');
       }
     },
-    [currentUserProfile, tasks]
+    [currentUserProfile, tasks, enqueueMutation]
   );
 
   // Edit task
@@ -917,8 +1089,19 @@ export default function SatinAlmaPanel() {
         }
         updates.attachments = allAttachments.length > 0 ? allAttachments : null;
 
-        await updateDoc(doc(db, 'purchasingTasks', editingTask.id), updates);
-        toast.success('Görev güncellendi');
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setTasks((prev) => prev.map((t) => (t.id === editingTask.id ? ({ ...t, ...updates } as PurchasingTask) : t)));
+          enqueueMutation({
+            action: 'update',
+            taskId: editingTask.id,
+            payload: updates,
+            baseUpdatedAtMs: getUpdatedAtMs(editingTask),
+          });
+          toast.info('Çevrimdışı: güncelleme sıraya alındı');
+        } else {
+          await updateDoc(doc(db, 'purchasingTasks', editingTask.id), updates);
+          toast.success('Görev güncellendi');
+        }
         setEditingTask(null);
         setSelectedDate(parseISO(data.date));
       } catch (err) {
@@ -926,7 +1109,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev güncellenemedi');
       }
     },
-    [editingTask, currentUserProfile, tasks]
+    [editingTask, currentUserProfile, tasks, enqueueMutation]
   );
 
   // Drag & drop reorder (native HTML5 DnD)
@@ -1111,6 +1294,15 @@ export default function SatinAlmaPanel() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
+            {(isOffline || pendingMutations > 0 || syncInProgress) && (
+              <div className="text-[11px] px-2 py-1 rounded-lg border border-border bg-secondary text-muted-foreground">
+                {isOffline
+                  ? `Offline • ${pendingMutations} bekleyen işlem`
+                  : syncInProgress
+                    ? 'Senkronize ediliyor...'
+                    : `${pendingMutations} işlem senkronize edilmeyi bekliyor`}
+              </div>
+            )}
             <button
               onClick={() => setShowTaskDefinitionModal(true)}
               className="shrink-0 mt-1 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-all"
