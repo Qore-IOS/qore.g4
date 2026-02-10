@@ -10,9 +10,8 @@ import type { ProductCode } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { db, storage } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp, where } from 'firebase/firestore';
-import { ref, getBlob } from 'firebase/storage';
 
 interface SavedIrsaliyeFile {
   id: string;
@@ -171,9 +170,19 @@ export default function IrsaliyeOcrModal({
     toast({ title: 'İşleniyor', description: `${file.fileName} okunuyor...` });
 
     try {
-      // Use Firebase Storage SDK to download the file (avoids CORS issues)
-      const storageRef = ref(storage, file.storagePath);
-      const blob = await getBlob(storageRef);
+      // Download via server-side API proxy to avoid CORS issues with Firebase Storage
+      const response = await fetch('/api/storage/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: file.storagePath }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Dosya indirilemedi');
+      }
+
+      const blob = await response.blob();
       const pdfFile = new File([blob], file.fileName, { type: 'application/pdf' });
 
       const text = await extractTextFromPdf(pdfFile);
