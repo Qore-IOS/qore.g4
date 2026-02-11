@@ -26,7 +26,7 @@ export default function PurchasingAgentChat({
     {
       id: 'welcome',
       role: 'assistant',
-      text: 'Merhaba! Satın Alma Agent hazırım. Görev ekleme/silme/düzenleme, personel ekleme, tarih-saat güncelleme ve takvim analizi komutlarını yazabilirsiniz.',
+      text: 'Merhaba! Planlama Birimi Agent hazırım. Görev ekleme/silme/düzenleme, personel ekleme, tarih-saat güncelleme ve takvim analizi komutlarını yazabilirsiniz.',
     },
   ]);
 
@@ -99,7 +99,7 @@ export default function PurchasingAgentChat({
           'bg-card text-foreground flex items-center justify-center',
           'bottom-36 md:bottom-28'
         )}
-        aria-label="Satın Alma Agent"
+        aria-label="Planlama Birimi Agent"
       >
         {open ? <X className="w-5 h-5" /> : <MessageCircle className="w-5 h-5" />}
       </button>
@@ -109,7 +109,7 @@ export default function PurchasingAgentChat({
           <div className="px-3 py-2 border-b border-border flex items-center gap-2">
             <Bot className="w-4 h-4" />
             <div>
-              <p className="text-sm font-semibold">Satın Alma Agent</p>
+              <p className="text-sm font-semibold">Planlama Birimi Agent</p>
               <p className="text-[11px] text-muted-foreground">Gemini destekli görev asistanı</p>
             </div>
           </div>

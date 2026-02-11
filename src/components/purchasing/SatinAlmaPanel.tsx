@@ -1356,7 +1356,7 @@ export default function SatinAlmaPanel() {
       <div className="px-4 pt-6 pb-2 md:px-8 md:pt-8">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-muted-foreground text-sm">Satın Alma Birimi</p>
+            <p className="text-muted-foreground text-sm">Planlama Birimi</p>
             <h1 className="text-2xl md:text-3xl font-bold mt-1">
               Merhaba, <span className={ACCENT}>{userName}</span>
             </h1>
@@ -2919,7 +2919,7 @@ function TaskFormModal({
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>{user.name || user.email}</span>
-                            <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Satın Alma'}</span>
+                            <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
                           </div>
                         </button>
                       );
@@ -2973,7 +2973,7 @@ function TaskFormModal({
                             </div>
                             <div className="flex-1 min-w-0">
                               <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>{user.name || user.email}</span>
-                              <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Satın Alma'}</span>
+                              <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
                             </div>
                           </button>
                         );
