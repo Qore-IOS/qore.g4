@@ -175,7 +175,7 @@ function parseRelativeOrAbsoluteDate(input: string): string | undefined {
     aralık: 11,
   };
 
-const m = lower.match(/(\d{1,2})\s*(ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)(?:[a-zçğıöşü]{0,4})?(?:\s*(\d{4}))?/u);
+  const m = lower.match(/(\d{1,2})\s*(ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)(?:[a-zçğıöşü]{0,4})?(?:\s*(\d{4}))?/u);
   if (m) {
     const day = Number(m[1]);
     const month = monthMap[m[2]];
@@ -339,7 +339,7 @@ async function geminiPlan(message: string, tasks: PurchasingTask[]): Promise<Age
     assignedPersonnel: t.assignedPersonnel || [],
   }));
 
-  const prompt = `Sen Satın Alma paneli için görev ajanısın. Kullanıcı mesajını yorumlayıp JSON action plan döndür.
+  const prompt = `Sen Planlama Birimi paneli için görev ajanısın. Kullanıcı mesajını yorumlayıp JSON action plan döndür.
 Sadece JSON döndür:
 {
   "reply": "kısa doğal Türkçe cevap",
@@ -511,7 +511,7 @@ function activityLog(action: string, message: string, uid?: string, name?: strin
     message,
     createdAt: new Date(),
     createdByUid: uid || 'agent',
-    createdByName: name || 'Satın Alma Agent',
+    createdByName: name || 'Planlama Birimi Agent',
   };
 }
 
