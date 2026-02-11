@@ -530,6 +530,7 @@ export default function SatinAlmaPanel() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
+  const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday' | 'workflow'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -1111,7 +1112,7 @@ export default function SatinAlmaPanel() {
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
-      if (!editingTask) return;
+      if (!editingTask || !currentUserProfile) return;
       try {
         const conflicts = hasTimeConflict(
           tasks,
@@ -1136,6 +1137,8 @@ export default function SatinAlmaPanel() {
           endTime: data.endTime,
           priority: data.priority,
           updatedAt: Timestamp.now(),
+          assignedTo: data.assignedTo?.length ? data.assignedTo : null,
+          activities,
         };
 
         if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
@@ -1236,7 +1239,7 @@ export default function SatinAlmaPanel() {
     [dayTasks, draggedTaskId]
   );
 
-  const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
+  const selectedOccupancy = getOccupancyForDay(myTasks, selectedDateStr);
 
   const sliderDates = useMemo(() => {
     const dates: Date[] = [];
@@ -2013,6 +2016,96 @@ export default function SatinAlmaPanel() {
         </>
       )}
       </div>
+
+      {mobileMonthModalDate && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMonthModalDate(null)} />
+          <div className="absolute inset-x-3 bottom-4 top-20 bg-card border border-border rounded-2xl shadow-xl p-3 flex flex-col">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div>
+                <p className="text-xs text-muted-foreground">Günlük Görevler</p>
+                <h4 className="text-sm font-semibold">{format(mobileMonthModalDate, 'd MMMM EEEE', { locale: tr })}</h4>
+              </div>
+              <button
+                onClick={() => setMobileMonthModalDate(null)}
+                className="p-2 rounded-lg bg-secondary border border-border"
+                aria-label="Kapat"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="mt-3 overflow-y-auto flex-1 space-y-2">
+              {mobileMonthModalTasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Bu gün için görev bulunmuyor.</p>
+              ) : (
+                mobileMonthModalTasks.map((task) => (
+                  <button
+                    key={task.id}
+                    onClick={() => {
+                      setEditingTask(task);
+                      setMobileMonthModalDate(null);
+                    }}
+                    className="w-full text-left p-2 rounded-xl border border-border bg-secondary/40"
+                  >
+                    <p className="text-sm truncate">{task.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{task.startTime} - {task.endTime}</p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PurchasingAgentChat
+        userUid={currentUserProfile?.uid}
+        userName={currentUserProfile?.name || currentUserProfile?.email || 'Kullanıcı'}
+      />
+
+      {mobileMonthModalDate && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMonthModalDate(null)} />
+          <div className="absolute inset-x-3 bottom-4 top-20 bg-card border border-border rounded-2xl shadow-xl p-3 flex flex-col">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div>
+                <p className="text-xs text-muted-foreground">Günlük Görevler</p>
+                <h4 className="text-sm font-semibold">{format(mobileMonthModalDate, 'd MMMM EEEE', { locale: tr })}</h4>
+              </div>
+              <button
+                onClick={() => setMobileMonthModalDate(null)}
+                className="p-2 rounded-lg bg-secondary border border-border"
+                aria-label="Kapat"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="mt-3 overflow-y-auto flex-1 space-y-2">
+              {mobileMonthModalTasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Bu gün için görev bulunmuyor.</p>
+              ) : (
+                mobileMonthModalTasks.map((task) => (
+                  <button
+                    key={task.id}
+                    onClick={() => {
+                      setEditingTask(task);
+                      setMobileMonthModalDate(null);
+                    }}
+                    className="w-full text-left p-2 rounded-xl border border-border bg-secondary/40"
+                  >
+                    <p className="text-sm truncate">{task.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{task.startTime} - {task.endTime}</p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PurchasingAgentChat
+        userUid={currentUserProfile?.uid}
+        userName={currentUserProfile?.name || currentUserProfile?.email || 'Kullanıcı'}
+      />
 
       {mobileMonthModalDate && (
         <div className="fixed inset-0 z-50 md:hidden">

@@ -8,6 +8,7 @@ import type { User } from './types';
 export function buildMembershipKeysFromProfile(profile: User | null): string[] {
   const keys = new Set<string>();
   if (!profile) return [];
+  keys.add('audience:all');
   if (profile.uid) keys.add(`user:${profile.uid}`);
   if (profile.role) keys.add(`role:${profile.role}`);
   (profile.accessibleViews || []).forEach((v: string) => keys.add(`view:${v}`));
