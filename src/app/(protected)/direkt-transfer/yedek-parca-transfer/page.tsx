@@ -65,6 +65,7 @@ import BackButton from '@/components/BackButton';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTransferTutanakPDFButton';
 
 // Menu selection types
 type MenuSection = 'transfer' | 'depo-stok' | 'toplam-stok' | 'personnel';
@@ -1087,67 +1088,6 @@ export default function YedekParcaTransferPage() {
     return transferLogs.filter((log) => log.action === historyActionFilter);
   }, [historyActionFilter, transferLogs]);
 
-  const exportTransferTutanakPdf = async () => {
-    const transferActions = new Set(['transfer_to_personnel', 'transfer_between_personnel']);
-    const transferOnlyLogs = filteredHistoryLogs.filter((log) => transferActions.has(log.action));
-
-    if (transferOnlyLogs.length === 0) {
-      toast({ title: 'Uyarı', description: 'PDF için uygun transfer kaydı bulunamadı.', variant: 'default' });
-      return;
-    }
-
-    try {
-      const [jsPDFModule, autoTableModule] = await Promise.all([
-        import('jspdf'),
-        import('jspdf-autotable'),
-      ]);
-      const jsPDF = jsPDFModule.default;
-      const autoTable = autoTableModule.default;
-
-      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-      const padX = 40;
-      const now = new Date();
-
-      const teslimEdenler = Array.from(new Set(transferOnlyLogs.map((l) => l.fromName || l.createdByName).filter(Boolean)));
-      const teslimAlanlar = Array.from(new Set(transferOnlyLogs.map((l) => l.toName).filter(Boolean)));
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.text('Teslim Tutanagi', padX, 40);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      doc.text(`Ref No: YP-${now.getTime()}`, padX, 60);
-      doc.text(`Teslim Eden Personel: ${teslimEdenler.join(', ') || '-'}`, padX, 78);
-      doc.text(`Teslim Alan Personel: ${teslimAlanlar.join(', ') || '-'}`, padX, 96);
-      doc.text(`Islemi Yapan: ${currentUserProfile?.name || '-'}`, padX, 114);
-      doc.text(`Tarih: ${now.toLocaleString('tr-TR')}`, padX, 132);
-
-      autoTable(doc, {
-        head: [[ 'Stok Adi', 'Stok Kodu', 'Seri No', 'Adet', 'Islem Tarihi', 'Teslim Eden', 'Teslim Alan' ]],
-        body: transferOnlyLogs.map((log) => [
-          log.stokAdi || '-',
-          log.stokKodu || '-',
-          log.serialNumber || '-',
-          String(log.quantity || 1),
-          format(log.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr }),
-          log.fromName || log.createdByName || '-',
-          log.toName || '-',
-        ]),
-        startY: 160,
-        styles: { font: 'helvetica', fontSize: 10 },
-        headStyles: { fillColor: [240, 240, 240] },
-        margin: { left: padX, right: padX },
-      });
-
-      doc.save(`yedek-parca-transfer-tutanak-${now.getTime()}.pdf`);
-      toast({ title: 'Başarılı', description: 'Transfer tutanağı PDF olarak indirildi.' });
-    } catch (error) {
-      console.error('Transfer tutanak PDF export error:', error);
-      toast({ title: 'Hata', description: 'PDF oluşturulurken bir hata oluştu.', variant: 'destructive' });
-    }
-  };
-
   // ========== RENDER: Transfer Panel (Right Side Default) ==========
   const renderTransferPanel = () => (
     <Card>
@@ -1645,10 +1585,6 @@ export default function YedekParcaTransferPage() {
                       <option value="depo_serial_deleted">Depo Seri No Silindi</option>
                     </select>
                   </div>
-
-                  <Button variant="outline" size="sm" onClick={exportTransferTutanakPdf}>
-                    PDF Tutanak
-                  </Button>
                 </div>
 
                 <ScrollArea className="h-[360px]">
@@ -1663,6 +1599,7 @@ export default function YedekParcaTransferPage() {
                         <TableHead>Adet</TableHead>
                         <TableHead>Kişi</TableHead>
                         <TableHead>İşlemi Yapan</TableHead>
+                        <TableHead className="text-right">Tutanak</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1687,6 +1624,13 @@ export default function YedekParcaTransferPage() {
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {log.createdByName}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {(log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel') ? (
+                              <SparePartTransferTutanakPDFButton log={log} />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
