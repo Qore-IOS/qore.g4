@@ -460,7 +460,10 @@ export default function DirektTransferPanel() {
       const matchedFormat = parsed.matchedFormatId
         ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
         : undefined;
-      const mode: TrackingMode = resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
+      const staticTrackingMode = productTracking[stokKodu] || resolveDefaultTrackingMode(product as any);
+      const mode: TrackingMode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
+        ? 'qty_barcode'
+        : resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
 
       if (mode === 'serial') {
         if (!seri) {
@@ -581,15 +584,31 @@ export default function DirektTransferPanel() {
 
     // Group stock by stokKodu and lotNumarasi for efficient allocation
     const stockByCodeAndLot = new Map<string, DepoStokItem[]>();
+    const stockByCode = new Map<string, DepoStokItem[]>();
     allStock.forEach(item => {
       const key = `${item.stokKodu}__${item.lotNumarasi || ''}`;
       const existing = stockByCodeAndLot.get(key) || [];
       existing.push(item);
       stockByCodeAndLot.set(key, existing);
+
+      const codeExisting = stockByCode.get(item.stokKodu) || [];
+      codeExisting.push(item);
+      stockByCode.set(item.stokKodu, codeExisting);
     });
 
     // Sort each group by FEFO (earliest expiry first)
     stockByCodeAndLot.forEach((items, key) => {
+      items.sort((a, b) => {
+        try {
+          const ad = parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date());
+          const bd = parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date());
+          return compareAsc(ad, bd);
+        } catch {
+          return 0;
+        }
+      });
+    });
+    stockByCode.forEach((items, key) => {
       items.sort((a, b) => {
         try {
           const ad = parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date());
@@ -606,8 +625,14 @@ export default function DirektTransferPanel() {
     const usedIds = new Set<string>(alreadyAllocatedIds);
 
     for (const row of groupRows) {
+      const trackingMode = productTracking[row.stokKodu] || resolveDefaultTrackingMode({ stokAdi: row.stokAdi } as any);
+      const isQuantityTracked = trackingMode === 'qty_manual' || trackingMode === 'qty_barcode';
+
       const key = `${row.stokKodu}__${row.lotNumarasi || ''}`;
-      const pool = (stockByCodeAndLot.get(key) || []).filter(s => !usedIds.has(s.id));
+      const sourcePool = isQuantityTracked && !row.lotNumarasi
+        ? (stockByCode.get(row.stokKodu) || [])
+        : (stockByCodeAndLot.get(key) || []);
+      const pool = sourcePool.filter(s => !usedIds.has(s.id));
 
       const need = Math.max(1, row.adet ?? 1);
       if (pool.length < need) {
@@ -620,7 +645,7 @@ export default function DirektTransferPanel() {
     }
 
     return { allocations, error: null };
-  }, [directTransferItems, selectedDepotId]);
+  }, [directTransferItems, selectedDepotId, productTracking]);
 
   // Legacy function kept for compatibility
   const allocateDocsForGroup = useCallback(async (row: TransferRow): Promise<DepoStokItem[] | null> => {
@@ -1306,5 +1331,4 @@ export default function DirektTransferPanel() {
     </>
   );
 }
-
 
