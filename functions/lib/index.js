@@ -128,10 +128,11 @@ exports.onNotificationCreated = functions
             return;
         }
         firebase_functions_1.logger.info(`[fanOut] Processing ${notificationId}, targets: ${data.targets.join(', ')}`);
-        // --- 1. Query pushTokens matching any of the targets ---
-        // Firestore array-contains-any supports max 30 values
-        const targetChunks = chunk(data.targets, 30);
+        // --- 1. Collect tokens from TWO sources ---
         const tokenMap = new Map();
+        const notificationType = data.type || '';
+        // Source A: pushTokens matching targets (role-based, lab-based, depot-based, user-based)
+        const targetChunks = chunk(data.targets, 30);
         for (const targetChunk of targetChunks) {
             const tokensSnap = await db
                 .collection('pushTokens')
@@ -145,46 +146,50 @@ exports.onNotificationCreated = functions
                 }
             }
         }
-        const initialMembershipTokens = tokenMap.size;
-        // Always augment by UID-based lookup so partially matched membershipKeys (e.g. only admin)
-        // still include non-admin recipients for the same notification targets.
-        const targetUids = await collectTargetUidsFromTargets(data.targets, (_a = data.actor) === null || _a === void 0 ? void 0 : _a.uid);
-        if (targetUids.size > 0) {
-            const uidChunks = chunk(Array.from(targetUids), 30);
-            for (const uidChunk of uidChunks) {
-                const fallbackTokenSnap = await db
-                    .collection('pushTokens')
-                    .where('uid', 'in', uidChunk)
-                    .where('enabled', '==', true)
-                    .get();
-                for (const tokenDoc of fallbackTokenSnap.docs) {
-                    const td = tokenDoc.data();
-                    if (td.token && !tokenMap.has(td.token)) {
-                        tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+        // Source B: Users who have this notification type in their notificationPreferences
+        // This ensures non-admin users with the right preferences also receive notifications
+        if (notificationType && notificationType !== 'custom') {
+            const prefsSnap = await db
+                .collection('users')
+                .where('notificationsEnabled', '==', true)
+                .where('notificationPreferences', 'array-contains', notificationType)
+                .get();
+            // Collect UIDs of users who opted into this notification type
+            const optedInUids = [];
+            for (const userDoc of prefsSnap.docs) {
+                optedInUids.push(userDoc.id);
+            }
+            // Fetch their push tokens
+            if (optedInUids.length > 0) {
+                const uidChunks = chunk(optedInUids, 30);
+                for (const uidChunk of uidChunks) {
+                    const userTokensSnap = await db
+                        .collection('pushTokens')
+                        .where('uid', 'in', uidChunk)
+                        .where('enabled', '==', true)
+                        .get();
+                    for (const tokenDoc of userTokensSnap.docs) {
+                        const td = tokenDoc.data();
+                        if (td.token && !tokenMap.has(td.token)) {
+                            tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+                        }
                     }
                 }
             }
         }
-        const fallbackAdded = tokenMap.size - initialMembershipTokens;
-        logEntry.tokensMatched = tokenMap.size;
-        logEntry.tokensMatchedByMembership = initialMembershipTokens;
-        logEntry.tokensMatchedByUidFallback = fallbackAdded;
-        if (fallbackAdded > 0) {
-            firebase_functions_1.logger.info(`[fanOut] UID fallback added ${fallbackAdded} tokens for ${notificationId}`);
-        }
-        const resolvedTokens = Array.from(tokenMap.values());
-        if (resolvedTokens.length === 0) {
+        const tokens = Array.from(tokenMap.values());
+        logEntry.tokensMatched = tokens.length;
+        if (tokens.length === 0) {
             logEntry.status = 'no_tokens';
-            logEntry.errors.push('No matching push tokens found for targets');
+            logEntry.errors.push('No matching push tokens found for targets or preferences');
             await db.collection('notificationLogs').add(logEntry);
             firebase_functions_1.logger.warn(`[fanOut] No tokens matched for ${notificationId}`);
             return;
         }
         // --- 2. Filter tokens by user notification preferences ---
-        const notificationType = data.type || '';
-        const uniqueUids = new Set(resolvedTokens.map(t => t.uid).filter((uid) => !!uid));
+        // Fetch user profiles for preference-based filtering
+        const uniqueUids = new Set(tokens.map(t => t.uid).filter((uid) => !!uid));
         const userPrefsMap = new Map();
-        // Batch-fetch user profiles (max 30 per getAll call)
         const uidArr = Array.from(uniqueUids);
         const uidBatches = chunk(uidArr, 30);
         for (const uidBatch of uidBatches) {
@@ -200,8 +205,8 @@ exports.onNotificationCreated = functions
                 }
             }
         }
-        // Filter: remove tokens for users who disabled notifications or excluded this type
-        const filteredTokens = resolvedTokens.filter(t => {
+        // Filter: remove tokens for users who explicitly disabled notifications or excluded this type
+        const filteredTokens = tokens.filter(t => {
             if (!t.uid)
                 return true; // No uid = allow (anonymous token)
             const prefs = userPrefsMap.get(t.uid);
@@ -211,7 +216,7 @@ exports.onNotificationCreated = functions
             if (!prefs.enabled)
                 return false;
             // If user has specific preferences set, check if this type is included
-            // Empty prefs array = no preferences set = allow all (for backwards compatibility)
+            // Empty prefs array = no preferences configured yet = allow all (backwards compat)
             if (prefs.prefs.length > 0 && notificationType !== 'custom' && !prefs.prefs.includes(notificationType)) {
                 return false;
             }

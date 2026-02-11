@@ -25,6 +25,22 @@
       ]
     },
     {
+      "collectionGroup": "pushTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "enabled", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "notificationsEnabled", "order": "ASCENDING" },
+        { "fieldPath": "notificationPreferences", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
       "collectionGroup": "notificationLogs",
       "queryScope": "COLLECTION",
       "fields": [
