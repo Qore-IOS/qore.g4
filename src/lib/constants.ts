@@ -29,7 +29,7 @@ export const VIEWS: { key: string; label: string; icon: React.ElementType; type:
   { key: 'cihaz-ustu-gecmisi', label: 'Cihaz Üstü Geçmişi', icon: Archive, type: 'nav', href: '/raporlama/cihaz-ustu-gecmisi'},
   { key: 'personel-islemleri', label: 'Personel İşlemleri', icon: UserCog, type: 'nav', href: '/personel-islemleri'},
   { key: 'tanimlar', label: 'Tanımlar', icon: BookText, type: 'nav', href: '/yonetim/tanimlar' },
-  { key: 'satin-alma', label: 'Satın Alma', icon: ShoppingCart, type: 'nav', href: '/satin-alma' },
+  { key: 'satin-alma', label: 'Planlama Birimi', icon: ShoppingCart, type: 'nav', href: '/satin-alma' },
   { key: 'yonetim', label: 'Yönetim', icon: Settings, type: 'nav', href: '/yonetim' },
 ];
 

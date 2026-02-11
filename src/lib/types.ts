@@ -1141,14 +1141,14 @@ export interface TransferTemplate {
 }
 
 // ==========================================
-// Satın Alma Birimi Görev Sistemi
+// Planlama Birimi Görev Sistemi
 // ==========================================
 
 export interface PurchasingTask {
   id: string;
   title: string;
   description: string;
-  taskType: 'custom' | 'kurum_ziyareti';
+  taskType: string;
   date: string;               // ISO date string (YYYY-MM-DD)
   startTime: string;           // HH:mm format
   endTime: string;             // HH:mm format
@@ -1166,12 +1166,19 @@ export interface PurchasingTask {
   recurringGroupId?: string;   // groups recurring task instances
   // Subtasks / checklist
   subtasks?: PurchasingSubtask[];
+  taskTypeLabel?: string;
   // Kurum Ziyareti specific fields
   laboratoryId?: string;
   laboratoryName?: string;
   accompanyingPersonnel?: { uid: string; name: string }[];
   // File attachments
   attachments?: PurchasingTaskAttachment[];
+  // Task followers / assignees
+  assignedPersonnel?: { uid: string; name: string }[];
+  // Notes & comments for collaboration
+  comments?: PurchasingTaskComment[];
+  // Immutable task activity history
+  activityLogs?: PurchasingTaskActivityLog[];
 }
 
 export interface PurchasingSubtask {
@@ -1194,4 +1201,30 @@ export interface PurchasingTaskAttachment {
   type: 'image' | 'pdf';
   size: number; // bytes
   storagePath: string;
+}
+
+export interface PurchasingTaskComment {
+  id: string;
+  message: string;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+}
+
+export interface PurchasingTaskActivityLog {
+  id: string;
+  action: string;
+  message: string;
+  createdAt: TimestampLike;
+  createdByUid: string;
+  createdByName: string;
+}
+
+
+export interface PurchasingTaskDefinition {
+  id: string;
+  name: string;
+  requiresLaboratory?: boolean;
+  active?: boolean;
+  createdAt?: TimestampLike;
 }
