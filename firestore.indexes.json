@@ -47,13 +47,6 @@
         { "fieldPath": "notificationsEnabled", "order": "ASCENDING" },
         { "fieldPath": "notificationPreferences", "arrayConfig": "CONTAINS" }
       ]
-    },
-    {
-      "collectionGroup": "notificationLogs",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []
