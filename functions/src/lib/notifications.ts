@@ -264,9 +264,9 @@ export async function emitFaultOpened(params: {
   hospitalName?: string;
   hospitalId?: string;
 }) {
-  const targetRole = `role:${params.faultType}`; 
+  const targetRole = `role:${params.faultType}`;
+  // Send push notification (channel defaults to 'push')
   await createNotification({
-    channel: 'sms', // ** SEND VIA SMS **
     type: 'fault_opened',
     title: `Yeni Ariza Kaydi: ${params.deviceName}`,
     message: `${params.hospitalName || ''} hastanesindeki ${params.deviceName} cihazı için ${params.faultType.replace('_', ' ')} arızası açıldı.`,
