@@ -528,6 +528,7 @@ export default function SatinAlmaPanel() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
+  const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -818,10 +819,19 @@ export default function SatinAlmaPanel() {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: newCompleted } : t)));
 
     try {
+      const newCompleted = !task.completed;
+      const log = createActivityLog(
+        newCompleted ? 'completed' : 'reopened',
+        newCompleted
+          ? `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`
+          : `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+        currentUserProfile
+      );
       await updateDoc(doc(db, 'purchasingTasks', task.id), {
         completed: newCompleted,
         activityLogs: arrayUnion(log),
         updatedAt: Timestamp.now(),
+        activities: [...(task.activities || []), activity],
       });
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: task.completed } : t)));
@@ -1078,7 +1088,7 @@ export default function SatinAlmaPanel() {
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
-      if (!editingTask) return;
+      if (!editingTask || !currentUserProfile) return;
       try {
         const conflicts = hasTimeConflict(
           tasks,
@@ -1103,6 +1113,8 @@ export default function SatinAlmaPanel() {
           endTime: data.endTime,
           priority: data.priority,
           updatedAt: Timestamp.now(),
+          assignedTo: data.assignedTo?.length ? data.assignedTo : null,
+          activities,
         };
 
         if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
@@ -1203,7 +1215,7 @@ export default function SatinAlmaPanel() {
     [dayTasks, draggedTaskId]
   );
 
-  const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
+  const selectedOccupancy = getOccupancyForDay(myTasks, selectedDateStr);
 
   const sliderDates = useMemo(() => {
     const dates: Date[] = [];
