@@ -61,11 +61,40 @@ function chunk(arr, size = 500) {
         out.push(arr.slice(i, i + size));
     return out;
 }
+async function collectTargetUidsFromTargets(targets, actorUid) {
+    const targetUids = new Set();
+    const userQueries = targets.map((key) => {
+        const [field, value] = key.split(':');
+        if (!field || !value)
+            return Promise.resolve(null);
+        if (field === 'role')
+            return db.collection('users').where('role', '==', value).get();
+        if (field === 'lab')
+            return db.collection('users').where('assignedLaboratories', 'array-contains', value).get();
+        if (field === 'depot')
+            return db.collection('users').where('assignedDepots', 'array-contains', value).get();
+        if (field === 'view')
+            return db.collection('users').where('accessibleViews', 'array-contains', value).get();
+        if (field === 'user')
+            return db.collection('users').where('uid', '==', value).get();
+        return Promise.resolve(null);
+    });
+    const userSnaps = await Promise.all(userQueries);
+    userSnaps.forEach((userSnap) => {
+        userSnap === null || userSnap === void 0 ? void 0 : userSnap.docs.forEach((d) => {
+            if (d.id && d.id !== actorUid) {
+                targetUids.add(d.id);
+            }
+        });
+    });
+    return targetUids;
+}
 exports.onNotificationCreated = functions
     .region('europe-west1')
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .firestore.document('notifications/{id}')
     .onCreate(async (snap, context) => {
+    var _a;
     const notificationId = context.params.id;
     const data = snap.data();
     // Prepare log entry
@@ -118,7 +147,32 @@ exports.onNotificationCreated = functions
         }
         const tokens = Array.from(tokenMap.values());
         logEntry.tokensMatched = tokens.length;
+        // Fallback path for legacy token docs where membershipKeys may be missing/stale.
+        // This ensures non-admin roles can still receive notifications when targeting by
+        // role/view/lab/depot/user.
         if (tokens.length === 0) {
+            const targetUids = await collectTargetUidsFromTargets(data.targets, (_a = data.actor) === null || _a === void 0 ? void 0 : _a.uid);
+            if (targetUids.size > 0) {
+                const uidChunks = chunk(Array.from(targetUids), 30);
+                for (const uidChunk of uidChunks) {
+                    const fallbackTokenSnap = await db
+                        .collection('pushTokens')
+                        .where('uid', 'in', uidChunk)
+                        .where('enabled', '==', true)
+                        .get();
+                    for (const tokenDoc of fallbackTokenSnap.docs) {
+                        const td = tokenDoc.data();
+                        if (td.token && !tokenMap.has(td.token)) {
+                            tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+                        }
+                    }
+                }
+                logEntry.tokensMatched = tokenMap.size;
+                firebase_functions_1.logger.info(`[fanOut] Fallback by uid resolved ${tokenMap.size} tokens for ${notificationId}`);
+            }
+        }
+        const resolvedTokens = Array.from(tokenMap.values());
+        if (resolvedTokens.length === 0) {
             logEntry.status = 'no_tokens';
             logEntry.errors.push('No matching push tokens found for targets');
             await db.collection('notificationLogs').add(logEntry);
@@ -127,7 +181,7 @@ exports.onNotificationCreated = functions
         }
         // --- 2. Filter tokens by user notification preferences ---
         const notificationType = data.type || '';
-        const uniqueUids = new Set(tokens.map(t => t.uid).filter((uid) => !!uid));
+        const uniqueUids = new Set(resolvedTokens.map(t => t.uid).filter((uid) => !!uid));
         const userPrefsMap = new Map();
         // Batch-fetch user profiles (max 30 per getAll call)
         const uidArr = Array.from(uniqueUids);
@@ -146,7 +200,7 @@ exports.onNotificationCreated = functions
             }
         }
         // Filter: remove tokens for users who disabled notifications or excluded this type
-        const filteredTokens = tokens.filter(t => {
+        const filteredTokens = resolvedTokens.filter(t => {
             if (!t.uid)
                 return true; // No uid = allow (anonymous token)
             const prefs = userPrefsMap.get(t.uid);
@@ -163,15 +217,15 @@ exports.onNotificationCreated = functions
             return true;
         });
         logEntry.tokensAfterPrefs = filteredTokens.length;
-        logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
+        logEntry.tokensFilteredByPrefs = resolvedTokens.length - filteredTokens.length;
         if (filteredTokens.length === 0) {
             logEntry.status = 'filtered_by_prefs';
             logEntry.errors.push('All tokens filtered out by user notification preferences');
             await db.collection('notificationLogs').add(logEntry);
-            firebase_functions_1.logger.info(`[fanOut] All ${tokens.length} tokens filtered by preferences for ${notificationId}`);
+            firebase_functions_1.logger.info(`[fanOut] All ${resolvedTokens.length} tokens filtered by preferences for ${notificationId}`);
             return;
         }
-        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
+        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${resolvedTokens.length} tokens after preference filtering for ${notificationId}`);
         // --- 2. Build FCM message ---
         const baseUrl = 'https://qorengine.com';
         const fcmMessage = {
