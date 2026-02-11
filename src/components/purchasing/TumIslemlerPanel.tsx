@@ -38,7 +38,7 @@ const ACCENT_BG = 'bg-[#d4ec00]';
 
 const PAGE_SIZE = 20;
 
-type TaskTypeFilter = 'all' | 'custom' | 'kurum_ziyareti';
+type TaskTypeFilter = 'all' | string;
 
 export default function TumIslemlerPanel() {
   const [tasks, setTasks] = useState<PurchasingTask[]>([]);
@@ -50,6 +50,8 @@ export default function TumIslemlerPanel() {
   const [personnelFilter, setPersonnelFilter] = useState<string>('all'); // 'all' or uid
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(true);
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -107,12 +109,17 @@ export default function TumIslemlerPanel() {
       result = result.filter((t) => (t.taskType || 'custom') === taskTypeFilter);
     }
 
-    // Personnel filter - check both creator and accompanying personnel
+    // Date range filter
+    if (startDateFilter) result = result.filter((t) => t.date >= startDateFilter);
+    if (endDateFilter) result = result.filter((t) => t.date <= endDateFilter);
+
+    // Personnel filter - check both creator and accompanying/assigned personnel
     if (personnelFilter !== 'all') {
       result = result.filter(
         (t) =>
           t.createdByUid === personnelFilter ||
-          (t.accompanyingPersonnel && t.accompanyingPersonnel.some((p) => p.uid === personnelFilter))
+          (t.accompanyingPersonnel && t.accompanyingPersonnel.some((p) => p.uid === personnelFilter)) ||
+          (t.assignedPersonnel && t.assignedPersonnel.some((p) => p.uid === personnelFilter))
       );
     }
 
@@ -130,7 +137,7 @@ export default function TumIslemlerPanel() {
     }
 
     return result;
-  }, [tasks, taskTypeFilter, personnelFilter, searchQuery]);
+  }, [tasks, taskTypeFilter, personnelFilter, searchQuery, startDateFilter, endDateFilter]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
@@ -142,7 +149,7 @@ export default function TumIslemlerPanel() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [taskTypeFilter, personnelFilter, searchQuery]);
+  }, [taskTypeFilter, personnelFilter, searchQuery, startDateFilter, endDateFilter]);
 
   // Get unique creators for dropdown
   const uniqueCreators = useMemo(() => {
@@ -153,6 +160,17 @@ export default function TumIslemlerPanel() {
       }
     });
     return Array.from(map.entries()).map(([uid, name]) => ({ uid, name }));
+  }, [tasks]);
+
+
+  const uniqueTaskTypes = useMemo(() => {
+    const map = new Map<string, string>();
+    tasks.forEach((t) => {
+      const key = t.taskType || 'custom';
+      const label = t.taskTypeLabel || (key === 'kurum_ziyareti' ? 'Kurum Ziyareti' : key === 'custom' ? 'Serbest Görev' : key);
+      map.set(key, label);
+    });
+    return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
   }, [tasks]);
 
   // Excel export
@@ -185,15 +203,15 @@ export default function TumIslemlerPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `satin-alma-islemler-${format(new Date(), 'yyyy-MM-dd')}.xls`;
+    a.download = `planlama-birimi-islemler-${format(new Date(), 'yyyy-MM-dd')}.xls`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, [filteredTasks]);
 
-  const taskTypeLabel = (type: string | undefined) =>
-    type === 'kurum_ziyareti' ? 'Kurum Ziyareti' : 'Serbest Görev';
+  const taskTypeLabel = (type: string | undefined, label?: string) =>
+    label || (type === 'kurum_ziyareti' ? 'Kurum Ziyareti' : type === 'custom' ? 'Serbest Görev' : type || 'Serbest Görev');
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
@@ -261,22 +279,16 @@ export default function TumIslemlerPanel() {
         {showFilters && (
           <div className="mt-3 flex flex-col sm:flex-row gap-2 animate-in slide-in-from-top-1 duration-200">
             {/* Task type filter */}
-            <div className="flex gap-1.5 flex-1">
-              {(['all', 'custom', 'kurum_ziyareti'] as TaskTypeFilter[]).map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setTaskTypeFilter(type)}
-                  className={cn(
-                    'flex-1 py-2 px-2 rounded-lg text-xs font-medium border transition-all',
-                    taskTypeFilter === type
-                      ? 'bg-[#d4ec00]/10 border-[#d4ec00]/40 text-[#7a8a00] dark:text-[#d4ec00]'
-                      : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {type === 'all' ? 'Tümü' : type === 'custom' ? 'Serbest' : 'Kurum Ziyareti'}
-                </button>
+            <select
+              value={taskTypeFilter}
+              onChange={(e) => setTaskTypeFilter(e.target.value)}
+              className="flex-1 sm:max-w-[220px] py-2 px-3 bg-secondary border border-border rounded-lg text-xs text-foreground outline-none focus:ring-2 focus:ring-[#d4ec00]/40"
+            >
+              <option value="all">Tüm Türler</option>
+              {uniqueTaskTypes.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
               ))}
-            </div>
+            </select>
 
             {/* Personnel filter */}
             <select
@@ -291,6 +303,21 @@ export default function TumIslemlerPanel() {
                 </option>
               ))}
             </select>
+
+            <input
+              type="date"
+              value={startDateFilter}
+              onChange={(e) => setStartDateFilter(e.target.value)}
+              className="flex-1 sm:max-w-[170px] py-2 px-3 bg-secondary border border-border rounded-lg text-xs text-foreground outline-none focus:ring-2 focus:ring-[#d4ec00]/40"
+              placeholder="Başlangıç"
+            />
+            <input
+              type="date"
+              value={endDateFilter}
+              onChange={(e) => setEndDateFilter(e.target.value)}
+              className="flex-1 sm:max-w-[170px] py-2 px-3 bg-secondary border border-border rounded-lg text-xs text-foreground outline-none focus:ring-2 focus:ring-[#d4ec00]/40"
+              placeholder="Bitiş"
+            />
           </div>
         )}
       </div>
@@ -349,7 +376,7 @@ export default function TumIslemlerPanel() {
                               : 'bg-secondary text-muted-foreground'
                           )}
                         >
-                          {taskTypeLabel(task.taskType || 'custom')}
+                          {taskTypeLabel(task.taskType || 'custom', task.taskTypeLabel)}
                         </span>
                       </td>
                       <td className="py-3 pr-4 text-muted-foreground whitespace-nowrap">
