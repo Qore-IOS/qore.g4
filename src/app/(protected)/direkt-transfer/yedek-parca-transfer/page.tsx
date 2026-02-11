@@ -1029,20 +1029,22 @@ export default function YedekParcaTransferPage() {
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="transfer">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="transfer">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
+            <TabsTrigger value="transfer" className="text-xs sm:text-sm">
               <Send className="h-4 w-4 mr-2" />
               Transfer
             </TabsTrigger>
-            <TabsTrigger value="borrowed">
+            <TabsTrigger value="borrowed" className="text-xs sm:text-sm">
               <HandCoins className="h-4 w-4 mr-2" />
-              Borç Alınan ({borrowedParts.length})
+              <span className="sm:hidden">Borç ({borrowedParts.length})</span>
+              <span className="hidden sm:inline">Borç Alınan ({borrowedParts.length})</span>
             </TabsTrigger>
-            <TabsTrigger value="pending">
+            <TabsTrigger value="pending" className="text-xs sm:text-sm">
               <Clock className="h-4 w-4 mr-2" />
-              İade Bekleyen ({pendingReturns.length})
+              <span className="sm:hidden">İade ({pendingReturns.length})</span>
+              <span className="hidden sm:inline">İade Bekleyen ({pendingReturns.length})</span>
             </TabsTrigger>
-            <TabsTrigger value="history">
+            <TabsTrigger value="history" className="text-xs sm:text-sm">
               <History className="h-4 w-4 mr-2" />
               Geçmiş
             </TabsTrigger>
