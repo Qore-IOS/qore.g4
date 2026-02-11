@@ -120,33 +120,35 @@ export const onNotificationCreated = functions
         }
       }
 
-      const tokens = Array.from(tokenMap.values());
-      logEntry.tokensMatched = tokens.length;
+      const initialMembershipTokens = tokenMap.size;
 
-      // Fallback path for legacy token docs where membershipKeys may be missing/stale.
-      // This ensures non-admin roles can still receive notifications when targeting by
-      // role/view/lab/depot/user.
-      if (tokens.length === 0) {
-        const targetUids = await collectTargetUidsFromTargets(data.targets, data.actor?.uid);
-        if (targetUids.size > 0) {
-          const uidChunks = chunk(Array.from(targetUids), 30);
-          for (const uidChunk of uidChunks) {
-            const fallbackTokenSnap = await db
-              .collection('pushTokens')
-              .where('uid', 'in', uidChunk)
-              .where('enabled', '==', true)
-              .get();
+      // Always augment by UID-based lookup so partially matched membershipKeys (e.g. only admin)
+      // still include non-admin recipients for the same notification targets.
+      const targetUids = await collectTargetUidsFromTargets(data.targets, data.actor?.uid);
+      if (targetUids.size > 0) {
+        const uidChunks = chunk(Array.from(targetUids), 30);
+        for (const uidChunk of uidChunks) {
+          const fallbackTokenSnap = await db
+            .collection('pushTokens')
+            .where('uid', 'in', uidChunk)
+            .where('enabled', '==', true)
+            .get();
 
-            for (const tokenDoc of fallbackTokenSnap.docs) {
-              const td = tokenDoc.data();
-              if (td.token && !tokenMap.has(td.token)) {
-                tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
-              }
+          for (const tokenDoc of fallbackTokenSnap.docs) {
+            const td = tokenDoc.data();
+            if (td.token && !tokenMap.has(td.token)) {
+              tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
             }
           }
-          logEntry.tokensMatched = tokenMap.size;
-          logger.info(`[fanOut] Fallback by uid resolved ${tokenMap.size} tokens for ${notificationId}`);
         }
+      }
+
+      const fallbackAdded = tokenMap.size - initialMembershipTokens;
+      logEntry.tokensMatched = tokenMap.size;
+      logEntry.tokensMatchedByMembership = initialMembershipTokens;
+      logEntry.tokensMatchedByUidFallback = fallbackAdded;
+      if (fallbackAdded > 0) {
+        logger.info(`[fanOut] UID fallback added ${fallbackAdded} tokens for ${notificationId}`);
       }
 
       const resolvedTokens = Array.from(tokenMap.values());
