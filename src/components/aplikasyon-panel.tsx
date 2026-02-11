@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Loader2, Eye, Calendar, Clock, AlertTriangle } from 'lucide-react';
+import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Loader2, Eye, Calendar, Clock, AlertTriangle, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
@@ -309,12 +309,18 @@ export default function AplikasyonPanel({
       <BackButton fallback="/cihaz-yonetimi-ana" />
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
             <CardTitle className="text-2xl font-headline flex items-center text-primary"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
-            <Button variant="outline" onClick={openAllFormsDialog}>
-              <FileText className="mr-2 h-4 w-4" />
-              Tüm İşlem Formlarını Göster
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto">
+              <Button variant="outline" onClick={openAllFormsDialog} className="w-full sm:w-auto">
+                <FileText className="mr-2 h-4 w-4" />
+                Tüm İşlem Formlarını Göster
+              </Button>
+              <Button variant="outline" onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')} className="w-full sm:w-auto">
+                <Package className="mr-2 h-4 w-4" />
+                Yedek Parça Stokları
+              </Button>
+            </div>
           </div>
           <CardDescription>Hastanelerdeki cihazların aplikasyon durumlarını görüntüleyin.</CardDescription>
         </CardHeader>
