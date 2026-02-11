@@ -1599,6 +1599,7 @@ export default function YedekParcaTransferPage() {
                         <TableHead>Adet</TableHead>
                         <TableHead>Kişi</TableHead>
                         <TableHead>İşlemi Yapan</TableHead>
+                        <TableHead className="text-right">Tutanak</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1631,6 +1632,13 @@ export default function YedekParcaTransferPage() {
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {log.createdByName}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {(log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel') ? (
+                              <SparePartTransferTutanakPDFButton log={log} />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                         );
