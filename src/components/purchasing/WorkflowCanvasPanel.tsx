@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { db } from '@/lib/firebase';
 import {
   addDoc,
@@ -10,7 +10,12 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import type { PurchasingTask, PurchasingWorkflowEdge, PurchasingWorkflowNodePosition, PurchasingWorkflowProject } from '@/lib/types';
+import type {
+  PurchasingTask,
+  PurchasingWorkflowEdge,
+  PurchasingWorkflowNodePosition,
+  PurchasingWorkflowProject,
+} from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { CheckCircle2, Circle, Link2, Palette, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -23,22 +28,40 @@ type Props = {
 };
 
 const PRESET_COLORS = ['#d4ec00', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#f97316'];
+const NODE_W = 236;
+const NODE_H = 84;
 
 export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userName }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(workflows[0]?.id || '');
   const [newName, setNewName] = useState('Yeni Workflow');
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
-  const [linkFromTaskId, setLinkFromTaskId] = useState<string | null>(null);
+
+  const [localNodes, setLocalNodes] = useState<PurchasingWorkflowNodePosition[]>([]);
+  const [draggingNode, setDraggingNode] = useState<{ taskId: string; dx: number; dy: number; pointerId: number } | null>(null);
+  const [linkingFromTaskId, setLinkingFromTaskId] = useState<string | null>(null);
+  const [linkPointer, setLinkPointer] = useState<{ x: number; y: number } | null>(null);
+  const [linkHoverTargetTaskId, setLinkHoverTargetTaskId] = useState<string | null>(null);
+
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const localNodesRef = useRef<PurchasingWorkflowNodePosition[]>([]);
 
   const selectedWorkflow = useMemo(
     () => workflows.find((w) => w.id === selectedWorkflowId),
     [workflows, selectedWorkflowId]
   );
 
-
   useEffect(() => {
     if (!selectedWorkflowId && workflows[0]?.id) setSelectedWorkflowId(workflows[0].id);
   }, [workflows, selectedWorkflowId]);
+
+  useEffect(() => {
+    setLocalNodes(selectedWorkflow?.nodes || []);
+    localNodesRef.current = selectedWorkflow?.nodes || [];
+    setDraggingNode(null);
+    setLinkingFromTaskId(null);
+    setLinkPointer(null);
+    setLinkHoverTargetTaskId(null);
+  }, [selectedWorkflow?.id, selectedWorkflow?.nodes]);
 
   const orderedTasks = useMemo(
     () => [...tasks].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)),
@@ -63,14 +86,19 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
 
   const nodePositionsByTask = useMemo(() => {
     const map = new Map<string, PurchasingWorkflowNodePosition>();
-    (selectedWorkflow?.nodes || []).forEach((n) => map.set(n.taskId, n));
+    localNodes.forEach((n) => map.set(n.taskId, n));
     return map;
-  }, [selectedWorkflow]);
+  }, [localNodes]);
 
-  const workflowTasks = useMemo(
-    () => (selectedWorkflow?.taskIds || []).map((id) => workflowTaskMap.get(id)).filter(Boolean) as PurchasingTask[],
-    [selectedWorkflow, workflowTaskMap]
-  );
+  const persistNodes = async (nodes: PurchasingWorkflowNodePosition[]) => {
+    if (!selectedWorkflow) return;
+    try {
+      await updateDoc(doc(db, 'purchasingWorkflows', selectedWorkflow.id), { nodes, updatedAt: Timestamp.now() });
+    } catch (err) {
+      console.error(err);
+      toast.error('Kanvas konumu kaydedilemedi');
+    }
+  };
 
   const createWorkflow = async () => {
     const name = newName.trim();
@@ -101,7 +129,11 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
       const batch = writeBatch(db);
       batch.update(doc(db, 'purchasingWorkflows', selectedWorkflow.id), { color, updatedAt: Timestamp.now() });
       selectedWorkflow.taskIds.forEach((taskId) => {
-        batch.update(doc(db, 'purchasingTasks', taskId), { workflowColor: color, workflowProjectId: selectedWorkflow.id, updatedAt: Timestamp.now() });
+        batch.update(doc(db, 'purchasingTasks', taskId), {
+          workflowColor: color,
+          workflowProjectId: selectedWorkflow.id,
+          updatedAt: Timestamp.now(),
+        });
       });
       await batch.commit();
       toast.success('Workflow rengi güncellendi');
@@ -115,7 +147,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
     if (!selectedWorkflow) return;
     if (selectedWorkflow.taskIds.includes(taskId)) return;
 
-    const nextNodes = [...selectedWorkflow.nodes, { taskId, x, y }];
+    const nextNodes = [...(selectedWorkflow.nodes || []), { taskId, x, y }];
     const nextTaskIds = [...selectedWorkflow.taskIds, taskId];
     try {
       const batch = writeBatch(db);
@@ -156,7 +188,6 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
         updatedAt: Timestamp.now(),
       });
       await batch.commit();
-      setLinkFromTaskId((prev) => (prev === taskId ? null : prev));
       toast.success('Görev workflow\'dan çıkarıldı');
     } catch (err) {
       console.error(err);
@@ -164,20 +195,16 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
     }
   };
 
-  const linkTasks = async (toTaskId: string) => {
-    if (!selectedWorkflow || !linkFromTaskId || linkFromTaskId === toTaskId) return;
-    const exists = selectedWorkflow.edges.some((e) => e.fromTaskId === linkFromTaskId && e.toTaskId === toTaskId);
-    if (exists) {
-      setLinkFromTaskId(null);
-      return;
-    }
+  const linkTasks = async (fromTaskId: string, toTaskId: string) => {
+    if (!selectedWorkflow || fromTaskId === toTaskId) return;
+    const exists = selectedWorkflow.edges.some((e) => e.fromTaskId === fromTaskId && e.toTaskId === toTaskId);
+    if (exists) return;
     const next: PurchasingWorkflowEdge[] = [
       ...selectedWorkflow.edges,
-      { id: `we_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fromTaskId: linkFromTaskId, toTaskId },
+      { id: `we_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fromTaskId, toTaskId },
     ];
     try {
       await updateDoc(doc(db, 'purchasingWorkflows', selectedWorkflow.id), { edges: next, updatedAt: Timestamp.now() });
-      setLinkFromTaskId(null);
       toast.success('Akış bağlantısı eklendi');
     } catch (err) {
       console.error(err);
@@ -196,9 +223,81 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
     }
   };
 
+  const startNodeDrag = (e: React.PointerEvent<HTMLDivElement>, taskId: string) => {
+    if (!canvasRef.current) return;
+    const pos = nodePositionsByTask.get(taskId);
+    if (!pos) return;
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    setDraggingNode({
+      taskId,
+      pointerId: e.pointerId,
+      dx: e.clientX - canvasRect.left - pos.x,
+      dy: e.clientY - canvasRect.top - pos.y,
+    });
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+
+  const startLinkDrag = (e: React.PointerEvent<HTMLButtonElement>, fromTaskId: string) => {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    setLinkingFromTaskId(fromTaskId);
+    setLinkHoverTargetTaskId(null);
+    setLinkPointer({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  useEffect(() => {
+    if (!draggingNode && !linkingFromTaskId) return;
+
+    const onPointerMove = (ev: PointerEvent) => {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const px = ev.clientX - rect.left;
+      const py = ev.clientY - rect.top;
+
+      if (draggingNode) {
+        const nextX = Math.max(8, px - draggingNode.dx);
+        const nextY = Math.max(8, py - draggingNode.dy);
+        setLocalNodes((prev) => {
+          const next = prev.map((n) => (n.taskId === draggingNode.taskId ? { ...n, x: nextX, y: nextY } : n));
+          localNodesRef.current = next;
+          return next;
+        });
+      }
+
+      if (linkingFromTaskId) {
+        setLinkPointer({ x: px, y: py });
+      }
+    };
+
+    const onPointerUp = async () => {
+      if (draggingNode) {
+        setDraggingNode(null);
+        const snapshot = [...localNodesRef.current];
+        await persistNodes(snapshot);
+      }
+      if (linkingFromTaskId) {
+        const from = linkingFromTaskId;
+        const target = linkHoverTargetTaskId;
+        setLinkingFromTaskId(null);
+        setLinkPointer(null);
+        setLinkHoverTargetTaskId(null);
+        if (target) await linkTasks(from, target);
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+  }, [draggingNode, linkingFromTaskId, linkHoverTargetTaskId]);
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-3">
-      <aside className="rounded-2xl border border-border bg-card p-3 space-y-3">
+      <aside className="rounded-2xl border border-border bg-card p-3 space-y-3 shadow-sm">
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground">Workflow Projesi</label>
           <select
@@ -218,7 +317,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
           <input value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-xs" placeholder="Örn: Ekim Kurum Ziyaret Planı" />
           <div className="flex flex-wrap gap-1.5">
             {PRESET_COLORS.map((c) => (
-              <button key={c} onClick={() => setNewColor(c)} className={cn('w-5 h-5 rounded-full border', newColor === c ? 'ring-2 ring-white/60' : 'border-white/20')} style={{ backgroundColor: c }} />
+              <button key={c} onClick={() => setNewColor(c)} className={cn('w-6 h-6 rounded-full border shadow-sm', newColor === c ? 'ring-2 ring-offset-1 ring-offset-background ring-foreground/60' : 'border-foreground/20')} style={{ backgroundColor: c }} />
             ))}
           </div>
           <button onClick={createWorkflow} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-[#d4ec00] text-zinc-900 font-medium">
@@ -238,7 +337,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                   <button
                     key={c}
                     onClick={() => updateWorkflowColor(c)}
-                    className={cn('w-5 h-5 rounded-full border', selectedWorkflow.color === c ? 'ring-2 ring-white/60' : 'border-white/20')}
+                    className={cn('w-6 h-6 rounded-full border shadow-sm', selectedWorkflow.color === c ? 'ring-2 ring-offset-1 ring-offset-background ring-foreground/60' : 'border-foreground/20')}
                     style={{ backgroundColor: c }}
                   />
                 ))}
@@ -266,11 +365,16 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                   key={task.id}
                   draggable={!!selectedWorkflow}
                   onDragStart={(e) => e.dataTransfer.setData('application/x-task-id', task.id)}
-                  className={cn('rounded-lg border px-2 py-1.5 text-xs bg-card', inSelectedWorkflow ? 'border-[#d4ec00]/50' : 'border-border')}
+                  className={cn(
+                    'rounded-lg border px-2 py-1.5 text-xs transition-all',
+                    inSelectedWorkflow
+                      ? 'border-2 shadow-sm bg-[#d4ec00]/12 border-[#7a8a00] dark:border-[#d4ec00]'
+                      : 'bg-card border-border'
+                  )}
                 >
                   <div className="flex items-center gap-1.5">
                     {task.completed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Circle className="w-3.5 h-3.5 text-muted-foreground" />}
-                    <span className="truncate font-medium">{task.title}</span>
+                    <span className={cn('truncate font-medium', inSelectedWorkflow ? 'text-foreground' : 'text-foreground/85')}>{task.title}</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">{task.date} • {task.startTime}-{task.endTime}</p>
                 </div>
@@ -280,76 +384,117 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
         </div>
       </aside>
 
-      <section className="rounded-2xl border border-border bg-card p-3 min-h-[72vh]">
+      <section className="rounded-2xl border border-border bg-card p-3 min-h-[72vh] shadow-sm">
         {!selectedWorkflow ? (
           <div className="h-full min-h-[300px] flex items-center justify-center text-sm text-muted-foreground">Önce bir workflow seçin veya oluşturun.</div>
         ) : (
           <div
+            ref={canvasRef}
             className="relative rounded-xl border border-border min-h-[68vh] overflow-auto"
             style={{
-              backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)',
+              backgroundColor: 'hsl(var(--card))',
+              backgroundImage:
+                'linear-gradient(to right, rgba(0,0,0,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.12) 1px, transparent 1px)',
               backgroundSize: '24px 24px',
             }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
               const taskId = e.dataTransfer.getData('application/x-task-id');
-              if (!taskId) return;
-              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-              addTaskToCanvas(taskId, Math.max(12, e.clientX - rect.left - 120), Math.max(12, e.clientY - rect.top - 30));
+              if (!taskId || !canvasRef.current) return;
+              const rect = canvasRef.current.getBoundingClientRect();
+              addTaskToCanvas(taskId, Math.max(12, e.clientX - rect.left - NODE_W / 2), Math.max(12, e.clientY - rect.top - NODE_H / 2));
             }}
           >
+            <div
+              className="pointer-events-none absolute inset-0 dark:block hidden"
+              style={{
+                backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(239,68,68,0.16), transparent 35%), radial-gradient(circle at 75% 60%, rgba(59,130,246,0.16), transparent 35%)',
+              }}
+            />
+
             <svg className="absolute inset-0 w-full h-full pointer-events-none">
               {(selectedWorkflow.edges || []).map((edge) => {
                 const from = nodePositionsByTask.get(edge.fromTaskId);
                 const to = nodePositionsByTask.get(edge.toTaskId);
                 if (!from || !to) return null;
-                const x1 = from.x + 228;
-                const y1 = from.y + 30;
+                const x1 = from.x + NODE_W;
+                const y1 = from.y + NODE_H / 2;
                 const x2 = to.x;
-                const y2 = to.y + 30;
+                const y2 = to.y + NODE_H / 2;
                 const c1 = x1 + 70;
                 const c2 = x2 - 70;
                 return (
-                  <path key={edge.id} d={`M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`} stroke={selectedWorkflow.color} strokeWidth="2.2" fill="none" opacity="0.9" />
+                  <path key={edge.id} d={`M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`} stroke={selectedWorkflow.color} strokeWidth="2.4" fill="none" opacity="0.95" />
                 );
               })}
+
+              {linkingFromTaskId && linkPointer && (() => {
+                const from = nodePositionsByTask.get(linkingFromTaskId);
+                if (!from) return null;
+                const x1 = from.x + NODE_W;
+                const y1 = from.y + NODE_H / 2;
+                const x2 = linkPointer.x;
+                const y2 = linkPointer.y;
+                const c1 = x1 + 70;
+                const c2 = x2 - 70;
+                return (
+                  <path d={`M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`} stroke={selectedWorkflow.color} strokeWidth="2.4" strokeDasharray="6 6" fill="none" opacity="0.9" />
+                );
+              })()}
             </svg>
 
-            {(selectedWorkflow.nodes || []).map((node) => {
+            {localNodes.map((node) => {
               const task = workflowTaskMap.get(node.taskId);
               if (!task) return null;
-              const isLinkFrom = linkFromTaskId === task.id;
+              const isLinkFrom = linkingFromTaskId === task.id;
+              const isLinkHover = linkHoverTargetTaskId === task.id;
               return (
-                <div key={task.id} className="absolute w-[228px]" style={{ left: node.x, top: node.y }}>
-                  <div className="absolute -left-2 top-1/2 -translate-y-1/2">
+                <div key={task.id} className="absolute w-[236px]" style={{ left: node.x, top: node.y }}>
+                  <div className="absolute -left-2 top-1/2 -translate-y-1/2 z-20">
                     <button
-                      onClick={() => linkTasks(task.id)}
-                      className={cn('w-4 h-4 rounded-full border-2 bg-background', linkFromTaskId ? 'border-sky-400' : 'border-muted-foreground/50')}
+                      onPointerEnter={() => linkingFromTaskId && setLinkHoverTargetTaskId(task.id)}
+                      onPointerLeave={() => setLinkHoverTargetTaskId((prev) => (prev === task.id ? null : prev))}
+                      className={cn(
+                        'w-5 h-5 rounded-full border-2 shadow bg-background transition-all',
+                        isLinkHover ? 'border-sky-500 ring-2 ring-sky-500/30 scale-110' : 'border-foreground/40',
+                        linkingFromTaskId ? 'cursor-copy' : 'cursor-default'
+                      )}
                       title="Giriş pini"
                     />
                   </div>
 
-                  <div className="rounded-lg border shadow-sm px-2.5 py-2" style={{ borderColor: selectedWorkflow.color, background: 'rgba(23,23,23,0.82)' }}>
+                  <div
+                    onPointerDown={(e) => startNodeDrag(e, task.id)}
+                    className={cn(
+                      'rounded-lg border px-2.5 py-2 shadow-sm select-none cursor-move backdrop-blur-[1px] transition-all',
+                      'bg-white/95 dark:bg-zinc-900/90',
+                      draggingNode?.taskId === task.id ? 'ring-2 ring-sky-500/40' : ''
+                    )}
+                    style={{ borderColor: selectedWorkflow.color }}
+                  >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-semibold truncate">{task.title}</p>
-                      <button onClick={() => removeTaskFromWorkflow(task.id)} className="text-muted-foreground hover:text-red-400">
+                      <p className="text-xs font-semibold truncate text-zinc-800 dark:text-zinc-100">{task.title}</p>
+                      <button onClick={() => removeTaskFromWorkflow(task.id)} className="text-zinc-500 hover:text-red-500 dark:text-zinc-400" onPointerDown={(e) => e.stopPropagation()}>
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-1">{task.date} • {task.startTime}-{task.endTime}</p>
+                    <p className="text-[10px] text-zinc-600 dark:text-zinc-400 mt-1">{task.date} • {task.startTime}-{task.endTime}</p>
                     <div className="mt-2 flex items-center justify-between">
-                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded', task.completed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400')}>
+                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded', task.completed ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-400')}>
                         {task.completed ? 'Tamamlandı' : 'Bekliyor'}
                       </span>
-                      {isLinkFrom && <span className="text-[10px] text-sky-400 inline-flex items-center gap-1"><Link2 className="w-3 h-3" /> Bağlantı modu</span>}
+                      {isLinkFrom && <span className="text-[10px] text-sky-600 dark:text-sky-400 inline-flex items-center gap-1"><Link2 className="w-3 h-3" /> Bağlantı</span>}
                     </div>
                   </div>
 
-                  <div className="absolute -right-2 top-1/2 -translate-y-1/2">
+                  <div className="absolute -right-2 top-1/2 -translate-y-1/2 z-20">
                     <button
-                      onClick={() => setLinkFromTaskId(task.id)}
-                      className={cn('w-4 h-4 rounded-full border-2 bg-background', isLinkFrom ? 'border-sky-400' : 'border-muted-foreground/50')}
+                      onPointerDown={(e) => startLinkDrag(e, task.id)}
+                      className={cn(
+                        'w-5 h-5 rounded-full border-2 shadow bg-background transition-all',
+                        isLinkFrom ? 'border-sky-500 ring-2 ring-sky-500/30 scale-110' : 'border-foreground/40'
+                      )}
                       title="Çıkış pini"
                     />
                   </div>
@@ -358,7 +503,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
             })}
 
             {(selectedWorkflow.edges || []).length > 0 && (
-              <div className="absolute right-2 top-2 rounded-lg border border-border bg-card/80 p-2 max-w-[260px]">
+              <div className="absolute right-2 top-2 rounded-lg border border-border bg-card/85 p-2 max-w-[260px] shadow-sm">
                 <p className="text-[11px] text-muted-foreground mb-1">Bağlantılar</p>
                 <div className="space-y-1.5 max-h-40 overflow-y-auto">
                   {selectedWorkflow.edges.map((edge) => (
