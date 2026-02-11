@@ -430,6 +430,15 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
               />
 
             <svg className="absolute inset-0 pointer-events-none" width={CANVAS_W} height={CANVAS_H}>
+              <defs>
+                <filter id="workflow-complete-glow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="2.6" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
               {(selectedWorkflow.edges || []).map((edge) => {
                 const from = nodePositionsByTask.get(edge.fromTaskId);
                 const to = nodePositionsByTask.get(edge.toTaskId);
@@ -446,11 +455,14 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                 const pathD = `M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`;
                 return (
                   <g key={edge.id}>
-                    <path d={pathD} stroke={selectedWorkflow.color} strokeWidth="2.4" fill="none" opacity="0.95" />
+                    {!isFlowCompleted && <path d={pathD} stroke={selectedWorkflow.color} strokeWidth="2.4" fill="none" opacity="0.95" />}
                     {isFlowCompleted && (
-                      <path d={pathD} stroke="#22c55e" strokeWidth="3" fill="none" strokeDasharray="7 14" strokeLinecap="round" opacity="0.95">
-                        <animate attributeName="stroke-dashoffset" from="0" to="-42" dur="1.2s" repeatCount="indefinite" />
-                      </path>
+                      <>
+                        <path d={pathD} stroke="#22c55e" strokeWidth="3.2" fill="none" opacity="0.95" filter="url(#workflow-complete-glow)" />
+                        <path d={pathD} stroke="#86efac" strokeWidth="4.2" fill="none" strokeDasharray="8 15" strokeLinecap="round" opacity="0.95" filter="url(#workflow-complete-glow)">
+                          <animate attributeName="stroke-dashoffset" from="0" to="-46" dur="1s" repeatCount="indefinite" />
+                        </path>
+                      </>
                     )}
                   </g>
                 );
