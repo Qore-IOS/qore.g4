@@ -512,7 +512,10 @@ export default function AnaPanel(props: AnaPanelProps) {
         const matchedFormat = parsed.matchedFormatId
           ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
           : undefined;
-        const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, matchedProduct as any);
+        const staticTrackingMode = productTracking[stokKodu] || resolveDefaultTrackingMode(matchedProduct as any);
+        const mode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
+          ? 'qty_barcode'
+          : resolveEffectiveTrackingMode(resolved, matchedFormat, matchedProduct as any);
 
         const isLotOnlyBarcode = (mode === 'serial') && !!lotNumarasi && !seriNumarasi;
 
