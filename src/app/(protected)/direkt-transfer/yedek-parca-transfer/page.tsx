@@ -146,7 +146,18 @@ export default function YedekParcaTransferPage() {
   const [allStockLoading, setAllStockLoading] = useState(false);
 
   // Check authorization
-  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik';
+  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
+
+  const fetchRecentTransferLogs = useCallback(async () => {
+    const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
+    const logs = logsSnap.docs.map(d => {
+      const data = d.data();
+      const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
+      return { id: d.id, ...data, timestamp };
+    });
+    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setTransferLogs(logs.slice(0, 50));
+  }, []);
 
   const fetchRecentTransferLogs = useCallback(async () => {
     const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
