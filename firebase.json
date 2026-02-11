@@ -18,6 +18,7 @@
     "source": "functions"
   },
   "firestore": {
-    "indexes": "[\n      {\n        \"collectionGroup\": \"overtimeRequests\",\n        \"queryScope\": \"COLLECTION\",\n        \"fields\": [\n          {\n            \"fieldPath\": \"userId\",\n            \"order\": \"ASCENDING\"\n          },\n          {\n            \"fieldPath\": \"createdAt\",\n            \"order\": \"DESCENDING\"\n          }\n        ]\n      }\n    ]"
+    "indexes": "firestore.indexes.json",
+    "rules": "firestore.rules.json"
   }
 }
