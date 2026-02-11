@@ -54,6 +54,7 @@ import {
   Hash,
   List,
   ChevronLeft,
+  Pencil,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -123,6 +124,9 @@ export default function YedekParcaTransferPage() {
   const [expandedStokKodu, setExpandedStokKodu] = useState<string | null>(null);
   const [depoStokSearchQuery, setDepoStokSearchQuery] = useState('');
   const [depoStokPage, setDepoStokPage] = useState(0);
+  const [editingDepoGroup, setEditingDepoGroup] = useState<GroupedDepoStokItem | null>(null);
+  const [editingQuantity, setEditingQuantity] = useState<number>(1);
+  const [isSavingDepoEdit, setIsSavingDepoEdit] = useState(false);
   const DEPO_STOK_PER_PAGE = 20;
 
   // Product code reference for cihazGrubu lookup
@@ -140,6 +144,17 @@ export default function YedekParcaTransferPage() {
 
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik';
+
+  const fetchRecentTransferLogs = useCallback(async () => {
+    const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
+    const logs = logsSnap.docs.map(d => {
+      const data = d.data();
+      const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
+      return { id: d.id, ...data, timestamp };
+    });
+    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setTransferLogs(logs.slice(0, 50));
+  }, []);
 
   // Fetch data
   useEffect(() => {
@@ -211,14 +226,7 @@ export default function YedekParcaTransferPage() {
         setBorrowedParts(borrowed);
 
         // Fetch recent transfer logs
-        const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
-        const logs = logsSnap.docs.map(d => {
-          const data = d.data();
-          const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-          return { id: d.id, ...data, timestamp };
-        });
-        logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setTransferLogs(logs.slice(0, 50));
+        await fetchRecentTransferLogs();
       } catch (err) {
         console.error('Error fetching data:', err);
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -228,7 +236,7 @@ export default function YedekParcaTransferPage() {
     };
 
     fetchData();
-  }, [isAuthorized, toast]);
+  }, [fetchRecentTransferLogs, isAuthorized, toast]);
 
   // Build grouped depot stock products (for transfer product selector)
   useEffect(() => {
@@ -672,19 +680,161 @@ export default function YedekParcaTransferPage() {
       setDepoStok(stokItems);
 
       // Refresh logs
-      const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
-      const logs = logsSnap.docs.map(d => {
-        const data = d.data();
-        const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-        return { id: d.id, ...data, timestamp };
-      });
-      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      setTransferLogs(logs.slice(0, 50));
+      await fetchRecentTransferLogs();
     } catch (err) {
       console.error('Error executing transfer:', err);
       toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  const openDepoQuantityEditor = (group: GroupedDepoStokItem) => {
+    setEditingDepoGroup(group);
+    setEditingQuantity(group.totalQuantity);
+  };
+
+  const saveDepoQuantityEdit = async () => {
+    if (!editingDepoGroup) return;
+
+    const serialCount = editingDepoGroup.serialNumbers.length;
+    const minQuantity = serialCount;
+    const nextTotal = Math.max(minQuantity, Math.floor(editingQuantity));
+    const oldTotal = editingDepoGroup.totalQuantity;
+
+    if (nextTotal === oldTotal) {
+      setEditingDepoGroup(null);
+      return;
+    }
+
+    setIsSavingDepoEdit(true);
+    try {
+      const now = new Date();
+      const nonSerialEntries = editingDepoGroup.entries.filter(e => !e.serialNumber);
+      const nextNonSerialTotal = nextTotal - serialCount;
+      const batch = writeBatch(db);
+
+      if (nextNonSerialTotal <= 0) {
+        nonSerialEntries.forEach(entry => {
+          batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+        });
+      } else if (nonSerialEntries.length > 0) {
+        const [first, ...rest] = nonSerialEntries;
+        batch.update(doc(db, 'yedekParcaDepoStok', first.id), {
+          quantity: nextNonSerialTotal,
+        });
+        rest.forEach(entry => {
+          batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+        });
+      } else {
+        const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
+        batch.set(stockRef, {
+          productCodeId: editingDepoGroup.productCodeId,
+          stokKodu: editingDepoGroup.stokKodu,
+          stokAdi: editingDepoGroup.stokAdi,
+          serialNumber: '',
+          quantity: nextNonSerialTotal,
+          cihazGrubu: editingDepoGroup.cihazGrubu || '',
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+      }
+
+      const delta = nextTotal - oldTotal;
+
+      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+      batch.set(depoLogRef, {
+        action: 'stok_duzeltme',
+        productCodeId: editingDepoGroup.productCodeId,
+        stokKodu: editingDepoGroup.stokKodu,
+        stokAdi: editingDepoGroup.stokAdi,
+        cihazGrubu: editingDepoGroup.cihazGrubu || '',
+        serialNumber: '',
+        quantity: Math.abs(delta),
+        notes: `Depo stok adedi düzenlendi: ${oldTotal} -> ${nextTotal}`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(transferLogRef, {
+        action: 'depo_stock_adjusted',
+        productCodeId: editingDepoGroup.productCodeId,
+        stokKodu: editingDepoGroup.stokKodu,
+        stokAdi: editingDepoGroup.stokAdi,
+        serialNumber: '',
+        quantity: Math.abs(delta),
+        notes: `Depo stok adedi düzenlendi: ${oldTotal} -> ${nextTotal}`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      await batch.commit();
+      setEditingDepoGroup(null);
+      await fetchDepoStok();
+      await fetchRecentTransferLogs();
+
+      toast({
+        title: 'Stok Güncellendi',
+        description: `${editingDepoGroup.stokKodu} için adet ${oldTotal} -> ${nextTotal} olarak güncellendi.`,
+      });
+    } catch (err) {
+      console.error('Error updating depot stock quantity:', err);
+      toast({ title: 'Hata', description: 'Depo stok adedi güncellenemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingDepoEdit(false);
+    }
+  };
+
+  const deleteSerialFromDepot = async (group: GroupedDepoStokItem, serialEntry: { serialNumber: string; id: string }) => {
+    try {
+      const now = new Date();
+      const batch = writeBatch(db);
+
+      batch.delete(doc(db, 'yedekParcaDepoStok', serialEntry.id));
+
+      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+      batch.set(depoLogRef, {
+        action: 'stok_duzeltme',
+        productCodeId: group.productCodeId,
+        stokKodu: group.stokKodu,
+        stokAdi: group.stokAdi,
+        cihazGrubu: group.cihazGrubu || '',
+        serialNumber: serialEntry.serialNumber,
+        quantity: 1,
+        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber}`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(transferLogRef, {
+        action: 'depo_serial_deleted',
+        productCodeId: group.productCodeId,
+        stokKodu: group.stokKodu,
+        stokAdi: group.stokAdi,
+        serialNumber: serialEntry.serialNumber,
+        quantity: 1,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      await batch.commit();
+      await fetchDepoStok();
+      await fetchRecentTransferLogs();
+
+      toast({
+        title: 'Seri No Silindi',
+        description: `${group.stokKodu} / ${serialEntry.serialNumber} depodan kaldırıldı.`,
+      });
+    } catch (err) {
+      console.error('Error deleting serial from depot stock:', err);
+      toast({ title: 'Hata', description: 'Seri numarası silinirken hata oluştu.', variant: 'destructive' });
     }
   };
 
@@ -856,6 +1006,8 @@ export default function YedekParcaTransferPage() {
       borrowed_part: 'Borç Parça Kullanıldı',
       borrowed_approved: 'Borç Onaylandı',
       borrowed_rejected: 'Borç Reddedildi',
+      depo_stock_adjusted: 'Depo Stok Güncellendi',
+      depo_serial_deleted: 'Depo Seri No Silindi',
     };
     return labels[action] || action;
   };
@@ -1471,7 +1623,21 @@ export default function YedekParcaTransferPage() {
                         ) : '-'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{group.totalQuantity}</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">{group.totalQuantity}</Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDepoQuantityEditor(group);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}
@@ -1503,12 +1669,24 @@ export default function YedekParcaTransferPage() {
                             </p>
                             <div className="flex flex-wrap gap-2">
                               {group.serialNumbers.map((sn) => (
-                                <Badge key={sn.id} variant="outline" className="font-mono text-xs">
-                                  {sn.serialNumber}
-                                  <span className="ml-1 text-muted-foreground">
+                                <div key={sn.id} className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1">
+                                  <span className="font-mono text-xs">{sn.serialNumber}</span>
+                                  <span className="text-xs text-muted-foreground">
                                     ({format(sn.createdAt, 'dd.MM.yy', { locale: tr })})
                                   </span>
-                                </Badge>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteSerialFromDepot(group, sn);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 text-red-600" />
+                                  </Button>
+                                </div>
                               ))}
                             </div>
                             {group.totalQuantity > group.serialNumbers.length && (
@@ -2038,6 +2216,56 @@ export default function YedekParcaTransferPage() {
                 alt="Parça fotoğrafı"
                 className="w-full h-auto max-h-[70vh] object-contain rounded-md"
               />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!editingDepoGroup}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDepoGroup(null);
+            setIsSavingDepoEdit(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Depo Stok Adet Düzenle</DialogTitle>
+          </DialogHeader>
+          {editingDepoGroup && (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">{editingDepoGroup.stokAdi}</p>
+                <p>{editingDepoGroup.stokKodu}</p>
+                {editingDepoGroup.serialNumbers.length > 0 && (
+                  <p className="mt-1 text-amber-700 dark:text-amber-400">
+                    Bu ürün seri numaralı. Minimum adet: {editingDepoGroup.serialNumbers.length}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="depo-edit-qty">Yeni Adet</Label>
+                <Input
+                  id="depo-edit-qty"
+                  type="number"
+                  min={editingDepoGroup.serialNumbers.length}
+                  value={editingQuantity}
+                  onChange={(e) => setEditingQuantity(Number(e.target.value || 0))}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditingDepoGroup(null)} disabled={isSavingDepoEdit}>
+                  İptal
+                </Button>
+                <Button onClick={saveDepoQuantityEdit} disabled={isSavingDepoEdit}>
+                  {isSavingDepoEdit && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Kaydet
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
