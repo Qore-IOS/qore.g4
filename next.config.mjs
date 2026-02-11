@@ -14,19 +14,17 @@ const config = {
   poweredByHeader: false,
 
   // ESLint Configuration
-  // TEMPORARILY DISABLED: Set to false after fixing all linting errors
-  // This allows production deployment while lint errors are being resolved
+  // Enforce ESLint during production builds
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: false,
     // Directories to lint
     dirs: ['src'],
   },
 
   // TypeScript Configuration
-  // TEMPORARILY DISABLED: Set to false after fixing all TypeScript errors
-  // This allows production deployment while type errors are being resolved
+  // Enforce TypeScript checks during production builds
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
 
   // Image optimization configuration
