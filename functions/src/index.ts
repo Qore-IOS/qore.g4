@@ -159,7 +159,7 @@ export const onNotificationCreated = functions
       const tokens = Array.from(tokenMap.values());
       logEntry.tokensMatched = tokens.length;
 
-      if (resolvedTokens.length === 0) {
+      if (tokens.length === 0) {
         logEntry.status = 'no_tokens';
         logEntry.errors.push('No matching push tokens found for targets or preferences');
         await db.collection('notificationLogs').add(logEntry);
@@ -204,17 +204,17 @@ export const onNotificationCreated = functions
       });
 
       logEntry.tokensAfterPrefs = filteredTokens.length;
-      logEntry.tokensFilteredByPrefs = resolvedTokens.length - filteredTokens.length;
+      logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
 
       if (filteredTokens.length === 0) {
         logEntry.status = 'filtered_by_prefs';
         logEntry.errors.push('All tokens filtered out by user notification preferences');
         await db.collection('notificationLogs').add(logEntry);
-        logger.info(`[fanOut] All ${resolvedTokens.length} tokens filtered by preferences for ${notificationId}`);
+        logger.info(`[fanOut] All ${tokens.length} tokens filtered by preferences for ${notificationId}`);
         return;
       }
 
-      logger.info(`[fanOut] ${filteredTokens.length}/${resolvedTokens.length} tokens after preference filtering for ${notificationId}`);
+      logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
 
       // --- 2. Build FCM message ---
       const baseUrl = 'https://qorengine.com';
