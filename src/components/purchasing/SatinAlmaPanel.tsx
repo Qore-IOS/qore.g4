@@ -90,6 +90,7 @@ import {
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import PurchasingAgentChat from '@/components/purchasing/PurchasingAgentChat';
 
 // ==========================================
 // Helper: Occupancy calculation (9-5, 8 hours)
@@ -527,6 +528,7 @@ export default function SatinAlmaPanel() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
+  const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -787,16 +789,20 @@ export default function SatinAlmaPanel() {
       .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
   }, [mobileMonthModalDate, tasks]);
 
+  // NOTE: keep an explicit alias to avoid runtime regressions from stale refs (`myTasks`)
+  // in dependency arrays after merges/cherry-picks.
+  const myTasks = tasks;
+
   // Day tasks sorted by sortOrder then startTime
   const dayTasks = useMemo(() => {
-    const filtered = tasks.filter((t) => t.date === selectedDateStr);
+    const filtered = myTasks.filter((t) => t.date === selectedDateStr);
     return filtered.sort((a, b) => {
       const orderA = a.sortOrder ?? 999999;
       const orderB = b.sortOrder ?? 999999;
       if (orderA !== orderB) return orderA - orderB;
       return parseTime(a.startTime) - parseTime(b.startTime);
     });
-  }, [tasks, selectedDateStr]);
+  }, [myTasks, selectedDateStr]);
 
   // Toggle completion
   const toggleTask = useCallback(async (task: PurchasingTask) => {
@@ -825,6 +831,7 @@ export default function SatinAlmaPanel() {
         completed: newCompleted,
         activityLogs: arrayUnion(log),
         updatedAt: Timestamp.now(),
+        activities: [...(task.activities || []), activity],
       });
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: task.completed } : t)));
@@ -1081,7 +1088,7 @@ export default function SatinAlmaPanel() {
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
-      if (!editingTask) return;
+      if (!editingTask || !currentUserProfile) return;
       try {
         const conflicts = hasTimeConflict(
           tasks,
@@ -1106,6 +1113,8 @@ export default function SatinAlmaPanel() {
           endTime: data.endTime,
           priority: data.priority,
           updatedAt: Timestamp.now(),
+          assignedTo: data.assignedTo?.length ? data.assignedTo : null,
+          activities,
         };
 
         if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
@@ -1206,7 +1215,7 @@ export default function SatinAlmaPanel() {
     [dayTasks, draggedTaskId]
   );
 
-  const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
+  const selectedOccupancy = getOccupancyForDay(myTasks, selectedDateStr);
 
   const sliderDates = useMemo(() => {
     const dates: Date[] = [];
@@ -1347,7 +1356,7 @@ export default function SatinAlmaPanel() {
       <div className="px-4 pt-6 pb-2 md:px-8 md:pt-8">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-muted-foreground text-sm">Satın Alma Birimi</p>
+            <p className="text-muted-foreground text-sm">Planlama Birimi</p>
             <h1 className="text-2xl md:text-3xl font-bold mt-1">
               Merhaba, <span className={ACCENT}>{userName}</span>
             </h1>
@@ -2010,6 +2019,11 @@ export default function SatinAlmaPanel() {
           </div>
         </div>
       )}
+
+      <PurchasingAgentChat
+        userUid={currentUserProfile?.uid}
+        userName={currentUserProfile?.name || currentUserProfile?.email || 'Kullanıcı'}
+      />
 
       {/* Floating Add Button */}
       <button
@@ -2905,7 +2919,7 @@ function TaskFormModal({
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>{user.name || user.email}</span>
-                            <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Satın Alma'}</span>
+                            <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
                           </div>
                         </button>
                       );
@@ -2959,7 +2973,7 @@ function TaskFormModal({
                             </div>
                             <div className="flex-1 min-w-0">
                               <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>{user.name || user.email}</span>
-                              <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Satın Alma'}</span>
+                              <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
                             </div>
                           </button>
                         );

@@ -61,11 +61,40 @@ function chunk(arr, size = 500) {
         out.push(arr.slice(i, i + size));
     return out;
 }
+async function collectTargetUidsFromTargets(targets, actorUid) {
+    const targetUids = new Set();
+    const userQueries = targets.map((key) => {
+        const [field, value] = key.split(':');
+        if (!field || !value)
+            return Promise.resolve(null);
+        if (field === 'role')
+            return db.collection('users').where('role', '==', value).get();
+        if (field === 'lab')
+            return db.collection('users').where('assignedLaboratories', 'array-contains', value).get();
+        if (field === 'depot')
+            return db.collection('users').where('assignedDepots', 'array-contains', value).get();
+        if (field === 'view')
+            return db.collection('users').where('accessibleViews', 'array-contains', value).get();
+        if (field === 'user')
+            return db.collection('users').where('uid', '==', value).get();
+        return Promise.resolve(null);
+    });
+    const userSnaps = await Promise.all(userQueries);
+    userSnaps.forEach((userSnap) => {
+        userSnap === null || userSnap === void 0 ? void 0 : userSnap.docs.forEach((d) => {
+            if (d.id && d.id !== actorUid) {
+                targetUids.add(d.id);
+            }
+        });
+    });
+    return targetUids;
+}
 exports.onNotificationCreated = functions
     .region('europe-west1')
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .firestore.document('notifications/{id}')
     .onCreate(async (snap, context) => {
+    var _a;
     const notificationId = context.params.id;
     const data = snap.data();
     // Prepare log entry
@@ -194,15 +223,15 @@ exports.onNotificationCreated = functions
             return true;
         });
         logEntry.tokensAfterPrefs = filteredTokens.length;
-        logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
+        logEntry.tokensFilteredByPrefs = resolvedTokens.length - filteredTokens.length;
         if (filteredTokens.length === 0) {
             logEntry.status = 'filtered_by_prefs';
             logEntry.errors.push('All tokens filtered out by user notification preferences');
             await db.collection('notificationLogs').add(logEntry);
-            firebase_functions_1.logger.info(`[fanOut] All ${tokens.length} tokens filtered by preferences for ${notificationId}`);
+            firebase_functions_1.logger.info(`[fanOut] All ${resolvedTokens.length} tokens filtered by preferences for ${notificationId}`);
             return;
         }
-        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
+        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${resolvedTokens.length} tokens after preference filtering for ${notificationId}`);
         // --- 2. Build FCM message ---
         const baseUrl = 'https://qorengine.com';
         const fcmMessage = {

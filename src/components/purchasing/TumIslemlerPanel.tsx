@@ -203,7 +203,7 @@ export default function TumIslemlerPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `satin-alma-islemler-${format(new Date(), 'yyyy-MM-dd')}.xls`;
+    a.download = `planlama-birimi-islemler-${format(new Date(), 'yyyy-MM-dd')}.xls`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

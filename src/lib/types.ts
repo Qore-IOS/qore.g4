@@ -1141,7 +1141,7 @@ export interface TransferTemplate {
 }
 
 // ==========================================
-// Satın Alma Birimi Görev Sistemi
+// Planlama Birimi Görev Sistemi
 // ==========================================
 
 export interface PurchasingTask {

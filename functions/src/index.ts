@@ -31,6 +31,32 @@ function chunk<T>(arr: T[], size = 500): T[][] {
   return out;
 }
 
+async function collectTargetUidsFromTargets(targets: string[], actorUid?: string): Promise<Set<string>> {
+  const targetUids = new Set<string>();
+
+  const userQueries = targets.map((key) => {
+    const [field, value] = key.split(':');
+    if (!field || !value) return Promise.resolve(null);
+    if (field === 'role') return db.collection('users').where('role', '==', value).get();
+    if (field === 'lab') return db.collection('users').where('assignedLaboratories', 'array-contains', value).get();
+    if (field === 'depot') return db.collection('users').where('assignedDepots', 'array-contains', value).get();
+    if (field === 'view') return db.collection('users').where('accessibleViews', 'array-contains', value).get();
+    if (field === 'user') return db.collection('users').where('uid', '==', value).get();
+    return Promise.resolve(null);
+  });
+
+  const userSnaps = await Promise.all(userQueries);
+  userSnaps.forEach((userSnap) => {
+    userSnap?.docs.forEach((d) => {
+      if (d.id && d.id !== actorUid) {
+        targetUids.add(d.id);
+      }
+    });
+  });
+
+  return targetUids;
+}
+
 export const onNotificationCreated = functions
   .region('europe-west1')
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
@@ -133,7 +159,7 @@ export const onNotificationCreated = functions
       const tokens = Array.from(tokenMap.values());
       logEntry.tokensMatched = tokens.length;
 
-      if (tokens.length === 0) {
+      if (resolvedTokens.length === 0) {
         logEntry.status = 'no_tokens';
         logEntry.errors.push('No matching push tokens found for targets or preferences');
         await db.collection('notificationLogs').add(logEntry);
@@ -178,17 +204,17 @@ export const onNotificationCreated = functions
       });
 
       logEntry.tokensAfterPrefs = filteredTokens.length;
-      logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
+      logEntry.tokensFilteredByPrefs = resolvedTokens.length - filteredTokens.length;
 
       if (filteredTokens.length === 0) {
         logEntry.status = 'filtered_by_prefs';
         logEntry.errors.push('All tokens filtered out by user notification preferences');
         await db.collection('notificationLogs').add(logEntry);
-        logger.info(`[fanOut] All ${tokens.length} tokens filtered by preferences for ${notificationId}`);
+        logger.info(`[fanOut] All ${resolvedTokens.length} tokens filtered by preferences for ${notificationId}`);
         return;
       }
 
-      logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
+      logger.info(`[fanOut] ${filteredTokens.length}/${resolvedTokens.length} tokens after preference filtering for ${notificationId}`);
 
       // --- 2. Build FCM message ---
       const baseUrl = 'https://qorengine.com';
