@@ -1603,13 +1603,21 @@ export default function YedekParcaTransferPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredHistoryLogs.map((log) => (
+                      {filteredHistoryLogs.map((log) => {
+                        const isTransferAction = log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel';
+
+                        return (
                         <TableRow key={log.id}>
                           <TableCell className="text-sm">
                             {format(log.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr })}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline">{getActionLabel(log.action)}</Badge>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline">{getActionLabel(log.action)}</Badge>
+                              {isTransferAction && (
+                                <SparePartTransferTutanakPDFButton log={log} className="h-7 px-2 text-xs" />
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <div>
@@ -1633,7 +1641,8 @@ export default function YedekParcaTransferPage() {
                             )}
                           </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
                   </div>
