@@ -148,18 +148,7 @@ export default function YedekParcaTransferPage() {
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
 
-  const fetchRecentTransferLogs = useCallback(async () => {
-    const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
-    const logs = logsSnap.docs.map(d => {
-      const data = d.data();
-      const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-      return { id: d.id, ...data, timestamp };
-    });
-    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    setTransferLogs(logs.slice(0, 50));
-  }, []);
-
-  const fetchRecentTransferLogs = useCallback(async () => {
+  const loadRecentTransferLogs = useCallback(async () => {
     const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
     const logs = logsSnap.docs.map(d => {
       const data = d.data();
@@ -240,7 +229,7 @@ export default function YedekParcaTransferPage() {
         setBorrowedParts(borrowed);
 
         // Fetch recent transfer logs
-        await fetchRecentTransferLogs();
+        await loadRecentTransferLogs();
       } catch (err) {
         console.error('Error fetching data:', err);
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -250,7 +239,7 @@ export default function YedekParcaTransferPage() {
     };
 
     fetchData();
-  }, [fetchRecentTransferLogs, isAuthorized, toast]);
+  }, [loadRecentTransferLogs, isAuthorized, toast]);
 
   // Build grouped depot stock products (for transfer product selector)
   useEffect(() => {
@@ -694,7 +683,7 @@ export default function YedekParcaTransferPage() {
       setDepoStok(stokItems);
 
       // Refresh logs
-      await fetchRecentTransferLogs();
+      await loadRecentTransferLogs();
     } catch (err) {
       console.error('Error executing transfer:', err);
       toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
@@ -789,7 +778,7 @@ export default function YedekParcaTransferPage() {
       await batch.commit();
       setEditingDepoGroup(null);
       await fetchDepoStok();
-      await fetchRecentTransferLogs();
+      await loadRecentTransferLogs();
 
       toast({
         title: 'Stok Güncellendi',
@@ -840,7 +829,7 @@ export default function YedekParcaTransferPage() {
 
       await batch.commit();
       await fetchDepoStok();
-      await fetchRecentTransferLogs();
+      await loadRecentTransferLogs();
 
       toast({
         title: 'Seri No Silindi',
