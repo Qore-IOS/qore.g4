@@ -94,7 +94,6 @@ exports.onNotificationCreated = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .firestore.document('notifications/{id}')
     .onCreate(async (snap, context) => {
-    var _a;
     const notificationId = context.params.id;
     const data = snap.data();
     // Prepare log entry
@@ -223,15 +222,15 @@ exports.onNotificationCreated = functions
             return true;
         });
         logEntry.tokensAfterPrefs = filteredTokens.length;
-        logEntry.tokensFilteredByPrefs = resolvedTokens.length - filteredTokens.length;
+        logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
         if (filteredTokens.length === 0) {
             logEntry.status = 'filtered_by_prefs';
             logEntry.errors.push('All tokens filtered out by user notification preferences');
             await db.collection('notificationLogs').add(logEntry);
-            firebase_functions_1.logger.info(`[fanOut] All ${resolvedTokens.length} tokens filtered by preferences for ${notificationId}`);
+            firebase_functions_1.logger.info(`[fanOut] All ${tokens.length} tokens filtered by preferences for ${notificationId}`);
             return;
         }
-        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${resolvedTokens.length} tokens after preference filtering for ${notificationId}`);
+        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
         // --- 2. Build FCM message ---
         const baseUrl = 'https://qorengine.com';
         const fcmMessage = {
