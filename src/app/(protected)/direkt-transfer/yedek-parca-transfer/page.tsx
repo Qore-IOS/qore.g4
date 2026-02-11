@@ -55,8 +55,10 @@ import {
   List,
   ChevronLeft,
   Pencil,
+  Menu,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
@@ -127,6 +129,7 @@ export default function YedekParcaTransferPage() {
   const [editingDepoGroup, setEditingDepoGroup] = useState<GroupedDepoStokItem | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number>(1);
   const [isSavingDepoEdit, setIsSavingDepoEdit] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const DEPO_STOK_PER_PAGE = 20;
 
   // Product code reference for cihazGrubu lookup
@@ -1965,6 +1968,186 @@ export default function YedekParcaTransferPage() {
     );
   };
 
+  const handleMenuSelect = useCallback((selection: MenuSelection, closeMenu?: () => void) => {
+    setMenuSelection(selection);
+    closeMenu?.();
+  }, []);
+
+  const renderManagementMenu = (closeMenu?: () => void) => (
+    <ScrollArea className="h-[calc(100vh-180px)] md:h-[calc(100vh-180px)]">
+      {/* Depo Stok */}
+      <div className="mb-1">
+        <button
+          onClick={() => handleMenuSelect({ section: 'depo-stok' }, closeMenu)}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
+            menuSelection.section === 'depo-stok'
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <Warehouse className="h-4 w-4 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">Depo Stok</p>
+            <p className={cn(
+              'text-xs truncate',
+              menuSelection.section === 'depo-stok'
+                ? 'text-primary-foreground/70'
+                : 'text-muted-foreground'
+            )}>
+              Yedek parça deposu
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+        </button>
+      </div>
+
+      {/* Personeldeki Toplam Stok */}
+      <div className="mb-1">
+        <button
+          onClick={() => handleMenuSelect({ section: 'toplam-stok' }, closeMenu)}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
+            menuSelection.section === 'toplam-stok'
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <PackageOpen className="h-4 w-4 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">Personeldeki Toplam Stok</p>
+            <p className={cn(
+              'text-xs truncate',
+              menuSelection.section === 'toplam-stok'
+                ? 'text-primary-foreground/70'
+                : 'text-muted-foreground'
+            )}>
+              Kullanılmamış toplam stok
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+        </button>
+      </div>
+
+      {/* Transfer Paneli */}
+      <div className="mb-3">
+        <button
+          onClick={() => handleMenuSelect({ section: 'transfer' }, closeMenu)}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
+            menuSelection.section === 'transfer'
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <Send className="h-4 w-4 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">Transfer Paneli</p>
+            <p className={cn(
+              'text-xs truncate',
+              menuSelection.section === 'transfer'
+                ? 'text-primary-foreground/70'
+                : 'text-muted-foreground'
+            )}>
+              Transfer, borç, iade, geçmiş
+            </p>
+          </div>
+          <div className="flex gap-1 flex-shrink-0">
+            {borrowedParts.length > 0 && (
+              <Badge variant="destructive" className="text-xs px-1.5 py-0">
+                {borrowedParts.length}
+              </Badge>
+            )}
+            {pendingReturns.length > 0 && (
+              <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                {pendingReturns.length}
+              </Badge>
+            )}
+          </div>
+          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+        </button>
+      </div>
+
+      <Separator className="my-3" />
+
+      {/* Teknik Servis Personel Listesi */}
+      <div className="mb-2">
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Teknik Servis
+          </span>
+          <Badge variant="outline" className="text-xs ml-auto">{teknikServisUsers.length}</Badge>
+        </div>
+        <div className="space-y-0.5">
+          {teknikServisUsers.map((user) => (
+            <button
+              key={user.uid}
+              onClick={() => handleMenuSelect({
+                section: 'personnel',
+                personnelUid: user.uid || '',
+                personnelName: user.name || '',
+                personnelRole: 'teknik_servis',
+              }, closeMenu)}
+              className={cn(
+                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
+                menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              )}
+            >
+              <UserIcon className="h-4 w-4 flex-shrink-0" />
+              <span className="text-sm truncate flex-1">{user.name}</span>
+              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
+            </button>
+          ))}
+          {teknikServisUsers.length === 0 && (
+            <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
+          )}
+        </div>
+      </div>
+
+      <Separator className="my-3" />
+
+      {/* Aplikasyon Personel Listesi */}
+      <div className="mb-2">
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Aplikasyon
+          </span>
+          <Badge variant="outline" className="text-xs ml-auto">{aplikasyonUsers.length}</Badge>
+        </div>
+        <div className="space-y-0.5">
+          {aplikasyonUsers.map((user) => (
+            <button
+              key={user.uid}
+              onClick={() => handleMenuSelect({
+                section: 'personnel',
+                personnelUid: user.uid || '',
+                personnelName: user.name || '',
+                personnelRole: 'aplikasyon',
+              }, closeMenu)}
+              className={cn(
+                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
+                menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              )}
+            >
+              <UserIcon className="h-4 w-4 flex-shrink-0" />
+              <span className="text-sm truncate flex-1">{user.name}</span>
+              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
+            </button>
+          ))}
+          {aplikasyonUsers.length === 0 && (
+            <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
+          )}
+        </div>
+      </div>
+    </ScrollArea>
+  );
+
   // ========== RENDER: Right Panel Content ==========
   const renderRightPanel = () => {
     switch (menuSelection.section) {
@@ -2005,200 +2188,43 @@ export default function YedekParcaTransferPage() {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-2 sm:p-4 space-y-3 sm:space-y-4">
       <BackButton fallback="/direkt-transfer" />
 
-      <div className="flex items-center gap-2 mb-2">
-        <Package className="h-6 w-6" />
-        <h1 className="text-xl font-bold">Yedek Parça Yönetim Paneli</h1>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <Package className="h-6 w-6" />
+          <h1 className="text-lg sm:text-xl font-bold">Yedek Parça Yönetim Paneli</h1>
+        </div>
+        <Button variant="outline" size="sm" className="md:hidden" onClick={() => setMobileMenuOpen(true)}>
+          <Menu className="h-4 w-4 mr-2" /> Menü
+        </Button>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col md:flex-row gap-3 md:gap-4">
         {/* ===== LEFT PANEL (40%) - Management Menu ===== */}
-        <div className="w-[40%] min-w-[280px] space-y-2">
+        <div className="hidden md:block w-[40%] min-w-[280px] space-y-2">
           <Card>
             <CardContent className="p-3">
-              <ScrollArea className="h-[calc(100vh-180px)]">
-                {/* Depo Stok */}
-                <div className="mb-1">
-                  <button
-                    onClick={() => setMenuSelection({ section: 'depo-stok' })}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-                      menuSelection.section === 'depo-stok'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'hover:bg-muted'
-                    )}
-                  >
-                    <Warehouse className="h-4 w-4 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm">Depo Stok</p>
-                      <p className={cn(
-                        'text-xs truncate',
-                        menuSelection.section === 'depo-stok'
-                          ? 'text-primary-foreground/70'
-                          : 'text-muted-foreground'
-                      )}>
-                        Yedek parça deposu
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
-                  </button>
-                </div>
-
-                {/* Personeldeki Toplam Stok */}
-                <div className="mb-1">
-                  <button
-                    onClick={() => setMenuSelection({ section: 'toplam-stok' })}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-                      menuSelection.section === 'toplam-stok'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'hover:bg-muted'
-                    )}
-                  >
-                    <PackageOpen className="h-4 w-4 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm">Personeldeki Toplam Stok</p>
-                      <p className={cn(
-                        'text-xs truncate',
-                        menuSelection.section === 'toplam-stok'
-                          ? 'text-primary-foreground/70'
-                          : 'text-muted-foreground'
-                      )}>
-                        Kullanılmamış toplam stok
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
-                  </button>
-                </div>
-
-                {/* Transfer Paneli */}
-                <div className="mb-3">
-                  <button
-                    onClick={() => setMenuSelection({ section: 'transfer' })}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-                      menuSelection.section === 'transfer'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'hover:bg-muted'
-                    )}
-                  >
-                    <Send className="h-4 w-4 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm">Transfer Paneli</p>
-                      <p className={cn(
-                        'text-xs truncate',
-                        menuSelection.section === 'transfer'
-                          ? 'text-primary-foreground/70'
-                          : 'text-muted-foreground'
-                      )}>
-                        Transfer, borç, iade, geçmiş
-                      </p>
-                    </div>
-                    <div className="flex gap-1 flex-shrink-0">
-                      {borrowedParts.length > 0 && (
-                        <Badge variant="destructive" className="text-xs px-1.5 py-0">
-                          {borrowedParts.length}
-                        </Badge>
-                      )}
-                      {pendingReturns.length > 0 && (
-                        <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                          {pendingReturns.length}
-                        </Badge>
-                      )}
-                    </div>
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
-                  </button>
-                </div>
-
-                <Separator className="my-3" />
-
-                {/* Teknik Servis Personel Listesi */}
-                <div className="mb-2">
-                  <div className="flex items-center gap-2 px-3 py-1.5">
-                    <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Teknik Servis
-                    </span>
-                    <Badge variant="outline" className="text-xs ml-auto">{teknikServisUsers.length}</Badge>
-                  </div>
-                  <div className="space-y-0.5">
-                    {teknikServisUsers.map((user) => (
-                      <button
-                        key={user.uid}
-                        onClick={() => setMenuSelection({
-                          section: 'personnel',
-                          personnelUid: user.uid || '',
-                          personnelName: user.name || '',
-                          personnelRole: 'teknik_servis',
-                        })}
-                        className={cn(
-                          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
-                          menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
-                            ? 'bg-primary text-primary-foreground'
-                            : 'hover:bg-muted'
-                        )}
-                      >
-                        <UserIcon className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-sm truncate flex-1">{user.name}</span>
-                        <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
-                      </button>
-                    ))}
-                    {teknikServisUsers.length === 0 && (
-                      <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
-                    )}
-                  </div>
-                </div>
-
-                <Separator className="my-3" />
-
-                {/* Aplikasyon Personel Listesi */}
-                <div className="mb-2">
-                  <div className="flex items-center gap-2 px-3 py-1.5">
-                    <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Aplikasyon
-                    </span>
-                    <Badge variant="outline" className="text-xs ml-auto">{aplikasyonUsers.length}</Badge>
-                  </div>
-                  <div className="space-y-0.5">
-                    {aplikasyonUsers.map((user) => (
-                      <button
-                        key={user.uid}
-                        onClick={() => setMenuSelection({
-                          section: 'personnel',
-                          personnelUid: user.uid || '',
-                          personnelName: user.name || '',
-                          personnelRole: 'aplikasyon',
-                        })}
-                        className={cn(
-                          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
-                          menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
-                            ? 'bg-primary text-primary-foreground'
-                            : 'hover:bg-muted'
-                        )}
-                      >
-                        <UserIcon className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-sm truncate flex-1">{user.name}</span>
-                        <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
-                      </button>
-                    ))}
-                    {aplikasyonUsers.length === 0 && (
-                      <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
-                    )}
-                  </div>
-                </div>
-              </ScrollArea>
+              {renderManagementMenu()}
             </CardContent>
           </Card>
         </div>
 
         {/* ===== RIGHT PANEL (60%) - Content Area ===== */}
-        <div className="w-[60%] min-w-0">
+        <div className="w-full md:w-[60%] min-w-0">
           {renderRightPanel()}
         </div>
       </div>
+
+      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+        <SheetContent side="left" className="w-[86vw] p-0">
+          <SheetHeader className="px-4 py-3 border-b">
+            <SheetTitle>Yedek Parça Yönetim Menüsü</SheetTitle>
+          </SheetHeader>
+          <div className="p-3">{renderManagementMenu(() => setMobileMenuOpen(false))}</div>
+        </SheetContent>
+      </Sheet>
 
       {/* Image Preview Modal */}
       <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
