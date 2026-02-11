@@ -1179,6 +1179,9 @@ export interface PurchasingTask {
   comments?: PurchasingTaskComment[];
   // Immutable task activity history
   activityLogs?: PurchasingTaskActivityLog[];
+  // Workflow metadata
+  workflowProjectId?: string;
+  workflowColor?: string;
 }
 
 export interface PurchasingSubtask {
@@ -1220,6 +1223,31 @@ export interface PurchasingTaskActivityLog {
   createdByName: string;
 }
 
+
+export interface PurchasingWorkflowEdge {
+  id: string;
+  fromTaskId: string;
+  toTaskId: string;
+}
+
+export interface PurchasingWorkflowNodePosition {
+  taskId: string;
+  x: number;
+  y: number;
+}
+
+export interface PurchasingWorkflowProject {
+  id: string;
+  name: string;
+  color: string;
+  taskIds: string[];
+  nodes: PurchasingWorkflowNodePosition[];
+  edges: PurchasingWorkflowEdge[];
+  createdAt?: TimestampLike;
+  updatedAt?: TimestampLike;
+  createdByUid?: string;
+  createdByName?: string;
+}
 
 export interface PurchasingTaskDefinition {
   id: string;

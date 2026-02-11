@@ -29,6 +29,7 @@ import type {
   PurchasingTaskComment,
   PurchasingTaskActivityLog,
   PurchasingTaskDefinition,
+  PurchasingWorkflowProject,
   Hospital,
   LabPool,
   User,
@@ -91,6 +92,7 @@ import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import PurchasingAgentChat from '@/components/purchasing/PurchasingAgentChat';
+import WorkflowCanvasPanel from '@/components/purchasing/WorkflowCanvasPanel';
 
 // ==========================================
 // Helper: Occupancy calculation (9-5, 8 hours)
@@ -530,10 +532,11 @@ export default function SatinAlmaPanel() {
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
   const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
-  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday'>('daily');
+  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday' | 'workflow'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [tasksLoading, setTasksLoading] = useState(true);
   const [taskDefinitions, setTaskDefinitions] = useState<PurchasingTaskDefinition[]>([]);
+  const [workflows, setWorkflows] = useState<PurchasingWorkflowProject[]>([]);
   const [showTaskDefinitionModal, setShowTaskDefinitionModal] = useState(false);
   const [mobileMonthModalDate, setMobileMonthModalDate] = useState<Date | null>(null);
   const [myDayTaskIds, setMyDayTaskIds] = useState<string[]>([]);
@@ -691,6 +694,19 @@ export default function SatinAlmaPanel() {
         setTaskDefinitions(defs.filter((d) => d.active !== false));
       },
       (err) => console.error('TaskDefinitions listen error', err)
+    );
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'purchasingWorkflows'), orderBy('updatedAt', 'desc'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingWorkflowProject[];
+        setWorkflows(items);
+      },
+      (err) => console.error('Workflows listen error', err)
     );
     return () => unsub();
   }, []);
@@ -1660,7 +1676,7 @@ export default function SatinAlmaPanel() {
         <>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-semibold text-muted-foreground">
-            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : viewMode === 'monthly' ? 'Aylık Görev Görünümü' : viewMode === 'timeline' ? 'Timeline / Gantt' : viewMode === 'heatmap' ? 'Personel Aktivite Haritası' : 'Bugünüm'}
+            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : viewMode === 'monthly' ? 'Aylık Görev Görünümü' : viewMode === 'timeline' ? 'Timeline / Gantt' : viewMode === 'heatmap' ? 'Personel Aktivite Haritası' : viewMode === 'workflow' ? 'Workflow Kanvası' : 'Bugünüm'}
           </h3>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
             {([
@@ -1670,6 +1686,7 @@ export default function SatinAlmaPanel() {
               ['timeline', 'Timeline'],
               ['heatmap', 'Heatmap'],
               ['myday', 'Bugünüm'],
+              ['workflow', 'Workflow'],
             ] as const).map(([mode, label]) => (
               <button
                 key={mode}
@@ -1826,7 +1843,7 @@ export default function SatinAlmaPanel() {
                           onDragEnd={() => setDraggedTimelineTask(null)}
                           onClick={() => setEditingTask(task)}
                           className={cn('absolute rounded-md px-1.5 py-1 text-left border-l-2 text-[10px] overflow-hidden z-20', task.completed ? 'bg-muted/60 border-muted-foreground/40 text-muted-foreground' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border} text-foreground`)}
-                          style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 8)}%`, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)` }}
+                          style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 8)}%`, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, borderLeftColor: task.workflowColor || undefined }}
                           title="Sürükleyip saat/gün değiştirin"
                         >
                           <p className="truncate font-medium">{task.title}</p>
@@ -1931,6 +1948,17 @@ export default function SatinAlmaPanel() {
           </div>
         )}
 
+        {viewMode === 'workflow' && (
+          <div className="rounded-2xl border border-border bg-card p-3">
+            <WorkflowCanvasPanel
+              tasks={tasks}
+              workflows={workflows}
+              userUid={currentUserProfile?.uid}
+              userName={currentUserProfile?.name}
+            />
+          </div>
+        )}
+
         {viewMode === 'monthly' && (
           <div className="bg-card border border-border rounded-2xl p-3">
             <div className="grid grid-cols-7 gap-1 mb-1">
@@ -1962,7 +1990,7 @@ export default function SatinAlmaPanel() {
                     )}
                     <div className="space-y-1">
                       {cellTasks.slice(0, 3).map((task) => (
-                        <div key={task.id} className={cn('text-[10px] rounded px-1 py-0.5 truncate border-l-2', task.completed ? 'bg-secondary text-muted-foreground border-muted-foreground/40' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border}`)}>
+                        <div key={task.id} className={cn('text-[10px] rounded px-1 py-0.5 truncate border-l-2', task.completed ? 'bg-secondary text-muted-foreground border-muted-foreground/40' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border}`)} style={{ borderLeftColor: task.workflowColor || undefined }}>
                           {task.startTime} {task.title}
                         </div>
                       ))}
@@ -2127,6 +2155,7 @@ function TaskCard({
   const completedSubtasks = task.subtasks?.filter((s) => s.completed).length || 0;
   const totalSubtasks = task.subtasks?.length || 0;
   const assignedPersonnel = task.assignedPersonnel || [];
+  const workflowColor = task.workflowColor || undefined;
   const comments = (task.comments || []).slice().sort((a, b) => {
     const ta = 'seconds' in (a.createdAt as any) ? (a.createdAt as any).seconds : 0;
     const tb = 'seconds' in (b.createdAt as any) ? (b.createdAt as any).seconds : 0;
@@ -2227,7 +2256,7 @@ function TaskCard({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        style={{ transform: `translateX(${swipeOffset}px)` }}
+        style={{ transform: `translateX(${swipeOffset}px)`, borderLeftColor: workflowColor || undefined }}
         className={cn(
           'group relative flex items-start gap-3 p-4 rounded-2xl border-l-[3px] border border-border',
           isSwiping ? 'transition-none' : 'transition-transform duration-200',
@@ -2271,6 +2300,12 @@ function TaskCard({
           {task.recurring && (
             <span className="shrink-0 inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-purple-500/10 text-purple-400">
               <Repeat className="w-2.5 h-2.5" />
+            </span>
+          )}
+          {workflowColor && (
+            <span className="shrink-0 inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-medium border" style={{ borderColor: workflowColor, color: workflowColor }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: workflowColor }} />
+              Workflow
             </span>
           )}
         </div>
