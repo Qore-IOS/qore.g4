@@ -145,6 +145,7 @@ export default function YedekParcaTransferPage() {
   const [allPersonnelStock, setAllPersonnelStock] = useState<PersonalStockItem[]>([]);
   const [allStockLoading, setAllStockLoading] = useState(false);
   const [takingOverStockId, setTakingOverStockId] = useState<string | null>(null);
+  const [historyActionFilter, setHistoryActionFilter] = useState<string>('all');
 
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
@@ -1081,6 +1082,72 @@ export default function YedekParcaTransferPage() {
     return labels[action] || action;
   };
 
+  const filteredHistoryLogs = useMemo(() => {
+    if (historyActionFilter === 'all') return transferLogs;
+    return transferLogs.filter((log) => log.action === historyActionFilter);
+  }, [historyActionFilter, transferLogs]);
+
+  const exportTransferTutanakPdf = async () => {
+    const transferActions = new Set(['transfer_to_personnel', 'transfer_between_personnel']);
+    const transferOnlyLogs = filteredHistoryLogs.filter((log) => transferActions.has(log.action));
+
+    if (transferOnlyLogs.length === 0) {
+      toast({ title: 'Uyarı', description: 'PDF için uygun transfer kaydı bulunamadı.', variant: 'default' });
+      return;
+    }
+
+    try {
+      const [jsPDFModule, autoTableModule] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
+      const jsPDF = jsPDFModule.default;
+      const autoTable = autoTableModule.default;
+
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const padX = 40;
+      const now = new Date();
+
+      const teslimEdenler = Array.from(new Set(transferOnlyLogs.map((l) => l.fromName || l.createdByName).filter(Boolean)));
+      const teslimAlanlar = Array.from(new Set(transferOnlyLogs.map((l) => l.toName).filter(Boolean)));
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('Teslim Tutanagi', padX, 40);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.text(`Ref No: YP-${now.getTime()}`, padX, 60);
+      doc.text(`Teslim Eden Personel: ${teslimEdenler.join(', ') || '-'}`, padX, 78);
+      doc.text(`Teslim Alan Personel: ${teslimAlanlar.join(', ') || '-'}`, padX, 96);
+      doc.text(`Islemi Yapan: ${currentUserProfile?.name || '-'}`, padX, 114);
+      doc.text(`Tarih: ${now.toLocaleString('tr-TR')}`, padX, 132);
+
+      autoTable(doc, {
+        head: [[ 'Stok Adi', 'Stok Kodu', 'Seri No', 'Adet', 'Islem Tarihi', 'Teslim Eden', 'Teslim Alan' ]],
+        body: transferOnlyLogs.map((log) => [
+          log.stokAdi || '-',
+          log.stokKodu || '-',
+          log.serialNumber || '-',
+          String(log.quantity || 1),
+          format(log.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr }),
+          log.fromName || log.createdByName || '-',
+          log.toName || '-',
+        ]),
+        startY: 160,
+        styles: { font: 'helvetica', fontSize: 10 },
+        headStyles: { fillColor: [240, 240, 240] },
+        margin: { left: padX, right: padX },
+      });
+
+      doc.save(`yedek-parca-transfer-tutanak-${now.getTime()}.pdf`);
+      toast({ title: 'Başarılı', description: 'Transfer tutanağı PDF olarak indirildi.' });
+    } catch (error) {
+      console.error('Transfer tutanak PDF export error:', error);
+      toast({ title: 'Hata', description: 'PDF oluşturulurken bir hata oluştu.', variant: 'destructive' });
+    }
+  };
+
   // ========== RENDER: Transfer Panel (Right Side Default) ==========
   const renderTransferPanel = () => (
     <Card>
@@ -1556,8 +1623,36 @@ export default function YedekParcaTransferPage() {
                 <p>Henüz işlem geçmişi bulunmuyor.</p>
               </div>
             ) : (
-              <ScrollArea className="h-[400px]">
-                <div className="border rounded-lg">
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="history-action-filter" className="text-sm">İşlem Türü</Label>
+                    <select
+                      id="history-action-filter"
+                      className="h-9 rounded-md border bg-background px-3 text-sm"
+                      value={historyActionFilter}
+                      onChange={(e) => setHistoryActionFilter(e.target.value)}
+                    >
+                      <option value="all">Tümü</option>
+                      <option value="transfer_to_personnel">Personele Transfer</option>
+                      <option value="transfer_between_personnel">Personelden Personele Devir</option>
+                      <option value="return_confirmed">İade Teslim Alındı</option>
+                      <option value="submit_confirmed">Teslim Alındı</option>
+                      <option value="borrowed_part">Borç Parça Kullanıldı</option>
+                      <option value="borrowed_approved">Borç Onaylandı</option>
+                      <option value="borrowed_rejected">Borç Reddedildi</option>
+                      <option value="depo_stock_adjusted">Depo Stok Güncellendi</option>
+                      <option value="depo_serial_deleted">Depo Seri No Silindi</option>
+                    </select>
+                  </div>
+
+                  <Button variant="outline" size="sm" onClick={exportTransferTutanakPdf}>
+                    PDF Tutanak
+                  </Button>
+                </div>
+
+                <ScrollArea className="h-[360px]">
+                  <div className="border rounded-lg">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1571,7 +1666,7 @@ export default function YedekParcaTransferPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {transferLogs.map((log) => (
+                      {filteredHistoryLogs.map((log) => (
                         <TableRow key={log.id}>
                           <TableCell className="text-sm">
                             {format(log.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr })}
@@ -1597,8 +1692,9 @@ export default function YedekParcaTransferPage() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
-              </ScrollArea>
+                  </div>
+                </ScrollArea>
+              </div>
             )}
           </TabsContent>
         </Tabs>
