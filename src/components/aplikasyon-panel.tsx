@@ -316,7 +316,7 @@ export default function AplikasyonPanel({
                 <FileText className="mr-2 h-4 w-4" />
                 Tüm İşlem Formlarını Göster
               </Button>
-              <Button variant="outline" onClick={() => router.push('/yedek-parca-transfer')} className="w-full sm:w-auto">
+              <Button variant="outline" onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')} className="w-full sm:w-auto">
                 <Package className="mr-2 h-4 w-4" />
                 Yedek Parça Stokları
               </Button>
