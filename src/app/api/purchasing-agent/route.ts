@@ -424,6 +424,9 @@ export async function POST(req: NextRequest) {
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ ok: false, error: 'Mesaj boş olamaz' }, { status: 400 });
     }
+    if (!userUid || typeof userUid !== 'string') {
+      return NextResponse.json({ ok: false, error: 'Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın.' }, { status: 401 });
+    }
 
     const [taskSnap, hospitalSnap] = await Promise.all([
       adminDb.collection('purchasingTasks').orderBy('date', 'asc').get(),
@@ -479,8 +482,9 @@ export async function POST(req: NextRequest) {
           completed: false,
           createdAt: new Date(),
           updatedAt: new Date(),
-          createdByUid: userUid || 'agent',
-          createdByName: userName || 'Satın Alma Agent',
+          createdByUid: userUid,
+          createdByName: userName || 'Kullanıcı',
+          assignedPersonnel: [{ uid: userUid, name: userName || 'Kullanıcı' }],
           ...(action.data?.laboratoryId ? { laboratoryId: action.data.laboratoryId } : {}),
           ...(action.data?.laboratoryName ? { laboratoryName: action.data.laboratoryName } : {}),
           activityLogs: [activityLog('created', 'Agent tarafından oluşturuldu', userUid, userName)],
