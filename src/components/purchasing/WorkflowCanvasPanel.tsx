@@ -434,14 +434,25 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                 const from = nodePositionsByTask.get(edge.fromTaskId);
                 const to = nodePositionsByTask.get(edge.toTaskId);
                 if (!from || !to) return null;
+                const fromTask = workflowTaskMap.get(edge.fromTaskId);
+                const toTask = workflowTaskMap.get(edge.toTaskId);
+                const isFlowCompleted = !!fromTask?.completed && !!toTask?.completed;
                 const x1 = from.x + NODE_W;
                 const y1 = from.y + NODE_H / 2;
                 const x2 = to.x;
                 const y2 = to.y + NODE_H / 2;
                 const c1 = x1 + 70;
                 const c2 = x2 - 70;
+                const pathD = `M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`;
                 return (
-                  <path key={edge.id} d={`M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`} stroke={selectedWorkflow.color} strokeWidth="2.4" fill="none" opacity="0.95" />
+                  <g key={edge.id}>
+                    <path d={pathD} stroke={selectedWorkflow.color} strokeWidth="2.4" fill="none" opacity="0.95" />
+                    {isFlowCompleted && (
+                      <path d={pathD} stroke="#22c55e" strokeWidth="3" fill="none" strokeDasharray="7 14" strokeLinecap="round" opacity="0.95">
+                        <animate attributeName="stroke-dashoffset" from="0" to="-42" dur="1.2s" repeatCount="indefinite" />
+                      </path>
+                    )}
+                  </g>
                 );
               })}
 
