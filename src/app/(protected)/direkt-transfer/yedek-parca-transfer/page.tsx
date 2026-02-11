@@ -144,6 +144,7 @@ export default function YedekParcaTransferPage() {
   // All personnel stock for toplam stok view
   const [allPersonnelStock, setAllPersonnelStock] = useState<PersonalStockItem[]>([]);
   const [allStockLoading, setAllStockLoading] = useState(false);
+  const [takingOverStockId, setTakingOverStockId] = useState<string | null>(null);
 
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
@@ -997,6 +998,70 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  const takeOverPersonnelStock = async (item: PersonalStockItem) => {
+    if (!currentUserProfile?.uid || !currentUserProfile?.name) {
+      toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    if (item.ownerUid === currentUserProfile.uid) {
+      toast({ title: 'Bilgi', description: 'Bu ürün zaten sizin üzerinizde.', variant: 'default' });
+      return;
+    }
+
+    if (item.status !== 'in_stock') {
+      toast({ title: 'Uyarı', description: 'Sadece aktif stok devralınabilir.', variant: 'default' });
+      return;
+    }
+
+    setTakingOverStockId(item.id);
+    try {
+      const now = new Date();
+      await updateDoc(doc(db, 'personalStock', item.id), {
+        ownerUid: currentUserProfile.uid,
+        ownerName: currentUserProfile.name,
+        createdAt: Timestamp.fromDate(now),
+        transferredByUid: currentUserProfile.uid,
+        transferredByName: currentUserProfile.name,
+        previousOwnerUid: item.ownerUid,
+        previousOwnerName: item.ownerName,
+      });
+
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'transfer_between_personnel',
+        personalStockId: item.id,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber || '',
+        quantity: 1,
+        fromUid: item.ownerUid,
+        fromName: item.ownerName,
+        toUid: currentUserProfile.uid,
+        toName: currentUserProfile.name,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile.uid,
+        createdByName: currentUserProfile.name,
+      });
+
+      toast({
+        title: 'Üzerinize Alındı',
+        description: `${item.stokAdi} (${item.serialNumber || 'Seri No Yok'}) stoğunuza eklendi.`,
+      });
+
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      await fetchAllPersonnelStock();
+      await loadRecentTransferLogs();
+    } catch (err) {
+      console.error('Error taking over personal stock:', err);
+      toast({ title: 'Hata', description: 'Ürünü üzerinize alma işlemi başarısız oldu.', variant: 'destructive' });
+    } finally {
+      setTakingOverStockId(null);
+    }
+  };
+
   // Action labels for logs
   const getActionLabel = (action: string) => {
     const labels: Record<string, string> = {
@@ -1011,6 +1076,7 @@ export default function YedekParcaTransferPage() {
       borrowed_rejected: 'Borç Reddedildi',
       depo_stock_adjusted: 'Depo Stok Güncellendi',
       depo_serial_deleted: 'Depo Seri No Silindi',
+      transfer_between_personnel: 'Personelden Personele Devir',
     };
     return labels[action] || action;
   };
@@ -1798,11 +1864,17 @@ export default function YedekParcaTransferPage() {
                       <TableHead>Durum</TableHead>
                       <TableHead>Transfer Tarihi</TableHead>
                       <TableHead>Kullanım Tarihi</TableHead>
+                      <TableHead className="text-right">İşlem</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paginatedPersonnelStock.map((item) => {
                       const isUsed = item.status === 'used' || item.status === 'pending_return';
+                      const canTakeOver =
+                        item.status === 'in_stock' &&
+                        !!currentUserProfile?.uid &&
+                        currentUserProfile.uid !== item.ownerUid;
+
                       return (
                         <TableRow key={item.id} className={isUsed ? 'opacity-60' : ''}>
                           <TableCell className={cn('font-mono', isUsed && 'line-through')}>
@@ -1833,6 +1905,21 @@ export default function YedekParcaTransferPage() {
                               ? format(item.usedAt, 'dd.MM.yyyy HH:mm', { locale: tr })
                               : '-'
                             }
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {canTakeOver ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={takingOverStockId === item.id}
+                                onClick={() => takeOverPersonnelStock(item)}
+                              >
+                                {takingOverStockId === item.id && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                Üzerime Al
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
