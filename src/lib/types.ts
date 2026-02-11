@@ -1182,6 +1182,15 @@ export interface PurchasingTask {
   // Workflow metadata
   workflowProjectId?: string;
   workflowColor?: string;
+  // Completion flow metadata
+  completionChecklist?: PurchasingCompletionChecklistItem[];
+  expectedCompletionFileName?: string;
+}
+
+export interface PurchasingCompletionChecklistItem {
+  id: string;
+  title: string;
+  completed: boolean;
 }
 
 export interface PurchasingSubtask {
@@ -1201,7 +1210,7 @@ export interface PurchasingTaskRecurrence {
 export interface PurchasingTaskAttachment {
   name: string;
   url: string;
-  type: 'image' | 'pdf';
+  type: 'image' | 'pdf' | 'file';
   size: number; // bytes
   storagePath: string;
 }
