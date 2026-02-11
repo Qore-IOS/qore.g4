@@ -30,6 +30,8 @@ type Props = {
 const PRESET_COLORS = ['#d4ec00', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#f97316'];
 const NODE_W = 236;
 const NODE_H = 84;
+const CANVAS_W = 4200;
+const CANVAS_H = 2400;
 
 export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userName }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(workflows[0]?.id || '');
@@ -228,11 +230,13 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
     const pos = nodePositionsByTask.get(taskId);
     if (!pos) return;
     const canvasRect = canvasRef.current.getBoundingClientRect();
+    const scrollLeft = canvasRef.current.scrollLeft;
+    const scrollTop = canvasRef.current.scrollTop;
     setDraggingNode({
       taskId,
       pointerId: e.pointerId,
-      dx: e.clientX - canvasRect.left - pos.x,
-      dy: e.clientY - canvasRect.top - pos.y,
+      dx: e.clientX - canvasRect.left + scrollLeft - pos.x,
+      dy: e.clientY - canvasRect.top + scrollTop - pos.y,
     });
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   };
@@ -240,9 +244,11 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
   const startLinkDrag = (e: React.PointerEvent<HTMLButtonElement>, fromTaskId: string) => {
     if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
+    const scrollLeft = canvasRef.current.scrollLeft;
+    const scrollTop = canvasRef.current.scrollTop;
     setLinkingFromTaskId(fromTaskId);
     setLinkHoverTargetTaskId(null);
-    setLinkPointer({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setLinkPointer({ x: e.clientX - rect.left + scrollLeft, y: e.clientY - rect.top + scrollTop });
     e.preventDefault();
     e.stopPropagation();
   };
@@ -253,12 +259,14 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
     const onPointerMove = (ev: PointerEvent) => {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
-      const px = ev.clientX - rect.left;
-      const py = ev.clientY - rect.top;
+      const scrollLeft = canvasRef.current.scrollLeft;
+      const scrollTop = canvasRef.current.scrollTop;
+      const px = ev.clientX - rect.left + scrollLeft;
+      const py = ev.clientY - rect.top + scrollTop;
 
       if (draggingNode) {
-        const nextX = Math.max(8, px - draggingNode.dx);
-        const nextY = Math.max(8, py - draggingNode.dy);
+        const nextX = Math.max(8, Math.min(CANVAS_W - NODE_W - 8, px - draggingNode.dx));
+        const nextY = Math.max(8, Math.min(CANVAS_H - NODE_H - 8, py - draggingNode.dy));
         setLocalNodes((prev) => {
           const next = prev.map((n) => (n.taskId === draggingNode.taskId ? { ...n, x: nextX, y: nextY } : n));
           localNodesRef.current = next;
@@ -403,17 +411,24 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
               const taskId = e.dataTransfer.getData('application/x-task-id');
               if (!taskId || !canvasRef.current) return;
               const rect = canvasRef.current.getBoundingClientRect();
-              addTaskToCanvas(taskId, Math.max(12, e.clientX - rect.left - NODE_W / 2), Math.max(12, e.clientY - rect.top - NODE_H / 2));
+              const x = e.clientX - rect.left + canvasRef.current.scrollLeft - NODE_W / 2;
+              const y = e.clientY - rect.top + canvasRef.current.scrollTop - NODE_H / 2;
+              addTaskToCanvas(
+                taskId,
+                Math.max(12, Math.min(CANVAS_W - NODE_W - 12, x)),
+                Math.max(12, Math.min(CANVAS_H - NODE_H - 12, y))
+              );
             }}
           >
-            <div
-              className="pointer-events-none absolute inset-0 dark:block hidden"
-              style={{
-                backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(239,68,68,0.16), transparent 35%), radial-gradient(circle at 75% 60%, rgba(59,130,246,0.16), transparent 35%)',
-              }}
-            />
+            <div className="relative" style={{ width: CANVAS_W, height: CANVAS_H }}>
+              <div
+                className="pointer-events-none absolute inset-0 dark:block hidden"
+                style={{
+                  backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(239,68,68,0.16), transparent 35%), radial-gradient(circle at 75% 60%, rgba(59,130,246,0.16), transparent 35%)',
+                }}
+              />
 
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
+            <svg className="absolute inset-0 pointer-events-none" width={CANVAS_W} height={CANVAS_H}>
               {(selectedWorkflow.edges || []).map((edge) => {
                 const from = nodePositionsByTask.get(edge.fromTaskId);
                 const to = nodePositionsByTask.get(edge.toTaskId);
@@ -519,6 +534,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                 </div>
               </div>
             )}
+            </div>
           </div>
         )}
       </section>
