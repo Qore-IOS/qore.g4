@@ -25,6 +25,7 @@ type Props = {
   workflows: PurchasingWorkflowProject[];
   userUid?: string;
   userName?: string;
+  onToggleTask?: (task: PurchasingTask) => void;
 };
 
 const PRESET_COLORS = ['#d4ec00', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#f97316'];
@@ -33,7 +34,7 @@ const NODE_H = 84;
 const CANVAS_W = 4200;
 const CANVAS_H = 2400;
 
-export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userName }: Props) {
+export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userName, onToggleTask }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(workflows[0]?.id || '');
   const [newName, setNewName] = useState('Yeni Workflow');
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
@@ -304,7 +305,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
   }, [draggingNode, linkingFromTaskId, linkHoverTargetTaskId]);
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-3">
+    <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-3 min-w-0">
       <aside className="rounded-2xl border border-border bg-card p-3 space-y-3 shadow-sm">
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground">Workflow Projesi</label>
@@ -392,13 +393,13 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
         </div>
       </aside>
 
-      <section className="rounded-2xl border border-border bg-card p-3 min-h-[72vh] shadow-sm">
+      <section className="rounded-2xl border border-border bg-card p-3 min-h-[72vh] shadow-sm min-w-0">
         {!selectedWorkflow ? (
           <div className="h-full min-h-[300px] flex items-center justify-center text-sm text-muted-foreground">Önce bir workflow seçin veya oluşturun.</div>
         ) : (
           <div
             ref={canvasRef}
-            className="relative rounded-xl border border-border min-h-[68vh] overflow-auto"
+            className="relative rounded-xl border border-border min-h-[68vh] overflow-auto w-full"
             style={{
               backgroundColor: 'hsl(var(--card))',
               backgroundImage:
@@ -490,9 +491,19 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-semibold truncate text-zinc-800 dark:text-zinc-100">{task.title}</p>
-                      <button onClick={() => removeTaskFromWorkflow(task.id)} className="text-zinc-500 hover:text-red-500 dark:text-zinc-400" onPointerDown={(e) => e.stopPropagation()}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onToggleTask?.(task); }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className={cn('text-[10px] px-1.5 py-0.5 rounded border', task.completed ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400' : 'border-amber-500/40 text-amber-700 dark:text-amber-400')}
+                          title="Tamamlandı durumunu değiştir"
+                        >
+                          {task.completed ? 'Aç' : 'Tamamla'}
+                        </button>
+                        <button onClick={() => removeTaskFromWorkflow(task.id)} className="text-zinc-500 hover:text-red-500 dark:text-zinc-400" onPointerDown={(e) => e.stopPropagation()}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-[10px] text-zinc-600 dark:text-zinc-400 mt-1">{task.date} • {task.startTime}-{task.endTime}</p>
                     <div className="mt-2 flex items-center justify-between">
