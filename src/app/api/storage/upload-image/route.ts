@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as admin from 'firebase-admin';
 import '@/lib/firebase-admin';
+import { resolveStorageBucket } from '@/lib/server/storage-bucket';
 
-const STORAGE_BUCKET = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
 
 const ALLOWED_FOLDERS = new Set(['removed-parts', 'used-parts']);
 
@@ -31,9 +30,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const bucket = STORAGE_BUCKET
-      ? admin.storage().bucket(STORAGE_BUCKET)
-      : admin.storage().bucket();
+    const bucket = await resolveStorageBucket();
 
     const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
     const filePath = `${folderValue}/${deviceIdValue}/${Date.now()}_${safeName}`;

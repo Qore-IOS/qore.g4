@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as admin from 'firebase-admin';
 import '@/lib/firebase-admin';
+import { resolveStorageBucket } from '@/lib/server/storage-bucket';
 
-const STORAGE_BUCKET = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
-const ALLOWED_FOLDERS = new Set(['irsaliyeler']);
+const ALLOWED_FOLDERS = new Set(['irsaliyeler', 'purchasing-tasks']);
 const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
 ]);
 
 export async function POST(request: NextRequest) {
@@ -27,7 +31,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!ALLOWED_MIME_TYPES.has(file.type)) {
-      return NextResponse.json({ error: 'Sadece PDF ve Excel dosyaları yüklenebilir.' }, { status: 400 });
+      return NextResponse.json({ error: 'Sadece PDF, Excel veya görsel dosyaları yüklenebilir.' }, { status: 400 });
     }
 
     const owner = typeof userUid === 'string' && userUid.trim() ? userUid.trim() : 'unknown-user';
@@ -37,9 +41,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const bucket = STORAGE_BUCKET
-      ? admin.storage().bucket(STORAGE_BUCKET)
-      : admin.storage().bucket();
+    const bucket = await resolveStorageBucket();
 
     const bucketFile = bucket.file(filePath);
     await bucketFile.save(buffer, {
