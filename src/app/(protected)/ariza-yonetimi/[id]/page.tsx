@@ -1,25 +1,25 @@
 
 
 'use client';
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where } from 'firebase/firestore';
+import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where, addDoc, Timestamp, writeBatch } from 'firebase/firestore';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
-import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User } from '@/lib/types';
+import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import jsPDF from 'jspdf';
@@ -34,6 +34,23 @@ import { useTheme } from 'next-themes';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+
+type FaultPartChange = {
+  id: string;
+  stokKodu?: string;
+  stokAdi?: string;
+  serialNumber?: string;
+  personalStockId?: string;
+  isManualEntry?: boolean;
+  removedPartStokKodu?: string;
+  removedPartStokAdi?: string;
+  removedPartSerialNumber?: string;
+  removedPartImageUrl?: string;
+  usedPartImageUrl?: string;
+  addedAt: Date;
+  addedByUid: string;
+  addedByName: string;
+};
 
 // Status config - liste sayfasıyla tutarlı
 const STATUS_CONFIG: Record<DeviceFaultStatus, { label: string; variant: 'destructive' | 'default' | 'secondary' | 'outline'; icon: React.ReactNode; className?: string }> = {
@@ -133,6 +150,28 @@ export default function FaultDetailPage() {
   const [allPersonnel, setAllPersonnel] = useState<User[]>([]);
   const [selectedSupportPersonnelUid, setSelectedSupportPersonnelUid] = useState<string>('');
   const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
+
+  // Yedek parça değişim state'leri
+  const [isPartModalOpen, setIsPartModalOpen] = useState(false);
+  const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
+  const [partSearchQuery, setPartSearchQuery] = useState('');
+  const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
+  const [manualPartCode, setManualPartCode] = useState('');
+  const [manualPartName, setManualPartName] = useState('');
+  const [manualSerialNumber, setManualSerialNumber] = useState('');
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [removedPartStokKodu, setRemovedPartStokKodu] = useState('');
+  const [removedPartStokAdi, setRemovedPartStokAdi] = useState('');
+  const [removedPartSerialNumber, setRemovedPartSerialNumber] = useState('');
+  const [removedPartImageFile, setRemovedPartImageFile] = useState<File | null>(null);
+  const [removedPartImagePreview, setRemovedPartImagePreview] = useState<string | null>(null);
+  const [usedPartImageFile, setUsedPartImageFile] = useState<File | null>(null);
+  const [usedPartImagePreview, setUsedPartImagePreview] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const removedPartImageInputRef = useRef<HTMLInputElement>(null);
+  const usedPartImageInputRef = useRef<HTMLInputElement>(null);
+  const [faultPartChanges, setFaultPartChanges] = useState<FaultPartChange[]>([]);
+  const [isSavingPart, setIsSavingPart] = useState(false);
 
 
   useEffect(() => {
@@ -263,6 +302,43 @@ export default function FaultDetailPage() {
       }
     })();
   }, []);
+
+  // Şahsi stok verilerini çek
+  useEffect(() => {
+    if (!currentUser) return;
+    const fetchPersonalStock = async () => {
+      try {
+        const stockSnap = await getDocs(
+          query(
+            collection(db, 'personalStock'),
+            where('ownerUid', '==', currentUser.uid),
+            where('status', '==', 'in_stock')
+          )
+        );
+        setPersonalStock(stockSnap.docs.map(d => ({ id: d.id, ...d.data() } as PersonalStockItem)));
+      } catch (e) {
+        console.error('Şahsi stok alınamadı:', e);
+      }
+    };
+    fetchPersonalStock();
+  }, [currentUser]);
+
+  // Arızaya eklenen parça değişimlerini çek
+  useEffect(() => {
+    if (!params?.id) return;
+    const q = query(collection(db, 'deviceFaultReports', params.id, 'partChanges'), orderBy('addedAt', 'asc'));
+    const unsub = onSnapshot(q, (ss) => {
+      setFaultPartChanges(ss.docs.map(d => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          ...data,
+          addedAt: data.addedAt?.toDate ? data.addedAt.toDate() : new Date(),
+        } as FaultPartChange;
+      }));
+    });
+    return () => unsub();
+  }, [params?.id]);
 
   // Konum doğrulama durumunu kontrol et
   useEffect(() => {
@@ -453,6 +529,182 @@ export default function FaultDetailPage() {
     } catch (e) {
         console.error(e);
         toast({ title: 'Hata', description: 'Kit arızası çözümlenirken hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  // Yedek parça değişim fonksiyonları
+  const filteredStock = useMemo(() => {
+    if (!partSearchQuery) return personalStock;
+    const q = partSearchQuery.toLowerCase();
+    return personalStock.filter(p =>
+      p.stokKodu?.toLowerCase().includes(q) ||
+      p.stokAdi?.toLowerCase().includes(q) ||
+      p.serialNumber?.toLowerCase().includes(q)
+    );
+  }, [personalStock, partSearchQuery]);
+
+  const handleRemovedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setRemovedPartImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setRemovedPartImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleUsedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUsedPartImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setUsedPartImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const uploadPartImage = async (file: File, pathPrefix: 'removed-parts' | 'used-parts'): Promise<string | null> => {
+    setIsUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', pathPrefix);
+      formData.append('deviceId', fault?.deviceId || 'unknown-device');
+
+      const response = await fetch('/api/storage/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.url) {
+        throw new Error(payload?.error || 'Resim yüklenemedi.');
+      }
+      return payload.url;
+    } catch (e: any) {
+      console.error('Image upload error:', e);
+      toast({ title: 'Resim Yükleme Hatası', description: e.message || 'Resim yüklenemedi.', variant: 'destructive' });
+      return null;
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const resetPartModalState = () => {
+    setSelectedStockItem(null);
+    setPartSearchQuery('');
+    setManualPartCode('');
+    setManualPartName('');
+    setManualSerialNumber('');
+    setShowManualEntry(false);
+    setRemovedPartStokKodu('');
+    setRemovedPartStokAdi('');
+    setRemovedPartSerialNumber('');
+    setRemovedPartImageFile(null);
+    setRemovedPartImagePreview(null);
+    setUsedPartImageFile(null);
+    setUsedPartImagePreview(null);
+  };
+
+  const openPartModal = () => {
+    resetPartModalState();
+    setIsPartModalOpen(true);
+  };
+
+  const addFaultPartChange = async () => {
+    if (!fault || !currentUser) return;
+    setIsSavingPart(true);
+
+    try {
+      // Upload images if present
+      let removedImgUrl: string | undefined = undefined;
+      let usedImgUrl: string | undefined = undefined;
+
+      if (removedPartImageFile) {
+        const url = await uploadPartImage(removedPartImageFile, 'removed-parts');
+        if (url) removedImgUrl = url;
+      }
+      if (usedPartImageFile) {
+        const url = await uploadPartImage(usedPartImageFile, 'used-parts');
+        if (url) usedImgUrl = url;
+      }
+
+      const batch = writeBatch(db);
+      const now = new Date();
+
+      const partChangeData: any = {
+        stokKodu: selectedStockItem?.stokKodu || manualPartCode.trim(),
+        stokAdi: selectedStockItem?.stokAdi || manualPartName.trim(),
+        serialNumber: selectedStockItem?.serialNumber || manualSerialNumber.trim(),
+        personalStockId: selectedStockItem?.id || null,
+        isManualEntry: !selectedStockItem,
+        removedPartStokKodu: removedPartStokKodu.trim() || selectedStockItem?.stokKodu || manualPartCode.trim(),
+        removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem?.stokAdi || manualPartName.trim(),
+        removedPartSerialNumber: removedPartSerialNumber.trim() || null,
+        removedPartImageUrl: removedImgUrl || null,
+        usedPartImageUrl: usedImgUrl || null,
+        addedAt: Timestamp.fromDate(now),
+        addedByUid: currentUser.uid,
+        addedByName: currentUserProfile?.name || 'Bilinmeyen',
+      };
+
+      // Add to fault's partChanges subcollection
+      const partRef = doc(collection(db, 'deviceFaultReports', fault.id, 'partChanges'));
+      batch.set(partRef, partChangeData);
+
+      // If from personal stock, mark stock item as used
+      if (selectedStockItem?.id) {
+        const stockRef = doc(db, 'personalStock', selectedStockItem.id);
+        batch.update(stockRef, {
+          status: 'used',
+          usedAt: Timestamp.fromDate(now),
+          usedOnDeviceId: fault.deviceId,
+          usedOnFormId: fault.id,
+          usedOnFormType: 'ariza_yonetimi',
+          usedPartImageUrl: usedImgUrl || null,
+        });
+      }
+
+      // If removed part has serial number, create personal stock entry for removed part
+      if (removedPartSerialNumber.trim()) {
+        const removedStockRef = doc(collection(db, 'personalStock'));
+        batch.set(removedStockRef, {
+          ownerUid: currentUser.uid,
+          ownerName: currentUserProfile?.name || '',
+          productCodeId: null,
+          stokKodu: removedPartStokKodu.trim() || selectedStockItem?.stokKodu || manualPartCode.trim(),
+          stokAdi: removedPartStokAdi.trim() || selectedStockItem?.stokAdi || manualPartName.trim(),
+          serialNumber: removedPartSerialNumber.trim(),
+          imageUrl: removedImgUrl || null,
+          source: 'device',
+          sourceDeviceId: fault.deviceId,
+          sourceDeviceName: fault.model || '',
+          status: 'in_stock',
+          createdAt: Timestamp.fromDate(now),
+          replacedPartId: selectedStockItem?.id || null,
+        });
+      }
+
+      // Add history entry for part change
+      const historyRef = doc(collection(db, 'deviceFaultReports', fault.id, 'history'));
+      batch.set(historyRef, {
+        type: 'note',
+        actorUid: currentUser.uid,
+        actorName: currentUserProfile?.name || 'Bilinmeyen',
+        description: `Parça değişimi: ${partChangeData.stokAdi} (${partChangeData.serialNumber || 'Seri No Yok'})${removedPartSerialNumber.trim() ? ` → Çıkan: ${partChangeData.removedPartStokAdi} (${removedPartSerialNumber.trim()})` : ''}`,
+        timestamp: Timestamp.fromDate(now),
+      });
+
+      await batch.commit();
+
+      toast({ title: 'Başarılı', description: 'Parça değişimi eklendi.' });
+      resetPartModalState();
+      setIsPartModalOpen(false);
+    } catch (e: any) {
+      console.error('Part change error:', e);
+      toast({ title: 'Hata', description: e.message || 'Parça değişimi eklenemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingPart(false);
     }
   };
 
@@ -866,6 +1118,74 @@ export default function FaultDetailPage() {
             return null;
           })()}
 
+          {/* Yedek Parça Değişimleri */}
+          {(() => {
+            const normalized = normalizeStatus(fault.status);
+            const showPartChange = normalized === 'mudahale_ediliyor' || normalized === 'mudahale_bekliyor';
+            if (!showPartChange && faultPartChanges.length === 0) return null;
+
+            return (
+              <div className="space-y-3 pt-4 border-t">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Yedek Parça Değişimleri
+                    {faultPartChanges.length > 0 && (
+                      <Badge variant="secondary">{faultPartChanges.length}</Badge>
+                    )}
+                  </p>
+                  {showPartChange && (
+                    <Button variant="outline" size="sm" onClick={openPartModal}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Parça Değişimi Ekle
+                    </Button>
+                  )}
+                </div>
+                {faultPartChanges.length > 0 ? (
+                  <div className="space-y-2">
+                    {faultPartChanges.map(pc => (
+                      <div key={pc.id} className="p-3 border rounded-lg bg-muted/30 text-sm space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">
+                              Takılan: {pc.stokAdi} {pc.serialNumber && <span className="font-mono text-xs">({pc.serialNumber})</span>}
+                            </p>
+                            {pc.stokKodu && <p className="text-xs text-muted-foreground font-mono">{pc.stokKodu}</p>}
+                          </div>
+                          <Badge variant={pc.isManualEntry ? 'outline' : 'secondary'} className="text-xs">
+                            {pc.isManualEntry ? 'Manuel' : 'Stoktan'}
+                          </Badge>
+                        </div>
+                        {pc.removedPartSerialNumber && (
+                          <p className="text-amber-700 dark:text-amber-400">
+                            Çıkan: {pc.removedPartStokAdi || pc.stokAdi} <span className="font-mono text-xs">({pc.removedPartSerialNumber})</span>
+                          </p>
+                        )}
+                        <div className="flex items-center gap-3 mt-1">
+                          {pc.removedPartImageUrl && (
+                            <a href={pc.removedPartImageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                              <Camera className="h-3 w-3" /> Çıkan Parça Foto
+                            </a>
+                          )}
+                          {pc.usedPartImageUrl && (
+                            <a href={pc.usedPartImageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                              <Camera className="h-3 w-3" /> Takılan Parça Foto
+                            </a>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {pc.addedByName} - {pc.addedAt ? format(pc.addedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Henüz parça değişimi eklenmedi.</p>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="space-y-2 pt-4 border-t">
             <p className="font-medium">Arıza Geçmişi</p>
             <Table>
@@ -1136,6 +1456,283 @@ export default function FaultDetailPage() {
               ) : (
                 <><MapPin className="h-4 w-4 mr-2" /> Kurumda Başlat</>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Yedek Parça Değişim Modal */}
+      <Dialog open={isPartModalOpen} onOpenChange={(open) => {
+        if (!open) resetPartModalState();
+        setIsPartModalOpen(open);
+      }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Yedek Parça Değişimi</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            {/* Section 1: Select part from personal stock */}
+            <div className="p-3 border rounded-lg bg-muted/30 space-y-3">
+              <Label className="font-semibold">1. Şahsi Stokunuzdan Parça Seçin</Label>
+              {!showManualEntry ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Parça kodu, adı veya seri no ile arayın..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-40 border rounded-md bg-background">
+                    {filteredStock.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {personalStock.length === 0
+                          ? 'Şahsi stokunuzda yedek parça bulunmuyor.'
+                          : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredStock.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => setSelectedStockItem(item)}
+                            className={`w-full text-left p-2 rounded-md transition-colors ${
+                              selectedStockItem?.id === item.id
+                                ? 'bg-primary/10 border-primary border'
+                                : 'hover:bg-muted'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.stokAdi}</p>
+                                <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono">{item.serialNumber}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {item.source === 'depot' ? 'Depodan' : 'Cihazdan'}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualEntry(true)}
+                    className="w-full text-xs"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Stokta yok, manuel ekle
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Parça Kodu <span className="text-destructive">*</span></Label>
+                      <Input
+                        placeholder="Kod..."
+                        value={manualPartCode}
+                        onChange={(e) => setManualPartCode(e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Seri No</Label>
+                      <Input
+                        placeholder="Seri No..."
+                        value={manualSerialNumber}
+                        onChange={(e) => setManualSerialNumber(e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Parça Adı <span className="text-destructive">*</span></Label>
+                    <Input
+                      placeholder="Parça adını girin..."
+                      value={manualPartName}
+                      onChange={(e) => setManualPartName(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualEntry(false)}
+                    className="text-xs"
+                  >
+                    Stoktan seç
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: Removed part info (from device) - opsiyonel */}
+            <div className="p-3 border rounded-lg space-y-3 bg-muted/30">
+              <Label className="font-semibold flex items-center gap-2">
+                2. Cihazdan Çıkan Parça Bilgisi
+                <span className="text-xs font-normal text-muted-foreground">(opsiyonel)</span>
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Parça Kodu</Label>
+                  <Input
+                    placeholder={selectedStockItem?.stokKodu || manualPartCode || 'Kod...'}
+                    value={removedPartStokKodu}
+                    onChange={(e) => setRemovedPartStokKodu(e.target.value)}
+                    className="h-9"
+                  />
+                  <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça kodu kullanılır</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Seri No</Label>
+                  <Input
+                    placeholder="Çıkan parça seri no..."
+                    value={removedPartSerialNumber}
+                    onChange={(e) => setRemovedPartSerialNumber(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Parça Adı</Label>
+                <Input
+                  placeholder={selectedStockItem?.stokAdi || manualPartName || 'Parça adı...'}
+                  value={removedPartStokAdi}
+                  onChange={(e) => setRemovedPartStokAdi(e.target.value)}
+                  className="h-9"
+                />
+                <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça adı kullanılır</p>
+              </div>
+              {/* Part images */}
+              <div className="space-y-3 pt-2 border-t">
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Camera className="h-3 w-3" />
+                    Çıkan Parça Fotoğrafı (Opsiyonel)
+                  </Label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={removedPartImageInputRef}
+                    onChange={handleRemovedPartImageSelect}
+                    className="hidden"
+                  />
+                  {removedPartImagePreview ? (
+                    <div className="relative">
+                      <img
+                        src={removedPartImagePreview}
+                        alt="Çıkan parça"
+                        className="w-full h-32 object-cover rounded-md border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={() => {
+                          setRemovedPartImageFile(null);
+                          setRemovedPartImagePreview(null);
+                          if (removedPartImageInputRef.current) removedPartImageInputRef.current.value = '';
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      onClick={() => removedPartImageInputRef.current?.click()}
+                    >
+                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Çıkan parça fotoğrafı (Kamera/Galeri)</span>
+                    </Button>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Camera className="h-3 w-3" />
+                    Takılan/Kullanılan Parça Fotoğrafı (Opsiyonel)
+                  </Label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={usedPartImageInputRef}
+                    onChange={handleUsedPartImageSelect}
+                    className="hidden"
+                  />
+                  {usedPartImagePreview ? (
+                    <div className="relative">
+                      <img
+                        src={usedPartImagePreview}
+                        alt="Takılan parça"
+                        className="w-full h-32 object-cover rounded-md border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={() => {
+                          setUsedPartImageFile(null);
+                          setUsedPartImagePreview(null);
+                          if (usedPartImageInputRef.current) usedPartImageInputRef.current.value = '';
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      onClick={() => usedPartImageInputRef.current?.click()}
+                    >
+                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Takılan parça fotoğrafı (Kamera/Galeri)</span>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Selected item summary */}
+            {(selectedStockItem || (showManualEntry && manualPartCode && manualPartName)) && (
+              <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg text-sm">
+                <p className="font-medium text-green-800 dark:text-green-200">
+                  Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber || 'Seri No Yok'})
+                </p>
+                {removedPartSerialNumber && (
+                  <p className="text-green-700 dark:text-green-300">
+                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
+            <Button
+              onClick={addFaultPartChange}
+              disabled={
+                (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName))
+                || isSavingPart
+                || isUploadingImage
+              }
+            >
+              {isSavingPart ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Kaydediliyor...</> : 'Ekle'}
             </Button>
           </DialogFooter>
         </DialogContent>
