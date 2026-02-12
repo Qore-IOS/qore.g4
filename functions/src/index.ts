@@ -121,24 +121,30 @@ export const onNotificationCreated = functions
         }
       }
 
-      // Source B: Users who have this notification type in their notificationPreferences
-      // This ensures non-admin users with the right preferences also receive notifications
+      // Source B: Users targeted by notification scope who opted into this notification type
+      // IMPORTANT: Keep role/lab/depot targeting boundaries (do not fan out to everyone with prefs)
       if (notificationType && notificationType !== 'custom') {
-        const prefsSnap = await db
-          .collection('users')
-          .where('notificationsEnabled', '==', true)
-          .where('notificationPreferences', 'array-contains', notificationType)
-          .get();
+        const targetUids = await collectTargetUidsFromTargets(data.targets, data.actor?.uid);
+        const optedInTargetUids: string[] = [];
 
-        // Collect UIDs of users who opted into this notification type
-        const optedInUids: string[] = [];
-        for (const userDoc of prefsSnap.docs) {
-          optedInUids.push(userDoc.id);
+        for (const uid of targetUids) {
+          const userDoc = await db.collection('users').doc(uid).get();
+          if (!userDoc.exists) continue;
+          const userData = userDoc.data() as Record<string, any>;
+          const isEnabled = userData.notificationsEnabled !== false;
+          const prefs = Array.isArray(userData.notificationPreferences)
+            ? userData.notificationPreferences
+            : [];
+
+          if (!isEnabled) continue;
+          if (prefs.length > 0 && !prefs.includes(notificationType)) continue;
+
+          optedInTargetUids.push(uid);
         }
 
         // Fetch their push tokens
-        if (optedInUids.length > 0) {
-          const uidChunks = chunk(optedInUids, 30);
+        if (optedInTargetUids.length > 0) {
+          const uidChunks = chunk(optedInTargetUids, 30);
           for (const uidChunk of uidChunks) {
             const userTokensSnap = await db
               .collection('pushTokens')

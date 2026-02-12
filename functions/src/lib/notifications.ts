@@ -258,22 +258,36 @@ export async function emitLabCountCompleted(params: {
 
 export async function emitFaultOpened(params: {
   actor: Actor;
+  faultReportId: string;
   assignedDeviceId: string;
   deviceName: string;
   faultType: 'teknik_servis' | 'aplikasyon';
   hospitalName?: string;
   hospitalId?: string;
+  description?: string;
 }) {
   const targetRole = `role:${params.faultType}`;
+  const faultTypeLabel = params.faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+  const normalizedDescription = (params.description || '').trim();
+  const descriptionSuffix = normalizedDescription ? ` • Açıklama: ${normalizedDescription}` : '';
+
   // Send push notification (channel defaults to 'push')
   await createNotification({
     type: 'fault_opened',
     title: `Yeni Ariza Kaydi: ${params.deviceName}`,
-    message: `${params.hospitalName || ''} hastanesindeki ${params.deviceName} cihazı için ${params.faultType.replace('_', ' ')} arızası açıldı.`,
+    message: `${params.actor.name}, ${params.hospitalName || ''} hastanesindeki ${params.deviceName} cihazı için ${faultTypeLabel} arızası açtı${descriptionSuffix}`,
+    href: `/ariza-yonetimi/${params.faultReportId}`,
     resource: { type: 'device', id: params.assignedDeviceId },
     actor: params.actor,
     targets: [targetRole, 'role:admin'], // Target specific role and admins
-    meta: { hospitalId: params.hospitalId, deviceName: params.deviceName },
+    meta: {
+      hospitalId: params.hospitalId,
+      deviceName: params.deviceName,
+      faultReportId: params.faultReportId,
+      faultType: params.faultType,
+      description: normalizedDescription,
+      openedByName: params.actor.name,
+    },
   });
 }
 
