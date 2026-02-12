@@ -47,6 +47,7 @@ type ActionItem = {
   removedPartStokAdi?: string;
   removedPartSerialNumber?: string;
   removedPartImageUrl?: string;
+  usedPartImageUrl?: string;
 };
 
 type ActionFormRecord = {
@@ -419,21 +420,37 @@ export default function AplikasyonGecmisPage() {
                                               )}
                                             </div>
 
-                                            {/* Image preview button */}
-                                            {act.removedPartImageUrl && (
-                                              <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="flex items-center gap-1"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setPreviewImage(act.removedPartImageUrl!);
-                                                }}
-                                              >
-                                                <ImageIcon className="h-4 w-4" />
-                                                <span className="hidden sm:inline">Fotoğraf</span>
-                                              </Button>
-                                            )}
+                                            {/* Image preview buttons */}
+                                            <div className="flex flex-col gap-1">
+                                              {act.removedPartImageUrl && (
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  className="flex items-center gap-1"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setPreviewImage(act.removedPartImageUrl!);
+                                                  }}
+                                                >
+                                                  <ImageIcon className="h-4 w-4" />
+                                                  <span className="hidden sm:inline">Çıkan Parça Fotoğrafı</span>
+                                                </Button>
+                                              )}
+                                              {act.usedPartImageUrl && (
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  className="flex items-center gap-1"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setPreviewImage(act.usedPartImageUrl!);
+                                                  }}
+                                                >
+                                                  <ImageIcon className="h-4 w-4" />
+                                                  <span className="hidden sm:inline">Kullanım Fotoğrafını Göster</span>
+                                                </Button>
+                                              )}
+                                            </div>
                                           </div>
                                         </div>
                                       ))}
