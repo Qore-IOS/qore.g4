@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { db, storage } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import {
   collection,
   addDoc,
@@ -15,12 +15,6 @@ import {
   where,
   getDocs,
 } from 'firebase/firestore';
-import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-} from 'firebase/storage';
 import {
   Card,
   CardHeader,
@@ -106,9 +100,12 @@ export default function DosyaYonetimiPage() {
         for (const docSnap of snapshot.docs) {
           const data = docSnap.data();
           try {
-            const storageRef = ref(storage, data.storagePath);
-            await deleteObject(storageRef);
-          } catch (e) {
+            await fetch('/api/storage/delete-file', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ storagePath: data.storagePath }),
+            });
+          } catch {
             // File may already be deleted from storage
           }
           await deleteDoc(doc(db, 'irsaliyeDosyalari', docSnap.id));
@@ -163,60 +160,53 @@ export default function DosyaYonetimiPage() {
     setUploadProgress(0);
 
     try {
-      const timestamp = Date.now();
-      const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `irsaliyeler/${currentUser.uid}/${timestamp}_${sanitizedName}`;
-      const storageRef = ref(storage, storagePath);
+      setUploadProgress(25);
 
-      const uploadTask = uploadBytesResumable(storageRef, file);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'irsaliyeler');
+      formData.append('userUid', currentUser.uid);
 
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setUploadProgress(progress);
-        },
-        (error) => {
-          console.error('Yükleme hatası:', error);
-          toast({
-            title: 'Yükleme Hatası',
-            description: 'Dosya yüklenirken bir hata oluştu.',
-            variant: 'destructive',
-          });
-          setUploading(false);
-        },
-        async () => {
-          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+      const uploadResponse = await fetch('/api/storage/upload-file', {
+        method: 'POST',
+        body: formData,
+      });
 
-          const fileType = file.name.endsWith('.pdf')
-            ? 'pdf'
-            : file.name.endsWith('.xlsx')
-            ? 'xlsx'
-            : 'xls';
+      const uploadPayload = await uploadResponse.json().catch(() => ({}));
+      if (!uploadResponse.ok || !uploadPayload?.url || !uploadPayload?.path) {
+        throw new Error(uploadPayload?.error || 'Dosya yüklenirken bir hata oluştu.');
+      }
 
-          const now = Timestamp.now();
-          const oneWeekLater = Timestamp.fromMillis(now.toMillis() + 7 * 24 * 60 * 60 * 1000);
+      setUploadProgress(80);
 
-          await addDoc(collection(db, 'irsaliyeDosyalari'), {
-            fileName: file.name,
-            fileType,
-            fileSize: file.size,
-            storagePath,
-            downloadURL,
-            uploadedBy: currentUser.uid,
-            uploadedByName: currentUserProfile?.displayName || currentUserProfile?.email || 'Bilinmeyen',
-            uploadedAt: now,
-            expiresAt: oneWeekLater,
-          });
+      const fileType = file.name.endsWith('.pdf')
+        ? 'pdf'
+        : file.name.endsWith('.xlsx')
+        ? 'xlsx'
+        : 'xls';
 
-          toast({
-            title: 'Başarılı',
-            description: `${file.name} başarıyla yüklendi.`,
-          });
-          setUploading(false);
-          setUploadProgress(0);
-        }
-      );
+      const now = Timestamp.now();
+      const oneWeekLater = Timestamp.fromMillis(now.toMillis() + 7 * 24 * 60 * 60 * 1000);
+
+      await addDoc(collection(db, 'irsaliyeDosyalari'), {
+        fileName: file.name,
+        fileType,
+        fileSize: file.size,
+        storagePath: uploadPayload.path,
+        downloadURL: uploadPayload.url,
+        uploadedBy: currentUser.uid,
+        uploadedByName: currentUserProfile?.displayName || currentUserProfile?.email || 'Bilinmeyen',
+        uploadedAt: now,
+        expiresAt: oneWeekLater,
+      });
+
+      setUploadProgress(100);
+      toast({
+        title: 'Başarılı',
+        description: `${file.name} başarıyla yüklendi.`,
+      });
+      setUploading(false);
+      setUploadProgress(0);
     } catch (error: any) {
       console.error('Dosya yükleme hatası:', error);
       toast({
@@ -237,9 +227,12 @@ export default function DosyaYonetimiPage() {
     try {
       // Delete from Storage
       try {
-        const storageRef = ref(storage, dosya.storagePath);
-        await deleteObject(storageRef);
-      } catch (e) {
+        await fetch('/api/storage/delete-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storagePath: dosya.storagePath }),
+        });
+      } catch {
         // File may already be deleted
       }
 

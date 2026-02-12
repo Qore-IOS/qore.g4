@@ -2,8 +2,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { db, storage } from '@/lib/firebase';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db } from '@/lib/firebase';
 import {
   collection,
   onSnapshot,
@@ -282,12 +281,19 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   let uploadData: Blob | File = file;
   if (isImage) uploadData = await compressImage(file);
 
-  const uploadPromise = uploadBytes(storageRef, uploadData);
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Yükleme zaman aşımına uğradı')), 60000)
-  );
-  await Promise.race([uploadPromise, timeoutPromise]);
-  const url = await getDownloadURL(storageRef);
+  const uploadFile = uploadData instanceof File
+    ? uploadData
+    : new File([uploadData], file.name, { type: uploadData.type || file.type || 'image/jpeg' });
+
+  const formData = new FormData();
+  formData.append('file', uploadFile);
+  formData.append('folder', 'purchasing-tasks');
+  formData.append('userUid', taskPath);
+
+  const response = await fetch('/api/storage/upload-file', {
+    method: 'POST',
+    body: formData,
+  });
 
   return { name: file.name, url, type: isImage ? 'image' : isPdf ? 'pdf' : 'file', size: uploadData.size, storagePath };
 }
@@ -533,6 +539,109 @@ function parseNaturalTaskInputForPlanning(
   };
 }
 
+
+function getNextWeekdayDate(targetWeekday: number): Date {
+  const today = new Date();
+  const current = today.getDay(); // 0..6 Sun..Sat
+  const delta = (targetWeekday - current + 7) % 7 || 7;
+  const d = new Date(today);
+  d.setDate(today.getDate() + delta);
+  return d;
+}
+
+function parseNaturalTaskInputForPlanning(
+  input: string,
+  labs: Hospital[]
+): {
+  title: string;
+  description: string;
+  taskType: string;
+  taskTypeLabel?: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  priority: Priority;
+  laboratoryId?: string;
+  laboratoryName?: string;
+  recurring?: PurchasingTaskRecurrence;
+} {
+  const raw = input.trim();
+  const lower = raw.toLowerCase('tr-TR');
+  const now = new Date();
+
+  let date = format(now, 'yyyy-MM-dd');
+  if (lower.includes('yarın')) date = format(addDays(now, 1), 'yyyy-MM-dd');
+  else if (lower.includes('gelecek hafta')) date = format(addWeeks(now, 1), 'yyyy-MM-dd');
+
+  const weekdays: Record<string, number> = {
+    pazar: 0,
+    pazartesi: 1,
+    salı: 2,
+    çarşamba: 3,
+    perşembe: 4,
+    cuma: 5,
+    cumartesi: 6,
+  };
+
+  let recurring: PurchasingTaskRecurrence | undefined;
+  for (const [name, idx] of Object.entries(weekdays)) {
+    if (lower.includes(`her ${name}`)) {
+      date = format(getNextWeekdayDate(idx), 'yyyy-MM-dd');
+      recurring = { type: 'weekly', interval: 1, daysOfWeek: [idx] };
+      break;
+    }
+  }
+  if (lower.includes('her ay')) recurring = { type: 'monthly', interval: 1 };
+
+  const rangeMatch = raw.match(/(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/);
+  const singleMatch = raw.match(/saat\s*(\d{1,2})(?::(\d{2}))?/i) || raw.match(/(\d{1,2}):(\d{2})/);
+
+  let startTime = '09:00';
+  let endTime = '10:00';
+  if (rangeMatch) {
+    const sh = parseInt(rangeMatch[1]);
+    const sm = parseInt(rangeMatch[2] || '0');
+    const eh = parseInt(rangeMatch[3]);
+    const em = parseInt(rangeMatch[4] || '0');
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+  } else if (singleMatch) {
+    const sh = parseInt(singleMatch[1]);
+    const sm = parseInt(singleMatch[2] || '0');
+    const eh = Math.min(sh + 1, 23);
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+  }
+
+  let priority: Priority = 'normal';
+  if (lower.includes('#acil')) priority = 'urgent';
+  else if (lower.includes('#önemli')) priority = 'high';
+
+  const matchedLab = labs.find((l) => lower.includes((l.name || '').toLowerCase('tr-TR')));
+  const isVisit = !!matchedLab || lower.includes('ziyaret');
+
+  const cleanTitle = raw
+    .replace(/#\S+/g, '')
+    .replace(/yarın|bugün|gelecek hafta/gi, '')
+    .replace(/her\s+(pazar|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|ay)/gi, '')
+    .replace(/saat\s*\d{1,2}(:\d{2})?/gi, '')
+    .replace(/\d{1,2}(:\d{2})?\s*[-–]\s*\d{1,2}(:\d{2})?/g, '')
+    .trim();
+
+  return {
+    title: isVisit ? (matchedLab?.name ? `${matchedLab.name} Ziyareti` : 'Kurum Ziyareti') : (cleanTitle || 'Yeni Görev'),
+    description: raw,
+    taskType: isVisit ? 'kurum_ziyareti' : 'custom',
+    taskTypeLabel: isVisit ? 'Kurum Ziyareti' : 'Serbest Görev',
+    date,
+    startTime,
+    endTime,
+    priority,
+    ...(matchedLab && { laboratoryId: matchedLab.id, laboratoryName: matchedLab.name }),
+    ...(recurring && { recurring }),
+  };
+}
+
 // ==========================================
 // Main Panel Component
 // ==========================================
@@ -547,6 +656,7 @@ export default function SatinAlmaPanel() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
+  const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday' | 'workflow'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -1020,7 +1130,7 @@ export default function SatinAlmaPanel() {
     try {
       if (task.attachments && task.attachments.length > 0) {
         for (const att of task.attachments) {
-          try { await deleteObject(ref(storage, att.storagePath)); } catch { /* ok */ }
+          try { await fetch('/api/storage/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storagePath: att.storagePath }) }); } catch { /* ok */ }
         }
       }
       await deleteDoc(doc(db, 'purchasingTasks', task.id));
@@ -1183,7 +1293,7 @@ export default function SatinAlmaPanel() {
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
-      if (!editingTask) return;
+      if (!editingTask || !currentUserProfile) return;
       try {
         const conflicts = hasTimeConflict(
           tasks,
@@ -1208,6 +1318,8 @@ export default function SatinAlmaPanel() {
           endTime: data.endTime,
           priority: data.priority,
           updatedAt: Timestamp.now(),
+          assignedTo: data.assignedTo?.length ? data.assignedTo : null,
+          activities,
         };
 
         if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
@@ -1234,7 +1346,7 @@ export default function SatinAlmaPanel() {
         // Remove deleted attachments from storage
         if (data.removedAttachments?.length) {
           for (const att of data.removedAttachments) {
-            try { await deleteObject(ref(storage, att.storagePath)); } catch { /* ok */ }
+            try { await fetch('/api/storage/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storagePath: att.storagePath }) }); } catch { /* ok */ }
           }
         }
 
@@ -1310,7 +1422,7 @@ export default function SatinAlmaPanel() {
     [dayTasks, draggedTaskId]
   );
 
-  const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
+  const selectedOccupancy = getOccupancyForDay(myTasks, selectedDateStr);
 
   const sliderDates = useMemo(() => {
     const dates: Date[] = [];

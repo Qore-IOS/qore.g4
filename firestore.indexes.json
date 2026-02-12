@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "overtimeRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "transfers",
       "queryScope": "COLLECTION",
       "fields": [
@@ -14,6 +22,30 @@
       "fields": [
         { "fieldPath": "depotId", "order": "ASCENDING" },
         { "fieldPath": "isShipped", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pushTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "membershipKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "enabled", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pushTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "enabled", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "notificationsEnabled", "order": "ASCENDING" },
+        { "fieldPath": "notificationPreferences", "arrayConfig": "CONTAINS" }
       ]
     }
   ],
