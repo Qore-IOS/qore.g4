@@ -658,6 +658,7 @@ export interface PersonalStockItem {
   usedOnFormType?: 'teknik_servis' | 'aplikasyon';
   replacedPartId?: string;     // Değişilen parça (cihazdan çıkan) ID
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
+  usedPartImageUrl?: string;   // Cihaza takılan parça kullanım fotoğrafı URL
 }
 
 // Transfer/kullanım/iade log kaydı
@@ -681,6 +682,7 @@ export interface SparePartTransferLog {
   createdByUid: string;
   createdByName: string;
   notes?: string;
+  usageImageUrl?: string;      // Cihaza takılan/kullanılan parçanın fotoğrafı URL
 }
 
 // Depoya iade/teslim bekleyen parça

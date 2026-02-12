@@ -2,8 +2,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { db, storage } from '@/lib/firebase';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db } from '@/lib/firebase';
 import {
   collection,
   onSnapshot,
@@ -275,22 +274,35 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   if (!isImage && !isPdf) throw new Error('Sadece resim ve PDF dosyaları yüklenebilir');
   if (file.size > MAX_ATTACHMENT_SIZE_BYTES) throw new Error('Dosya boyutu 10MB sınırını aşıyor');
 
-  const timestamp = Date.now();
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `purchasing-tasks/${taskPath}/${timestamp}_${safeName}`;
-  const storageRef = ref(storage, storagePath);
-
   let uploadData: Blob | File = file;
   if (isImage) uploadData = await compressImage(file);
 
-  const uploadPromise = uploadBytes(storageRef, uploadData);
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Yükleme zaman aşımına uğradı')), 60000)
-  );
-  await Promise.race([uploadPromise, timeoutPromise]);
-  const url = await getDownloadURL(storageRef);
+  const uploadFile = uploadData instanceof File
+    ? uploadData
+    : new File([uploadData], file.name, { type: uploadData.type || file.type || 'image/jpeg' });
 
-  return { name: file.name, url, type: isImage ? 'image' : 'pdf', size: uploadData.size, storagePath };
+  const formData = new FormData();
+  formData.append('file', uploadFile);
+  formData.append('folder', 'purchasing-tasks');
+  formData.append('userUid', taskPath);
+
+  const response = await fetch('/api/storage/upload-file', {
+    method: 'POST',
+    body: formData,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.url || !payload?.path) {
+    throw new Error(payload?.error || 'Dosya yüklenemedi');
+  }
+
+  return {
+    name: file.name,
+    url: payload.url,
+    type: isImage ? 'image' : 'pdf',
+    size: uploadFile.size,
+    storagePath: payload.path,
+  };
 }
 
 // ==========================================
@@ -968,7 +980,7 @@ export default function SatinAlmaPanel() {
     try {
       if (task.attachments && task.attachments.length > 0) {
         for (const att of task.attachments) {
-          try { await deleteObject(ref(storage, att.storagePath)); } catch { /* ok */ }
+          try { await fetch('/api/storage/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storagePath: att.storagePath }) }); } catch { /* ok */ }
         }
       }
       await deleteDoc(doc(db, 'purchasingTasks', task.id));
@@ -1163,7 +1175,7 @@ export default function SatinAlmaPanel() {
         // Remove deleted attachments from storage
         if (data.removedAttachments?.length) {
           for (const att of data.removedAttachments) {
-            try { await deleteObject(ref(storage, att.storagePath)); } catch { /* ok */ }
+            try { await fetch('/api/storage/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storagePath: att.storagePath }) }); } catch { /* ok */ }
           }
         }
 

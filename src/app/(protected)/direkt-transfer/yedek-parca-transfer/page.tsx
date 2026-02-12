@@ -54,14 +54,18 @@ import {
   Hash,
   List,
   ChevronLeft,
+  Pencil,
+  Menu,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTransferTutanakPDFButton';
 
 // Menu selection types
 type MenuSection = 'transfer' | 'depo-stok' | 'toplam-stok' | 'personnel';
@@ -123,6 +127,10 @@ export default function YedekParcaTransferPage() {
   const [expandedStokKodu, setExpandedStokKodu] = useState<string | null>(null);
   const [depoStokSearchQuery, setDepoStokSearchQuery] = useState('');
   const [depoStokPage, setDepoStokPage] = useState(0);
+  const [editingDepoGroup, setEditingDepoGroup] = useState<GroupedDepoStokItem | null>(null);
+  const [editingQuantity, setEditingQuantity] = useState<number>(1);
+  const [isSavingDepoEdit, setIsSavingDepoEdit] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const DEPO_STOK_PER_PAGE = 20;
 
   // Product code reference for cihazGrubu lookup
@@ -137,9 +145,22 @@ export default function YedekParcaTransferPage() {
   // All personnel stock for toplam stok view
   const [allPersonnelStock, setAllPersonnelStock] = useState<PersonalStockItem[]>([]);
   const [allStockLoading, setAllStockLoading] = useState(false);
+  const [takingOverStockId, setTakingOverStockId] = useState<string | null>(null);
+  const [historyActionFilter, setHistoryActionFilter] = useState<string>('all');
 
   // Check authorization
-  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik';
+  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
+
+  const loadRecentTransferLogs = useCallback(async () => {
+    const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
+    const logs = logsSnap.docs.map(d => {
+      const data = d.data();
+      const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
+      return { id: d.id, ...data, timestamp };
+    });
+    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setTransferLogs(logs.slice(0, 50));
+  }, []);
 
   // Fetch data
   useEffect(() => {
@@ -211,14 +232,7 @@ export default function YedekParcaTransferPage() {
         setBorrowedParts(borrowed);
 
         // Fetch recent transfer logs
-        const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
-        const logs = logsSnap.docs.map(d => {
-          const data = d.data();
-          const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-          return { id: d.id, ...data, timestamp };
-        });
-        logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setTransferLogs(logs.slice(0, 50));
+        await loadRecentTransferLogs();
       } catch (err) {
         console.error('Error fetching data:', err);
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -228,7 +242,7 @@ export default function YedekParcaTransferPage() {
     };
 
     fetchData();
-  }, [isAuthorized, toast]);
+  }, [loadRecentTransferLogs, isAuthorized, toast]);
 
   // Build grouped depot stock products (for transfer product selector)
   useEffect(() => {
@@ -672,19 +686,161 @@ export default function YedekParcaTransferPage() {
       setDepoStok(stokItems);
 
       // Refresh logs
-      const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
-      const logs = logsSnap.docs.map(d => {
-        const data = d.data();
-        const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-        return { id: d.id, ...data, timestamp };
-      });
-      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      setTransferLogs(logs.slice(0, 50));
+      await loadRecentTransferLogs();
     } catch (err) {
       console.error('Error executing transfer:', err);
       toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  const openDepoQuantityEditor = (group: GroupedDepoStokItem) => {
+    setEditingDepoGroup(group);
+    setEditingQuantity(group.totalQuantity);
+  };
+
+  const saveDepoQuantityEdit = async () => {
+    if (!editingDepoGroup) return;
+
+    const serialCount = editingDepoGroup.serialNumbers.length;
+    const minQuantity = serialCount;
+    const nextTotal = Math.max(minQuantity, Math.floor(editingQuantity));
+    const oldTotal = editingDepoGroup.totalQuantity;
+
+    if (nextTotal === oldTotal) {
+      setEditingDepoGroup(null);
+      return;
+    }
+
+    setIsSavingDepoEdit(true);
+    try {
+      const now = new Date();
+      const nonSerialEntries = editingDepoGroup.entries.filter(e => !e.serialNumber);
+      const nextNonSerialTotal = nextTotal - serialCount;
+      const batch = writeBatch(db);
+
+      if (nextNonSerialTotal <= 0) {
+        nonSerialEntries.forEach(entry => {
+          batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+        });
+      } else if (nonSerialEntries.length > 0) {
+        const [first, ...rest] = nonSerialEntries;
+        batch.update(doc(db, 'yedekParcaDepoStok', first.id), {
+          quantity: nextNonSerialTotal,
+        });
+        rest.forEach(entry => {
+          batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+        });
+      } else {
+        const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
+        batch.set(stockRef, {
+          productCodeId: editingDepoGroup.productCodeId,
+          stokKodu: editingDepoGroup.stokKodu,
+          stokAdi: editingDepoGroup.stokAdi,
+          serialNumber: '',
+          quantity: nextNonSerialTotal,
+          cihazGrubu: editingDepoGroup.cihazGrubu || '',
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+      }
+
+      const delta = nextTotal - oldTotal;
+
+      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+      batch.set(depoLogRef, {
+        action: 'stok_duzeltme',
+        productCodeId: editingDepoGroup.productCodeId,
+        stokKodu: editingDepoGroup.stokKodu,
+        stokAdi: editingDepoGroup.stokAdi,
+        cihazGrubu: editingDepoGroup.cihazGrubu || '',
+        serialNumber: '',
+        quantity: Math.abs(delta),
+        notes: `Depo stok adedi düzenlendi: ${oldTotal} -> ${nextTotal}`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(transferLogRef, {
+        action: 'depo_stock_adjusted',
+        productCodeId: editingDepoGroup.productCodeId,
+        stokKodu: editingDepoGroup.stokKodu,
+        stokAdi: editingDepoGroup.stokAdi,
+        serialNumber: '',
+        quantity: Math.abs(delta),
+        notes: `Depo stok adedi düzenlendi: ${oldTotal} -> ${nextTotal}`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      await batch.commit();
+      setEditingDepoGroup(null);
+      await fetchDepoStok();
+      await loadRecentTransferLogs();
+
+      toast({
+        title: 'Stok Güncellendi',
+        description: `${editingDepoGroup.stokKodu} için adet ${oldTotal} -> ${nextTotal} olarak güncellendi.`,
+      });
+    } catch (err) {
+      console.error('Error updating depot stock quantity:', err);
+      toast({ title: 'Hata', description: 'Depo stok adedi güncellenemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingDepoEdit(false);
+    }
+  };
+
+  const deleteSerialFromDepot = async (group: GroupedDepoStokItem, serialEntry: { serialNumber: string; id: string }) => {
+    try {
+      const now = new Date();
+      const batch = writeBatch(db);
+
+      batch.delete(doc(db, 'yedekParcaDepoStok', serialEntry.id));
+
+      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+      batch.set(depoLogRef, {
+        action: 'stok_duzeltme',
+        productCodeId: group.productCodeId,
+        stokKodu: group.stokKodu,
+        stokAdi: group.stokAdi,
+        cihazGrubu: group.cihazGrubu || '',
+        serialNumber: serialEntry.serialNumber,
+        quantity: 1,
+        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber}`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(transferLogRef, {
+        action: 'depo_serial_deleted',
+        productCodeId: group.productCodeId,
+        stokKodu: group.stokKodu,
+        stokAdi: group.stokAdi,
+        serialNumber: serialEntry.serialNumber,
+        quantity: 1,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      await batch.commit();
+      await fetchDepoStok();
+      await loadRecentTransferLogs();
+
+      toast({
+        title: 'Seri No Silindi',
+        description: `${group.stokKodu} / ${serialEntry.serialNumber} depodan kaldırıldı.`,
+      });
+    } catch (err) {
+      console.error('Error deleting serial from depot stock:', err);
+      toast({ title: 'Hata', description: 'Seri numarası silinirken hata oluştu.', variant: 'destructive' });
     }
   };
 
@@ -844,6 +1000,70 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  const takeOverPersonnelStock = async (item: PersonalStockItem) => {
+    if (!currentUserProfile?.uid || !currentUserProfile?.name) {
+      toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    if (item.ownerUid === currentUserProfile.uid) {
+      toast({ title: 'Bilgi', description: 'Bu ürün zaten sizin üzerinizde.', variant: 'default' });
+      return;
+    }
+
+    if (item.status !== 'in_stock') {
+      toast({ title: 'Uyarı', description: 'Sadece aktif stok devralınabilir.', variant: 'default' });
+      return;
+    }
+
+    setTakingOverStockId(item.id);
+    try {
+      const now = new Date();
+      await updateDoc(doc(db, 'personalStock', item.id), {
+        ownerUid: currentUserProfile.uid,
+        ownerName: currentUserProfile.name,
+        createdAt: Timestamp.fromDate(now),
+        transferredByUid: currentUserProfile.uid,
+        transferredByName: currentUserProfile.name,
+        previousOwnerUid: item.ownerUid,
+        previousOwnerName: item.ownerName,
+      });
+
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'transfer_between_personnel',
+        personalStockId: item.id,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber || '',
+        quantity: 1,
+        fromUid: item.ownerUid,
+        fromName: item.ownerName,
+        toUid: currentUserProfile.uid,
+        toName: currentUserProfile.name,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile.uid,
+        createdByName: currentUserProfile.name,
+      });
+
+      toast({
+        title: 'Üzerinize Alındı',
+        description: `${item.stokAdi} (${item.serialNumber || 'Seri No Yok'}) stoğunuza eklendi.`,
+      });
+
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      await fetchAllPersonnelStock();
+      await loadRecentTransferLogs();
+    } catch (err) {
+      console.error('Error taking over personal stock:', err);
+      toast({ title: 'Hata', description: 'Ürünü üzerinize alma işlemi başarısız oldu.', variant: 'destructive' });
+    } finally {
+      setTakingOverStockId(null);
+    }
+  };
+
   // Action labels for logs
   const getActionLabel = (action: string) => {
     const labels: Record<string, string> = {
@@ -856,9 +1076,17 @@ export default function YedekParcaTransferPage() {
       borrowed_part: 'Borç Parça Kullanıldı',
       borrowed_approved: 'Borç Onaylandı',
       borrowed_rejected: 'Borç Reddedildi',
+      depo_stock_adjusted: 'Depo Stok Güncellendi',
+      depo_serial_deleted: 'Depo Seri No Silindi',
+      transfer_between_personnel: 'Personelden Personele Devir',
     };
     return labels[action] || action;
   };
+
+  const filteredHistoryLogs = useMemo(() => {
+    if (historyActionFilter === 'all') return transferLogs;
+    return transferLogs.filter((log) => log.action === historyActionFilter);
+  }, [historyActionFilter, transferLogs]);
 
   // ========== RENDER: Transfer Panel (Right Side Default) ==========
   const renderTransferPanel = () => (
@@ -874,20 +1102,22 @@ export default function YedekParcaTransferPage() {
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="transfer">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="transfer">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
+            <TabsTrigger value="transfer" className="text-xs sm:text-sm">
               <Send className="h-4 w-4 mr-2" />
               Transfer
             </TabsTrigger>
-            <TabsTrigger value="borrowed">
+            <TabsTrigger value="borrowed" className="text-xs sm:text-sm">
               <HandCoins className="h-4 w-4 mr-2" />
-              Borç Alınan ({borrowedParts.length})
+              <span className="sm:hidden">Borç ({borrowedParts.length})</span>
+              <span className="hidden sm:inline">Borç Alınan ({borrowedParts.length})</span>
             </TabsTrigger>
-            <TabsTrigger value="pending">
+            <TabsTrigger value="pending" className="text-xs sm:text-sm">
               <Clock className="h-4 w-4 mr-2" />
-              İade Bekleyen ({pendingReturns.length})
+              <span className="sm:hidden">İade ({pendingReturns.length})</span>
+              <span className="hidden sm:inline">İade Bekleyen ({pendingReturns.length})</span>
             </TabsTrigger>
-            <TabsTrigger value="history">
+            <TabsTrigger value="history" className="text-xs sm:text-sm">
               <History className="h-4 w-4 mr-2" />
               Geçmiş
             </TabsTrigger>
@@ -1333,8 +1563,33 @@ export default function YedekParcaTransferPage() {
                 <p>Henüz işlem geçmişi bulunmuyor.</p>
               </div>
             ) : (
-              <ScrollArea className="h-[400px]">
-                <div className="border rounded-lg">
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="history-action-filter" className="text-sm">İşlem Türü</Label>
+                    <select
+                      id="history-action-filter"
+                      className="h-9 rounded-md border bg-background px-3 text-sm"
+                      value={historyActionFilter}
+                      onChange={(e) => setHistoryActionFilter(e.target.value)}
+                    >
+                      <option value="all">Tümü</option>
+                      <option value="transfer_to_personnel">Personele Transfer</option>
+                      <option value="transfer_between_personnel">Personelden Personele Devir</option>
+                      <option value="return_confirmed">İade Teslim Alındı</option>
+                      <option value="submit_confirmed">Teslim Alındı</option>
+                      <option value="use_on_device">Cihazda Kullanıldı</option>
+                      <option value="borrowed_part">Borç Parça Kullanıldı</option>
+                      <option value="borrowed_approved">Borç Onaylandı</option>
+                      <option value="borrowed_rejected">Borç Reddedildi</option>
+                      <option value="depo_stock_adjusted">Depo Stok Güncellendi</option>
+                      <option value="depo_serial_deleted">Depo Seri No Silindi</option>
+                    </select>
+                  </div>
+                </div>
+
+                <ScrollArea className="h-[360px]">
+                  <div className="border rounded-lg">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1348,13 +1603,32 @@ export default function YedekParcaTransferPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {transferLogs.map((log) => (
+                      {filteredHistoryLogs.map((log) => {
+                        const isTransferAction = log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel';
+
+                        return (
                         <TableRow key={log.id}>
                           <TableCell className="text-sm">
                             {format(log.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr })}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline">{getActionLabel(log.action)}</Badge>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline">{getActionLabel(log.action)}</Badge>
+                              {isTransferAction && (
+                                <SparePartTransferTutanakPDFButton log={log} className="h-7 px-2 text-xs" />
+                              )}
+                              {log.usageImageUrl && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => setPreviewImage(log.usageImageUrl)}
+                                >
+                                  <ImageIcon className="h-3.5 w-3.5 mr-1" />
+                                  Kullanım Fotoğrafını Göster
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <div>
@@ -1371,11 +1645,13 @@ export default function YedekParcaTransferPage() {
                             {log.createdByName}
                           </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
-                </div>
-              </ScrollArea>
+                  </div>
+                </ScrollArea>
+              </div>
             )}
           </TabsContent>
         </Tabs>
@@ -1471,7 +1747,21 @@ export default function YedekParcaTransferPage() {
                         ) : '-'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{group.totalQuantity}</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">{group.totalQuantity}</Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDepoQuantityEditor(group);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}
@@ -1503,12 +1793,24 @@ export default function YedekParcaTransferPage() {
                             </p>
                             <div className="flex flex-wrap gap-2">
                               {group.serialNumbers.map((sn) => (
-                                <Badge key={sn.id} variant="outline" className="font-mono text-xs">
-                                  {sn.serialNumber}
-                                  <span className="ml-1 text-muted-foreground">
+                                <div key={sn.id} className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1">
+                                  <span className="font-mono text-xs">{sn.serialNumber}</span>
+                                  <span className="text-xs text-muted-foreground">
                                     ({format(sn.createdAt, 'dd.MM.yy', { locale: tr })})
                                   </span>
-                                </Badge>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteSerialFromDepot(group, sn);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 text-red-600" />
+                                  </Button>
+                                </div>
                               ))}
                             </div>
                             {group.totalQuantity > group.serialNumbers.length && (
@@ -1615,11 +1917,17 @@ export default function YedekParcaTransferPage() {
                       <TableHead>Durum</TableHead>
                       <TableHead>Transfer Tarihi</TableHead>
                       <TableHead>Kullanım Tarihi</TableHead>
+                      <TableHead className="text-right">İşlem</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paginatedPersonnelStock.map((item) => {
                       const isUsed = item.status === 'used' || item.status === 'pending_return';
+                      const canTakeOver =
+                        item.status === 'in_stock' &&
+                        !!currentUserProfile?.uid &&
+                        currentUserProfile.uid !== item.ownerUid;
+
                       return (
                         <TableRow key={item.id} className={isUsed ? 'opacity-60' : ''}>
                           <TableCell className={cn('font-mono', isUsed && 'line-through')}>
@@ -1650,6 +1958,21 @@ export default function YedekParcaTransferPage() {
                               ? format(item.usedAt, 'dd.MM.yyyy HH:mm', { locale: tr })
                               : '-'
                             }
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {canTakeOver ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={takingOverStockId === item.id}
+                                onClick={() => takeOverPersonnelStock(item)}
+                              >
+                                {takingOverStockId === item.id && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                Üzerime Al
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -1787,6 +2110,186 @@ export default function YedekParcaTransferPage() {
     );
   };
 
+  const handleMenuSelect = useCallback((selection: MenuSelection, closeMenu?: () => void) => {
+    setMenuSelection(selection);
+    closeMenu?.();
+  }, []);
+
+  const renderManagementMenu = (closeMenu?: () => void) => (
+    <ScrollArea className="h-[calc(100vh-180px)] md:h-[calc(100vh-180px)]">
+      {/* Depo Stok */}
+      <div className="mb-1">
+        <button
+          onClick={() => handleMenuSelect({ section: 'depo-stok' }, closeMenu)}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
+            menuSelection.section === 'depo-stok'
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <Warehouse className="h-4 w-4 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">Depo Stok</p>
+            <p className={cn(
+              'text-xs truncate',
+              menuSelection.section === 'depo-stok'
+                ? 'text-primary-foreground/70'
+                : 'text-muted-foreground'
+            )}>
+              Yedek parça deposu
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+        </button>
+      </div>
+
+      {/* Personeldeki Toplam Stok */}
+      <div className="mb-1">
+        <button
+          onClick={() => handleMenuSelect({ section: 'toplam-stok' }, closeMenu)}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
+            menuSelection.section === 'toplam-stok'
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <PackageOpen className="h-4 w-4 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">Personeldeki Toplam Stok</p>
+            <p className={cn(
+              'text-xs truncate',
+              menuSelection.section === 'toplam-stok'
+                ? 'text-primary-foreground/70'
+                : 'text-muted-foreground'
+            )}>
+              Kullanılmamış toplam stok
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+        </button>
+      </div>
+
+      {/* Transfer Paneli */}
+      <div className="mb-3">
+        <button
+          onClick={() => handleMenuSelect({ section: 'transfer' }, closeMenu)}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
+            menuSelection.section === 'transfer'
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <Send className="h-4 w-4 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">Transfer Paneli</p>
+            <p className={cn(
+              'text-xs truncate',
+              menuSelection.section === 'transfer'
+                ? 'text-primary-foreground/70'
+                : 'text-muted-foreground'
+            )}>
+              Transfer, borç, iade, geçmiş
+            </p>
+          </div>
+          <div className="flex gap-1 flex-shrink-0">
+            {borrowedParts.length > 0 && (
+              <Badge variant="destructive" className="text-xs px-1.5 py-0">
+                {borrowedParts.length}
+              </Badge>
+            )}
+            {pendingReturns.length > 0 && (
+              <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                {pendingReturns.length}
+              </Badge>
+            )}
+          </div>
+          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+        </button>
+      </div>
+
+      <Separator className="my-3" />
+
+      {/* Teknik Servis Personel Listesi */}
+      <div className="mb-2">
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Teknik Servis
+          </span>
+          <Badge variant="outline" className="text-xs ml-auto">{teknikServisUsers.length}</Badge>
+        </div>
+        <div className="space-y-0.5">
+          {teknikServisUsers.map((user) => (
+            <button
+              key={user.uid}
+              onClick={() => handleMenuSelect({
+                section: 'personnel',
+                personnelUid: user.uid || '',
+                personnelName: user.name || '',
+                personnelRole: 'teknik_servis',
+              }, closeMenu)}
+              className={cn(
+                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
+                menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              )}
+            >
+              <UserIcon className="h-4 w-4 flex-shrink-0" />
+              <span className="text-sm truncate flex-1">{user.name}</span>
+              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
+            </button>
+          ))}
+          {teknikServisUsers.length === 0 && (
+            <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
+          )}
+        </div>
+      </div>
+
+      <Separator className="my-3" />
+
+      {/* Aplikasyon Personel Listesi */}
+      <div className="mb-2">
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Aplikasyon
+          </span>
+          <Badge variant="outline" className="text-xs ml-auto">{aplikasyonUsers.length}</Badge>
+        </div>
+        <div className="space-y-0.5">
+          {aplikasyonUsers.map((user) => (
+            <button
+              key={user.uid}
+              onClick={() => handleMenuSelect({
+                section: 'personnel',
+                personnelUid: user.uid || '',
+                personnelName: user.name || '',
+                personnelRole: 'aplikasyon',
+              }, closeMenu)}
+              className={cn(
+                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
+                menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              )}
+            >
+              <UserIcon className="h-4 w-4 flex-shrink-0" />
+              <span className="text-sm truncate flex-1">{user.name}</span>
+              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
+            </button>
+          ))}
+          {aplikasyonUsers.length === 0 && (
+            <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
+          )}
+        </div>
+      </div>
+    </ScrollArea>
+  );
+
   // ========== RENDER: Right Panel Content ==========
   const renderRightPanel = () => {
     switch (menuSelection.section) {
@@ -1827,200 +2330,43 @@ export default function YedekParcaTransferPage() {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-2 sm:p-4 space-y-3 sm:space-y-4">
       <BackButton fallback="/direkt-transfer" />
 
-      <div className="flex items-center gap-2 mb-2">
-        <Package className="h-6 w-6" />
-        <h1 className="text-xl font-bold">Yedek Parça Yönetim Paneli</h1>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <Package className="h-6 w-6" />
+          <h1 className="text-lg sm:text-xl font-bold">Yedek Parça Yönetim Paneli</h1>
+        </div>
+        <Button variant="outline" size="sm" className="md:hidden" onClick={() => setMobileMenuOpen(true)}>
+          <Menu className="h-4 w-4 mr-2" /> Menü
+        </Button>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col md:flex-row gap-3 md:gap-4">
         {/* ===== LEFT PANEL (40%) - Management Menu ===== */}
-        <div className="w-[40%] min-w-[280px] space-y-2">
+        <div className="hidden md:block w-[40%] min-w-[280px] space-y-2">
           <Card>
             <CardContent className="p-3">
-              <ScrollArea className="h-[calc(100vh-180px)]">
-                {/* Depo Stok */}
-                <div className="mb-1">
-                  <button
-                    onClick={() => setMenuSelection({ section: 'depo-stok' })}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-                      menuSelection.section === 'depo-stok'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'hover:bg-muted'
-                    )}
-                  >
-                    <Warehouse className="h-4 w-4 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm">Depo Stok</p>
-                      <p className={cn(
-                        'text-xs truncate',
-                        menuSelection.section === 'depo-stok'
-                          ? 'text-primary-foreground/70'
-                          : 'text-muted-foreground'
-                      )}>
-                        Yedek parça deposu
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
-                  </button>
-                </div>
-
-                {/* Personeldeki Toplam Stok */}
-                <div className="mb-1">
-                  <button
-                    onClick={() => setMenuSelection({ section: 'toplam-stok' })}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-                      menuSelection.section === 'toplam-stok'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'hover:bg-muted'
-                    )}
-                  >
-                    <PackageOpen className="h-4 w-4 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm">Personeldeki Toplam Stok</p>
-                      <p className={cn(
-                        'text-xs truncate',
-                        menuSelection.section === 'toplam-stok'
-                          ? 'text-primary-foreground/70'
-                          : 'text-muted-foreground'
-                      )}>
-                        Kullanılmamış toplam stok
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
-                  </button>
-                </div>
-
-                {/* Transfer Paneli */}
-                <div className="mb-3">
-                  <button
-                    onClick={() => setMenuSelection({ section: 'transfer' })}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-                      menuSelection.section === 'transfer'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'hover:bg-muted'
-                    )}
-                  >
-                    <Send className="h-4 w-4 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm">Transfer Paneli</p>
-                      <p className={cn(
-                        'text-xs truncate',
-                        menuSelection.section === 'transfer'
-                          ? 'text-primary-foreground/70'
-                          : 'text-muted-foreground'
-                      )}>
-                        Transfer, borç, iade, geçmiş
-                      </p>
-                    </div>
-                    <div className="flex gap-1 flex-shrink-0">
-                      {borrowedParts.length > 0 && (
-                        <Badge variant="destructive" className="text-xs px-1.5 py-0">
-                          {borrowedParts.length}
-                        </Badge>
-                      )}
-                      {pendingReturns.length > 0 && (
-                        <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                          {pendingReturns.length}
-                        </Badge>
-                      )}
-                    </div>
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
-                  </button>
-                </div>
-
-                <Separator className="my-3" />
-
-                {/* Teknik Servis Personel Listesi */}
-                <div className="mb-2">
-                  <div className="flex items-center gap-2 px-3 py-1.5">
-                    <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Teknik Servis
-                    </span>
-                    <Badge variant="outline" className="text-xs ml-auto">{teknikServisUsers.length}</Badge>
-                  </div>
-                  <div className="space-y-0.5">
-                    {teknikServisUsers.map((user) => (
-                      <button
-                        key={user.uid}
-                        onClick={() => setMenuSelection({
-                          section: 'personnel',
-                          personnelUid: user.uid || '',
-                          personnelName: user.name || '',
-                          personnelRole: 'teknik_servis',
-                        })}
-                        className={cn(
-                          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
-                          menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
-                            ? 'bg-primary text-primary-foreground'
-                            : 'hover:bg-muted'
-                        )}
-                      >
-                        <UserIcon className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-sm truncate flex-1">{user.name}</span>
-                        <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
-                      </button>
-                    ))}
-                    {teknikServisUsers.length === 0 && (
-                      <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
-                    )}
-                  </div>
-                </div>
-
-                <Separator className="my-3" />
-
-                {/* Aplikasyon Personel Listesi */}
-                <div className="mb-2">
-                  <div className="flex items-center gap-2 px-3 py-1.5">
-                    <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Aplikasyon
-                    </span>
-                    <Badge variant="outline" className="text-xs ml-auto">{aplikasyonUsers.length}</Badge>
-                  </div>
-                  <div className="space-y-0.5">
-                    {aplikasyonUsers.map((user) => (
-                      <button
-                        key={user.uid}
-                        onClick={() => setMenuSelection({
-                          section: 'personnel',
-                          personnelUid: user.uid || '',
-                          personnelName: user.name || '',
-                          personnelRole: 'aplikasyon',
-                        })}
-                        className={cn(
-                          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
-                          menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
-                            ? 'bg-primary text-primary-foreground'
-                            : 'hover:bg-muted'
-                        )}
-                      >
-                        <UserIcon className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-sm truncate flex-1">{user.name}</span>
-                        <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
-                      </button>
-                    ))}
-                    {aplikasyonUsers.length === 0 && (
-                      <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
-                    )}
-                  </div>
-                </div>
-              </ScrollArea>
+              {renderManagementMenu()}
             </CardContent>
           </Card>
         </div>
 
         {/* ===== RIGHT PANEL (60%) - Content Area ===== */}
-        <div className="w-[60%] min-w-0">
+        <div className="w-full md:w-[60%] min-w-0">
           {renderRightPanel()}
         </div>
       </div>
+
+      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+        <SheetContent side="left" className="w-[86vw] p-0">
+          <SheetHeader className="px-4 py-3 border-b">
+            <SheetTitle>Yedek Parça Yönetim Menüsü</SheetTitle>
+          </SheetHeader>
+          <div className="p-3">{renderManagementMenu(() => setMobileMenuOpen(false))}</div>
+        </SheetContent>
+      </Sheet>
 
       {/* Image Preview Modal */}
       <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
@@ -2038,6 +2384,56 @@ export default function YedekParcaTransferPage() {
                 alt="Parça fotoğrafı"
                 className="w-full h-auto max-h-[70vh] object-contain rounded-md"
               />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!editingDepoGroup}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDepoGroup(null);
+            setIsSavingDepoEdit(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Depo Stok Adet Düzenle</DialogTitle>
+          </DialogHeader>
+          {editingDepoGroup && (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">{editingDepoGroup.stokAdi}</p>
+                <p>{editingDepoGroup.stokKodu}</p>
+                {editingDepoGroup.serialNumbers.length > 0 && (
+                  <p className="mt-1 text-amber-700 dark:text-amber-400">
+                    Bu ürün seri numaralı. Minimum adet: {editingDepoGroup.serialNumbers.length}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="depo-edit-qty">Yeni Adet</Label>
+                <Input
+                  id="depo-edit-qty"
+                  type="number"
+                  min={editingDepoGroup.serialNumbers.length}
+                  value={editingQuantity}
+                  onChange={(e) => setEditingQuantity(Number(e.target.value || 0))}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditingDepoGroup(null)} disabled={isSavingDepoEdit}>
+                  İptal
+                </Button>
+                <Button onClick={saveDepoQuantityEdit} disabled={isSavingDepoEdit}>
+                  {isSavingDepoEdit && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Kaydet
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
