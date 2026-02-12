@@ -72,6 +72,7 @@ type ActionItem = {
   removedPartStokAdi?: string;
   removedPartSerialNumber?: string;
   removedPartImageUrl?: string;
+  usedPartImageUrl?: string;
   // Periodic part change info
   periodicPartChangeId?: string;
   isPeriodicPartChange?: boolean;
@@ -177,8 +178,12 @@ export default function AplikasyonIslemFormuPage() {
   // Removed part image
   const [removedPartImageFile, setRemovedPartImageFile] = useState<File | null>(null);
   const [removedPartImagePreview, setRemovedPartImagePreview] = useState<string | null>(null);
+  // Used part image
+  const [usedPartImageFile, setUsedPartImageFile] = useState<File | null>(null);
+  const [usedPartImagePreview, setUsedPartImagePreview] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const removedPartImageInputRef = useRef<HTMLInputElement>(null);
+  const usedPartImageInputRef = useRef<HTMLInputElement>(null);
 
   // Maintenance plans for periyodik bakım
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
@@ -601,6 +606,8 @@ export default function AplikasyonIslemFormuPage() {
     setRemovedPartSerialNumber('');
     setRemovedPartImageFile(null);
     setRemovedPartImagePreview(null);
+    setUsedPartImageFile(null);
+    setUsedPartImagePreview(null);
 
     if (matchingStockItem) {
       setSelectedStockItem(matchingStockItem);
@@ -645,18 +652,28 @@ export default function AplikasyonIslemFormuPage() {
     }
   };
 
-  // Upload removed part image to Firebase Storage with timeout
-  const uploadRemovedPartImage = async (): Promise<string | null> => {
-    if (!removedPartImageFile) return null;
+  const handleUsedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUsedPartImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUsedPartImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
+  // Upload removed part image to Firebase Storage with timeout
+  const uploadPartImage = async (file: File, pathPrefix: 'removed-parts' | 'used-parts'): Promise<string | null> => {
     setIsUploadingImage(true);
     try {
       const timestamp = Date.now();
-      const fileName = `removed-parts/${deviceId}/${timestamp}_${removedPartImageFile.name}`;
+      const fileName = `${pathPrefix}/${deviceId}/${timestamp}_${file.name}`;
       const storageRef = ref(storage, fileName);
 
       // Upload with timeout (30 seconds)
-      const uploadPromise = uploadBytes(storageRef, removedPartImageFile);
+      const uploadPromise = uploadBytes(storageRef, file);
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Upload timeout')), 30000)
       );
@@ -679,6 +696,16 @@ export default function AplikasyonIslemFormuPage() {
     }
   };
 
+  const uploadRemovedPartImage = async (): Promise<string | null> => {
+    if (!removedPartImageFile) return null;
+    return uploadPartImage(removedPartImageFile, 'removed-parts');
+  };
+
+  const uploadUsedPartImage = async (): Promise<string | null> => {
+    if (!usedPartImageFile) return null;
+    return uploadPartImage(usedPartImageFile, 'used-parts');
+  };
+
   const addSelectedPart = async () => {
     // Determine if this is for a periodic part with reduced requirements
     const pendingPeriodic = pendingPeriodicPartChangeId
@@ -693,12 +720,20 @@ export default function AplikasyonIslemFormuPage() {
       return;
     }
 
-    // Upload image if provided
+    // Upload images if provided
     let removedPartImageUrl: string | undefined = undefined;
     if (removedPartImageFile) {
       const uploadedUrl = await uploadRemovedPartImage();
       if (uploadedUrl) {
         removedPartImageUrl = uploadedUrl;
+      }
+    }
+
+    let usedPartImageUrl: string | undefined = undefined;
+    if (usedPartImageFile) {
+      const uploadedUrl = await uploadUsedPartImage();
+      if (uploadedUrl) {
+        usedPartImageUrl = uploadedUrl;
       }
     }
 
@@ -730,6 +765,7 @@ export default function AplikasyonIslemFormuPage() {
         removedPartStokAdi: removedPartStokAdi.trim() || manualPartName.trim(),
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
+        usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
       };
@@ -768,6 +804,7 @@ export default function AplikasyonIslemFormuPage() {
         removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
+        usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
       };
@@ -1101,6 +1138,7 @@ export default function AplikasyonIslemFormuPage() {
               usedOnFormId: formRef.id,
               usedOnFormType: 'aplikasyon',
               replacedPartId: removedStockRefId,
+              usedPartImageUrl: partChange.usedPartImageUrl || null,
             });
 
             // Create log for using the part
@@ -1118,6 +1156,7 @@ export default function AplikasyonIslemFormuPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
+              usageImageUrl: partChange.usedPartImageUrl || null,
             });
           }
 
@@ -1157,6 +1196,7 @@ export default function AplikasyonIslemFormuPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
+              usageImageUrl: partChange.usedPartImageUrl || null,
             });
           }
         }
@@ -1916,55 +1956,107 @@ export default function AplikasyonIslemFormuPage() {
                 />
                 <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça adı kullanılır</p>
               </div>
-              {/* Removed part image upload */}
-              <div className="space-y-2 pt-2 border-t border-amber-200 dark:border-amber-800">
-                <Label className="text-xs flex items-center gap-1">
-                  <Camera className="h-3 w-3" />
-                  Parça Fotoğrafı (Opsiyonel)
-                </Label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  ref={removedPartImageInputRef}
-                  onChange={handleRemovedPartImageSelect}
-                  className="hidden"
-                />
-                {removedPartImagePreview ? (
-                  <div className="relative">
-                    <img
-                      src={removedPartImagePreview}
-                      alt="Çıkan parça"
-                      className="w-full h-32 object-cover rounded-md border"
-                    />
+              {/* Removed/used part image upload */}
+              <div className="space-y-3 pt-2 border-t border-amber-200 dark:border-amber-800">
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Camera className="h-3 w-3" />
+                    Çıkan Parça Fotoğrafı (Opsiyonel)
+                  </Label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    ref={removedPartImageInputRef}
+                    onChange={handleRemovedPartImageSelect}
+                    className="hidden"
+                  />
+                  {removedPartImagePreview ? (
+                    <div className="relative">
+                      <img
+                        src={removedPartImagePreview}
+                        alt="Çıkan parça"
+                        className="w-full h-32 object-cover rounded-md border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={() => {
+                          setRemovedPartImageFile(null);
+                          setRemovedPartImagePreview(null);
+                          if (removedPartImageInputRef.current) {
+                            removedPartImageInputRef.current.value = '';
+                          }
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
                     <Button
                       type="button"
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-1 right-1 h-6 w-6"
-                      onClick={() => {
-                        setRemovedPartImageFile(null);
-                        setRemovedPartImagePreview(null);
-                        if (removedPartImageInputRef.current) {
-                          removedPartImageInputRef.current.value = '';
-                        }
-                      }}
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      onClick={() => removedPartImageInputRef.current?.click()}
                     >
-                      <X className="h-3 w-3" />
+                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Çıkan parça fotoğrafı</span>
                     </Button>
-                  </div>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-20 border-dashed flex flex-col gap-1"
-                    onClick={() => removedPartImageInputRef.current?.click()}
-                  >
-                    <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Fotoğraf Çek / Yükle</span>
-                  </Button>
-                )}
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Camera className="h-3 w-3" />
+                    Takılan/Kullanılan Parça Fotoğrafı (Opsiyonel)
+                  </Label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    ref={usedPartImageInputRef}
+                    onChange={handleUsedPartImageSelect}
+                    className="hidden"
+                  />
+                  {usedPartImagePreview ? (
+                    <div className="relative">
+                      <img
+                        src={usedPartImagePreview}
+                        alt="Takılan parça"
+                        className="w-full h-32 object-cover rounded-md border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={() => {
+                          setUsedPartImageFile(null);
+                          setUsedPartImagePreview(null);
+                          if (usedPartImageInputRef.current) {
+                            usedPartImageInputRef.current.value = '';
+                          }
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      onClick={() => usedPartImageInputRef.current?.click()}
+                    >
+                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Takılan parça fotoğrafı</span>
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 

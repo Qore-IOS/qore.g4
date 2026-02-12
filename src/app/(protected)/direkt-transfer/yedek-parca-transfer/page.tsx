@@ -1578,6 +1578,7 @@ export default function YedekParcaTransferPage() {
                       <option value="transfer_between_personnel">Personelden Personele Devir</option>
                       <option value="return_confirmed">İade Teslim Alındı</option>
                       <option value="submit_confirmed">Teslim Alındı</option>
+                      <option value="use_on_device">Cihazda Kullanıldı</option>
                       <option value="borrowed_part">Borç Parça Kullanıldı</option>
                       <option value="borrowed_approved">Borç Onaylandı</option>
                       <option value="borrowed_rejected">Borç Reddedildi</option>
@@ -1616,6 +1617,17 @@ export default function YedekParcaTransferPage() {
                               <Badge variant="outline">{getActionLabel(log.action)}</Badge>
                               {isTransferAction && (
                                 <SparePartTransferTutanakPDFButton log={log} className="h-7 px-2 text-xs" />
+                              )}
+                              {log.usageImageUrl && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => setPreviewImage(log.usageImageUrl)}
+                                >
+                                  <ImageIcon className="h-3.5 w-3.5 mr-1" />
+                                  Kullanım Fotoğrafını Göster
+                                </Button>
                               )}
                             </div>
                           </TableCell>
