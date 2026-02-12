@@ -1,8 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { db, storage } from '@/lib/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -668,27 +667,25 @@ export default function AplikasyonIslemFormuPage() {
   const uploadPartImage = async (file: File, pathPrefix: 'removed-parts' | 'used-parts'): Promise<string | null> => {
     setIsUploadingImage(true);
     try {
-      const timestamp = Date.now();
-      const fileName = `${pathPrefix}/${deviceId}/${timestamp}_${file.name}`;
-      const storageRef = ref(storage, fileName);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', pathPrefix);
+      formData.append('deviceId', deviceId || 'unknown-device');
 
-      // Upload with timeout (30 seconds)
-      const uploadPromise = uploadBytes(storageRef, file);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Upload timeout')), 30000)
-      );
+      const response = await fetch('/api/storage/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
 
-      await Promise.race([uploadPromise, timeoutPromise]);
-      const downloadUrl = await getDownloadURL(storageRef);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.url) {
+        throw new Error(payload?.error || 'Resim yüklenemedi.');
+      }
 
-      return downloadUrl;
+      return payload.url as string;
     } catch (err: any) {
       console.error('Error uploading image:', err);
-      const errorMessage = err?.code === 'storage/unauthorized'
-        ? 'Yükleme yetkisi yok. Storage kurallarını kontrol edin.'
-        : err?.message === 'Upload timeout'
-        ? 'Yükleme zaman aşımına uğradı.'
-        : 'Resim yüklenemedi.';
+      const errorMessage = err?.message || 'Resim yüklenemedi.';
       toast({ title: 'Hata', description: errorMessage, variant: 'destructive' });
       return null;
     } finally {
@@ -1966,7 +1963,6 @@ export default function AplikasyonIslemFormuPage() {
                   <input
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     ref={removedPartImageInputRef}
                     onChange={handleRemovedPartImageSelect}
                     className="hidden"
@@ -2003,7 +1999,7 @@ export default function AplikasyonIslemFormuPage() {
                       onClick={() => removedPartImageInputRef.current?.click()}
                     >
                       <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Çıkan parça fotoğrafı</span>
+                      <span className="text-xs text-muted-foreground">Çıkan parça fotoğrafı (Kamera/Galeri)</span>
                     </Button>
                   )}
                 </div>
@@ -2016,7 +2012,6 @@ export default function AplikasyonIslemFormuPage() {
                   <input
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     ref={usedPartImageInputRef}
                     onChange={handleUsedPartImageSelect}
                     className="hidden"
@@ -2053,7 +2048,7 @@ export default function AplikasyonIslemFormuPage() {
                       onClick={() => usedPartImageInputRef.current?.click()}
                     >
                       <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Takılan parça fotoğrafı</span>
+                      <span className="text-xs text-muted-foreground">Takılan parça fotoğrafı (Kamera/Galeri)</span>
                     </Button>
                   )}
                 </div>
