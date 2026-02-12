@@ -17,7 +17,7 @@ import type {
   PurchasingWorkflowProject,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { CheckCircle2, Circle, Link2, Palette, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Link2, Maximize2, Minimize2, Palette, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Props = {
@@ -55,9 +55,15 @@ export default function WorkflowCanvasPanel({
   const [linkPointer, setLinkPointer] = useState<{ x: number; y: number } | null>(null);
   const [linkHoverTargetTaskId, setLinkHoverTargetTaskId] = useState<string | null>(null);
   const [canvasContextMenu, setCanvasContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [canvasScale, setCanvasScale] = useState(1);
+  const [isMobileFullscreen, setIsMobileFullscreen] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const canvasSectionRef = useRef<HTMLElement | null>(null);
   const localNodesRef = useRef<PurchasingWorkflowNodePosition[]>([]);
+  const touchModeRef = useRef<'pan' | 'pinch' | null>(null);
+  const panStartRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const pinchStartRef = useRef<{ distance: number; scale: number } | null>(null);
 
   const selectedWorkflow = useMemo(
     () => workflows.find((w) => w.id === selectedWorkflowId),
@@ -76,7 +82,16 @@ export default function WorkflowCanvasPanel({
     setLinkPointer(null);
     setLinkHoverTargetTaskId(null);
     setCanvasContextMenu(null);
+    setCanvasScale(1);
   }, [selectedWorkflow?.id, selectedWorkflow?.nodes]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsMobileFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
 
   const orderedTasks = useMemo(
     () => [...tasks].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)),
@@ -104,6 +119,64 @@ export default function WorkflowCanvasPanel({
     localNodes.forEach((n) => map.set(n.taskId, n));
     return map;
   }, [localNodes]);
+
+  const completedPathState = useMemo(() => {
+    if (!selectedWorkflow) return { completedNodeIds: new Set<string>(), completedEdgeIds: new Set<string>() };
+    const edges = selectedWorkflow.edges || [];
+    const adjacency = new Map<string, PurchasingWorkflowEdge[]>();
+    const inDegree = new Map<string, number>();
+    const outDegree = new Map<string, number>();
+    selectedWorkflow.taskIds.forEach((taskId) => {
+      inDegree.set(taskId, 0);
+      outDegree.set(taskId, 0);
+      adjacency.set(taskId, []);
+    });
+
+    for (const edge of edges) {
+      adjacency.set(edge.fromTaskId, [...(adjacency.get(edge.fromTaskId) || []), edge]);
+      inDegree.set(edge.toTaskId, (inDegree.get(edge.toTaskId) || 0) + 1);
+      outDegree.set(edge.fromTaskId, (outDegree.get(edge.fromTaskId) || 0) + 1);
+    }
+
+    const startNodes = selectedWorkflow.taskIds.filter((id) => (inDegree.get(id) || 0) === 0);
+    const endNodes = new Set(selectedWorkflow.taskIds.filter((id) => (outDegree.get(id) || 0) === 0));
+    const sources = startNodes.length > 0 ? startNodes : selectedWorkflow.taskIds;
+
+    const completedNodeIds = new Set<string>();
+    const completedEdgeIds = new Set<string>();
+
+    const dfs = (taskId: string, pathNodes: string[], pathEdges: PurchasingWorkflowEdge[], visited: Set<string>) => {
+      const nextVisited = new Set(visited);
+      nextVisited.add(taskId);
+      const outgoing = adjacency.get(taskId) || [];
+      const atEnd = outgoing.length === 0 || endNodes.has(taskId);
+
+      if (atEnd) {
+        const allCompleted = pathNodes.every((id) => !!workflowTaskMap.get(id)?.completed);
+        if (allCompleted) {
+          pathNodes.forEach((id) => completedNodeIds.add(id));
+          pathEdges.forEach((e) => completedEdgeIds.add(e.id));
+        }
+        return;
+      }
+
+      for (const edge of outgoing) {
+        if (nextVisited.has(edge.toTaskId)) continue;
+        dfs(edge.toTaskId, [...pathNodes, edge.toTaskId], [...pathEdges, edge], nextVisited);
+      }
+    };
+
+    sources.forEach((sourceId) => dfs(sourceId, [sourceId], [], new Set()));
+    return { completedNodeIds, completedEdgeIds };
+  }, [selectedWorkflow, workflowTaskMap]);
+
+  const clientToCanvasCoords = (clientX: number, clientY: number) => {
+    if (!canvasRef.current) return null;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = (clientX - rect.left + canvasRef.current.scrollLeft) / canvasScale;
+    const y = (clientY - rect.top + canvasRef.current.scrollTop) / canvasScale;
+    return { x, y };
+  };
 
   const persistNodes = async (nodes: PurchasingWorkflowNodePosition[]) => {
     if (!selectedWorkflow) return;
@@ -239,29 +312,29 @@ export default function WorkflowCanvasPanel({
   };
 
   const startNodeDrag = (e: React.PointerEvent<HTMLDivElement>, taskId: string) => {
+    if (e.pointerType === 'touch') return;
     if (!canvasRef.current) return;
     const pos = nodePositionsByTask.get(taskId);
     if (!pos) return;
-    const canvasRect = canvasRef.current.getBoundingClientRect();
-    const scrollLeft = canvasRef.current.scrollLeft;
-    const scrollTop = canvasRef.current.scrollTop;
+    const point = clientToCanvasCoords(e.clientX, e.clientY);
+    if (!point) return;
     setDraggingNode({
       taskId,
       pointerId: e.pointerId,
-      dx: e.clientX - canvasRect.left + scrollLeft - pos.x,
-      dy: e.clientY - canvasRect.top + scrollTop - pos.y,
+      dx: point.x - pos.x,
+      dy: point.y - pos.y,
     });
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   };
 
   const startLinkDrag = (e: React.PointerEvent<HTMLButtonElement>, fromTaskId: string) => {
+    if (e.pointerType === 'touch') return;
     if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const scrollLeft = canvasRef.current.scrollLeft;
-    const scrollTop = canvasRef.current.scrollTop;
+    const point = clientToCanvasCoords(e.clientX, e.clientY);
+    if (!point) return;
     setLinkingFromTaskId(fromTaskId);
     setLinkHoverTargetTaskId(null);
-    setLinkPointer({ x: e.clientX - rect.left + scrollLeft, y: e.clientY - rect.top + scrollTop });
+    setLinkPointer(point);
     e.preventDefault();
     e.stopPropagation();
   };
@@ -270,12 +343,10 @@ export default function WorkflowCanvasPanel({
     if (!draggingNode && !linkingFromTaskId) return;
 
     const onPointerMove = (ev: PointerEvent) => {
-      if (!canvasRef.current) return;
-      const rect = canvasRef.current.getBoundingClientRect();
-      const scrollLeft = canvasRef.current.scrollLeft;
-      const scrollTop = canvasRef.current.scrollTop;
-      const px = ev.clientX - rect.left + scrollLeft;
-      const py = ev.clientY - rect.top + scrollTop;
+      const point = clientToCanvasCoords(ev.clientX, ev.clientY);
+      if (!point) return;
+      const px = point.x;
+      const py = point.y;
 
       if (draggingNode) {
         const nextX = Math.max(8, Math.min(CANVAS_W - NODE_W - 8, px - draggingNode.dx));
@@ -315,6 +386,71 @@ export default function WorkflowCanvasPanel({
       window.removeEventListener('pointerup', onPointerUp);
     };
   }, [draggingNode, linkingFromTaskId, linkHoverTargetTaskId]);
+
+  const handleWorkflowTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!canvasRef.current) return;
+    if (e.touches.length >= 2) {
+      touchModeRef.current = 'pinch';
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const distance = Math.hypot((a?.clientX || 0) - (b?.clientX || 0), (a?.clientY || 0) - (b?.clientY || 0));
+      pinchStartRef.current = { distance, scale: canvasScale };
+      return;
+    }
+    if (e.touches.length === 1) {
+      touchModeRef.current = 'pan';
+      const t = e.touches[0];
+      panStartRef.current = {
+        x: t.clientX,
+        y: t.clientY,
+        scrollLeft: canvasRef.current.scrollLeft,
+        scrollTop: canvasRef.current.scrollTop,
+      };
+    }
+  };
+
+  const handleWorkflowTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!canvasRef.current) return;
+    if (touchModeRef.current === 'pinch' && e.touches.length >= 2 && pinchStartRef.current) {
+      e.preventDefault();
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const distance = Math.hypot((a?.clientX || 0) - (b?.clientX || 0), (a?.clientY || 0) - (b?.clientY || 0));
+      const ratio = distance / Math.max(pinchStartRef.current.distance, 1);
+      const nextScale = Math.max(0.65, Math.min(2.1, pinchStartRef.current.scale * ratio));
+      setCanvasScale(nextScale);
+      return;
+    }
+    if (touchModeRef.current === 'pan' && e.touches.length === 1 && panStartRef.current) {
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - panStartRef.current.x;
+      const dy = t.clientY - panStartRef.current.y;
+      canvasRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+      canvasRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+    }
+  };
+
+  const handleWorkflowTouchEnd = () => {
+    touchModeRef.current = null;
+    panStartRef.current = null;
+    pinchStartRef.current = null;
+  };
+
+  const toggleMobileFullscreen = async () => {
+    const target = canvasSectionRef.current;
+    if (!target) return;
+    try {
+      if (!document.fullscreenElement) {
+        await target.requestFullscreen();
+        await (screen.orientation as any)?.lock?.('landscape').catch(() => undefined);
+      } else {
+        await document.exitFullscreen();
+        await (screen.orientation as any)?.unlock?.();
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Tam ekran açılamadı');
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-3 min-w-0">
@@ -405,37 +541,47 @@ export default function WorkflowCanvasPanel({
         </div>
       </aside>
 
-      <section className="rounded-2xl border border-border bg-card p-3 min-h-[72vh] shadow-sm min-w-0">
+      <section
+        ref={canvasSectionRef}
+        className={cn(
+          'rounded-2xl border border-border bg-card p-3 min-h-[72vh] shadow-sm min-w-0 relative',
+          isMobileFullscreen && 'fixed inset-0 z-[80] rounded-none border-none p-2 min-h-0'
+        )}
+      >
         {!selectedWorkflow ? (
           <div className="h-full min-h-[300px] flex items-center justify-center text-sm text-muted-foreground">Önce bir workflow seçin veya oluşturun.</div>
         ) : (
           <div
             ref={canvasRef}
             className="relative rounded-xl border border-border min-h-[68vh] overflow-auto w-full"
+            onDragOver={(e) => e.preventDefault()}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              const point = clientToCanvasCoords(e.clientX, e.clientY);
+              if (!point) return;
+              setCanvasContextMenu({
+                x: point.x,
+                y: point.y,
+              });
+            }}
+            onClick={() => setCanvasContextMenu(null)}
+            onTouchStart={handleWorkflowTouchStart}
+            onTouchMove={handleWorkflowTouchMove}
+            onTouchEnd={handleWorkflowTouchEnd}
             style={{
               backgroundColor: 'hsl(var(--card))',
               backgroundImage:
                 'linear-gradient(to right, rgba(0,0,0,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.12) 1px, transparent 1px)',
-              backgroundSize: '24px 24px',
+              backgroundSize: `${24 * canvasScale}px ${24 * canvasScale}px`,
+              touchAction: 'none',
             }}
-            onDragOver={(e) => e.preventDefault()}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              if (!canvasRef.current) return;
-              const rect = canvasRef.current.getBoundingClientRect();
-              setCanvasContextMenu({
-                x: e.clientX - rect.left + canvasRef.current.scrollLeft,
-                y: e.clientY - rect.top + canvasRef.current.scrollTop,
-              });
-            }}
-            onClick={() => setCanvasContextMenu(null)}
             onDrop={(e) => {
               e.preventDefault();
               const taskId = e.dataTransfer.getData('application/x-task-id');
-              if (!taskId || !canvasRef.current) return;
-              const rect = canvasRef.current.getBoundingClientRect();
-              const x = e.clientX - rect.left + canvasRef.current.scrollLeft - NODE_W / 2;
-              const y = e.clientY - rect.top + canvasRef.current.scrollTop - NODE_H / 2;
+              const point = clientToCanvasCoords(e.clientX, e.clientY);
+              if (!taskId || !point) return;
+              const x = point.x - NODE_W / 2;
+              const y = point.y - NODE_H / 2;
               addTaskToCanvas(
                 taskId,
                 Math.max(12, Math.min(CANVAS_W - NODE_W - 12, x)),
@@ -444,7 +590,16 @@ export default function WorkflowCanvasPanel({
               setCanvasContextMenu(null);
             }}
           >
-            <div className="relative" style={{ width: CANVAS_W, height: CANVAS_H }}>
+            <button
+              type="button"
+              onClick={toggleMobileFullscreen}
+              className="md:hidden absolute right-2 top-2 z-30 inline-flex items-center gap-1 rounded-lg border border-border bg-card/95 px-2.5 py-1.5 text-xs"
+            >
+              {isMobileFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />} Tam Ekran
+            </button>
+
+            <div className="relative" style={{ width: CANVAS_W * canvasScale, height: CANVAS_H * canvasScale }}>
+              <div className="relative origin-top-left" style={{ width: CANVAS_W, height: CANVAS_H, transform: `scale(${canvasScale})` }}>
               {canvasContextMenu && (
                 <div
                   className="absolute z-40 w-48 rounded-xl border border-border bg-popover shadow-lg p-1"
@@ -485,13 +640,11 @@ export default function WorkflowCanvasPanel({
                   </feMerge>
                 </filter>
               </defs>
-              {(selectedWorkflow.edges || []).map((edge) => {
+            {(selectedWorkflow.edges || []).map((edge) => {
                 const from = nodePositionsByTask.get(edge.fromTaskId);
                 const to = nodePositionsByTask.get(edge.toTaskId);
                 if (!from || !to) return null;
-                const fromTask = workflowTaskMap.get(edge.fromTaskId);
-                const toTask = workflowTaskMap.get(edge.toTaskId);
-                const isFlowCompleted = !!fromTask?.completed && !!toTask?.completed;
+                const isFlowCompleted = completedPathState.completedEdgeIds.has(edge.id);
                 const x1 = from.x + NODE_W;
                 const y1 = from.y + NODE_H / 2;
                 const x2 = to.x;
@@ -556,7 +709,7 @@ export default function WorkflowCanvasPanel({
                       'bg-white/95 dark:bg-zinc-900/90',
                       draggingNode?.taskId === task.id ? 'ring-2 ring-sky-500/40' : ''
                     )}
-                    style={{ borderColor: selectedWorkflow.color }}
+                    style={{ borderColor: completedPathState.completedNodeIds.has(task.id) ? '#22c55e' : selectedWorkflow.color }}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-semibold truncate text-zinc-800 dark:text-zinc-100">{task.title}</p>
@@ -618,6 +771,7 @@ export default function WorkflowCanvasPanel({
                 </div>
               </div>
             )}
+              </div>
             </div>
           </div>
         )}
