@@ -547,6 +547,7 @@ export default function SatinAlmaPanel() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
+  const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday' | 'workflow'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -1183,7 +1184,7 @@ export default function SatinAlmaPanel() {
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
-      if (!editingTask) return;
+      if (!editingTask || !currentUserProfile) return;
       try {
         const conflicts = hasTimeConflict(
           tasks,
@@ -1208,6 +1209,8 @@ export default function SatinAlmaPanel() {
           endTime: data.endTime,
           priority: data.priority,
           updatedAt: Timestamp.now(),
+          assignedTo: data.assignedTo?.length ? data.assignedTo : null,
+          activities,
         };
 
         if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
@@ -1310,7 +1313,7 @@ export default function SatinAlmaPanel() {
     [dayTasks, draggedTaskId]
   );
 
-  const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
+  const selectedOccupancy = getOccupancyForDay(myTasks, selectedDateStr);
 
   const sliderDates = useMemo(() => {
     const dates: Date[] = [];
