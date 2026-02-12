@@ -26,6 +26,8 @@ type Props = {
   userUid?: string;
   userName?: string;
   onToggleTask?: (task: PurchasingTask) => void;
+  onRequestTaskCompletion?: (task: PurchasingTask) => void;
+  onRequestCreateTask?: (preset?: { workflowProjectId?: string; workflowColor?: string; x?: number; y?: number }) => void;
 };
 
 const PRESET_COLORS = ['#d4ec00', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#f97316'];
@@ -34,7 +36,15 @@ const NODE_H = 84;
 const CANVAS_W = 4200;
 const CANVAS_H = 2400;
 
-export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userName, onToggleTask }: Props) {
+export default function WorkflowCanvasPanel({
+  tasks,
+  workflows,
+  userUid,
+  userName,
+  onToggleTask,
+  onRequestTaskCompletion,
+  onRequestCreateTask,
+}: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(workflows[0]?.id || '');
   const [newName, setNewName] = useState('Yeni Workflow');
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
@@ -44,6 +54,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
   const [linkingFromTaskId, setLinkingFromTaskId] = useState<string | null>(null);
   const [linkPointer, setLinkPointer] = useState<{ x: number; y: number } | null>(null);
   const [linkHoverTargetTaskId, setLinkHoverTargetTaskId] = useState<string | null>(null);
+  const [canvasContextMenu, setCanvasContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const localNodesRef = useRef<PurchasingWorkflowNodePosition[]>([]);
@@ -64,6 +75,7 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
     setLinkingFromTaskId(null);
     setLinkPointer(null);
     setLinkHoverTargetTaskId(null);
+    setCanvasContextMenu(null);
   }, [selectedWorkflow?.id, selectedWorkflow?.nodes]);
 
   const orderedTasks = useMemo(
@@ -407,6 +419,16 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
               backgroundSize: '24px 24px',
             }}
             onDragOver={(e) => e.preventDefault()}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              if (!canvasRef.current) return;
+              const rect = canvasRef.current.getBoundingClientRect();
+              setCanvasContextMenu({
+                x: e.clientX - rect.left + canvasRef.current.scrollLeft,
+                y: e.clientY - rect.top + canvasRef.current.scrollTop,
+              });
+            }}
+            onClick={() => setCanvasContextMenu(null)}
             onDrop={(e) => {
               e.preventDefault();
               const taskId = e.dataTransfer.getData('application/x-task-id');
@@ -419,9 +441,33 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                 Math.max(12, Math.min(CANVAS_W - NODE_W - 12, x)),
                 Math.max(12, Math.min(CANVAS_H - NODE_H - 12, y))
               );
+              setCanvasContextMenu(null);
             }}
           >
             <div className="relative" style={{ width: CANVAS_W, height: CANVAS_H }}>
+              {canvasContextMenu && (
+                <div
+                  className="absolute z-40 w-48 rounded-xl border border-border bg-popover shadow-lg p-1"
+                  style={{ left: Math.min(canvasContextMenu.x, CANVAS_W - 200), top: Math.min(canvasContextMenu.y, CANVAS_H - 80) }}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-left px-2.5 py-2 text-xs rounded-lg hover:bg-accent"
+                    onClick={() => {
+                      onRequestCreateTask?.({
+                        workflowProjectId: selectedWorkflow.id,
+                        workflowColor: selectedWorkflow.color,
+                        x: canvasContextMenu.x,
+                        y: canvasContextMenu.y,
+                      });
+                      setCanvasContextMenu(null);
+                    }}
+                  >
+                    + Görev Ekle
+                  </button>
+                </div>
+              )}
+
               <div
                 className="pointer-events-none absolute inset-0 dark:block hidden"
                 style={{
@@ -516,7 +562,11 @@ export default function WorkflowCanvasPanel({ tasks, workflows, userUid, userNam
                       <p className="text-xs font-semibold truncate text-zinc-800 dark:text-zinc-100">{task.title}</p>
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={(e) => { e.stopPropagation(); onToggleTask?.(task); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (task.completed) onToggleTask?.(task);
+                            else onRequestTaskCompletion?.(task);
+                          }}
                           onPointerDown={(e) => e.stopPropagation()}
                           className={cn('text-[10px] px-1.5 py-0.5 rounded border', task.completed ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400' : 'border-amber-500/40 text-amber-700 dark:text-amber-400')}
                           title="Tamamlandı durumunu değiştir"
