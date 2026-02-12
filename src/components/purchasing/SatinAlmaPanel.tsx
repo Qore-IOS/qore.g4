@@ -270,8 +270,7 @@ function compressImage(file: File): Promise<Blob> {
 
 async function uploadAttachment(file: File, taskPath: string): Promise<PurchasingTaskAttachment> {
   const isImage = file.type.startsWith('image/');
-  const isPdf = file.type === 'application/pdf';
-  if (!isImage && !isPdf) throw new Error('Sadece resim ve PDF dosyaları yüklenebilir');
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   if (file.size > MAX_ATTACHMENT_SIZE_BYTES) throw new Error('Dosya boyutu 10MB sınırını aşıyor');
 
   let uploadData: Blob | File = file;
@@ -334,6 +333,10 @@ function generateSubtaskId(): string {
   return Math.random().toString(36).substring(2, 10);
 }
 
+function generateChecklistId(): string {
+  return `chk_${Math.random().toString(36).substring(2, 10)}`;
+}
+
 
 function getTaskChangeLogs(prev: PurchasingTask, next: TaskFormData, user: { uid: string; name?: string; email?: string }): PurchasingTaskActivityLog[] {
   const logs: PurchasingTaskActivityLog[] = [];
@@ -349,6 +352,14 @@ function getTaskChangeLogs(prev: PurchasingTask, next: TaskFormData, user: { uid
   if ((prev.assignedPersonnel || []).map((p) => p.uid).sort().join(',') !== (next.assignedPersonnel || []).map((p) => p.uid).sort().join(',')) {
     const names = (next.assignedPersonnel || []).map((p) => p.name).join(', ');
     logs.push(createActivityLog('assignee_changed', names ? `Takipçi personeller güncellendi: ${names}` : 'Takipçi personeller temizlendi', user));
+  }
+  const prevChecklistTitles = (prev.completionChecklist || []).map((i) => i.title).join(' | ');
+  const nextChecklistTitles = (next.completionChecklist || []).map((i) => i.title).join(' | ');
+  if (prevChecklistTitles !== nextChecklistTitles) {
+    logs.push(createActivityLog('completion_checklist_changed', 'Görev tamamlama çıktı checklisti güncellendi', user));
+  }
+  if ((prev.expectedCompletionFileName || '') !== (next.expectedCompletionFileName || '')) {
+    logs.push(createActivityLog('expected_file_changed', 'Beklenen tamamlanma dosyası güncellendi', user));
   }
   return logs;
 }
@@ -422,11 +433,17 @@ interface TaskFormData {
   existingAttachments?: PurchasingTaskAttachment[];
   removedAttachments?: PurchasingTaskAttachment[];
   subtasks?: PurchasingSubtask[];
+  completionChecklist?: PurchasingSubtask[];
+  expectedCompletionFileName?: string;
+  workflowProjectId?: string;
+  workflowColor?: string;
+  workflowNodeX?: number;
+  workflowNodeY?: number;
   recurring?: PurchasingTaskRecurrence;
 }
 
 
-function nextWeekdayDate(targetWeekday: number): Date {
+function getNextWeekdayDate(targetWeekday: number): Date {
   const today = new Date();
   const current = today.getDay(); // 0..6 Sun..Sat
   const delta = (targetWeekday - current + 7) % 7 || 7;
@@ -435,7 +452,7 @@ function nextWeekdayDate(targetWeekday: number): Date {
   return d;
 }
 
-function parseNaturalTaskInput(
+function parseNaturalTaskInputForPlanning(
   input: string,
   labs: Hospital[]
 ): {
@@ -472,7 +489,7 @@ function parseNaturalTaskInput(
   let recurring: PurchasingTaskRecurrence | undefined;
   for (const [name, idx] of Object.entries(weekdays)) {
     if (lower.includes(`her ${name}`)) {
-      date = format(nextWeekdayDate(idx), 'yyyy-MM-dd');
+      date = format(getNextWeekdayDate(idx), 'yyyy-MM-dd');
       recurring = { type: 'weekly', interval: 1, daysOfWeek: [idx] };
       break;
     }
@@ -558,6 +575,8 @@ export default function SatinAlmaPanel() {
   const [isOffline, setIsOffline] = useState<boolean>(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [pendingMutations, setPendingMutations] = useState(0);
   const [syncInProgress, setSyncInProgress] = useState(false);
+  const [completionTask, setCompletionTask] = useState<PurchasingTask | null>(null);
+  const [workflowNewTaskPreset, setWorkflowNewTaskPreset] = useState<{ workflowProjectId?: string; workflowColor?: string; x?: number; y?: number } | null>(null);
   const syncRef = useRef(false);
 
   const loadQueue = useCallback((): OfflineMutation[] => {
@@ -833,22 +852,20 @@ export default function SatinAlmaPanel() {
   }, [myTasks, selectedDateStr]);
 
   // Toggle completion
-  const toggleTask = useCallback(async (task: PurchasingTask) => {
+  const completeTask = useCallback(async (task: PurchasingTask) => {
     if (!currentUserProfile) return;
-    const newCompleted = !task.completed;
+    if (task.completed) return;
     const log = createActivityLog(
-      newCompleted ? 'completed' : 'reopened',
-      newCompleted
-        ? `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`
-        : `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+      'completed',
+      `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
       currentUserProfile
     );
 
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: newCompleted } : t)));
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: true } : t)));
 
     try {
       await updateDoc(doc(db, 'purchasingTasks', task.id), {
-        completed: newCompleted,
+        completed: true,
         activityLogs: arrayUnion(log),
         updatedAt: Timestamp.now(),
       });
@@ -860,21 +877,57 @@ export default function SatinAlmaPanel() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             taskId: task.id,
-            completed: newCompleted,
+            completed: true,
             userUid: currentUserProfile?.uid,
             userName: currentUserProfile?.name || currentUserProfile?.email || 'Kullanıcı',
           }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data?.ok) throw new Error(data?.error || 'API fallback başarısız');
-        toast.success(newCompleted ? 'Görev tamamlandı' : 'Görev yeniden açıldı');
+        toast.success('Görev tamamlandı');
       } catch (fallbackErr) {
-        setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: task.completed } : t)));
+        setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: false } : t)));
         console.error('Error toggling task (fallback failed)', fallbackErr);
         toast.error('Görev güncellenemedi');
       }
     }
   }, [currentUserProfile]);
+
+  const reopenTask = useCallback(async (task: PurchasingTask) => {
+    if (!currentUserProfile) return;
+    if (!task.completed) return;
+    const log = createActivityLog(
+      'reopened',
+      `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+      currentUserProfile
+    );
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: false } : t)));
+    try {
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        completed: false,
+        activityLogs: arrayUnion(log),
+        updatedAt: Timestamp.now(),
+      });
+      toast.success('Görev yeniden açıldı');
+    } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: true } : t)));
+      console.error('Error reopening task', err);
+      toast.error('Görev güncellenemedi');
+    }
+  }, [currentUserProfile]);
+
+  const requestTaskCompletion = useCallback((task: PurchasingTask) => {
+    if (task.completed) {
+      reopenTask(task);
+      return;
+    }
+    const checklist = task.completionChecklist || [];
+    if (checklist.length === 0 && !task.expectedCompletionFileName) {
+      completeTask(task);
+      return;
+    }
+    setCompletionTask(task);
+  }, [completeTask, reopenTask]);
 
 
   const postponeTaskToTomorrow = useCallback(async (task: PurchasingTask) => {
@@ -1046,6 +1099,10 @@ export default function SatinAlmaPanel() {
         if (data.assignedPersonnel?.length) taskDoc.assignedPersonnel = data.assignedPersonnel;
 
         if (data.subtasks?.length) taskDoc.subtasks = data.subtasks;
+        if (data.completionChecklist?.length) taskDoc.completionChecklist = data.completionChecklist;
+        if (data.expectedCompletionFileName) taskDoc.expectedCompletionFileName = data.expectedCompletionFileName;
+        if (data.workflowProjectId) taskDoc.workflowProjectId = data.workflowProjectId;
+        if (data.workflowColor) taskDoc.workflowColor = data.workflowColor;
         if (data.recurring && (typeof navigator === 'undefined' || navigator.onLine)) {
           taskDoc.recurring = data.recurring;
           taskDoc.recurringGroupId = `rg_${Date.now()}`;
@@ -1064,6 +1121,19 @@ export default function SatinAlmaPanel() {
         } else {
           const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
           createdTaskId = docRef.id;
+
+          if (data.workflowProjectId) {
+            const targetWorkflow = workflows.find((w) => w.id === data.workflowProjectId);
+            if (targetWorkflow) {
+              const nodeX = Math.max(12, Math.min(4200 - 236 - 12, (data.workflowNodeX ?? 220) - 118));
+              const nodeY = Math.max(12, Math.min(2400 - 84 - 12, (data.workflowNodeY ?? 220) - 42));
+              await updateDoc(doc(db, 'purchasingWorkflows', data.workflowProjectId), {
+                taskIds: [...(targetWorkflow.taskIds || []), docRef.id],
+                nodes: [...(targetWorkflow.nodes || []), { taskId: docRef.id, x: nodeX, y: nodeY }],
+                updatedAt: Timestamp.now(),
+              });
+            }
+          }
 
           // Upload files
           if (data.files?.length) {
@@ -1093,6 +1163,8 @@ export default function SatinAlmaPanel() {
               const recurDoc = {
                 ...taskDoc,
                 date: futureDate,
+                workflowProjectId: null,
+                workflowColor: null,
                 createdAt: Timestamp.now(),
                 activityLogs: [
                   createActivityLog(
@@ -1118,7 +1190,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev eklenemedi');
       }
     },
-    [currentUserProfile, tasks, enqueueMutation]
+    [currentUserProfile, tasks, enqueueMutation, workflows]
   );
 
   // Edit task
@@ -1166,6 +1238,8 @@ export default function SatinAlmaPanel() {
         updates.assignedPersonnel = data.assignedPersonnel?.length ? data.assignedPersonnel : null;
 
         updates.subtasks = data.subtasks?.length ? data.subtasks : null;
+        updates.completionChecklist = data.completionChecklist?.length ? data.completionChecklist : null;
+        updates.expectedCompletionFileName = data.expectedCompletionFileName || null;
 
         if (currentUserProfile) {
           const changeLogs = getTaskChangeLogs(editingTask, data, currentUserProfile);
@@ -1335,7 +1409,7 @@ export default function SatinAlmaPanel() {
     if (!trimmed || naturalSubmitting) return;
     try {
       setNaturalSubmitting(true);
-      const parsed = parseNaturalTaskInput(trimmed, mainLaboratories);
+      const parsed = parseNaturalTaskInputForPlanning(trimmed, mainLaboratories);
       await handleAddTask({
         title: parsed.title,
         description: parsed.description,
@@ -1793,7 +1867,7 @@ export default function SatinAlmaPanel() {
                 >
                   <TaskCard
                     task={task}
-                    onToggle={() => toggleTask(task)}
+                    onToggle={() => requestTaskCompletion(task)}
                     onToggleSubtask={(stId) => toggleSubtask(task, stId)}
                     onEdit={() => setEditingTask(task)}
                     onDelete={() => deleteTask(task)}
@@ -1975,7 +2049,17 @@ export default function SatinAlmaPanel() {
               workflows={workflows}
               userUid={currentUserProfile?.uid}
               userName={currentUserProfile?.name}
-              onToggleTask={toggleTask}
+              onToggleTask={reopenTask}
+              onRequestTaskCompletion={requestTaskCompletion}
+              onRequestCreateTask={(preset) => {
+                setWorkflowNewTaskPreset({
+                  workflowProjectId: preset?.workflowProjectId,
+                  workflowColor: preset?.workflowColor,
+                  x: preset?.x,
+                  y: preset?.y,
+                });
+                setShowAddModal(true);
+              }}
             />
           </div>
         )}
@@ -2120,11 +2204,15 @@ export default function SatinAlmaPanel() {
         <TaskFormModal
           mode="add"
           defaultDate={selectedDateStr}
+          defaultWorkflowPreset={workflowNewTaskPreset || undefined}
           laboratories={mainLaboratories}
           personnel={personnel}
           taskDefinitions={taskDefinitions}
-          onClose={() => setShowAddModal(false)}
-          onSubmit={handleAddTask}
+          onClose={() => { setShowAddModal(false); setWorkflowNewTaskPreset(null); }}
+          onSubmit={async (data) => {
+            await handleAddTask(data);
+            setWorkflowNewTaskPreset(null);
+          }}
         />
       )}
 
@@ -2140,6 +2228,40 @@ export default function SatinAlmaPanel() {
           onClose={() => setEditingTask(null)}
           onSubmit={handleEditTask}
           onDelete={() => deleteTask(editingTask)}
+        />
+      )}
+
+      {completionTask && (
+        <TaskCompletionModal
+          task={completionTask}
+          onClose={() => setCompletionTask(null)}
+          onSaveChecklist={async (items) => {
+            try {
+              await updateDoc(doc(db, 'purchasingTasks', completionTask.id), {
+                completionChecklist: items,
+                updatedAt: Timestamp.now(),
+              });
+              setTasks((prev) => prev.map((t) => (t.id === completionTask.id ? { ...t, completionChecklist: items } : t)));
+            } catch (err) {
+              console.error('Error saving completion checklist', err);
+            }
+          }}
+          onComplete={async (force) => {
+            const latest = tasks.find((t) => t.id === completionTask.id) || completionTask;
+            const total = latest.completionChecklist?.length || 0;
+            const done = latest.completionChecklist?.filter((i) => i.completed).length || 0;
+            if (!force && total > 0 && done < total) return;
+            await completeTask(latest);
+            if (latest.expectedCompletionFileName) {
+              const shouldUpload = typeof window !== 'undefined'
+                ? window.confirm(`Görev tamamlandı. Yüklemeniz gereken "${latest.expectedCompletionFileName}" dosyasını şimdi yüklemek ister misiniz?`)
+                : false;
+              if (shouldUpload) {
+                toast.info(`Lütfen görev kartını düzenleyip "${latest.expectedCompletionFileName}" dosyasını yükleyin.`);
+              }
+            }
+            setCompletionTask(null);
+          }}
         />
       )}
     </div>
@@ -2606,6 +2728,119 @@ function TaskDefinitionsModal({
   );
 }
 
+function TaskCompletionModal({
+  task,
+  onClose,
+  onSaveChecklist,
+  onComplete,
+}: {
+  task: PurchasingTask;
+  onClose: () => void;
+  onSaveChecklist: (items: PurchasingSubtask[]) => Promise<void>;
+  onComplete: (force: boolean) => Promise<void>;
+}) {
+  const [items, setItems] = useState<PurchasingSubtask[]>(task.completionChecklist || []);
+  const [saving, setSaving] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const total = items.length;
+  const done = items.filter((i) => i.completed).length;
+  const allDone = total > 0 && done === total;
+
+  const persistItems = async (nextItems: PurchasingSubtask[]) => {
+    setItems(nextItems);
+    setSaving(true);
+    try {
+      await onSaveChecklist(nextItems);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleItem = async (id: string) => {
+    const nextItems = items.map((item) => (item.id === id ? { ...item, completed: !item.completed } : item));
+    await persistItems(nextItems);
+    const nextDone = nextItems.filter((i) => i.completed).length;
+    if (nextItems.length > 0 && nextDone === nextItems.length) {
+      setCompleting(true);
+      await onComplete(false);
+      setCompleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-foreground">Görev Tamamlama</h3>
+            <p className="text-xs text-muted-foreground mt-1">{task.title}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {items.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">Çıktı checklisti: {done}/{total}</p>
+            {items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => toggleItem(item.id)}
+                disabled={saving || completing}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-secondary/60 text-left"
+              >
+                {item.completed ? <CheckSquare className={cn('w-4 h-4', ACCENT)} /> : <Square className="w-4 h-4 text-muted-foreground" />}
+                <span className={cn('text-sm', item.completed ? 'line-through text-muted-foreground' : 'text-foreground')}>{item.title}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Bu görev için checklist tanımı yok.</p>
+        )}
+
+        {task.expectedCompletionFileName && (
+          <div className="mt-4 rounded-xl border border-border bg-secondary/40 p-3">
+            <p className="text-xs font-medium text-foreground">Beklenen çıktı dosyası</p>
+            <p className="text-xs text-muted-foreground mt-1">{task.expectedCompletionFileName}</p>
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-col gap-2">
+          <button
+            type="button"
+            disabled={completing || saving || (items.length > 0 && !allDone)}
+            onClick={async () => {
+              setCompleting(true);
+              await onComplete(false);
+              setCompleting(false);
+            }}
+            className={cn('w-full py-3 rounded-xl text-sm font-semibold transition-all', items.length > 0 && !allDone ? 'bg-secondary text-muted-foreground cursor-not-allowed' : `${ACCENT_BG} text-zinc-900 hover:brightness-110`)}
+          >
+            Tüm Çıktılar Tamamlandı → Görevi Bitir
+          </button>
+
+          {items.length > 0 && !allDone && (
+            <button
+              type="button"
+              disabled={completing || saving}
+              onClick={async () => {
+                setCompleting(true);
+                await onComplete(true);
+                setCompleting(false);
+              }}
+              className="w-full py-2.5 rounded-xl text-xs font-medium border border-amber-500/40 text-amber-600 hover:bg-amber-500/10"
+            >
+              Yine de tamamla
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==========================================
 // Task Form Modal (Add & Edit)
 // ==========================================
@@ -2614,6 +2849,7 @@ function TaskFormModal({
   mode,
   task,
   defaultDate,
+  defaultWorkflowPreset,
   laboratories,
   personnel,
   taskDefinitions,
@@ -2624,6 +2860,7 @@ function TaskFormModal({
   mode: 'add' | 'edit';
   task?: PurchasingTask;
   defaultDate: string;
+  defaultWorkflowPreset?: { workflowProjectId?: string; workflowColor?: string; x?: number; y?: number };
   laboratories: Hospital[];
   personnel: User[];
   taskDefinitions: PurchasingTaskDefinition[];
@@ -2667,6 +2904,9 @@ function TaskFormModal({
   // Subtasks
   const [subtasks, setSubtasks] = useState<PurchasingSubtask[]>(isEdit ? task.subtasks || [] : []);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [completionChecklist, setCompletionChecklist] = useState<PurchasingSubtask[]>(isEdit ? task.completionChecklist || [] : []);
+  const [newCompletionChecklistTitle, setNewCompletionChecklistTitle] = useState('');
+  const [expectedCompletionFileName, setExpectedCompletionFileName] = useState(isEdit ? task.expectedCompletionFileName || '' : '');
 
   // Recurring
   const [isRecurring, setIsRecurring] = useState(false);
@@ -2738,11 +2978,11 @@ function TaskFormModal({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files;
     if (!selected) return;
-    const allowed = Array.from(selected).filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf');
+    const allowed = Array.from(selected).filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf' || f.type === '' || !!f.name);
     const sizeFiltered = Array.from(selected).filter((f) => f.size <= MAX_ATTACHMENT_SIZE_BYTES);
-    if (allowed.length < selected.length) toast.error('Sadece resim ve PDF dosyaları yüklenebilir');
+    if (allowed.length < selected.length) toast.error('Bazı dosyalar format nedeniyle eklenemedi');
     if (sizeFiltered.length < allowed.length) toast.error('10MB üzeri dosyalar eklenemez');
-    setFiles((prev) => [...prev, ...sizeFiltered.filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf')]);
+    setFiles((prev) => [...prev, ...sizeFiltered.filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf' || f.type === '' || !!f.name)]);
     e.target.value = '';
   };
 
@@ -2768,6 +3008,15 @@ function TaskFormModal({
 
   const removeSubtask = (id: string) => setSubtasks((prev) => prev.filter((s) => s.id !== id));
 
+  const addCompletionChecklistItem = () => {
+    const trimmed = newCompletionChecklistTitle.trim();
+    if (!trimmed) return;
+    setCompletionChecklist((prev) => [...prev, { id: generateChecklistId(), title: trimmed, completed: false }]);
+    setNewCompletionChecklistTitle('');
+  };
+
+  const removeCompletionChecklistItem = (id: string) => setCompletionChecklist((prev) => prev.filter((s) => s.id !== id));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid || submitting) return;
@@ -2791,6 +3040,14 @@ function TaskFormModal({
       existingAttachments: existingAttachments.length > 0 ? existingAttachments : undefined,
       removedAttachments: removedAttachments.length > 0 ? removedAttachments : undefined,
       subtasks: subtasks.length > 0 ? subtasks : undefined,
+      completionChecklist: completionChecklist.length > 0 ? completionChecklist : undefined,
+      expectedCompletionFileName: expectedCompletionFileName.trim() || undefined,
+      ...(!isEdit && defaultWorkflowPreset?.workflowProjectId && {
+        workflowProjectId: defaultWorkflowPreset.workflowProjectId,
+        workflowColor: defaultWorkflowPreset.workflowColor,
+        workflowNodeX: defaultWorkflowPreset.x,
+        workflowNodeY: defaultWorkflowPreset.y,
+      }),
       ...(isRecurring && !isEdit && {
         recurring: {
           type: recurringType,
@@ -3079,6 +3336,54 @@ function TaskFormModal({
             </div>
           </div>
 
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">
+              <CheckSquare className="w-3.5 h-3.5 inline mr-1" />
+              Görev Sonlandırma Çıktı Listesi (opsiyonel)
+            </label>
+            {completionChecklist.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {completionChecklist.map((item) => (
+                  <div key={item.id} className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
+                    <span className="flex-1 text-xs text-foreground">{item.title}</span>
+                    <button type="button" onClick={() => removeCompletionChecklistItem(item.id)} className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-red-400 transition-colors">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newCompletionChecklistTitle}
+                onChange={(e) => setNewCompletionChecklistTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCompletionChecklistItem(); } }}
+                placeholder="Örn: Tedarikçi teklifleri karşılaştırıldı"
+                className={cn(inputCls, 'py-2.5')}
+              />
+              <button
+                type="button"
+                onClick={addCompletionChecklistItem}
+                disabled={!newCompletionChecklistTitle.trim()}
+                className={cn('shrink-0 px-3 rounded-xl border transition-all', newCompletionChecklistTitle.trim() ? cn(ACCENT_BG, 'text-zinc-900 border-transparent') : 'bg-secondary border-border text-muted-foreground')}
+              >
+                <CirclePlus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Tamamlandığında Beklenen Dosya Adı (opsiyonel)</label>
+            <input
+              type="text"
+              value={expectedCompletionFileName}
+              onChange={(e) => setExpectedCompletionFileName(e.target.value)}
+              placeholder="Örn: teklif-karsilastirma-raporu.pdf"
+              className={inputCls}
+            />
+          </div>
+
           {/* Date */}
           <div>
             <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Tarih</label>
@@ -3164,8 +3469,8 @@ function TaskFormModal({
 
           {/* File Attachments */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Dosya Ekle (Resim / PDF)</label>
-            <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple onChange={handleFileSelect} className="hidden" />
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Dosya Ekle (Resim / PDF / Diğer)</label>
+            <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
