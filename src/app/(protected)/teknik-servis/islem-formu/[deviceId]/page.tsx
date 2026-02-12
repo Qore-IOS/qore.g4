@@ -141,9 +141,11 @@ export default function IslemFormuPage() {
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
   const [aciklama, setAciklama] = useState('');
 
-  // Başlangıç ve Bitiş Saatleri (Zorunlu)
+  // Başlangıç ve Bitiş Saatleri/Tarihleri (Zorunlu)
   const [baslangicSaati, setBaslangicSaati] = useState<string>('');
   const [bitisSaati, setBitisSaati] = useState<string>('');
+  const [baslangicTarihi, setBaslangicTarihi] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [bitisTarihi, setBitisTarihi] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
 
 
   // Signature modal
@@ -871,9 +873,17 @@ export default function IslemFormuPage() {
   };
 
   const startSaveProcess = () => {
-    // Validate başlangıç ve bitiş saatleri (zorunlu)
+    // Validate başlangıç ve bitiş tarihleri ve saatleri (zorunlu)
+    if (!baslangicTarihi) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen başlangıç tarihini seçin.', variant: 'destructive' });
+      return;
+    }
     if (!baslangicSaati) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen başlangıç saatini seçin.', variant: 'destructive' });
+      return;
+    }
+    if (!bitisTarihi) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen bitiş tarihini seçin.', variant: 'destructive' });
       return;
     }
     if (!bitisSaati) {
@@ -970,6 +980,8 @@ export default function IslemFormuPage() {
             aciklama: aciklama.trim(),
             baslangicSaati,
             bitisSaati,
+            baslangicTarihi,
+            bitisTarihi,
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -1002,6 +1014,8 @@ export default function IslemFormuPage() {
             aciklama: aciklama.trim(),
             baslangicSaati,
             bitisSaati,
+            baslangicTarihi,
+            bitisTarihi,
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -1021,13 +1035,14 @@ export default function IslemFormuPage() {
 
         // Create closed fault report when ariza is selected
         if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
-          // Parse başlangıç ve bitiş saatlerini tarih olarak oluştur
-          const today = new Date();
+          // Parse başlangıç ve bitiş tarih/saatlerini oluştur
+          const [startYear, startMonth, startDay] = baslangicTarihi.split('-').map(Number);
           const [startHour, startMinute] = baslangicSaati.split(':').map(Number);
+          const [endYear, endMonth, endDay] = bitisTarihi.split('-').map(Number);
           const [endHour, endMinute] = bitisSaati.split(':').map(Number);
 
-          const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), startHour, startMinute);
-          const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), endHour, endMinute);
+          const startTime = new Date(startYear, startMonth - 1, startDay, startHour, startMinute);
+          const endTime = new Date(endYear, endMonth - 1, endDay, endHour, endMinute);
 
           // Çözüm süresi hesapla (milisaniye)
           const cozumSuresi = endTime.getTime() - startTime.getTime();
@@ -1645,13 +1660,23 @@ export default function IslemFormuPage() {
               </div>
             )}
 
-            {/* Başlangıç ve Bitiş Saatleri (Zorunlu) */}
+            {/* Başlangıç ve Bitiş Tarihleri/Saatleri (Zorunlu) */}
             <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
               <Label className="flex items-center gap-2 mb-4">
                 <Clock className="h-4 w-4" />
-                İşlem Saatleri <span className="text-destructive">*</span>
+                İşlem Tarihi ve Saatleri <span className="text-destructive">*</span>
               </Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="baslangicTarihi" className="text-sm">Başlangıç Tarihi <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="baslangicTarihi"
+                    type="date"
+                    value={baslangicTarihi}
+                    onChange={(e) => setBaslangicTarihi(e.target.value)}
+                    className={!baslangicTarihi ? 'border-amber-500/50' : ''}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="baslangicSaati" className="text-sm">Başlangıç Saati <span className="text-destructive">*</span></Label>
                   <Input
@@ -1660,6 +1685,16 @@ export default function IslemFormuPage() {
                     value={baslangicSaati}
                     onChange={(e) => setBaslangicSaati(e.target.value)}
                     className={!baslangicSaati ? 'border-amber-500/50' : ''}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bitisTarihi" className="text-sm">Bitiş Tarihi <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="bitisTarihi"
+                    type="date"
+                    value={bitisTarihi}
+                    onChange={(e) => setBitisTarihi(e.target.value)}
+                    className={!bitisTarihi ? 'border-amber-500/50' : ''}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1674,7 +1709,7 @@ export default function IslemFormuPage() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-2">
-                İşleme başladığınız ve bitirdiğiniz saatleri giriniz. Bu alanlar zorunludur.
+                İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz. Bu alanlar zorunludur.
               </p>
             </div>
 
