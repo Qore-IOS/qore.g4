@@ -41,15 +41,14 @@ export default function UrunTalepGecmisPanel() {
           cache: 'no-store',
         });
 
-        if (!response.ok) {
-          throw new Error('Geçmiş verisi alınamadı.');
-        }
-
         const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Geçmiş verisi alınamadı.');
+        }
         setOrders(payload.data || []);
       } catch (error) {
         if ((error as Error).name === 'AbortError') return;
-        toast({ title: 'Hata', description: 'Ürün talep geçmişi yüklenemedi.', variant: 'destructive' });
+        toast({ title: 'Hata', description: (error as Error).message || 'Ürün talep geçmişi yüklenemedi.', variant: 'destructive' });
       } finally {
         setLoading(false);
       }
