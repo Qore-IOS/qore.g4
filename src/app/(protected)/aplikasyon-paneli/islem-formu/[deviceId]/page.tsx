@@ -440,6 +440,17 @@ export default function AplikasyonIslemFormuPage() {
     );
   }, [personalStock, partSearchQuery]);
 
+  const installedPartDefaults = useMemo(() => ({
+    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || ''),
+    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || ''),
+  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem]);
+
+  useEffect(() => {
+    if (!isPartModalOpen) return;
+    setRemovedPartStokKodu(installedPartDefaults.stokKodu);
+    setRemovedPartStokAdi(installedPartDefaults.stokAdi);
+  }, [isPartModalOpen, installedPartDefaults]);
+
   // Calculate maintenance status with remaining days
   const maintenanceTasksWithStatus = useMemo(() => {
     const periodUnitLabels: Record<string, string> = {
@@ -710,14 +721,7 @@ export default function AplikasyonIslemFormuPage() {
     const pendingPeriodic = pendingPeriodicPartChangeId
       ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
       : null;
-    const needsRemovedPartInfo = pendingPeriodic ? pendingPeriodic.requiresOutgoingPartInfo : true;
     const needsSerialTracking = pendingPeriodic ? pendingPeriodic.requiresSerialTracking : true;
-
-    // Validate removed part info is provided (only if needed)
-    if (needsRemovedPartInfo && !removedPartSerialNumber.trim()) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen cihazdan çıkan parçanın seri numarasını girin.', variant: 'destructive' });
-      return;
-    }
 
     // Upload images if provided
     let removedPartImageUrl: string | undefined = undefined;
@@ -760,8 +764,8 @@ export default function AplikasyonIslemFormuPage() {
         serialNumber: manualSerialNumber.trim(),
         quantity: partQuantity,
         isManualEntry: true,
-        removedPartStokKodu: removedPartStokKodu.trim() || manualPartCode.trim(),
-        removedPartStokAdi: removedPartStokAdi.trim() || manualPartName.trim(),
+        removedPartStokKodu: installedPartDefaults.stokKodu,
+        removedPartStokAdi: installedPartDefaults.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
         usedPartImageUrl,
@@ -799,8 +803,8 @@ export default function AplikasyonIslemFormuPage() {
         serialNumber: selectedStockItem.serialNumber,
         personalStockId: selectedStockItem.id,
         quantity: 1, // Personal stock items are individual
-        removedPartStokKodu: removedPartStokKodu.trim() || selectedStockItem.stokKodu,
-        removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem.stokAdi,
+        removedPartStokKodu: installedPartDefaults.stokKodu,
+        removedPartStokAdi: installedPartDefaults.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
         usedPartImageUrl,
@@ -1840,14 +1844,14 @@ export default function AplikasyonIslemFormuPage() {
         }
         setIsPartModalOpen(open);
       }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl rounded-3xl border-0 bg-background/95 p-0 shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/90 overflow-hidden">
           <DialogHeader>
-            <DialogTitle>Yedek Parça Değişimi</DialogTitle>
+            <DialogTitle className="px-6 pt-6 text-xl font-semibold tracking-tight">Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
-          <div className="py-4 space-y-4">
+          <div className="px-6 pb-6 space-y-4 max-h-[78vh] overflow-y-auto">
             {/* Section 1: Select part from personal stock */}
-            <div className="p-3 border rounded-lg bg-muted/30 space-y-3">
-              <Label className="font-semibold">1. Şahsi Stokunuzdan Parça Seçin</Label>
+            <div className="p-4 border border-border/60 rounded-2xl bg-muted/20 space-y-3 shadow-sm">
+              <Label className="font-semibold text-sm">1. Şahsi Stokunuzdan Parça Seçin</Label>
               {!showManualEntry ? (
                 <>
                   <div className="relative">
@@ -1859,7 +1863,7 @@ export default function AplikasyonIslemFormuPage() {
                       className="pl-10"
                     />
                   </div>
-                  <ScrollArea className="h-40 border rounded-md bg-background">
+                  <ScrollArea className="h-44 border border-border/60 rounded-xl bg-background/80">
                     {filteredStock.length === 0 ? (
                       <div className="p-4 text-center text-muted-foreground">
                         {personalStock.length === 0
@@ -1872,10 +1876,10 @@ export default function AplikasyonIslemFormuPage() {
                           <button
                             key={item.id}
                             onClick={() => setSelectedStockItem(item)}
-                            className={`w-full text-left p-2 rounded-md transition-colors ${
+                            className={`w-full text-left p-3 rounded-xl transition-all ${
                               selectedStockItem?.id === item.id
-                                ? 'bg-primary/10 border-primary border'
-                                : 'hover:bg-muted'
+                                ? 'bg-primary/10 border border-primary/40 shadow-sm'
+                                : 'hover:bg-muted/80 border border-transparent'
                             }`}
                           >
                             <div className="flex justify-between items-start">
@@ -1949,8 +1953,8 @@ export default function AplikasyonIslemFormuPage() {
             </div>
 
             {/* Section 2: Removed part info (from device) */}
-            <div className={`p-3 border rounded-lg space-y-3 ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'bg-amber-50 dark:bg-amber-950/20' : 'bg-muted/30'}`}>
-              <Label className="font-semibold flex items-center gap-2">
+            <div className={`p-4 border rounded-2xl space-y-3 shadow-sm ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'border-amber-200/70 bg-amber-50/70 dark:bg-amber-950/20 dark:border-amber-800/60' : 'border-border/60 bg-muted/20'}`}>
+              <Label className="font-semibold text-sm flex items-center gap-2">
                 2. Cihazdan Çıkan Parça Bilgisi
                 {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo)
                   ? <span className="text-xs font-normal text-muted-foreground">(zorunlu)</span>
@@ -1961,15 +1965,15 @@ export default function AplikasyonIslemFormuPage() {
                 <div className="space-y-1">
                   <Label className="text-xs">Parça Kodu</Label>
                   <Input
-                    placeholder={selectedStockItem?.stokKodu || manualPartCode || 'Kod...'}
+                    placeholder="Takılan parçadan otomatik doldurulur"
                     value={removedPartStokKodu}
-                    onChange={(e) => setRemovedPartStokKodu(e.target.value)}
-                    className="h-9"
+                    readOnly
+                    className="h-9 bg-muted/50"
                   />
-                  <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça kodu kullanılır</p>
+                  <p className="text-xs text-muted-foreground">Takılan parçanın kodundan otomatik alınır.</p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Seri No {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) && <span className="text-destructive">*</span>}</Label>
+                  <Label className="text-xs">Seri No <span className="text-muted-foreground">(Opsiyonel)</span></Label>
                   <Input
                     placeholder="Çıkan parça seri no..."
                     value={removedPartSerialNumber}
@@ -1981,12 +1985,12 @@ export default function AplikasyonIslemFormuPage() {
               <div className="space-y-1">
                 <Label className="text-xs">Parça Adı</Label>
                 <Input
-                  placeholder={selectedStockItem?.stokAdi || manualPartName || 'Parça adı...'}
+                  placeholder="Takılan parçadan otomatik doldurulur"
                   value={removedPartStokAdi}
-                  onChange={(e) => setRemovedPartStokAdi(e.target.value)}
-                  className="h-9"
+                  readOnly
+                  className="h-9 bg-muted/50"
                 />
-                <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça adı kullanılır</p>
+                <p className="text-xs text-muted-foreground">Takılan parçanın adından otomatik alınır.</p>
               </div>
               {/* Removed/used part image upload */}
               <div className="space-y-3 pt-2 border-t border-amber-200 dark:border-amber-800">
@@ -2096,21 +2100,18 @@ export default function AplikasyonIslemFormuPage() {
                 <p className="font-medium text-green-800 dark:text-green-200">
                   Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber})
                 </p>
-                {removedPartSerialNumber && (
-                  <p className="text-green-700 dark:text-green-300">
-                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
-                  </p>
-                )}
+                <p className="text-green-700 dark:text-green-300">
+                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
+                </p>
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="px-6 pb-6 pt-3 border-t bg-background/80">
             <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
             <Button
               onClick={addSelectedPart}
               disabled={
                 (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
-                || ((!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo !== false) && !removedPartSerialNumber.trim())
                 || isUploadingImage
               }
             >
