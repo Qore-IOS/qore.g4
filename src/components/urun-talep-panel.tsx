@@ -40,7 +40,7 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, PlusCircle, Trash2, ClipboardPlus, Check, ChevronsUpDown, Unplug } from 'lucide-react';
+import { Loader2, PlusCircle, Trash2, ClipboardPlus, Check, ChevronsUpDown, Unplug, CalendarDays, Wrench, FlaskConical, History } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
@@ -58,6 +58,158 @@ import { generateId, playNotificationSound, cn } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { useRouter } from 'next/navigation';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useFirebaseQueries';
+import type { DutyShift } from '@/lib/types';
+import { format as formatDate } from 'date-fns';
+import { tr } from 'date-fns/locale';
+
+function formatShiftDate(date: unknown): string {
+  const d = date instanceof Date ? date : new Date(date as any);
+  return formatDate(d, 'd MMM yyyy', { locale: tr });
+}
+
+function DutyScheduleModal({ open, onOpenChange, selectedLabId }: { open: boolean; onOpenChange: (open: boolean) => void; selectedLabId: string | null }) {
+  const { data: upcomingShifts = [], isLoading } = useUpcomingDutyShifts(selectedLabId);
+
+  const teknikServisShifts = React.useMemo(() =>
+    upcomingShifts.filter((s: DutyShift) => s.role === 'teknik_servis'),
+    [upcomingShifts]
+  );
+  const aplikasyonShifts = React.useMemo(() =>
+    upcomingShifts.filter((s: DutyShift) => s.role === 'aplikasyon'),
+    [upcomingShifts]
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarDays className="h-5 w-5 text-primary" />
+            Nöbet Takvimi - Gelecek 30 Gün
+          </DialogTitle>
+          <DialogDescription>
+            Seçili laboratuvara atanmış nöbetçi personel listesi
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[60vh]">
+          {isLoading ? (
+            <div className="flex items-center justify-center p-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <span className="ml-2 text-sm text-muted-foreground">Yükleniyor...</span>
+            </div>
+          ) : upcomingShifts.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <CalendarDays className="h-10 w-10 mx-auto mb-2 opacity-40" />
+              <p>Gelecek 30 gün için nöbet kaydı bulunamadı.</p>
+            </div>
+          ) : (
+            <div className="space-y-6 pr-3">
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Wrench className="h-4 w-4 text-blue-400" />
+                  <h3 className="font-semibold text-sm text-blue-400 uppercase tracking-wider">Teknik Servis</h3>
+                </div>
+                {teknikServisShifts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground pl-6">Atanmış nöbetçi yok</p>
+                ) : (
+                  <div className="space-y-2 pl-6">
+                    {teknikServisShifts.map((shift: DutyShift) => (
+                      <div key={shift.id} className="flex items-center justify-between rounded-lg border p-3 bg-blue-500/5 border-blue-500/20">
+                        <span className="font-medium text-sm">{shift.userName}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatShiftDate(shift.startDate)} - {formatShiftDate(shift.endDate)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <FlaskConical className="h-4 w-4 text-purple-400" />
+                  <h3 className="font-semibold text-sm text-purple-400 uppercase tracking-wider">Aplikasyon</h3>
+                </div>
+                {aplikasyonShifts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground pl-6">Atanmış nöbetçi yok</p>
+                ) : (
+                  <div className="space-y-2 pl-6">
+                    {aplikasyonShifts.map((shift: DutyShift) => (
+                      <div key={shift.id} className="flex items-center justify-between rounded-lg border p-3 bg-purple-500/5 border-purple-500/20">
+                        <span className="font-medium text-sm">{shift.userName}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatShiftDate(shift.startDate)} - {formatShiftDate(shift.endDate)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
+  const { data: activeShifts = [] } = useActiveDutyShifts();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const dutyPersonnel = React.useMemo(() => {
+    if (!selectedLabId || !activeShifts.length) return { teknikServis: null, aplikasyon: null };
+
+    const labShifts = activeShifts.filter(shift => shift.laboratoryIds.includes(selectedLabId));
+    const teknikServisShift = labShifts.find(s => s.role === 'teknik_servis');
+    const aplikasyonShift = labShifts.find(s => s.role === 'aplikasyon');
+
+    return {
+      teknikServis: teknikServisShift ? { name: teknikServisShift.userName } : null,
+      aplikasyon: aplikasyonShift ? { name: aplikasyonShift.userName } : null,
+    };
+  }, [selectedLabId, activeShifts]);
+
+  if (!selectedLabId) return null;
+
+  const hasDutyPersonnel = dutyPersonnel.teknikServis || dutyPersonnel.aplikasyon;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setIsModalOpen(true)}
+        className="hidden md:flex items-center gap-4 text-foreground cursor-pointer hover:opacity-80 transition-opacity rounded-lg px-3 py-1.5 hover:bg-white/5"
+      >
+        <span className="text-base opacity-70 font-semibold text-foreground">Nöbetçi</span>
+        {hasDutyPersonnel ? (
+          <>
+            {dutyPersonnel.teknikServis && (
+              <div className="flex items-center gap-2 duty-glow-text">
+                <Wrench className="h-5 w-5 text-blue-400 flex-shrink-0" />
+                <span className="whitespace-nowrap font-bold text-xl tracking-wide">{dutyPersonnel.teknikServis.name}</span>
+              </div>
+            )}
+            {dutyPersonnel.teknikServis && dutyPersonnel.aplikasyon && (
+              <span className="opacity-30 text-xl">|</span>
+            )}
+            {dutyPersonnel.aplikasyon && (
+              <div className="flex items-center gap-2 duty-glow-text">
+                <FlaskConical className="h-5 w-5 text-purple-400 flex-shrink-0" />
+                <span className="whitespace-nowrap font-bold text-xl tracking-wide">{dutyPersonnel.aplikasyon.name}</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <span className="text-sm text-muted-foreground italic">Atanmış nöbetçi yok</span>
+        )}
+      </button>
+      <DutyScheduleModal open={isModalOpen} onOpenChange={setIsModalOpen} selectedLabId={selectedLabId} />
+    </>
+  );
+}
 
 
 export default function UrunTalepPanel() {
@@ -247,9 +399,15 @@ export default function UrunTalepPanel() {
                 Yetkili olduğunuz laboratuvarlar için ürün talebi oluşturun.
               </CardDescription>
             </div>
-             <Button variant="outline" onClick={() => router.push('/cihazdan-cikan-kit')}>
-              <Unplug className="mr-2 h-4 w-4" /> Cihazdan Çıkan Kit
-            </Button>
+            <div className="flex items-center gap-2">
+              <DutyInfo selectedLabId={selectedLabId || null} />
+              <Button variant="outline" onClick={() => router.push('/urun-talep/gecmis')}>
+                <History className="mr-2 h-4 w-4" /> Geçmiş
+              </Button>
+              <Button variant="outline" onClick={() => router.push('/cihazdan-cikan-kit')}>
+                <Unplug className="mr-2 h-4 w-4" /> Cihazdan Çıkan Kit
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
