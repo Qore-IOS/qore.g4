@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, AlertTriangle, CheckCircle, Server, Clock, ShieldCheck, RotateCcw, Building, ChevronsUpDown, Check as CheckIcon, Calendar, Package, ChevronDown, ChevronUp, Wrench, FlaskConical, Phone, MapPin, Timer, TrendingUp } from 'lucide-react';
+import { Loader2, AlertTriangle, CheckCircle, Server, Clock, ShieldCheck, RotateCcw, Building, ChevronsUpDown, Check as CheckIcon, Calendar, Package, ChevronDown, ChevronUp, Wrench, FlaskConical, Phone, MapPin, Timer, TrendingUp, Layers } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { differenceInMinutes, startOfDay, endOfDay, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -86,8 +86,8 @@ export default function ArizaIstatistikleriPage() {
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
-  // Fault type filter for bar chart
-  const [selectedFaultType, setSelectedFaultType] = useState<'teknik_servis' | 'aplikasyon'>('teknik_servis');
+  // Global fault type filter
+  const [selectedFaultType, setSelectedFaultType] = useState<'all' | 'teknik_servis' | 'aplikasyon'>('all');
 
   // Product statistics state
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
@@ -201,8 +201,11 @@ export default function ArizaIstatistikleriPage() {
           const to = endOfDay(dateRange.to);
           filtered = filtered.filter(report => report.openedAt && report.openedAt <= to);
       }
+      if (selectedFaultType !== 'all') {
+          filtered = filtered.filter(report => report.faultType === selectedFaultType);
+      }
       return filtered;
-  }, [reports, selectedLabId, dateRange]);
+  }, [reports, selectedLabId, dateRange, selectedFaultType]);
 
   // Main statistics
   const stats = useMemo(() => {
@@ -300,9 +303,7 @@ export default function ArizaIstatistikleriPage() {
   const faultDefinitionsBarData = useMemo(() => {
     const countByFaultName: Record<string, number> = {};
 
-    filteredReports
-      .filter(r => r.faultType === selectedFaultType)
-      .forEach(r => {
+    filteredReports.forEach(r => {
         // Use faultName (from faultDefinitions) instead of title (which includes lab/device info)
         const faultName = r.faultName || 'Belirtilmemiş';
         countByFaultName[faultName] = (countByFaultName[faultName] || 0) + 1;
@@ -444,7 +445,7 @@ export default function ArizaIstatistikleriPage() {
 
       labData.devices.push(device);
 
-      const deviceFaults = reports.filter(r => r.deviceId === device.id);
+      const deviceFaults = filteredReports.filter(r => r.deviceId === device.id);
 
       for (const fault of deviceFaults) {
         if (fault.faultType === 'teknik_servis') {
@@ -459,7 +460,7 @@ export default function ArizaIstatistikleriPage() {
 
     if (selectedProduct.testAdi) {
       for (const [hospitalId, labData] of labMap) {
-        const testRelatedFaults = reports.filter(r =>
+        const testRelatedFaults = filteredReports.filter(r =>
           r.hospitalId === hospitalId &&
           r.relatedTests &&
           r.relatedTests.includes(selectedProduct.testAdi)
@@ -467,7 +468,7 @@ export default function ArizaIstatistikleriPage() {
 
         for (const fault of testRelatedFaults) {
           const alreadyCounted = labData.devices.some(d =>
-            reports.some(r => r.deviceId === d.id && r.id === fault.id)
+            filteredReports.some(r => r.deviceId === d.id && r.id === fault.id)
           );
 
           if (!alreadyCounted) {
@@ -486,7 +487,7 @@ export default function ArizaIstatistikleriPage() {
     for (const [hospitalId, labData] of labMap) {
       const deviceIds = labData.devices.map(d => d.id);
 
-      const labFaults = reports.filter(r =>
+      const labFaults = filteredReports.filter(r =>
         r.openedAt &&
         r.openedAt >= sixMonthsAgo &&
         (
@@ -520,7 +521,7 @@ export default function ArizaIstatistikleriPage() {
     return Array.from(labMap.values()).sort((a, b) =>
       (b.teknikServisFaults + b.aplikasyonFaults) - (a.teknikServisFaults + a.aplikasyonFaults)
     );
-  }, [selectedProduct, devices, hospitals, reports, hospitalMinMaxRules]);
+  }, [selectedProduct, devices, hospitals, filteredReports, hospitalMinMaxRules]);
 
   const toggleLabExpand = (hospitalId: string) => {
     setExpandedLabs(prev => {
@@ -692,6 +693,15 @@ export default function ArizaIstatistikleriPage() {
       <div className="flex justify-center">
         <div className="inline-flex rounded-lg p-1 bg-muted">
           <Button
+            variant={selectedFaultType === 'all' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setSelectedFaultType('all')}
+            className="gap-2"
+          >
+            <Layers className="h-4 w-4" />
+            Tümü
+          </Button>
+          <Button
             variant={selectedFaultType === 'teknik_servis' ? 'default' : 'ghost'}
             size="sm"
             onClick={() => setSelectedFaultType('teknik_servis')}
@@ -758,10 +768,16 @@ export default function ArizaIstatistikleriPage() {
             <CardTitle className="flex items-center gap-2 text-base">
               {selectedFaultType === 'teknik_servis' ? (
                 <Wrench className="h-5 w-5 text-blue-500" />
-              ) : (
+              ) : selectedFaultType === 'aplikasyon' ? (
                 <FlaskConical className="h-5 w-5 text-purple-500" />
+              ) : (
+                <Layers className="h-5 w-5 text-primary" />
               )}
-              {selectedFaultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} Arıza Başlıkları
+              {selectedFaultType === 'teknik_servis'
+                ? 'Teknik Servis'
+                : selectedFaultType === 'aplikasyon'
+                  ? 'Aplikasyon'
+                  : 'Tümü'} Arıza Başlıkları
             </CardTitle>
             <CardDescription>En sık karşılaşılan arıza tanımlamaları</CardDescription>
           </CardHeader>
@@ -780,7 +796,11 @@ export default function ArizaIstatistikleriPage() {
                   <Tooltip content={<CustomBarTooltip />} />
                   <Bar
                     dataKey="count"
-                    fill={selectedFaultType === 'teknik_servis' ? COLORS.teknik : COLORS.aplikasyon}
+                    fill={selectedFaultType === 'teknik_servis'
+                      ? COLORS.teknik
+                      : selectedFaultType === 'aplikasyon'
+                        ? COLORS.aplikasyon
+                        : '#64748b'}
                     radius={[0, 4, 4, 0]}
                   />
                 </BarChart>
