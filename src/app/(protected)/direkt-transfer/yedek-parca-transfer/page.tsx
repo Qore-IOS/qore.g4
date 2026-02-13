@@ -88,6 +88,14 @@ interface GroupedDepoStokItem {
   entries: YedekParcaDepoStokItem[];
 }
 
+interface ManualPersonnelStockRow {
+  id: string;
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber: string;
+  quantity: number;
+}
+
 export default function YedekParcaTransferPage() {
   const router = useRouter();
   const { currentUserProfile } = useAuth();
@@ -147,6 +155,9 @@ export default function YedekParcaTransferPage() {
   const [allStockLoading, setAllStockLoading] = useState(false);
   const [takingOverStockId, setTakingOverStockId] = useState<string | null>(null);
   const [historyActionFilter, setHistoryActionFilter] = useState<string>('all');
+  const [manualStockModalOpen, setManualStockModalOpen] = useState(false);
+  const [manualStockRows, setManualStockRows] = useState<ManualPersonnelStockRow[]>([]);
+  const [isSavingManualStock, setIsSavingManualStock] = useState(false);
 
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
@@ -692,6 +703,136 @@ export default function YedekParcaTransferPage() {
       toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  const createManualStockRow = (): ManualPersonnelStockRow => ({
+    id: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    stokKodu: '',
+    stokAdi: '',
+    serialNumber: '',
+    quantity: 1,
+  });
+
+  const openManualStockModal = () => {
+    setManualStockRows([createManualStockRow()]);
+    setManualStockModalOpen(true);
+  };
+
+  const updateManualStockRow = (rowId: string, field: keyof Omit<ManualPersonnelStockRow, 'id'>, value: string | number) => {
+    setManualStockRows(prev => prev.map(row => {
+      if (row.id !== rowId) return row;
+      if (field === 'quantity') {
+        const parsed = Number(value);
+        return { ...row, quantity: Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : 1 };
+      }
+      return { ...row, [field]: value };
+    }));
+  };
+
+  const addManualStockRow = () => {
+    setManualStockRows(prev => [...prev, createManualStockRow()]);
+  };
+
+  const removeManualStockRow = (rowId: string) => {
+    setManualStockRows(prev => prev.length > 1 ? prev.filter(row => row.id !== rowId) : prev);
+  };
+
+  const saveManualPersonnelStock = async () => {
+    if (!menuSelection.personnelUid || !menuSelection.personnelName) {
+      toast({ title: 'Hata', description: 'Personel bilgisi bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    const cleanedRows = manualStockRows
+      .map(row => ({
+        ...row,
+        stokKodu: row.stokKodu.trim(),
+        stokAdi: row.stokAdi.trim(),
+        serialNumber: row.serialNumber.trim(),
+        quantity: Math.max(1, Math.floor(row.quantity || 1)),
+      }))
+      .filter(row => row.stokKodu || row.stokAdi || row.serialNumber);
+
+    if (cleanedRows.length === 0) {
+      toast({ title: 'Eksik Bilgi', description: 'En az bir stok satırı girin.', variant: 'destructive' });
+      return;
+    }
+
+    const invalidRow = cleanedRows.find(row => !row.stokKodu || !row.stokAdi);
+    if (invalidRow) {
+      toast({ title: 'Eksik Bilgi', description: 'Stok kodu ve stok adı zorunludur.', variant: 'destructive' });
+      return;
+    }
+
+    const invalidSerialQuantity = cleanedRows.find(row => row.serialNumber && row.quantity !== 1);
+    if (invalidSerialQuantity) {
+      toast({ title: 'Geçersiz Adet', description: 'Seri numaralı satırlarda adet 1 olmalıdır.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingManualStock(true);
+
+    try {
+      const now = Timestamp.fromDate(new Date());
+      const batch = writeBatch(db);
+
+      cleanedRows.forEach((row) => {
+        const quantityToCreate = row.serialNumber ? 1 : row.quantity;
+        for (let i = 0; i < quantityToCreate; i++) {
+          const stockRef = doc(collection(db, 'personalStock'));
+          batch.set(stockRef, {
+            ownerUid: menuSelection.personnelUid,
+            ownerName: menuSelection.personnelName,
+            productCodeId: '',
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            serialNumber: row.serialNumber,
+            source: 'depot',
+            status: 'in_stock',
+            createdAt: now,
+            transferredByUid: currentUserProfile?.uid || '',
+            transferredByName: currentUserProfile?.name || '',
+            manualEntry: true,
+          });
+        }
+
+        const logRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(logRef, {
+          action: 'transfer_to_personnel',
+          productCodeId: '',
+          stokKodu: row.stokKodu,
+          stokAdi: row.stokAdi,
+          serialNumber: row.serialNumber,
+          toUid: menuSelection.personnelUid,
+          toName: menuSelection.personnelName,
+          quantity: quantityToCreate,
+          createdAt: now,
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+          notes: 'Manuel stok girişi',
+          manualEntry: true,
+        });
+      });
+
+      await batch.commit();
+      await fetchPersonnelStock(menuSelection.personnelUid);
+      await fetchAllPersonnelStock();
+      await loadRecentTransferLogs();
+
+      const totalQuantity = cleanedRows.reduce((sum, row) => sum + (row.serialNumber ? 1 : row.quantity), 0);
+      toast({
+        title: 'Başarılı',
+        description: `${totalQuantity} adet stok ${menuSelection.personnelName} personeline manuel olarak eklendi.`,
+      });
+
+      setManualStockModalOpen(false);
+      setManualStockRows([]);
+    } catch (err) {
+      console.error('Error saving manual personnel stock:', err);
+      toast({ title: 'Hata', description: 'Manuel stok kaydı sırasında hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsSavingManualStock(false);
     }
   };
 
@@ -1890,10 +2031,16 @@ export default function YedekParcaTransferPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <UserIcon className="h-5 w-5" />
-            {menuSelection.personnelName} - Yedek Parça Stoku
-          </CardTitle>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <UserIcon className="h-5 w-5" />
+              {menuSelection.personnelName} - Yedek Parça Stoku
+            </CardTitle>
+            <Button onClick={openManualStockModal} size="sm" className="w-full sm:w-auto">
+              <Plus className="h-4 w-4 mr-1" />
+              Manuel Stok Ekle
+            </Button>
+          </div>
           <CardDescription className="flex items-center gap-4">
             <span>
               {menuSelection.personnelRole === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli stok durumu
@@ -2444,6 +2591,82 @@ export default function YedekParcaTransferPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={manualStockModalOpen} onOpenChange={setManualStockModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{menuSelection.personnelName} için Manuel Stok Ekle</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {manualStockRows.map((row, index) => (
+              <div key={row.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 border rounded-lg p-3">
+                <div className="md:col-span-3">
+                  <Label>Stok Kodu</Label>
+                  <Input
+                    value={row.stokKodu}
+                    onChange={(e) => updateManualStockRow(row.id, 'stokKodu', e.target.value)}
+                    placeholder="Örn: 05521521001"
+                  />
+                </div>
+                <div className="md:col-span-4">
+                  <Label>Stok Adı</Label>
+                  <Input
+                    value={row.stokAdi}
+                    onChange={(e) => updateManualStockRow(row.id, 'stokAdi', e.target.value)}
+                    placeholder="Ürün adını girin"
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <Label>Seri Numarası (Opsiyonel)</Label>
+                  <Input
+                    value={row.serialNumber}
+                    onChange={(e) => updateManualStockRow(row.id, 'serialNumber', e.target.value)}
+                    placeholder="Opsiyonel"
+                  />
+                </div>
+                <div className="md:col-span-1">
+                  <Label>Adet</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={row.quantity}
+                    onChange={(e) => updateManualStockRow(row.id, 'quantity', Number(e.target.value))}
+                    disabled={!!row.serialNumber.trim()}
+                  />
+                </div>
+                <div className="md:col-span-1 flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => removeManualStockRow(row.id)}
+                    disabled={manualStockRows.length === 1}
+                    title={`${index + 1}. satırı sil`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+
+            <Button type="button" variant="outline" onClick={addManualStockRow}>
+              <Plus className="h-4 w-4 mr-2" />
+              Satır Ekle
+            </Button>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setManualStockModalOpen(false)}>
+              Vazgeç
+            </Button>
+            <Button type="button" onClick={saveManualPersonnelStock} disabled={isSavingManualStock}>
+              {isSavingManualStock && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Kaydet
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
