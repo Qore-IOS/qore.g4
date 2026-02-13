@@ -442,11 +442,26 @@ export function useDock() {
     const unsub = onSnapshot(
       q,
       (snap) => {
-        const newItems = snap.docs.map((d) => ({
+        const rawItems = snap.docs.map((d) => ({
           id: d.id,
           ...(d.data() as any),
         })) as NotificationItem[];
-        
+
+        // Intersection filter for fault_opened: non-admin users must have matching role AND assigned lab
+        const userRole = currentUserProfile?.role;
+        const userIsAdmin = userRole === 'admin';
+        const userAssignedLabs = currentUserProfile?.assignedLaboratories || [];
+        const newItems = rawItems.filter((item) => {
+          if (item.type !== 'fault_opened') return true; // only filter fault notifications
+          if (userIsAdmin) return true; // admins see all
+          const faultType = item.meta?.faultType;
+          const hospitalId = item.meta?.hospitalId;
+          if (!faultType || !hospitalId) return true; // missing meta, allow through
+          const roleMatch = userRole === faultType;
+          const labMatch = userAssignedLabs.includes(hospitalId);
+          return roleMatch && labMatch;
+        });
+
         const newUnreadCount = newItems.filter(
           (i) => !(i.readBy || []).includes(uid)
         ).length;
