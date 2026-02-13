@@ -288,6 +288,7 @@ export async function emitLabCountCompleted(params: {
 
 export async function emitFaultOpened(params: {
   actor: Actor;
+  faultReportId: string;
   assignedDeviceId: string;
   deviceName: string;
   faultType: "teknik_servis" | "aplikasyon";

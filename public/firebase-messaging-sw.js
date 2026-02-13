@@ -48,11 +48,7 @@ console.log("[Service Worker] Firebase initialized successfully");
  * It displays a system-level notification to the user.
  */
 messaging.onBackgroundMessage((payload) => {
-  console.log("[Service Worker] Received background message:", {
-    title: payload.notification?.title,
-    body: payload.notification?.body,
-    data: payload.data,
-  });
+  console.log("[Service Worker] Received background message:", payload);
 
   try {
     const notificationTitle = payload.notification?.title || "Yeni Bildirim";
@@ -70,12 +66,8 @@ messaging.onBackgroundMessage((payload) => {
       tag: payload.data?.notificationId || payload.data?.id || "notification",
       requireInteraction: isFaultOpened,
       data: {
-        url:
-          payload.fcmOptions?.link ||
-          payload.data?.link ||
-          payload.data?.href ||
-          "/",
-        ...payload.data,
+        url: d.link || d.href || payload.fcmOptions?.link || "/",
+        ...d,
       },
     };
 

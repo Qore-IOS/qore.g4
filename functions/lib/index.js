@@ -231,27 +231,23 @@ exports.onNotificationCreated = functions
             return;
         }
         firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
-        // --- 2. Build FCM message ---
+        // --- 3. Build FCM message ---
+        // Use data-only message to prevent duplicate notifications.
+        // With a 'notification' field, FCM auto-displays one notification AND
+        // the service worker's onBackgroundMessage shows another = 2 notifications.
+        // Data-only messages let the service worker handle display exclusively.
         const baseUrl = 'https://qorengine.com';
         const fcmMessage = {
             tokens: filteredTokens.map(t => t.token),
-            notification: {
-                title: data.title,
-                body: data.message,
-            },
             data: {
                 notificationId,
+                title: data.title || '',
+                body: data.message || '',
                 type: data.type || '',
                 href: data.href || '/',
                 link: data.href ? `${baseUrl}${data.href}` : baseUrl,
             },
             webpush: {
-                notification: {
-                    icon: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
-                    badge: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
-                    tag: notificationId,
-                    requireInteraction: false,
-                },
                 fcmOptions: {
                     link: data.href ? `${baseUrl}${data.href}` : baseUrl,
                 },

@@ -85,8 +85,8 @@ export default function PushNotificationsClient() {
           return;
         }
         toast({
-            title: payload.notification?.title || "Yeni Bildirim",
-            description: payload.notification?.body || "",
+            title: d.title || payload.notification?.title || "Yeni Bildirim",
+            description: d.body || payload.notification?.body || "",
         });
     });
 

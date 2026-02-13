@@ -144,8 +144,8 @@ export const onNotificationCreated = functions
         }
 
         // Fetch their push tokens
-        if (optedInUids.length > 0) {
-          const uidChunks = chunk(optedInUids, 30);
+        if (optedInTargetUids.length > 0) {
+          const uidChunks = chunk(optedInTargetUids, 30);
           for (const uidChunk of uidChunks) {
             const userTokensSnap = await db
               .collection('pushTokens')
@@ -247,7 +247,11 @@ export const onNotificationCreated = functions
 
       logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
 
-      // --- 2. Build FCM message ---
+      // --- 3. Build FCM message ---
+      // Use data-only message to prevent duplicate notifications.
+      // With a 'notification' field, FCM auto-displays one notification AND
+      // the service worker's onBackgroundMessage shows another = 2 notifications.
+      // Data-only messages let the service worker handle display exclusively.
       const baseUrl = 'https://qorengine.com';
       const isFaultOpened = data.type === 'fault_opened';
       const deviceImageUrl = data.meta?.deviceImageUrl || null;
@@ -289,6 +293,8 @@ export const onNotificationCreated = functions
         },
         data: {
           notificationId,
+          title: data.title || '',
+          body: data.message || '',
           type: data.type || '',
           href: data.href || '/',
           link: data.href ? `${baseUrl}${data.href}` : baseUrl,

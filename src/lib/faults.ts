@@ -83,6 +83,7 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
   // Emit notification after fault is successfully opened
   await emitFaultOpened({
     actor: { uid: openedByUid, name: openedByName },
+    faultReportId: reportRef.id,
     assignedDeviceId: deviceId,
     deviceName: model,
     faultType: faultType,
@@ -474,6 +475,7 @@ export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput)
   // Emit notification
   await emitFaultOpened({
     actor: { uid: openedByUid, name: openedByName },
+    faultReportId: reportRef.id,
     assignedDeviceId: deviceId,
     deviceName: model,
     faultType: 'aplikasyon',
