@@ -2,7 +2,7 @@
 
 'use client';
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where, addDoc, Timestamp, writeBatch } from 'firebase/firestore';
@@ -113,6 +113,7 @@ type HistoryEvent = {
 export default function FaultDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const { currentUser, currentUserProfile, isAdmin } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -394,6 +395,38 @@ export default function FaultDetailPage() {
       setIsAssigning(false);
     }
   }, [fault, currentUser, currentUserProfile, toast]);
+
+  // Auto-assign from push notification action button (?action=assign)
+  const autoAssignTriggered = useRef(false);
+  useEffect(() => {
+    if (autoAssignTriggered.current) return;
+    const action = searchParams.get('action');
+    if (action !== 'assign') return;
+    if (!fault || !currentUser || !currentUserProfile || loading) return;
+    // Only auto-assign if fault is still waiting for assignment
+    const normalized = fault.status === 'open' ? 'atama_bekliyor' : fault.status;
+    if (normalized !== 'atama_bekliyor') {
+      toast({ title: 'Arıza Zaten Atanmış', description: 'Bu arıza zaten bir personel tarafından üzerine alınmış.', variant: 'destructive' });
+      autoAssignTriggered.current = true;
+      // Clean up URL
+      router.replace(`/ariza-yonetimi/${params.id}`);
+      return;
+    }
+    // Check role match
+    const userRole = currentUserProfile.role;
+    const faultType = fault.faultType;
+    const canAssign = isAdmin || (faultType === 'teknik_servis' && userRole === 'teknik_servis') || (faultType === 'aplikasyon' && userRole === 'aplikasyon');
+    if (!canAssign) {
+      toast({ title: 'Yetki Hatası', description: 'Bu arızayı üzerinize alma yetkiniz yok.', variant: 'destructive' });
+      autoAssignTriggered.current = true;
+      router.replace(`/ariza-yonetimi/${params.id}`);
+      return;
+    }
+    autoAssignTriggered.current = true;
+    // Trigger auto-assign
+    handleAssignToSelf();
+    router.replace(`/ariza-yonetimi/${params.id}`);
+  }, [searchParams, fault, currentUser, currentUserProfile, loading, isAdmin, handleAssignToSelf, toast, router, params.id]);
 
   // Müdahale başlat - test seçimi sonrası
   const handleStartIntervention = useCallback(async (interventionType: InterventionType) => {

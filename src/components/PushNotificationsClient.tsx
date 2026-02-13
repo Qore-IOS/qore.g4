@@ -78,6 +78,12 @@ export default function PushNotificationsClient() {
     const messaging = getMessaging(app);
     const unsubscribe = onMessage(messaging, (payload) => {
         console.log("🔔 [Push Notifications] Foreground message:", payload);
+        // Skip foreground toast for fault_opened - DynamicIslandToast handles these via Firestore listener
+        const notificationType = payload.data?.type;
+        if (notificationType === 'fault_opened' || notificationType === 'fault_closed' || notificationType === 'fefo_override') {
+          console.log("🔇 [Push Notifications] Suppressing foreground toast for", notificationType, "- handled by DynamicIslandToast");
+          return;
+        }
         toast({
             title: payload.notification?.title || "Yeni Bildirim",
             description: payload.notification?.body || "",

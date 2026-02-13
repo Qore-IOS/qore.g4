@@ -985,6 +985,7 @@ export default function UrunKullanimPanel() {
         openDescription: faultDescription || faultDefinition.name,
         faultDefinitionId: faultDefinition.id,
         faultName: faultDefinition.name,
+        deviceImageUrl: selectedDevice.imageUrl || undefined,
       });
 
       urunKullanimLogger.info('Arıza kaydı oluşturuldu', {
@@ -1034,6 +1035,7 @@ export default function UrunKullanimPanel() {
         openDescription: customFaultDescription,
         faultDefinitionId: undefined,
         faultName: customFaultTitle.trim(),
+        deviceImageUrl: selectedDevice.imageUrl || undefined,
       });
 
       urunKullanimLogger.info('Özel arıza kaydı oluşturuldu', {

@@ -101,7 +101,7 @@ export const onNotificationCreated = functions
       logger.info(`[fanOut] Processing ${notificationId}, targets: ${data.targets.join(', ')}`);
 
       // --- 1. Collect tokens from TWO sources ---
-      const tokenMap = new Map<string, { token: string; uid: string | null }>();
+      const tokenMap = new Map<string, { token: string; uid: string | null; membershipKeys?: string[] }>();
       const notificationType = data.type || '';
 
       // Source A: pushTokens matching targets (role-based, lab-based, depot-based, user-based)
@@ -116,24 +116,31 @@ export const onNotificationCreated = functions
         for (const tokenDoc of tokensSnap.docs) {
           const td = tokenDoc.data();
           if (td.token && !tokenMap.has(td.token)) {
-            tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+            tokenMap.set(td.token, { token: td.token, uid: td.uid || null, membershipKeys: td.membershipKeys || [] });
           }
         }
       }
 
       // Source B: Users who have this notification type in their notificationPreferences
       // This ensures non-admin users with the right preferences also receive notifications
+      // BUT we must respect the target audience (e.g. only teknik_servis for teknik_servis faults)
       if (notificationType && notificationType !== 'custom') {
+        // First collect target UIDs to filter Source B
+        const targetUids = await collectTargetUidsFromTargets(data.targets, data.actor?.uid);
+
         const prefsSnap = await db
           .collection('users')
           .where('notificationsEnabled', '==', true)
           .where('notificationPreferences', 'array-contains', notificationType)
           .get();
 
-        // Collect UIDs of users who opted into this notification type
+        // Collect UIDs of users who opted into this notification type AND match target audience
         const optedInUids: string[] = [];
         for (const userDoc of prefsSnap.docs) {
-          optedInUids.push(userDoc.id);
+          // Only include if user is in target audience (role/lab/depot match)
+          if (targetUids.has(userDoc.id)) {
+            optedInUids.push(userDoc.id);
+          }
         }
 
         // Fetch their push tokens
@@ -149,11 +156,35 @@ export const onNotificationCreated = functions
             for (const tokenDoc of userTokensSnap.docs) {
               const td = tokenDoc.data();
               if (td.token && !tokenMap.has(td.token)) {
-                tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+                tokenMap.set(td.token, { token: td.token, uid: td.uid || null, membershipKeys: td.membershipKeys || [] });
               }
             }
           }
         }
+      }
+
+      // --- Intersection filter for fault notifications ---
+      // For fault_opened, a non-admin user must have BOTH the correct role AND be assigned to the lab
+      if (data.type === 'fault_opened' && data.meta?.faultType && data.meta?.hospitalId) {
+        const requiredRole = `role:${data.meta.faultType}`;
+        const requiredLab = `lab:${data.meta.hospitalId}`;
+        let removedByIntersection = 0;
+
+        for (const [key, tokenData] of tokenMap.entries()) {
+          const keys = tokenData.membershipKeys || [];
+          const isAdmin = keys.includes('role:admin');
+          // Non-admin users must match BOTH role and lab
+          if (!isAdmin) {
+            const hasCorrectRole = keys.includes(requiredRole);
+            const hasCorrectLab = keys.includes(requiredLab);
+            if (!hasCorrectRole || !hasCorrectLab) {
+              tokenMap.delete(key);
+              removedByIntersection++;
+            }
+          }
+        }
+
+        logger.info(`[fanOut] Fault intersection filter: removed ${removedByIntersection} tokens (require ${requiredRole} AND ${requiredLab})`);
       }
 
       const tokens = Array.from(tokenMap.values());
@@ -218,25 +249,54 @@ export const onNotificationCreated = functions
 
       // --- 2. Build FCM message ---
       const baseUrl = 'https://qorengine.com';
+      const isFaultOpened = data.type === 'fault_opened';
+      const deviceImageUrl = data.meta?.deviceImageUrl || null;
+      const faultReportId = data.meta?.faultReportId || null;
+
+      // Build webpush notification options
+      const webpushNotification: Record<string, any> = {
+        icon: deviceImageUrl || '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+        badge: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+        tag: notificationId,
+        requireInteraction: isFaultOpened, // Keep fault notifications visible until interaction
+      };
+
+      // Add image (large image in notification) for fault notifications with device image
+      if (isFaultOpened && deviceImageUrl) {
+        webpushNotification.image = deviceImageUrl;
+      }
+
+      // Add action buttons for fault notifications
+      if (isFaultOpened && faultReportId) {
+        webpushNotification.actions = [
+          {
+            action: 'assign_fault',
+            title: 'Arızayı Üzerime Al',
+          },
+          {
+            action: 'view_fault',
+            title: 'Görüntüle',
+          },
+        ];
+      }
+
       const fcmMessage: admin.messaging.MulticastMessage = {
         tokens: filteredTokens.map(t => t.token),
         notification: {
           title: data.title,
           body: data.message,
+          ...(isFaultOpened && deviceImageUrl ? { imageUrl: deviceImageUrl } : {}),
         },
         data: {
           notificationId,
           type: data.type || '',
           href: data.href || '/',
           link: data.href ? `${baseUrl}${data.href}` : baseUrl,
+          ...(faultReportId ? { faultReportId } : {}),
+          ...(data.meta?.faultType ? { faultType: data.meta.faultType } : {}),
         },
         webpush: {
-          notification: {
-            icon: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
-            badge: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
-            tag: notificationId,
-            requireInteraction: false,
-          },
+          notification: webpushNotification,
           fcmOptions: {
             link: data.href ? `${baseUrl}${data.href}` : baseUrl,
           },
