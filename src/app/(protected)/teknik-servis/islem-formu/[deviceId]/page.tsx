@@ -1849,13 +1849,13 @@ export default function IslemFormuPage() {
         }
         setIsPartModalOpen(open);
       }}>
-        <DialogContent className="max-w-2xl rounded-3xl border-0 bg-background/95 p-0 shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/90 overflow-hidden">
+        <DialogContent className="w-screen max-w-none sm:max-w-2xl h-[92vh] sm:h-auto max-h-[92vh] sm:max-h-[88vh] top-auto bottom-0 translate-y-0 rounded-t-2xl rounded-b-none sm:top-[50%] sm:bottom-auto sm:translate-y-[-50%] sm:rounded-2xl border bg-background p-0 shadow-none sm:shadow-lg overflow-hidden">
           <DialogHeader>
-            <DialogTitle className="px-6 pt-6 text-xl font-semibold tracking-tight">Yedek Parça Değişimi</DialogTitle>
+            <DialogTitle className="px-4 sm:px-6 pt-5 text-lg font-semibold tracking-tight">Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
-          <div className="px-6 pb-6 space-y-4 max-h-[78vh] overflow-y-auto">
+          <div className="px-4 sm:px-6 pb-4 sm:pb-6 space-y-4 max-h-[78vh] overflow-y-auto">
             {/* Section 1: Select part from personal stock */}
-            <div className="p-4 border border-border/60 rounded-2xl bg-muted/20 space-y-3 shadow-sm">
+            <div className="p-4 border border-border/60 rounded-xl bg-background space-y-3">
               <Label className="font-semibold text-sm">1. Şahsi Stokunuzdan Parça Seçin</Label>
               {!showManualEntry ? (
                 <>
@@ -1868,7 +1868,7 @@ export default function IslemFormuPage() {
                       className="pl-10"
                     />
                   </div>
-                  <ScrollArea className="h-44 border border-border/60 rounded-xl bg-background/80">
+                  <ScrollArea className="h-44 border border-border/60 rounded-lg bg-background">
                     {filteredStock.length === 0 ? (
                       <div className="p-4 text-center text-muted-foreground">
                         {personalStock.length === 0
@@ -1881,10 +1881,10 @@ export default function IslemFormuPage() {
                           <button
                             key={item.id}
                             onClick={() => setSelectedStockItem(item)}
-                            className={`w-full text-left p-3 rounded-xl transition-all ${
+                            className={`w-full text-left p-3 rounded-lg transition-all ${
                               selectedStockItem?.id === item.id
-                                ? 'bg-primary/10 border border-primary/40 shadow-sm'
-                                : 'hover:bg-muted/80 border border-transparent'
+                                ? 'bg-primary/10 border border-primary/40'
+                                : 'hover:bg-muted/60 border border-transparent'
                             }`}
                           >
                             <div className="flex justify-between items-start">
@@ -1958,7 +1958,7 @@ export default function IslemFormuPage() {
             </div>
 
             {/* Section 2: Removed part info (from device) */}
-            <div className={`p-4 border rounded-2xl space-y-3 shadow-sm ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'border-amber-200/70 bg-amber-50/70 dark:bg-amber-950/20 dark:border-amber-800/60' : 'border-border/60 bg-muted/20'}`}>
+            <div className={`p-4 border rounded-xl space-y-3 ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'border-amber-200/70 bg-amber-50/70 dark:bg-amber-950/20 dark:border-amber-800/60' : 'border-border/60 bg-background'}`}>
               <Label className="font-semibold text-sm flex items-center gap-2">
                 2. Cihazdan Çıkan Parça Bilgisi
                 {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo)
@@ -2111,7 +2111,7 @@ export default function IslemFormuPage() {
               </div>
             )}
           </div>
-          <DialogFooter className="px-6 pb-6 pt-3 border-t bg-background/80">
+          <DialogFooter className="px-4 sm:px-6 pb-4 sm:pb-6 pt-3 border-t bg-background sticky bottom-0">
             <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
             <Button
               onClick={addSelectedPart}
