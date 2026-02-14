@@ -51,19 +51,20 @@ messaging.onBackgroundMessage((payload) => {
   console.log("[Service Worker] Received background message:", payload);
 
   try {
-    const notificationTitle = payload.notification?.title || "Yeni Bildirim";
-    const isFaultOpened = payload.data?.type === "fault_opened";
-    const faultReportId = payload.data?.faultReportId;
+    const d = payload.data || {};
+    const notificationTitle = d.title || payload.notification?.title || "Yeni Bildirim";
+    const isFaultOpened = d.type === "fault_opened";
+    const faultReportId = d.faultReportId;
     const deviceImageUrl = payload.notification?.image || null;
 
     const notificationOptions = {
-      body: payload.notification?.body || "",
+      body: d.body || payload.notification?.body || "",
       icon:
         deviceImageUrl ||
         payload.notification?.icon ||
         "/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG",
       badge: "/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG",
-      tag: payload.data?.notificationId || payload.data?.id || "notification",
+      tag: d.notificationId || d.id || "notification",
       requireInteraction: isFaultOpened,
       data: {
         url: d.link || d.href || payload.fcmOptions?.link || "/",
