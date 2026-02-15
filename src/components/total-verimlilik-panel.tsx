@@ -948,11 +948,11 @@ export default function TotalVerimlilikPanel({
       const endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
 
       // Seçilen depodan yapılan sevkiyatları çek
+      // NOT: depotId (equality) + timestamp (range) composite index gerektirdiğinden
+      // sadece depotId ile sorgulayıp tarih filtresini client-side yapıyoruz
       const shipmentsQuery = query(
         collection(db, 'shipments'),
-        where('depotId', '==', selectedDepotForSevkiyat),
-        where('timestamp', '>=', Timestamp.fromDate(startDate)),
-        where('timestamp', '<=', Timestamp.fromDate(endDate))
+        where('depotId', '==', selectedDepotForSevkiyat)
       );
       const shipmentsSnap = await getDocs(shipmentsQuery);
 
@@ -970,6 +970,11 @@ export default function TotalVerimlilikPanel({
 
       for (const shipmentDoc of shipmentsSnap.docs) {
         const shipmentData = shipmentDoc.data();
+
+        // Tarih filtresini client-side uygula
+        const shipmentTimestamp = shipmentData.timestamp?.toDate ? shipmentData.timestamp.toDate() : new Date(shipmentData.timestamp);
+        if (shipmentTimestamp < startDate || shipmentTimestamp > endDate) continue;
+
         const recipientName = shipmentData.recipientHospital;
 
         // recipientHospital ismi ile seçilen lab'ları eşleştir
@@ -993,7 +998,14 @@ export default function TotalVerimlilikPanel({
       }
 
       // Satırları güncelle - sadece seçilen lab'ların verilerini güncelle
+      // Aynı zamanda toast özet bilgisi için kutu dönüşümlerini topla
+      const toastSummary: { labName: string; items: { stokAdi: string; kutu: number }[] }[] = [];
+
       setRows(prevRows => {
+        // labId -> labName haritası oluştur
+        const labIdToName = new Map<string, string>();
+        prevRows.forEach(r => { if (!labIdToName.has(r.labId)) labIdToName.set(r.labId, r.labName); });
+
         const updatedRows = prevRows.map(row => {
           // Sadece seçilen lab'lara ait satırları güncelle
           if (!selectedLabsForSevkiyat.has(row.labId)) return row;
@@ -1002,11 +1014,57 @@ export default function TotalVerimlilikPanel({
           const kutuSayisi = row.ambalajDegeri > 0 ? Math.round(counts / row.ambalajDegeri) : counts;
           return { ...row, goztepeSevkiyat: kutuSayisi };
         });
+
+        // Toast özet bilgisini oluştur
+        for (const labId of selectedLabsForSevkiyat) {
+          const labName = labIdToName.get(labId) || labId;
+          const productCounts = labProductCounts[labId];
+          if (!productCounts) continue;
+          const items: { stokAdi: string; kutu: number }[] = [];
+          for (const [stokKodu, adet] of Object.entries(productCounts)) {
+            if (adet <= 0) continue;
+            const matchedRow = prevRows.find(r => r.labId === labId && r.stokKodu === stokKodu);
+            const stokAdi = matchedRow?.stokAdi || stokKodu;
+            const kutu = matchedRow && matchedRow.ambalajDegeri > 0 ? Math.round(adet / matchedRow.ambalajDegeri) : adet;
+            items.push({ stokAdi, kutu });
+          }
+          if (items.length > 0) {
+            toastSummary.push({ labName, items });
+          }
+        }
+
         return recomputeAllRows(updatedRows, interLabTransfers);
       });
 
       const selectedDepotName = depots.find(d => d.id === selectedDepotForSevkiyat)?.name || selectedDepotForSevkiyat;
-      toast({ title: 'Başarılı', description: `${selectedDepotName} deposundan sevkiyat verileri çekildi.` });
+
+      if (toastSummary.length === 0) {
+        toast({
+          title: 'Bilgi',
+          description: `${selectedDepotName} deposundan seçilen laboratuvarlara ${MONTHS[selectedMonth]?.label} ${selectedYear} döneminde sevkiyat bulunamadı.`,
+        });
+      } else {
+        const totalSevkiyat = shipmentsSnap.docs.length;
+        toast({
+          title: 'Sevkiyat Verileri Çekildi',
+          description: (
+            <div className="mt-1 space-y-2 max-h-60 overflow-y-auto text-sm">
+              <div className="font-medium">{selectedDepotName} &rarr; {toastSummary.length} laboratuvar ({totalSevkiyat} sevkiyat kaydı)</div>
+              {toastSummary.map((lab, i) => (
+                <div key={i}>
+                  <div className="font-medium text-primary">{lab.labName}</div>
+                  <ul className="ml-3 list-disc list-inside">
+                    {lab.items.map((item, j) => (
+                      <li key={j}>{item.stokAdi}: <strong>{item.kutu} kutu</strong></li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ),
+          duration: 10000,
+        });
+      }
     } catch (error) {
       totalVerimlilikLogger.error('Sevkiyat bilgisi çekilirken hata oluştu', error, {
         selectedDepot: selectedDepotForSevkiyat,
