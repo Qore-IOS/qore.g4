@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as admin from 'firebase-admin';
 // Side-effect import to ensure admin SDK is initialized
 import '@/lib/firebase-admin';
+import { resolveStorageBucket } from '@/lib/server/storage-bucket';
 
-const STORAGE_BUCKET = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,7 +17,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Geçersiz dosya yolu' }, { status: 403 });
     }
 
-    const bucket = admin.storage().bucket(STORAGE_BUCKET);
+    const bucket = await resolveStorageBucket();
     const file = bucket.file(storagePath);
 
     const [exists] = await file.exists();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,7 +16,30 @@ import { useAuth } from "@/contexts/auth-context";
 import { createNotification } from "@/lib/notifications";
 import { useToast } from "@/hooks/use-toast";
 import { getMessaging, getToken } from "firebase/messaging";
-import { app } from "@/lib/firebase";
+import { app, db } from "@/lib/firebase";
+import {
+  collection,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+} from "firebase/firestore";
+
+type NotificationLog = {
+  id: string;
+  notificationId: string;
+  type: string;
+  channel: string;
+  title: string;
+  targets: string[];
+  status: string;
+  tokensMatched: number;
+  successCount: number;
+  failureCount: number;
+  staleTokensRemoved?: number;
+  errors: string[];
+  createdAt: any;
+};
 
 export default function NotificationTester() {
   const { currentUserProfile } = useAuth();
@@ -25,6 +48,34 @@ export default function NotificationTester() {
   const [message, setMessage] = useState("This is a test notification");
   const [loading, setLoading] = useState(false);
   const [currentToken, setCurrentToken] = useState<string>("");
+  const [logs, setLogs] = useState<NotificationLog[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
+  const fetchLogs = useCallback(async () => {
+    setLoadingLogs(true);
+    try {
+      const q = query(
+        collection(db, "notificationLogs"),
+        orderBy("createdAt", "desc"),
+        limit(20)
+      );
+      const snap = await getDocs(q);
+      const items: NotificationLog[] = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as NotificationLog[];
+      setLogs(items);
+    } catch (error) {
+      console.error("Error fetching logs:", error);
+      toast({
+        title: "Hata",
+        description: "Loglar yüklenemedi",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, [toast]);
 
   const handleGetToken = async () => {
     try {
@@ -220,19 +271,87 @@ export default function NotificationTester() {
           <h4 className="font-semibold text-sm">Testing Instructions:</h4>
           <ul className="text-sm space-y-1 list-disc list-inside text-muted-foreground">
             <li>
-              <strong>Foreground:</strong> Keep this tab active and click "Send
-              Test Notification"
+              <strong>Foreground:</strong> Keep this tab active and click &quot;Send
+              Test Notification&quot;
             </li>
             <li>
               <strong>Background:</strong> Minimize or switch tabs, then click
               the button
             </li>
             <li>
-              Check browser DevTools → Application → Service Workers to verify
+              Check browser DevTools &rarr; Application &rarr; Service Workers to verify
               registration
             </li>
-            <li>Check browser DevTools → Console for detailed logs</li>
+            <li>Check browser DevTools &rarr; Console for detailed logs</li>
           </ul>
+        </div>
+
+        {/* Notification Logs */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="font-semibold text-sm">Bildirim Logları</h4>
+            <Button
+              onClick={fetchLogs}
+              variant="outline"
+              size="sm"
+              disabled={loadingLogs}
+            >
+              {loadingLogs ? "Yükleniyor..." : "Logları Getir"}
+            </Button>
+          </div>
+
+          {logs.length > 0 && (
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {logs.map((log) => (
+                <div
+                  key={log.id}
+                  className={`rounded-lg border p-3 text-xs space-y-1 ${
+                    log.status === "sent"
+                      ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950"
+                      : log.status === "error" || log.status === "failed"
+                      ? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950"
+                      : log.status === "no_tokens"
+                      ? "border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950"
+                      : "border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold">{log.title || log.type}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                        log.status === "sent"
+                          ? "bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200"
+                          : log.status === "error" || log.status === "failed"
+                          ? "bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200"
+                          : log.status === "no_tokens"
+                          ? "bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200"
+                          : "bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
+                      }`}
+                    >
+                      {log.status}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground">
+                    Kanal: {log.channel} | Hedef: {log.targets?.join(", ")} | Token: {log.tokensMatched} | Basarili: {log.successCount} | Basarisiz: {log.failureCount}
+                    {log.staleTokensRemoved ? ` | Temizlenen: ${log.staleTokensRemoved}` : ""}
+                  </div>
+                  {log.errors && log.errors.length > 0 && (
+                    <div className="text-red-600 dark:text-red-400 mt-1">
+                      {log.errors.map((err, i) => (
+                        <div key={i}>{err}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {logs.length === 0 && !loadingLogs && (
+            <p className="text-xs text-muted-foreground">
+              Henuz log yok. &quot;Logları Getir&quot; butonuna tıklayın.
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>

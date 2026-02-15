@@ -33,7 +33,7 @@ import { useTheme } from 'next-themes';
 import { useUsageRouteSync } from '@/hooks/useUsageRouteSync';
 import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
 import { TrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
-import { emitFaultOpened, emitFefoOverride } from '@/lib/notifications';
+import { emitFefoOverride } from '@/lib/notifications';
 import { Input } from './ui/input';
 import { openDeviceFaultReport } from '@/lib/faults';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -985,15 +985,7 @@ export default function UrunKullanimPanel() {
         openDescription: faultDescription || faultDefinition.name,
         faultDefinitionId: faultDefinition.id,
         faultName: faultDefinition.name,
-      });
-
-      await emitFaultOpened({
-        actor: { uid: currentUser?.uid || '', name: currentUserProfile?.name || '' },
-        assignedDeviceId: selectedDevice.id,
-        deviceName: selectedDevice.cihazAdi || selectedDevice.name || '',
-        faultType: faultDefinition.type,
-        hospitalId: selectedLabId ?? '',
-        hospitalName: selectedLabName ?? '',
+        deviceImageUrl: selectedDevice.imageUrl || undefined,
       });
 
       urunKullanimLogger.info('Arıza kaydı oluşturuldu', {
@@ -1043,15 +1035,7 @@ export default function UrunKullanimPanel() {
         openDescription: customFaultDescription,
         faultDefinitionId: undefined,
         faultName: customFaultTitle.trim(),
-      });
-
-      await emitFaultOpened({
-        actor: { uid: currentUser?.uid || '', name: currentUserProfile?.name || '' },
-        assignedDeviceId: selectedDevice.id,
-        deviceName: selectedDevice.cihazAdi || selectedDevice.name || '',
-        faultType: customFaultType,
-        hospitalId: selectedLabId ?? '',
-        hospitalName: selectedLabName ?? '',
+        deviceImageUrl: selectedDevice.imageUrl || undefined,
       });
 
       urunKullanimLogger.info('Özel arıza kaydı oluşturuldu', {

@@ -2,8 +2,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { db, storage } from '@/lib/firebase';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db } from '@/lib/firebase';
 import {
   collection,
   onSnapshot,
@@ -282,12 +281,14 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   let uploadData: Blob | File = file;
   if (isImage) uploadData = await compressImage(file);
 
-  const uploadPromise = uploadBytes(storageRef, uploadData);
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Yükleme zaman aşımına uğradı')), 60000)
-  );
-  await Promise.race([uploadPromise, timeoutPromise]);
-  const url = await getDownloadURL(storageRef);
+  const uploadFile = uploadData instanceof File
+    ? uploadData
+    : new File([uploadData], file.name, { type: uploadData.type || file.type || 'image/jpeg' });
+
+  const formData = new FormData();
+  formData.append('file', uploadFile);
+  formData.append('folder', 'purchasing-tasks');
+  formData.append('userUid', taskPath);
 
   return { name: file.name, url, type: isImage ? 'image' : isPdf ? 'pdf' : 'file', size: uploadData.size, storagePath };
 }
@@ -547,6 +548,7 @@ export default function SatinAlmaPanel() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
+  const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday' | 'workflow'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -1051,7 +1053,7 @@ export default function SatinAlmaPanel() {
     try {
       if (task.attachments && task.attachments.length > 0) {
         for (const att of task.attachments) {
-          try { await deleteObject(ref(storage, att.storagePath)); } catch { /* ok */ }
+          try { await fetch('/api/storage/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storagePath: att.storagePath }) }); } catch { /* ok */ }
         }
       }
       await deleteDoc(doc(db, 'purchasingTasks', task.id));
@@ -1214,7 +1216,7 @@ export default function SatinAlmaPanel() {
   // Edit task
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
-      if (!editingTask) return;
+      if (!editingTask || !currentUserProfile) return;
       try {
         const conflicts = hasTimeConflict(
           tasks,
@@ -1239,6 +1241,8 @@ export default function SatinAlmaPanel() {
           endTime: data.endTime,
           priority: data.priority,
           updatedAt: Timestamp.now(),
+          assignedTo: data.assignedTo?.length ? data.assignedTo : null,
+          activities,
         };
 
         if (data.laboratoryId || data.laboratoryName || data.accompanyingPersonnel?.length) {
@@ -1265,7 +1269,7 @@ export default function SatinAlmaPanel() {
         // Remove deleted attachments from storage
         if (data.removedAttachments?.length) {
           for (const att of data.removedAttachments) {
-            try { await deleteObject(ref(storage, att.storagePath)); } catch { /* ok */ }
+            try { await fetch('/api/storage/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storagePath: att.storagePath }) }); } catch { /* ok */ }
           }
         }
 
@@ -1341,7 +1345,7 @@ export default function SatinAlmaPanel() {
     [dayTasks, draggedTaskId]
   );
 
-  const selectedOccupancy = getOccupancyForDay(tasks, selectedDateStr);
+  const selectedOccupancy = getOccupancyForDay(myTasks, selectedDateStr);
 
   const sliderDates = useMemo(() => {
     const dates: Date[] = [];

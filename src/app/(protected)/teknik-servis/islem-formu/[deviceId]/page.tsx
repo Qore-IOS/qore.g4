@@ -1,8 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { db, storage } from '@/lib/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -62,6 +61,7 @@ type ActionItem = {
   removedPartStokAdi?: string;
   removedPartSerialNumber?: string;
   removedPartImageUrl?: string;
+  usedPartImageUrl?: string;
   // Periodic part change info
   periodicPartChangeId?: string;
   isPeriodicPartChange?: boolean;
@@ -141,9 +141,11 @@ export default function IslemFormuPage() {
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
   const [aciklama, setAciklama] = useState('');
 
-  // Başlangıç ve Bitiş Saatleri (Zorunlu)
+  // Başlangıç ve Bitiş Saatleri/Tarihleri (Zorunlu)
   const [baslangicSaati, setBaslangicSaati] = useState<string>('');
   const [bitisSaati, setBitisSaati] = useState<string>('');
+  const [baslangicTarihi, setBaslangicTarihi] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [bitisTarihi, setBitisTarihi] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
 
 
   // Signature modal
@@ -182,8 +184,12 @@ export default function IslemFormuPage() {
   // Removed part image
   const [removedPartImageFile, setRemovedPartImageFile] = useState<File | null>(null);
   const [removedPartImagePreview, setRemovedPartImagePreview] = useState<string | null>(null);
+  // Used part image
+  const [usedPartImageFile, setUsedPartImageFile] = useState<File | null>(null);
+  const [usedPartImagePreview, setUsedPartImagePreview] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const removedPartImageInputRef = useRef<HTMLInputElement>(null);
+  const usedPartImageInputRef = useRef<HTMLInputElement>(null);
 
   // Maintenance plans for periyodik bakım
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
@@ -439,6 +445,17 @@ export default function IslemFormuPage() {
     );
   }, [personalStock, partSearchQuery]);
 
+  const installedPartDefaults = useMemo(() => ({
+    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || ''),
+    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || ''),
+  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem]);
+
+  useEffect(() => {
+    if (!isPartModalOpen) return;
+    setRemovedPartStokKodu(installedPartDefaults.stokKodu);
+    setRemovedPartStokAdi(installedPartDefaults.stokAdi);
+  }, [isPartModalOpen, installedPartDefaults]);
+
   // Calculate maintenance status with remaining days
   const maintenanceTasksWithStatus = useMemo(() => {
     const periodUnitLabels: Record<string, string> = {
@@ -606,6 +623,8 @@ export default function IslemFormuPage() {
     setRemovedPartSerialNumber('');
     setRemovedPartImageFile(null);
     setRemovedPartImagePreview(null);
+    setUsedPartImageFile(null);
+    setUsedPartImagePreview(null);
 
     if (matchingStockItem) {
       setSelectedStockItem(matchingStockItem);
@@ -674,33 +693,41 @@ export default function IslemFormuPage() {
     }
   };
 
-  // Upload removed part image to Firebase Storage with timeout
-  const uploadRemovedPartImage = async (): Promise<string | null> => {
-    if (!removedPartImageFile) return null;
+  const handleUsedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUsedPartImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUsedPartImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
+  // Upload removed part image to Firebase Storage with timeout
+  const uploadPartImage = async (file: File, pathPrefix: 'removed-parts' | 'used-parts'): Promise<string | null> => {
     setIsUploadingImage(true);
     try {
-      const timestamp = Date.now();
-      const fileName = `removed-parts/${deviceId}/${timestamp}_${removedPartImageFile.name}`;
-      const storageRef = ref(storage, fileName);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', pathPrefix);
+      formData.append('deviceId', deviceId || 'unknown-device');
 
-      // Upload with timeout (30 seconds)
-      const uploadPromise = uploadBytes(storageRef, removedPartImageFile);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Upload timeout')), 30000)
-      );
+      const response = await fetch('/api/storage/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
 
-      await Promise.race([uploadPromise, timeoutPromise]);
-      const downloadUrl = await getDownloadURL(storageRef);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.url) {
+        throw new Error(payload?.error || 'Resim yüklenemedi.');
+      }
 
-      return downloadUrl;
+      return payload.url as string;
     } catch (err: any) {
       console.error('Error uploading image:', err);
-      const errorMessage = err?.code === 'storage/unauthorized'
-        ? 'Yükleme yetkisi yok. Storage kurallarını kontrol edin.'
-        : err?.message === 'Upload timeout'
-        ? 'Yükleme zaman aşımına uğradı.'
-        : 'Resim yüklenemedi.';
+      const errorMessage = err?.message || 'Resim yüklenemedi.';
       toast({ title: 'Hata', description: errorMessage, variant: 'destructive' });
       return null;
     } finally {
@@ -708,26 +735,37 @@ export default function IslemFormuPage() {
     }
   };
 
+  const uploadRemovedPartImage = async (): Promise<string | null> => {
+    if (!removedPartImageFile) return null;
+    return uploadPartImage(removedPartImageFile, 'removed-parts');
+  };
+
+  const uploadUsedPartImage = async (): Promise<string | null> => {
+    if (!usedPartImageFile) return null;
+    return uploadPartImage(usedPartImageFile, 'used-parts');
+  };
+
   const addSelectedPart = async () => {
     // Determine if this is for a periodic part with reduced requirements
     const pendingPeriodic = pendingPeriodicPartChangeId
       ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
       : null;
-    const needsRemovedPartInfo = pendingPeriodic ? pendingPeriodic.requiresOutgoingPartInfo : true;
     const needsSerialTracking = pendingPeriodic ? pendingPeriodic.requiresSerialTracking : true;
 
-    // Validate removed part info is provided (only if needed)
-    if (needsRemovedPartInfo && !removedPartSerialNumber.trim()) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen cihazdan çıkan parçanın seri numarasını girin.', variant: 'destructive' });
-      return;
-    }
-
-    // Upload image if provided
+    // Upload images if provided
     let removedPartImageUrl: string | undefined = undefined;
     if (removedPartImageFile) {
       const uploadedUrl = await uploadRemovedPartImage();
       if (uploadedUrl) {
         removedPartImageUrl = uploadedUrl;
+      }
+    }
+
+    let usedPartImageUrl: string | undefined = undefined;
+    if (usedPartImageFile) {
+      const uploadedUrl = await uploadUsedPartImage();
+      if (uploadedUrl) {
+        usedPartImageUrl = uploadedUrl;
       }
     }
 
@@ -755,10 +793,11 @@ export default function IslemFormuPage() {
         serialNumber: manualSerialNumber.trim(),
         quantity: partQuantity,
         isManualEntry: true,
-        removedPartStokKodu: removedPartStokKodu.trim() || manualPartCode.trim(),
-        removedPartStokAdi: removedPartStokAdi.trim() || manualPartName.trim(),
+        removedPartStokKodu: installedPartDefaults.stokKodu,
+        removedPartStokAdi: installedPartDefaults.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
+        usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
       };
@@ -793,10 +832,11 @@ export default function IslemFormuPage() {
         serialNumber: selectedStockItem.serialNumber,
         personalStockId: selectedStockItem.id,
         quantity: 1, // Personal stock items are individual
-        removedPartStokKodu: removedPartStokKodu.trim() || selectedStockItem.stokKodu,
-        removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem.stokAdi,
+        removedPartStokKodu: installedPartDefaults.stokKodu,
+        removedPartStokAdi: installedPartDefaults.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
+        usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
       };
@@ -837,9 +877,17 @@ export default function IslemFormuPage() {
   };
 
   const startSaveProcess = () => {
-    // Validate başlangıç ve bitiş saatleri (zorunlu)
+    // Validate başlangıç ve bitiş tarihleri ve saatleri (zorunlu)
+    if (!baslangicTarihi) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen başlangıç tarihini seçin.', variant: 'destructive' });
+      return;
+    }
     if (!baslangicSaati) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen başlangıç saatini seçin.', variant: 'destructive' });
+      return;
+    }
+    if (!bitisTarihi) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen bitiş tarihini seçin.', variant: 'destructive' });
       return;
     }
     if (!bitisSaati) {
@@ -936,6 +984,8 @@ export default function IslemFormuPage() {
             aciklama: aciklama.trim(),
             baslangicSaati,
             bitisSaati,
+            baslangicTarihi,
+            bitisTarihi,
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -968,6 +1018,8 @@ export default function IslemFormuPage() {
             aciklama: aciklama.trim(),
             baslangicSaati,
             bitisSaati,
+            baslangicTarihi,
+            bitisTarihi,
             cihazDurumu,
             cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
             eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
@@ -987,13 +1039,14 @@ export default function IslemFormuPage() {
 
         // Create closed fault report when ariza is selected
         if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
-          // Parse başlangıç ve bitiş saatlerini tarih olarak oluştur
-          const today = new Date();
+          // Parse başlangıç ve bitiş tarih/saatlerini oluştur
+          const [startYear, startMonth, startDay] = baslangicTarihi.split('-').map(Number);
           const [startHour, startMinute] = baslangicSaati.split(':').map(Number);
+          const [endYear, endMonth, endDay] = bitisTarihi.split('-').map(Number);
           const [endHour, endMinute] = bitisSaati.split(':').map(Number);
 
-          const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), startHour, startMinute);
-          const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), endHour, endMinute);
+          const startTime = new Date(startYear, startMonth - 1, startDay, startHour, startMinute);
+          const endTime = new Date(endYear, endMonth - 1, endDay, endHour, endMinute);
 
           // Çözüm süresi hesapla (milisaniye)
           const cozumSuresi = endTime.getTime() - startTime.getTime();
@@ -1102,6 +1155,7 @@ export default function IslemFormuPage() {
               usedOnFormId: formRef.id,
               usedOnFormType: 'teknik_servis',
               replacedPartId: removedStockRefId,
+              usedPartImageUrl: partChange.usedPartImageUrl || null,
             });
 
             // Create log for using the part
@@ -1119,6 +1173,7 @@ export default function IslemFormuPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
+              usageImageUrl: partChange.usedPartImageUrl || null,
             });
           }
 
@@ -1158,6 +1213,7 @@ export default function IslemFormuPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
+              usageImageUrl: partChange.usedPartImageUrl || null,
             });
           }
         }
@@ -1608,13 +1664,23 @@ export default function IslemFormuPage() {
               </div>
             )}
 
-            {/* Başlangıç ve Bitiş Saatleri (Zorunlu) */}
+            {/* Başlangıç ve Bitiş Tarihleri/Saatleri (Zorunlu) */}
             <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
               <Label className="flex items-center gap-2 mb-4">
                 <Clock className="h-4 w-4" />
-                İşlem Saatleri <span className="text-destructive">*</span>
+                İşlem Tarihi ve Saatleri <span className="text-destructive">*</span>
               </Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="baslangicTarihi" className="text-sm">Başlangıç Tarihi <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="baslangicTarihi"
+                    type="date"
+                    value={baslangicTarihi}
+                    onChange={(e) => setBaslangicTarihi(e.target.value)}
+                    className={!baslangicTarihi ? 'border-amber-500/50' : ''}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="baslangicSaati" className="text-sm">Başlangıç Saati <span className="text-destructive">*</span></Label>
                   <Input
@@ -1623,6 +1689,16 @@ export default function IslemFormuPage() {
                     value={baslangicSaati}
                     onChange={(e) => setBaslangicSaati(e.target.value)}
                     className={!baslangicSaati ? 'border-amber-500/50' : ''}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bitisTarihi" className="text-sm">Bitiş Tarihi <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="bitisTarihi"
+                    type="date"
+                    value={bitisTarihi}
+                    onChange={(e) => setBitisTarihi(e.target.value)}
+                    className={!bitisTarihi ? 'border-amber-500/50' : ''}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1637,7 +1713,7 @@ export default function IslemFormuPage() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-2">
-                İşleme başladığınız ve bitirdiğiniz saatleri giriniz. Bu alanlar zorunludur.
+                İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz. Bu alanlar zorunludur.
               </p>
             </div>
 
@@ -1773,14 +1849,14 @@ export default function IslemFormuPage() {
         }
         setIsPartModalOpen(open);
       }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Yedek Parça Değişimi</DialogTitle>
+        <DialogContent className="left-0 right-0 top-auto bottom-0 translate-x-0 translate-y-0 w-screen max-w-none h-[100dvh] max-h-[100dvh] rounded-none border-0 bg-background p-0 shadow-none overflow-hidden sm:left-[50%] sm:right-auto sm:top-[50%] sm:bottom-auto sm:w-full sm:max-w-2xl sm:h-auto sm:max-h-[90vh] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border sm:shadow-lg">
+          <DialogHeader className="px-4 sm:px-6 py-4 border-b">
+            <DialogTitle className="text-lg font-semibold tracking-tight">Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
-          <div className="py-4 space-y-4">
+          <div className="flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto">
             {/* Section 1: Select part from personal stock */}
-            <div className="p-3 border rounded-lg bg-muted/30 space-y-3">
-              <Label className="font-semibold">1. Şahsi Stokunuzdan Parça Seçin</Label>
+            <div className="p-4 border border-border rounded-lg bg-background space-y-3">
+              <Label className="font-semibold text-sm">1. Şahsi Stokunuzdan Parça Seçin</Label>
               {!showManualEntry ? (
                 <>
                   <div className="relative">
@@ -1792,7 +1868,7 @@ export default function IslemFormuPage() {
                       className="pl-10"
                     />
                   </div>
-                  <ScrollArea className="h-40 border rounded-md bg-background">
+                  <ScrollArea className="h-44 border border-border rounded-lg bg-background">
                     {filteredStock.length === 0 ? (
                       <div className="p-4 text-center text-muted-foreground">
                         {personalStock.length === 0
@@ -1805,10 +1881,10 @@ export default function IslemFormuPage() {
                           <button
                             key={item.id}
                             onClick={() => setSelectedStockItem(item)}
-                            className={`w-full text-left p-2 rounded-md transition-colors ${
+                            className={`w-full text-left p-3 rounded-lg transition-colors ${
                               selectedStockItem?.id === item.id
-                                ? 'bg-primary/10 border-primary border'
-                                : 'hover:bg-muted'
+                                ? 'bg-primary/10 border border-primary/40'
+                                : 'hover:bg-muted/60 border border-transparent'
                             }`}
                           >
                             <div className="flex justify-between items-start">
@@ -1882,8 +1958,8 @@ export default function IslemFormuPage() {
             </div>
 
             {/* Section 2: Removed part info (from device) */}
-            <div className={`p-3 border rounded-lg space-y-3 ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'bg-amber-50 dark:bg-amber-950/20' : 'bg-muted/30'}`}>
-              <Label className="font-semibold flex items-center gap-2">
+            <div className={`p-4 border rounded-lg space-y-3 ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'border-amber-200/70 bg-amber-50/70 dark:bg-amber-950/20 dark:border-amber-800/60' : 'border-border bg-background'}`}>
+              <Label className="font-semibold text-sm flex items-center gap-2">
                 2. Cihazdan Çıkan Parça Bilgisi
                 {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo)
                   ? <span className="text-xs font-normal text-muted-foreground">(zorunlu)</span>
@@ -1894,15 +1970,15 @@ export default function IslemFormuPage() {
                 <div className="space-y-1">
                   <Label className="text-xs">Parça Kodu</Label>
                   <Input
-                    placeholder={selectedStockItem?.stokKodu || manualPartCode || 'Kod...'}
+                    placeholder="Takılan parçadan otomatik doldurulur"
                     value={removedPartStokKodu}
-                    onChange={(e) => setRemovedPartStokKodu(e.target.value)}
-                    className="h-9"
+                    readOnly
+                    className="h-9 bg-muted/50"
                   />
-                  <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça kodu kullanılır</p>
+                  <p className="text-xs text-muted-foreground">Takılan parçanın kodundan otomatik alınır.</p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Seri No {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) && <span className="text-destructive">*</span>}</Label>
+                  <Label className="text-xs">Seri No <span className="text-muted-foreground">(Opsiyonel)</span></Label>
                   <Input
                     placeholder="Çıkan parça seri no..."
                     value={removedPartSerialNumber}
@@ -1914,62 +1990,112 @@ export default function IslemFormuPage() {
               <div className="space-y-1">
                 <Label className="text-xs">Parça Adı</Label>
                 <Input
-                  placeholder={selectedStockItem?.stokAdi || manualPartName || 'Parça adı...'}
+                  placeholder="Takılan parçadan otomatik doldurulur"
                   value={removedPartStokAdi}
-                  onChange={(e) => setRemovedPartStokAdi(e.target.value)}
-                  className="h-9"
+                  readOnly
+                  className="h-9 bg-muted/50"
                 />
-                <p className="text-xs text-muted-foreground">Boş bırakılırsa yeni parça adı kullanılır</p>
+                <p className="text-xs text-muted-foreground">Takılan parçanın adından otomatik alınır.</p>
               </div>
-              {/* Removed part image upload */}
-              <div className="space-y-2 pt-2 border-t border-amber-200 dark:border-amber-800">
-                <Label className="text-xs flex items-center gap-1">
-                  <Camera className="h-3 w-3" />
-                  Parça Fotoğrafı (Opsiyonel)
-                </Label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  ref={removedPartImageInputRef}
-                  onChange={handleRemovedPartImageSelect}
-                  className="hidden"
-                />
-                {removedPartImagePreview ? (
-                  <div className="relative">
-                    <img
-                      src={removedPartImagePreview}
-                      alt="Çıkan parça"
-                      className="w-full h-32 object-cover rounded-md border"
-                    />
+              {/* Removed/used part image upload */}
+              <div className="space-y-3 pt-2 border-t border-amber-200 dark:border-amber-800">
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Camera className="h-3 w-3" />
+                    Çıkan Parça Fotoğrafı (Opsiyonel)
+                  </Label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={removedPartImageInputRef}
+                    onChange={handleRemovedPartImageSelect}
+                    className="hidden"
+                  />
+                  {removedPartImagePreview ? (
+                    <div className="relative">
+                      <img
+                        src={removedPartImagePreview}
+                        alt="Çıkan parça"
+                        className="w-full h-32 object-cover rounded-md border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={() => {
+                          setRemovedPartImageFile(null);
+                          setRemovedPartImagePreview(null);
+                          if (removedPartImageInputRef.current) {
+                            removedPartImageInputRef.current.value = '';
+                          }
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
                     <Button
                       type="button"
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-1 right-1 h-6 w-6"
-                      onClick={() => {
-                        setRemovedPartImageFile(null);
-                        setRemovedPartImagePreview(null);
-                        if (removedPartImageInputRef.current) {
-                          removedPartImageInputRef.current.value = '';
-                        }
-                      }}
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      onClick={() => removedPartImageInputRef.current?.click()}
                     >
-                      <X className="h-3 w-3" />
+                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Çıkan parça fotoğrafı (Kamera/Galeri)</span>
                     </Button>
-                  </div>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-20 border-dashed flex flex-col gap-1"
-                    onClick={() => removedPartImageInputRef.current?.click()}
-                  >
-                    <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Fotoğraf Çek / Yükle</span>
-                  </Button>
-                )}
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Camera className="h-3 w-3" />
+                    Takılan/Kullanılan Parça Fotoğrafı (Opsiyonel)
+                  </Label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={usedPartImageInputRef}
+                    onChange={handleUsedPartImageSelect}
+                    className="hidden"
+                  />
+                  {usedPartImagePreview ? (
+                    <div className="relative">
+                      <img
+                        src={usedPartImagePreview}
+                        alt="Takılan parça"
+                        className="w-full h-32 object-cover rounded-md border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={() => {
+                          setUsedPartImageFile(null);
+                          setUsedPartImagePreview(null);
+                          if (usedPartImageInputRef.current) {
+                            usedPartImageInputRef.current.value = '';
+                          }
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      onClick={() => usedPartImageInputRef.current?.click()}
+                    >
+                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Takılan parça fotoğrafı (Kamera/Galeri)</span>
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1979,21 +2105,19 @@ export default function IslemFormuPage() {
                 <p className="font-medium text-green-800 dark:text-green-200">
                   Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber})
                 </p>
-                {removedPartSerialNumber && (
-                  <p className="text-green-700 dark:text-green-300">
-                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
-                  </p>
-                )}
+                <p className="text-green-700 dark:text-green-300">
+                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
+                </p>
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
+          <DialogFooter className="px-4 sm:px-6 py-3 sm:py-4 border-t bg-background grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
+            <Button className="w-full sm:w-auto" variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
             <Button
+              className="w-full sm:w-auto"
               onClick={addSelectedPart}
               disabled={
                 (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
-                || ((!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo !== false) && !removedPartSerialNumber.trim())
                 || isUploadingImage
               }
             >

@@ -40,7 +40,7 @@ export default function CihazYonetimiHost() {
   const [isQoreAIPanelOpen, setIsQoreAIPanelOpen] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
-  const { isAdmin } = useAuth();
+  const { isAdmin, currentUserProfile } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -95,12 +95,16 @@ export default function CihazYonetimiHost() {
           <CardTitle className="text-3xl sm:text-4xl font-headline text-primary">Cihaz Yönetim Merkezi</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-10">
-          <ModernButton onClick={() => router.push('/teknik-servis')} icon={Wrench}>
-            Teknik Servis
-          </ModernButton>
-          <ModernButton onClick={() => router.push('/aplikasyon-paneli')} icon={FlaskConical}>
-            Aplikasyon
-          </ModernButton>
+          {currentUserProfile?.role !== 'aplikasyon' && (
+            <ModernButton onClick={() => router.push('/teknik-servis')} icon={Wrench}>
+              Teknik Servis
+            </ModernButton>
+          )}
+          {currentUserProfile?.role !== 'teknik_servis' && (
+            <ModernButton onClick={() => router.push('/aplikasyon-paneli')} icon={FlaskConical}>
+              Aplikasyon
+            </ModernButton>
+          )}
           <ModernButton onClick={() => router.push('/ariza-yonetimi')} icon={ShieldAlert}>
             Tüm Arızalar
           </ModernButton>

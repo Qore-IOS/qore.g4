@@ -48,31 +48,48 @@ console.log("[Service Worker] Firebase initialized successfully");
  * It displays a system-level notification to the user.
  */
 messaging.onBackgroundMessage((payload) => {
-  console.log("[Service Worker] Received background message:", {
-    title: payload.notification?.title,
-    body: payload.notification?.body,
-    data: payload.data,
-  });
+  console.log("[Service Worker] Received background message:", payload);
 
   try {
-    const notificationTitle = payload.notification?.title || "Yeni Bildirim";
+    const d = payload.data || {};
+    const notificationTitle = d.title || payload.notification?.title || "Yeni Bildirim";
+    const isFaultOpened = d.type === "fault_opened";
+    const faultReportId = d.faultReportId;
+    const deviceImageUrl = payload.notification?.image || null;
+
     const notificationOptions = {
-      body: payload.notification?.body || "",
+      body: d.body || payload.notification?.body || "",
       icon:
+        deviceImageUrl ||
         payload.notification?.icon ||
         "/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG",
       badge: "/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG",
-      tag: payload.data?.id || "notification",
-      requireInteraction: false,
+      tag: d.notificationId || d.id || "notification",
+      requireInteraction: isFaultOpened,
       data: {
-        url:
-          payload.fcmOptions?.link ||
-          payload.data?.link ||
-          payload.data?.href ||
-          "/",
-        ...payload.data,
+        url: d.link || d.href || payload.fcmOptions?.link || "/",
+        ...d,
       },
     };
+
+    // Add image (large image in notification) for fault notifications
+    if (isFaultOpened && deviceImageUrl) {
+      notificationOptions.image = deviceImageUrl;
+    }
+
+    // Add action buttons for fault notifications
+    if (isFaultOpened && faultReportId) {
+      notificationOptions.actions = [
+        {
+          action: "assign_fault",
+          title: "Arızayı Üzerime Al",
+        },
+        {
+          action: "view_fault",
+          title: "Görüntüle",
+        },
+      ];
+    }
 
     console.log("[Service Worker] Showing notification:", notificationTitle);
     return self.registration.showNotification(
@@ -84,12 +101,57 @@ messaging.onBackgroundMessage((payload) => {
   }
 });
 
-// Handle notification clicks
+// Handle notification clicks (both main body click and action button clicks)
 self.addEventListener("notificationclick", (event) => {
-  console.log("[Service Worker] Notification clicked:", event.notification.tag);
+  const action = event.action;
+  const notificationData = event.notification.data || {};
+  const faultReportId = notificationData.faultReportId;
+
+  console.log("[Service Worker] Notification clicked:", {
+    tag: event.notification.tag,
+    action: action,
+    faultReportId: faultReportId,
+  });
+
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url || "/";
+  // Handle "Arızayı Üzerime Al" action button
+  if (action === "assign_fault" && faultReportId) {
+    event.waitUntil(
+      clients
+        .matchAll({ type: "window", includeUncontrolled: true })
+        .then(async (clientList) => {
+          // Navigate to the fault page with assign action parameter
+          const faultUrl =
+            "https://qorengine.com/ariza-yonetimi/" +
+            faultReportId +
+            "?action=assign";
+
+          for (const client of clientList) {
+            if ("focus" in client) {
+              client.focus();
+              if (client.navigate) {
+                return client.navigate(faultUrl);
+              }
+              return client;
+            }
+          }
+          if (clients.openWindow) {
+            return clients.openWindow(faultUrl);
+          }
+        })
+        .catch((error) => {
+          console.error(
+            "[Service Worker] Error handling assign action:",
+            error
+          );
+        })
+    );
+    return;
+  }
+
+  // Handle "Görüntüle" action or default click
+  const urlToOpen = notificationData.url || "/";
   console.log("[Service Worker] Opening URL:", urlToOpen);
 
   event.waitUntil(

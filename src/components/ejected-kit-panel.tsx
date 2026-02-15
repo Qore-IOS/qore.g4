@@ -312,6 +312,7 @@ export default function EjectedKitPanel() {
                 cihazGrubu: selectedProduct.cihazGrubu,
                 testCount: calculatedTestCount,
                 quantityType,
+                deviceImageUrl: selectedDevice.imageUrl || undefined,
             });
 
             // Create ejected kit record

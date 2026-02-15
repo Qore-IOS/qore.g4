@@ -288,23 +288,49 @@ export async function emitLabCountCompleted(params: {
 
 export async function emitFaultOpened(params: {
   actor: Actor;
+  faultReportId: string;
   assignedDeviceId: string;
   deviceName: string;
   faultType: "teknik_servis" | "aplikasyon";
   hospitalName?: string;
   hospitalId?: string;
+  faultReportId: string;
+  description?: string;
+  deviceImageUrl?: string;
 }) {
   const targetRole = `role:${params.faultType}`;
+  const faultTypeLabel = params.faultType === "teknik_servis" ? "Teknik Servis" : "Aplikasyon";
+  // Build targets: role-specific + lab-specific + admins
+  // Cloud Function will compute intersection of role AND lab for non-admin users
+  const targets: string[] = [targetRole, "role:admin"];
+  if (params.hospitalId) {
+    targets.push(`lab:${params.hospitalId}`);
+  }
+  // Convert relative image path to full URL for push notifications
+  let fullDeviceImageUrl: string | null = null;
+  if (params.deviceImageUrl) {
+    const imgPath = params.deviceImageUrl.startsWith("/")
+      ? params.deviceImageUrl
+      : `/${params.deviceImageUrl}`;
+    fullDeviceImageUrl = `https://qorengine.com${imgPath}`;
+  }
   await createNotification({
     type: "fault_opened",
-    title: `Yeni Ariza Kaydi: ${params.deviceName}`,
-    message: `${params.hospitalName || ""} hastanesindeki ${
-      params.deviceName
-    } cihazı için ${params.faultType.replace("_", " ")} arızası açıldı.`,
+    title: `Yeni Arıza Kaydı: ${params.deviceName}`,
+    message: `${params.hospitalName || ""} - ${params.deviceName} cihazı için ${faultTypeLabel} arızası açıldı.${params.description ? ` Açıklama: ${params.description}` : ""} (Açan: ${params.actor.name})`,
+    href: `/ariza-yonetimi/${params.faultReportId}`,
     resource: { type: "device", id: params.assignedDeviceId },
     actor: params.actor,
-    targets: [targetRole, "role:admin"], // Target specific role and admins
-    meta: { hospitalId: params.hospitalId, deviceName: params.deviceName },
+    targets,
+    meta: {
+      hospitalId: params.hospitalId,
+      deviceName: params.deviceName,
+      faultReportId: params.faultReportId,
+      faultType: params.faultType,
+      description: params.description || null,
+      deviceImageUrl: fullDeviceImageUrl,
+      openedByName: params.actor.name,
+    },
   });
 }
 

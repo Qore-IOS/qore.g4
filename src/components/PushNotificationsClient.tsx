@@ -78,9 +78,10 @@ export default function PushNotificationsClient() {
     const messaging = getMessaging(app);
     const unsubscribe = onMessage(messaging, (payload) => {
         console.log("🔔 [Push Notifications] Foreground message:", payload);
+        const d = payload.data as Record<string, string> | undefined;
         toast({
-            title: payload.notification?.title || "Yeni Bildirim",
-            description: payload.notification?.body || "",
+            title: d?.title || payload.notification?.title || "Yeni Bildirim",
+            description: d?.body || payload.notification?.body || "",
         });
     });
 

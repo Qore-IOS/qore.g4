@@ -8,16 +8,18 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, Calendar, Eye, Trash2, Loader2, Wrench, FlaskConical, Building2, Clock, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeft, Calendar, Eye, Trash2, Loader2, Wrench, FlaskConical, Building2, Clock, ArrowLeftRight, CalendarDays } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { useDutyShiftsByStatus, useHospitals } from '@/hooks/useFirebaseQueries';
 import { db } from '@/lib/firebase';
-import { doc, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
-import { format, differenceInDays, isWithinInterval } from 'date-fns';
+import { doc, updateDoc, Timestamp, writeBatch, collection, addDoc } from 'firebase/firestore';
+import { format, differenceInDays, isWithinInterval, eachDayOfInterval, addDays, isSameDay, startOfDay } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { DutyShift } from '@/lib/types';
 import { useQueryClient } from '@tanstack/react-query';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 export default function AktifVardiyalarPage() {
   const router = useRouter();
@@ -36,6 +38,8 @@ export default function AktifVardiyalarPage() {
   const [swapTargetShift, setSwapTargetShift] = useState<DutyShift | null>(null);
   const [selectedOwnShiftId, setSelectedOwnShiftId] = useState<string>('');
   const [isSwapping, setIsSwapping] = useState(false);
+  const [swapMode, setSwapMode] = useState<'full' | 'partial'>('full');
+  const [selectedSwapDays, setSelectedSwapDays] = useState<Date[]>([]);
 
   const userRole = currentUserProfile?.role;
   const userId = currentUser?.uid;
@@ -84,6 +88,22 @@ export default function AktifVardiyalarPage() {
     return isWithinInterval(now, { start, end });
   };
 
+  // Get all days in a shift's date range
+  const getShiftDays = (shift: DutyShift): Date[] => {
+    const start = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
+    const end = shift.endDate instanceof Date ? shift.endDate : new Date(shift.endDate as any);
+    return eachDayOfInterval({ start: startOfDay(start), end: startOfDay(end) });
+  };
+
+  // Toggle a day in the selected swap days
+  const toggleSwapDay = (day: Date) => {
+    setSelectedSwapDays(prev => {
+      const exists = prev.find(d => isSameDay(d, day));
+      if (exists) return prev.filter(d => !isSameDay(d, day));
+      return [...prev, day].sort((a, b) => a.getTime() - b.getTime());
+    });
+  };
+
   const handleDelete = async () => {
     if (!deleteShift) return;
 
@@ -118,29 +138,230 @@ export default function AktifVardiyalarPage() {
       const batch = writeBatch(db);
       const now = Timestamp.now();
 
-      // Swap the userId and userName between the two shifts
-      batch.update(doc(db, 'dutyShifts', swapTargetShift.id), {
-        userId: ownShift.userId,
-        userName: ownShift.userName,
-        updatedAt: now,
-        updatedByUid: userId,
-        updatedByName: currentUserProfile?.name || '',
-      });
+      if (swapMode === 'full') {
+        // Full swap - swap the userId and userName between the two shifts
+        batch.update(doc(db, 'dutyShifts', swapTargetShift.id), {
+          userId: ownShift.userId,
+          userName: ownShift.userName,
+          updatedAt: now,
+          updatedByUid: userId,
+          updatedByName: currentUserProfile?.name || '',
+        });
 
-      batch.update(doc(db, 'dutyShifts', ownShift.id), {
-        userId: swapTargetShift.userId,
-        userName: swapTargetShift.userName,
-        updatedAt: now,
-        updatedByUid: userId,
-        updatedByName: currentUserProfile?.name || '',
-      });
+        batch.update(doc(db, 'dutyShifts', ownShift.id), {
+          userId: swapTargetShift.userId,
+          userName: swapTargetShift.userName,
+          updatedAt: now,
+          updatedByUid: userId,
+          updatedByName: currentUserProfile?.name || '',
+        });
+      } else {
+        // Partial swap - split shifts and create new ones for selected days
+        if (selectedSwapDays.length === 0) {
+          toast({ title: 'Eksik Bilgi', description: 'Lütfen en az bir gün seçin.', variant: 'destructive' });
+          setIsSwapping(false);
+          return;
+        }
+
+        const targetDays = getShiftDays(swapTargetShift);
+        const allTargetDaysSelected = targetDays.length === selectedSwapDays.length;
+
+        if (allTargetDaysSelected) {
+          // All days selected = same as full swap
+          batch.update(doc(db, 'dutyShifts', swapTargetShift.id), {
+            userId: ownShift.userId,
+            userName: ownShift.userName,
+            updatedAt: now,
+            updatedByUid: userId,
+            updatedByName: currentUserProfile?.name || '',
+          });
+
+          batch.update(doc(db, 'dutyShifts', ownShift.id), {
+            userId: swapTargetShift.userId,
+            userName: swapTargetShift.userName,
+            updatedAt: now,
+            updatedByUid: userId,
+            updatedByName: currentUserProfile?.name || '',
+          });
+        } else {
+          // Partial: Split the target shift
+          // 1. Find contiguous ranges of non-selected days (remain with target owner)
+          // 2. Find contiguous ranges of selected days (go to own user)
+          const sortedSwapDays = [...selectedSwapDays].sort((a, b) => a.getTime() - b.getTime());
+
+          // Determine remaining days (not swapped) for original target shift
+          const remainingDays = targetDays.filter(d => !sortedSwapDays.find(sd => isSameDay(sd, d)));
+
+          // Helper: group contiguous days into ranges
+          const groupContiguousDays = (days: Date[]): { start: Date; end: Date }[] => {
+            if (days.length === 0) return [];
+            const sorted = [...days].sort((a, b) => a.getTime() - b.getTime());
+            const ranges: { start: Date; end: Date }[] = [];
+            let rangeStart = sorted[0];
+            let rangeEnd = sorted[0];
+
+            for (let i = 1; i < sorted.length; i++) {
+              const nextDay = addDays(rangeEnd, 1);
+              if (isSameDay(sorted[i], nextDay)) {
+                rangeEnd = sorted[i];
+              } else {
+                ranges.push({ start: rangeStart, end: rangeEnd });
+                rangeStart = sorted[i];
+                rangeEnd = sorted[i];
+              }
+            }
+            ranges.push({ start: rangeStart, end: rangeEnd });
+            return ranges;
+          };
+
+          const remainingRanges = groupContiguousDays(remainingDays);
+          const swappedRanges = groupContiguousDays(sortedSwapDays);
+
+          // Cancel the original target shift
+          batch.update(doc(db, 'dutyShifts', swapTargetShift.id), {
+            status: 'cancelled',
+            updatedAt: now,
+            updatedByUid: userId,
+            updatedByName: currentUserProfile?.name || '',
+            cancelReason: 'partial_swap',
+          });
+
+          // Create new shifts for remaining days (original target owner)
+          for (const range of remainingRanges) {
+            const newShiftRef = doc(collection(db, 'dutyShifts'));
+            batch.set(newShiftRef, {
+              userId: swapTargetShift.userId,
+              userName: swapTargetShift.userName,
+              role: swapTargetShift.role,
+              laboratoryIds: swapTargetShift.laboratoryIds,
+              laboratoryNames: swapTargetShift.laboratoryNames,
+              startDate: Timestamp.fromDate(range.start),
+              endDate: Timestamp.fromDate(range.end),
+              startTime: swapTargetShift.startTime || null,
+              endTime: swapTargetShift.endTime || null,
+              status: 'active',
+              createdAt: now,
+              createdByUid: userId,
+              createdByName: currentUserProfile?.name || '',
+              notes: `Kısmi vardiya değişiminden oluşturuldu (Orijinal: ${swapTargetShift.id})`,
+              originalShiftId: swapTargetShift.id,
+            });
+          }
+
+          // Create new shifts for swapped days (own user takes target's days)
+          for (const range of swappedRanges) {
+            const newShiftRef = doc(collection(db, 'dutyShifts'));
+            batch.set(newShiftRef, {
+              userId: ownShift.userId,
+              userName: ownShift.userName,
+              role: swapTargetShift.role,
+              laboratoryIds: swapTargetShift.laboratoryIds,
+              laboratoryNames: swapTargetShift.laboratoryNames,
+              startDate: Timestamp.fromDate(range.start),
+              endDate: Timestamp.fromDate(range.end),
+              startTime: swapTargetShift.startTime || null,
+              endTime: swapTargetShift.endTime || null,
+              status: 'active',
+              createdAt: now,
+              createdByUid: userId,
+              createdByName: currentUserProfile?.name || '',
+              notes: `Kısmi vardiya değişiminden oluşturuldu (Orijinal: ${swapTargetShift.id}, Değişim yapan: ${swapTargetShift.userName})`,
+              originalShiftId: swapTargetShift.id,
+              swappedFromUserId: swapTargetShift.userId,
+              swappedFromUserName: swapTargetShift.userName,
+            });
+          }
+
+          // Similarly handle own shift: split selected days to target user
+          const ownDays = getShiftDays(ownShift);
+          // For partial swap from own shift, we also need to find corresponding days
+          // The user's own shift days that match the swap days go to target user
+          const ownSwapDays = ownDays.filter(d => sortedSwapDays.find(sd => isSameDay(sd, d)));
+          const ownRemainingDays = ownDays.filter(d => !sortedSwapDays.find(sd => isSameDay(sd, d)));
+
+          if (ownSwapDays.length > 0) {
+            // Cancel original own shift
+            batch.update(doc(db, 'dutyShifts', ownShift.id), {
+              status: 'cancelled',
+              updatedAt: now,
+              updatedByUid: userId,
+              updatedByName: currentUserProfile?.name || '',
+              cancelReason: 'partial_swap',
+            });
+
+            // Create shifts for own remaining days
+            const ownRemainingRanges = groupContiguousDays(ownRemainingDays);
+            for (const range of ownRemainingRanges) {
+              const newShiftRef = doc(collection(db, 'dutyShifts'));
+              batch.set(newShiftRef, {
+                userId: ownShift.userId,
+                userName: ownShift.userName,
+                role: ownShift.role,
+                laboratoryIds: ownShift.laboratoryIds,
+                laboratoryNames: ownShift.laboratoryNames,
+                startDate: Timestamp.fromDate(range.start),
+                endDate: Timestamp.fromDate(range.end),
+                startTime: ownShift.startTime || null,
+                endTime: ownShift.endTime || null,
+                status: 'active',
+                createdAt: now,
+                createdByUid: userId,
+                createdByName: currentUserProfile?.name || '',
+                notes: `Kısmi vardiya değişiminden oluşturuldu (Orijinal: ${ownShift.id})`,
+                originalShiftId: ownShift.id,
+              });
+            }
+
+            // Create shifts for own swap days going to target user
+            const ownSwappedRanges = groupContiguousDays(ownSwapDays);
+            for (const range of ownSwappedRanges) {
+              const newShiftRef = doc(collection(db, 'dutyShifts'));
+              batch.set(newShiftRef, {
+                userId: swapTargetShift.userId,
+                userName: swapTargetShift.userName,
+                role: ownShift.role,
+                laboratoryIds: ownShift.laboratoryIds,
+                laboratoryNames: ownShift.laboratoryNames,
+                startDate: Timestamp.fromDate(range.start),
+                endDate: Timestamp.fromDate(range.end),
+                startTime: ownShift.startTime || null,
+                endTime: ownShift.endTime || null,
+                status: 'active',
+                createdAt: now,
+                createdByUid: userId,
+                createdByName: currentUserProfile?.name || '',
+                notes: `Kısmi vardiya değişiminden oluşturuldu (Orijinal: ${ownShift.id}, Değişim yapan: ${ownShift.userName})`,
+                originalShiftId: ownShift.id,
+                swappedFromUserId: ownShift.userId,
+                swappedFromUserName: ownShift.userName,
+              });
+            }
+          } else {
+            // Own shift doesn't have matching days, just update with target user info for the full shift
+            batch.update(doc(db, 'dutyShifts', ownShift.id), {
+              userId: swapTargetShift.userId,
+              userName: swapTargetShift.userName,
+              updatedAt: now,
+              updatedByUid: userId,
+              updatedByName: currentUserProfile?.name || '',
+            });
+          }
+        }
+      }
 
       await batch.commit();
 
-      toast({ title: 'Başarılı', description: 'Vardiyalar başarıyla değiştirildi.' });
+      toast({
+        title: 'Başarılı',
+        description: swapMode === 'partial' && selectedSwapDays.length > 0
+          ? `${selectedSwapDays.length} günlük kısmi vardiya değişimi yapıldı.`
+          : 'Vardiyalar başarıyla değiştirildi.',
+      });
       queryClient.invalidateQueries({ queryKey: ['dutyShifts'] });
       setSwapTargetShift(null);
       setSelectedOwnShiftId('');
+      setSwapMode('full');
+      setSelectedSwapDays([]);
     } catch (error) {
       console.error('Vardiya değiştirme hatası:', error);
       toast({ title: 'Hata', description: 'Vardiyalar değiştirilirken bir hata oluştu.', variant: 'destructive' });
@@ -371,16 +592,18 @@ export default function AktifVardiyalarPage() {
           if (!open) {
             setSwapTargetShift(null);
             setSelectedOwnShiftId('');
+            setSwapMode('full');
+            setSelectedSwapDays([]);
           }
         }}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowLeftRight className="h-5 w-5 text-orange-500" />
                 Vardiya Yer Değiştirme
               </DialogTitle>
               <DialogDescription>
-                Aşağıdaki vardiya ile yer değiştirmek istediğiniz kendi vardiyenizi seçin.
+                Tüm vardiyayı veya belirli günleri seçerek yer değiştirebilirsiniz.
               </DialogDescription>
             </DialogHeader>
 
@@ -407,6 +630,85 @@ export default function AktifVardiyalarPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Swap mode toggle */}
+                <div className="rounded-lg border p-3 bg-muted/30">
+                  <Label className="text-sm font-medium mb-2 block">Değişim Tipi</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={swapMode === 'full' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => { setSwapMode('full'); setSelectedSwapDays([]); }}
+                      className="flex-1"
+                    >
+                      <ArrowLeftRight className="h-4 w-4 mr-1" />
+                      Tüm Vardiya
+                    </Button>
+                    <Button
+                      variant={swapMode === 'partial' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSwapMode('partial')}
+                      className="flex-1"
+                    >
+                      <CalendarDays className="h-4 w-4 mr-1" />
+                      Belirli Günler
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Day selection for partial swap */}
+                {swapMode === 'partial' && (
+                  <div className="rounded-lg border p-3 bg-orange-50 dark:bg-orange-950/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-sm font-medium">Değiştirilecek günleri seçin:</Label>
+                      {selectedSwapDays.length > 0 && (
+                        <Badge variant="secondary" className="text-xs">
+                          {selectedSwapDays.length} gün seçili
+                        </Badge>
+                      )}
+                    </div>
+                    <ScrollArea className="max-h-[180px]">
+                      <div className="space-y-1">
+                        {getShiftDays(swapTargetShift).map((day, i) => {
+                          const isSelected = selectedSwapDays.some(d => isSameDay(d, day));
+                          const isPast = startOfDay(day) < startOfDay(new Date());
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              disabled={isPast}
+                              onClick={() => toggleSwapDay(day)}
+                              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-3 ${
+                                isPast
+                                  ? 'opacity-40 cursor-not-allowed'
+                                  : isSelected
+                                    ? 'bg-orange-100 dark:bg-orange-900/40 border border-orange-300 dark:border-orange-700'
+                                    : 'hover:bg-muted border border-transparent'
+                              }`}
+                            >
+                              <Checkbox
+                                checked={isSelected}
+                                disabled={isPast}
+                                onCheckedChange={() => toggleSwapDay(day)}
+                              />
+                              <span className="font-medium">
+                                {format(day, 'd MMMM yyyy, EEEE', { locale: tr })}
+                              </span>
+                              {isSameDay(day, new Date()) && (
+                                <Badge className="bg-green-500 text-xs ml-auto">Bugün</Badge>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
+                    {selectedSwapDays.length === 0 && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Lütfen en az bir gün seçin.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Own shifts selection */}
                 <div>
@@ -457,12 +759,12 @@ export default function AktifVardiyalarPage() {
             )}
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setSwapTargetShift(null); setSelectedOwnShiftId(''); }}>
+              <Button variant="outline" onClick={() => { setSwapTargetShift(null); setSelectedOwnShiftId(''); setSwapMode('full'); setSelectedSwapDays([]); }}>
                 Vazgeç
               </Button>
               <Button
                 onClick={handleSwap}
-                disabled={!selectedOwnShiftId || isSwapping}
+                disabled={!selectedOwnShiftId || isSwapping || (swapMode === 'partial' && selectedSwapDays.length === 0)}
                 className="bg-orange-600 hover:bg-orange-700"
               >
                 {isSwapping ? (
@@ -470,7 +772,10 @@ export default function AktifVardiyalarPage() {
                 ) : (
                   <ArrowLeftRight className="h-4 w-4 mr-1" />
                 )}
-                Yer Değiştir
+                {swapMode === 'partial' && selectedSwapDays.length > 0
+                  ? `${selectedSwapDays.length} Gün Değiştir`
+                  : 'Yer Değiştir'
+                }
               </Button>
             </DialogFooter>
           </DialogContent>

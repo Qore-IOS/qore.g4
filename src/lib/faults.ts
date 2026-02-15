@@ -24,6 +24,7 @@ export type OpenFaultInput = {
   title?: string; // optional custom title
   faultDefinitionId?: string; // ID from faultDefinitions collection
   faultName?: string; // Name from faultDefinitions (for statistics)
+  deviceImageUrl?: string; // Device model image URL for push notifications
 };
 
 export async function openDeviceFaultReport(input: OpenFaultInput): Promise<string> {
@@ -79,14 +80,18 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     timestamp: serverTimestamp(),
   });
 
-  // Emit notification after fault is successfully opened (no change here)
+  // Emit notification after fault is successfully opened
   await emitFaultOpened({
     actor: { uid: openedByUid, name: openedByName },
+    faultReportId: reportRef.id,
     assignedDeviceId: deviceId,
     deviceName: model,
     faultType: faultType,
     hospitalId: hospitalId,
     hospitalName: labName,
+    faultReportId: reportRef.id,
+    description: openDescription ?? undefined,
+    deviceImageUrl: input.deviceImageUrl,
   });
 
   return reportRef.id;
@@ -414,6 +419,7 @@ export type OpenEjectedKitFaultInput = {
   cihazGrubu?: string;
   testCount: number;
   quantityType: 'kutu' | 'test';
+  deviceImageUrl?: string; // Device model image URL for push notifications
 };
 
 export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput): Promise<string> {
@@ -469,11 +475,15 @@ export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput)
   // Emit notification
   await emitFaultOpened({
     actor: { uid: openedByUid, name: openedByName },
+    faultReportId: reportRef.id,
     assignedDeviceId: deviceId,
     deviceName: model,
     faultType: 'aplikasyon',
     hospitalId: hospitalId,
     hospitalName: labName,
+    faultReportId: reportRef.id,
+    description: `Cihazdan çıkan kit: ${stokAdi} (${stokKodu}) - ${testCount} test. ${openDescription}`,
+    deviceImageUrl: input.deviceImageUrl,
   });
 
   return reportRef.id;
