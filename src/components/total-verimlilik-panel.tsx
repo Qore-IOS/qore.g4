@@ -224,8 +224,9 @@ export default function TotalVerimlilikPanel({
   // Phase 2 State'leri
   const [depots, setDepots] = useState<{ id: string; name: string }[]>([]);
 
-  // Göztepe Sevkiyat Modal State'leri (Sütun 11)
-  const [showGoztepeSevkiyatModal, setShowGoztepeSevkiyatModal] = useState(false);
+  // Sevkiyat Bilgisi Modal State'leri (Sütun 11)
+  const [showSevkiyatBilgisiModal, setShowSevkiyatBilgisiModal] = useState(false);
+  const [selectedDepotForSevkiyat, setSelectedDepotForSevkiyat] = useState<string>('');
   const [selectedLabsForSevkiyat, setSelectedLabsForSevkiyat] = useState<Set<string>>(new Set());
   const [isFetchingSevkiyat, setIsFetchingSevkiyat] = useState(false);
 
@@ -929,10 +930,14 @@ export default function TotalVerimlilikPanel({
     setKurumlarArasiEditingRow(null);
   }, [kurumlarArasiEditingRow, hospitals, interLabTransfers, recomputeAllRows]);
 
-  // Göztepe Sevkiyat - depo transferlerinden çek
-  const handleFetchGoztepeSevkiyat = useCallback(async () => {
+  // Sevkiyat Bilgisi - depodan laboratuvarlara yapılan sevkiyatları çek
+  const handleFetchSevkiyatBilgisi = useCallback(async () => {
+    if (!selectedDepotForSevkiyat) {
+      toast({ title: 'Uyarı', description: 'Lütfen bir gönderen depo seçin.', variant: 'destructive' });
+      return;
+    }
     if (selectedLabsForSevkiyat.size === 0) {
-      toast({ title: 'Uyarı', description: 'Lütfen en az bir laboratuvar seçin.', variant: 'destructive' });
+      toast({ title: 'Uyarı', description: 'Lütfen en az bir alıcı laboratuvar seçin.', variant: 'destructive' });
       return;
     }
 
@@ -942,56 +947,69 @@ export default function TotalVerimlilikPanel({
       const startDate = new Date(selectedYear, selectedMonth, 1);
       const endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
 
-      // Transfer kayıtlarını çek
-      const transfersQuery = query(
-        collection(db, 'transfers'),
+      // Seçilen depodan yapılan sevkiyatları çek
+      const shipmentsQuery = query(
+        collection(db, 'shipments'),
+        where('depotId', '==', selectedDepotForSevkiyat),
         where('timestamp', '>=', Timestamp.fromDate(startDate)),
         where('timestamp', '<=', Timestamp.fromDate(endDate))
       );
-      const transfersSnap = await getDocs(transfersQuery);
+      const shipmentsSnap = await getDocs(shipmentsQuery);
 
-      // Her transfer için item'ları çek ve lab'a göre grupla
-      const labProductCounts: Record<string, Record<string, number>> = {}; // labId -> stokKodu -> kutu sayısı
-
-      for (const transferDoc of transfersSnap.docs) {
-        const transferData = transferDoc.data();
-        const targetLabId = transferData.targetHospitalId;
-
-        // Sadece seçilen lab'lara yapılan transferleri say
-        if (!targetLabId || !selectedLabsForSevkiyat.has(targetLabId)) continue;
-
-        // Transfer item'larını çek
-        const itemsSnap = await getDocs(collection(db, 'transfers', transferDoc.id, 'items'));
-
-        for (const itemDoc of itemsSnap.docs) {
-          const itemData = itemDoc.data();
-          const stokKodu = itemData.stokKodu;
-
-          if (!labProductCounts[targetLabId]) {
-            labProductCounts[targetLabId] = {};
-          }
-          if (!labProductCounts[targetLabId][stokKodu]) {
-            labProductCounts[targetLabId][stokKodu] = 0;
-          }
-          // Her seri numarası 1 adet (1 kutu değil, ama seri bazlı transfer için adet sayısı)
-          labProductCounts[targetLabId][stokKodu] += 1;
+      // Seçilen lab isimlerini hazırla (recipientHospital name ile eşleştirmek için)
+      const selectedLabNames = new Map<string, string>(); // labName -> labId
+      for (const labId of selectedLabsForSevkiyat) {
+        const lab = hospitals.find(h => h.id === labId);
+        if (lab) {
+          selectedLabNames.set(lab.name, labId);
         }
       }
 
-      // Satırları güncelle - seri sayısını kutuya çevir (ambalaj ile böl)
+      // Her sevkiyat için item'ları grupla: labId -> stokKodu -> toplam adet
+      const labProductCounts: Record<string, Record<string, number>> = {};
+
+      for (const shipmentDoc of shipmentsSnap.docs) {
+        const shipmentData = shipmentDoc.data();
+        const recipientName = shipmentData.recipientHospital;
+
+        // recipientHospital ismi ile seçilen lab'ları eşleştir
+        const matchedLabId = selectedLabNames.get(recipientName);
+        if (!matchedLabId) continue;
+
+        // Sevkiyat item'larını say (items doküman içinde gömülü dizi)
+        const items = shipmentData.items || [];
+        for (const item of items) {
+          const stokKodu = item.stokKodu;
+          const quantity = item.quantity || 0;
+
+          if (!labProductCounts[matchedLabId]) {
+            labProductCounts[matchedLabId] = {};
+          }
+          if (!labProductCounts[matchedLabId][stokKodu]) {
+            labProductCounts[matchedLabId][stokKodu] = 0;
+          }
+          labProductCounts[matchedLabId][stokKodu] += quantity;
+        }
+      }
+
+      // Satırları güncelle - sadece seçilen lab'ların verilerini güncelle
       setRows(prevRows => {
         const updatedRows = prevRows.map(row => {
+          // Sadece seçilen lab'lara ait satırları güncelle
+          if (!selectedLabsForSevkiyat.has(row.labId)) return row;
           const counts = labProductCounts[row.labId]?.[row.stokKodu] || 0;
-          // Seri sayısını kutuya çevir (ambalaj değerine böl, yuvarla)
+          // Adet sayısını kutuya çevir (ambalaj değerine böl, yuvarla)
           const kutuSayisi = row.ambalajDegeri > 0 ? Math.round(counts / row.ambalajDegeri) : counts;
           return { ...row, goztepeSevkiyat: kutuSayisi };
         });
         return recomputeAllRows(updatedRows, interLabTransfers);
       });
 
-      toast({ title: 'Başarılı', description: 'Göztepe sevkiyat verileri çekildi.' });
+      const selectedDepotName = depots.find(d => d.id === selectedDepotForSevkiyat)?.name || selectedDepotForSevkiyat;
+      toast({ title: 'Başarılı', description: `${selectedDepotName} deposundan sevkiyat verileri çekildi.` });
     } catch (error) {
-      totalVerimlilikLogger.error('Göztepe sevkiyat verileri çekilirken hata oluştu', error, {
+      totalVerimlilikLogger.error('Sevkiyat bilgisi çekilirken hata oluştu', error, {
+        selectedDepot: selectedDepotForSevkiyat,
         selectedLabs: Array.from(selectedLabsForSevkiyat),
         month: selectedMonth,
         year: selectedYear,
@@ -999,10 +1017,11 @@ export default function TotalVerimlilikPanel({
       toast({ title: 'Hata', description: 'Sevkiyat verileri çekilirken hata oluştu.', variant: 'destructive' });
     } finally {
       setIsFetchingSevkiyat(false);
-      setShowGoztepeSevkiyatModal(false);
+      setShowSevkiyatBilgisiModal(false);
       setSelectedLabsForSevkiyat(new Set());
+      setSelectedDepotForSevkiyat('');
     }
-  }, [selectedLabsForSevkiyat, selectedYear, selectedMonth, toast, recomputeAllRows, interLabTransfers]);
+  }, [selectedDepotForSevkiyat, selectedLabsForSevkiyat, selectedYear, selectedMonth, depots, hospitals, toast, recomputeAllRows, interLabTransfers]);
 
   // Listedeki laboratuvarlar (verimlilik havuzundaki)
   const poolLabIds = useMemo(() => {
@@ -2309,12 +2328,12 @@ export default function TotalVerimlilikPanel({
                 </Button>
                 <Button
                   variant="secondary"
-                  onClick={() => setShowGoztepeSevkiyatModal(true)}
+                  onClick={() => setShowSevkiyatBilgisiModal(true)}
                   disabled={rows.length === 0}
-                  aria-label="Göztepe sevkiyat verilerini çek"
+                  aria-label="Depodan laboratuvarlara sevkiyat bilgisi çek"
                 >
                   <Download className="h-4 w-4 mr-2" aria-hidden="true" />
-                  Göztepe Sevkiyat Çek
+                  Sevkiyat Bilgisi Çek
                 </Button>
                 <Button
                   variant="secondary"
@@ -2567,7 +2586,7 @@ export default function TotalVerimlilikPanel({
             <CardDescription>
               {showResultsOnly
                 ? 'Sonuç odaklı görünüm - sadece özet ve hesaplama sütunları gösteriliyor.'
-                : 'İlk 6 sütun otomatik doldurulur. Mavi alanlar manuel giriş, yeşil alanlar otomatik hesaplanır. Sütun 11 için "Göztepe Sevkiyat Çek" butonunu kullanın. Sütun 12 için kaynak lab seçimi yapılır.'}
+                : 'İlk 6 sütun otomatik doldurulur. Mavi alanlar manuel giriş, yeşil alanlar otomatik hesaplanır. Sütun 11 için "Sevkiyat Bilgisi Çek" butonunu kullanın. Sütun 12 için kaynak lab seçimi yapılır.'}
               {hasActiveFilters && (
                 <span className="ml-2 text-primary font-medium">
                   ({filteredAndSortedRows.length}/{rows.length} satır gösteriliyor)
@@ -3675,56 +3694,74 @@ export default function TotalVerimlilikPanel({
         </Card>
       )}
 
-      {/* Göztepe Sevkiyat Modal - Sütun 11 */}
-      <Dialog open={showGoztepeSevkiyatModal} onOpenChange={setShowGoztepeSevkiyatModal}>
+      {/* Sevkiyat Bilgisi Modal - Sütun 11 */}
+      <Dialog open={showSevkiyatBilgisiModal} onOpenChange={setShowSevkiyatBilgisiModal}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Göztepe Sevkiyat Çek</DialogTitle>
+            <DialogTitle>Sevkiyat Bilgisi Çek</DialogTitle>
             <DialogDescription>
-              Seçilen laboratuvarlara {MONTHS[selectedMonth]?.label} {selectedYear} döneminde depodan yapılan transferleri çeker.
+              {MONTHS[selectedMonth]?.label} {selectedYear} döneminde seçilen depodan laboratuvarlara yapılan sevkiyat verilerini çeker.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="selectAll"
-                checked={selectedLabsForSevkiyat.size === poolLabs.length && poolLabs.length > 0}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    setSelectedLabsForSevkiyat(new Set(poolLabs.map(l => l.id)));
-                  } else {
-                    setSelectedLabsForSevkiyat(new Set());
-                  }
-                }}
-              />
-              <Label htmlFor="selectAll" className="font-medium">Tümünü Seç</Label>
+            {/* Gönderen Depo Seçimi */}
+            <div className="space-y-2">
+              <Label className="font-medium">Gönderen Depo</Label>
+              <Select value={selectedDepotForSevkiyat} onValueChange={setSelectedDepotForSevkiyat}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Depo seçin..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {depots.map(depot => (
+                    <SelectItem key={depot.id} value={depot.id}>{depot.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="border rounded-md p-3 max-h-60 overflow-y-auto space-y-2">
-              {poolLabs.map(lab => (
-                <div key={lab.id} className="flex items-center gap-2">
-                  <Checkbox
-                    id={lab.id}
-                    checked={selectedLabsForSevkiyat.has(lab.id)}
-                    onCheckedChange={(checked) => {
-                      const newSet = new Set(selectedLabsForSevkiyat);
-                      if (checked) {
-                        newSet.add(lab.id);
-                      } else {
-                        newSet.delete(lab.id);
-                      }
-                      setSelectedLabsForSevkiyat(newSet);
-                    }}
-                  />
-                  <Label htmlFor={lab.id} className="text-sm">{lab.name}</Label>
-                </div>
-              ))}
+            {/* Alıcı Laboratuvar Seçimi */}
+            <div className="space-y-2">
+              <Label className="font-medium">Alıcı Laboratuvarlar</Label>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="selectAllSevkiyat"
+                  checked={selectedLabsForSevkiyat.size === poolLabs.length && poolLabs.length > 0}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setSelectedLabsForSevkiyat(new Set(poolLabs.map(l => l.id)));
+                    } else {
+                      setSelectedLabsForSevkiyat(new Set());
+                    }
+                  }}
+                />
+                <Label htmlFor="selectAllSevkiyat" className="font-medium text-sm">Tümünü Seç</Label>
+              </div>
+              <div className="border rounded-md p-3 max-h-48 overflow-y-auto space-y-2">
+                {poolLabs.map(lab => (
+                  <div key={lab.id} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`sevkiyat-${lab.id}`}
+                      checked={selectedLabsForSevkiyat.has(lab.id)}
+                      onCheckedChange={(checked) => {
+                        const newSet = new Set(selectedLabsForSevkiyat);
+                        if (checked) {
+                          newSet.add(lab.id);
+                        } else {
+                          newSet.delete(lab.id);
+                        }
+                        setSelectedLabsForSevkiyat(newSet);
+                      }}
+                    />
+                    <Label htmlFor={`sevkiyat-${lab.id}`} className="text-sm">{lab.name}</Label>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGoztepeSevkiyatModal(false)}>
+            <Button variant="outline" onClick={() => setShowSevkiyatBilgisiModal(false)}>
               İptal
             </Button>
-            <Button onClick={handleFetchGoztepeSevkiyat} disabled={isFetchingSevkiyat}>
+            <Button onClick={handleFetchSevkiyatBilgisi} disabled={isFetchingSevkiyat || !selectedDepotForSevkiyat || selectedLabsForSevkiyat.size === 0}>
               {isFetchingSevkiyat ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -3733,7 +3770,7 @@ export default function TotalVerimlilikPanel({
               ) : (
                 <>
                   <Download className="h-4 w-4 mr-2" />
-                  Verileri Çek
+                  Bilgileri Al
                 </>
               )}
             </Button>
@@ -3843,7 +3880,7 @@ export default function TotalVerimlilikPanel({
                 <li>19. Hak Ediş (Test)</li>
               </ul>
               <p className="text-orange-600 dark:text-orange-400 mt-2">
-                11. Göztepe Sevkiyat ve 12. Kurumlar Arası Sevk sütunları sadece panel üzerinden yönetilir.
+                11. Göztepe Sevkiyat (Kutu) ve 12. Kurumlar Arası Sevk sütunları sadece panel üzerinden yönetilir. Sütun 11 için &quot;Sevkiyat Bilgisi Çek&quot; butonunu kullanın.
               </p>
             </div>
           </div>
