@@ -290,11 +290,6 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   formData.append('folder', 'purchasing-tasks');
   formData.append('userUid', taskPath);
 
-  const response = await fetch('/api/storage/upload-file', {
-    method: 'POST',
-    body: formData,
-  });
-
   return { name: file.name, url, type: isImage ? 'image' : isPdf ? 'pdf' : 'file', size: uploadData.size, storagePath };
 }
 
@@ -1008,6 +1003,37 @@ export default function SatinAlmaPanel() {
       toast.error('Yorum eklenemedi');
     }
   }, [currentUserProfile]);
+
+  const attachFilesToTask = useCallback(async (task: PurchasingTask, files: File[]) => {
+    if (!files.length) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      toast.warning('Çevrimdışı modda dosya yükleme desteklenmiyor');
+      return;
+    }
+
+    const uploaded: PurchasingTaskAttachment[] = [];
+    for (const file of files) {
+      try {
+        uploaded.push(await uploadAttachment(file, task.id));
+      } catch (err) {
+        console.error('Workflow card file upload error:', err);
+        toast.error(`"${file.name}" yüklenemedi`);
+      }
+    }
+    if (uploaded.length === 0) return;
+
+    const nextAttachments = [...(task.attachments || []), ...uploaded];
+    try {
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        attachments: nextAttachments,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (err) {
+      console.error('Error attaching files from workflow', err);
+      toast.error('Dosyalar göreve işlenemedi');
+      throw err;
+    }
+  }, []);
 
   // Delete task
   const deleteTask = useCallback(async (task: PurchasingTask) => {
@@ -2054,6 +2080,7 @@ export default function SatinAlmaPanel() {
                 });
                 setShowAddModal(true);
               }}
+              onAttachFilesToTask={attachFilesToTask}
             />
           </div>
         )}

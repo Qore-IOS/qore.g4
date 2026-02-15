@@ -28,6 +28,7 @@ type Props = {
   onToggleTask?: (task: PurchasingTask) => void;
   onRequestTaskCompletion?: (task: PurchasingTask) => void;
   onRequestCreateTask?: (preset?: { workflowProjectId?: string; workflowColor?: string; x?: number; y?: number }) => void;
+  onAttachFilesToTask?: (task: PurchasingTask, files: File[]) => Promise<void>;
 };
 
 const PRESET_COLORS = ['#d4ec00', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#f97316'];
@@ -44,6 +45,7 @@ export default function WorkflowCanvasPanel({
   onToggleTask,
   onRequestTaskCompletion,
   onRequestCreateTask,
+  onAttachFilesToTask,
 }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(workflows[0]?.id || '');
   const [newName, setNewName] = useState('Yeni Workflow');
@@ -57,6 +59,9 @@ export default function WorkflowCanvasPanel({
   const [canvasContextMenu, setCanvasContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [canvasScale, setCanvasScale] = useState(1);
   const [isMobileFullscreen, setIsMobileFullscreen] = useState(false);
+  const [showProjectFiles, setShowProjectFiles] = useState(false);
+  const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null);
+  const [dragHoverTaskId, setDragHoverTaskId] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const canvasSectionRef = useRef<HTMLElement | null>(null);
@@ -112,6 +117,17 @@ export default function WorkflowCanvasPanel({
     const total = selectedWorkflow.taskIds.length;
     const completed = selectedWorkflow.taskIds.filter((id) => workflowTaskMap.get(id)?.completed).length;
     return { completed, total, pct: Math.round((completed / total) * 100) };
+  }, [selectedWorkflow, workflowTaskMap]);
+
+  const workflowFiles = useMemo(() => {
+    if (!selectedWorkflow) return [] as Array<{ task: PurchasingTask; attachment: NonNullable<PurchasingTask['attachments']>[number] }>;
+    const rows: Array<{ task: PurchasingTask; attachment: NonNullable<PurchasingTask['attachments']>[number] }> = [];
+    selectedWorkflow.taskIds.forEach((taskId) => {
+      const task = workflowTaskMap.get(taskId);
+      if (!task || !task.attachments?.length) return;
+      task.attachments.forEach((attachment) => rows.push({ task, attachment }));
+    });
+    return rows;
   }, [selectedWorkflow, workflowTaskMap]);
 
   const nodePositionsByTask = useMemo(() => {
@@ -452,6 +468,25 @@ export default function WorkflowCanvasPanel({
     }
   };
 
+  const handleTaskFileDrop = async (task: PurchasingTask, e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragHoverTaskId(null);
+    if (!onAttachFilesToTask) return;
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
+    setUploadingTaskId(task.id);
+    try {
+      await onAttachFilesToTask(task, files);
+      toast.success(`${files.length} dosya göreve eklendi`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Dosyalar göreve eklenemedi');
+    } finally {
+      setUploadingTaskId(null);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-3 min-w-0">
       <aside className="rounded-2xl border border-border bg-card p-3 space-y-3 shadow-sm">
@@ -509,6 +544,14 @@ export default function WorkflowCanvasPanel({
               </div>
               <p className="text-[11px] text-muted-foreground mt-1">{progress.completed}/{progress.total} görev tamamlandı (%{progress.pct})</p>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowProjectFiles(true)}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-border bg-card hover:bg-accent"
+            >
+              Dosyalarım ({workflowFiles.length})
+            </button>
           </>
         )}
 
@@ -687,8 +730,22 @@ export default function WorkflowCanvasPanel({
               if (!task) return null;
               const isLinkFrom = linkingFromTaskId === task.id;
               const isLinkHover = linkHoverTargetTaskId === task.id;
+              const isFileDragHover = dragHoverTaskId === task.id;
               return (
-                <div key={task.id} className="absolute w-[236px]" style={{ left: node.x, top: node.y }}>
+                <div
+                  key={task.id}
+                  className="absolute w-[236px]"
+                  style={{ left: node.x, top: node.y }}
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.files?.length > 0) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragHoverTaskId(task.id);
+                    }
+                  }}
+                  onDragLeave={() => setDragHoverTaskId((prev) => (prev === task.id ? null : prev))}
+                  onDrop={(e) => handleTaskFileDrop(task, e)}
+                >
                   <div className="absolute -left-2 top-1/2 -translate-y-1/2 z-20">
                     <button
                       onPointerEnter={() => linkingFromTaskId && setLinkHoverTargetTaskId(task.id)}
@@ -707,7 +764,8 @@ export default function WorkflowCanvasPanel({
                     className={cn(
                       'rounded-lg border px-2.5 py-2 shadow-sm select-none cursor-move backdrop-blur-[1px] transition-all',
                       'bg-white/95 dark:bg-zinc-900/90',
-                      draggingNode?.taskId === task.id ? 'ring-2 ring-sky-500/40' : ''
+                      draggingNode?.taskId === task.id ? 'ring-2 ring-sky-500/40' : '',
+                      isFileDragHover ? 'ring-2 ring-emerald-500/50 bg-emerald-500/5' : ''
                     )}
                     style={{ borderColor: completedPathState.completedNodeIds.has(task.id) ? '#22c55e' : selectedWorkflow.color }}
                   >
@@ -732,6 +790,7 @@ export default function WorkflowCanvasPanel({
                       </div>
                     </div>
                     <p className="text-[10px] text-zinc-600 dark:text-zinc-400 mt-1">{task.date} • {task.startTime}-{task.endTime}</p>
+                    {uploadingTaskId === task.id && <p className="text-[10px] text-emerald-600 mt-1">Dosyalar yükleniyor...</p>}
                     <div className="mt-2 flex items-center justify-between">
                       <span className={cn('text-[10px] px-1.5 py-0.5 rounded', task.completed ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-400')}>
                         {task.completed ? 'Tamamlandı' : 'Bekliyor'}
@@ -773,6 +832,49 @@ export default function WorkflowCanvasPanel({
             )}
               </div>
             </div>
+            {showProjectFiles && selectedWorkflow && (
+              <div className="absolute inset-0 z-40 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-3" onClick={() => setShowProjectFiles(false)}>
+                <div className="w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-2xl border border-border bg-card" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between p-3 border-b border-border">
+                    <div>
+                      <p className="text-sm font-semibold">{selectedWorkflow.name} • Dosyalarım</p>
+                      <p className="text-xs text-muted-foreground">Bu projedeki görevlere eklenmiş dosyalar</p>
+                    </div>
+                    <button type="button" className="text-xs px-2 py-1 rounded border border-border" onClick={() => setShowProjectFiles(false)}>Kapat</button>
+                  </div>
+                  <div className="p-3 space-y-2 overflow-y-auto max-h-[calc(80vh-72px)]">
+                    {workflowFiles.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Bu projede henüz dosya yok.</p>
+                    ) : (
+                      workflowFiles.map(({ task, attachment }, idx) => (
+                        <div key={`${task.id}-${attachment.storagePath}-${idx}`} className="rounded-xl border border-border p-2.5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm truncate">{attachment.name}</p>
+                              <p className="text-[11px] text-muted-foreground truncate">Görev: {task.title}</p>
+                            </div>
+                            <a
+                              href={attachment.url}
+                              download={attachment.name}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs px-2 py-1 rounded border border-border hover:bg-accent shrink-0"
+                            >
+                              İndir
+                            </a>
+                          </div>
+                          <div className="mt-2">
+                            <span className={cn('text-[10px] px-1.5 py-0.5 rounded', task.completed ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-700')}>
+                              {task.completed ? 'Tamamlandı' : 'Tamamlanmadı'}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>
