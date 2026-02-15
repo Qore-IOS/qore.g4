@@ -948,11 +948,11 @@ export default function TotalVerimlilikPanel({
       const endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
 
       // Seçilen depodan yapılan sevkiyatları çek
+      // NOT: depotId (equality) + timestamp (range) composite index gerektirdiğinden
+      // sadece depotId ile sorgulayıp tarih filtresini client-side yapıyoruz
       const shipmentsQuery = query(
         collection(db, 'shipments'),
-        where('depotId', '==', selectedDepotForSevkiyat),
-        where('timestamp', '>=', Timestamp.fromDate(startDate)),
-        where('timestamp', '<=', Timestamp.fromDate(endDate))
+        where('depotId', '==', selectedDepotForSevkiyat)
       );
       const shipmentsSnap = await getDocs(shipmentsQuery);
 
@@ -970,6 +970,11 @@ export default function TotalVerimlilikPanel({
 
       for (const shipmentDoc of shipmentsSnap.docs) {
         const shipmentData = shipmentDoc.data();
+
+        // Tarih filtresini client-side uygula
+        const shipmentTimestamp = shipmentData.timestamp?.toDate ? shipmentData.timestamp.toDate() : new Date(shipmentData.timestamp);
+        if (shipmentTimestamp < startDate || shipmentTimestamp > endDate) continue;
+
         const recipientName = shipmentData.recipientHospital;
 
         // recipientHospital ismi ile seçilen lab'ları eşleştir
