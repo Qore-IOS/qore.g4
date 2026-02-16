@@ -113,6 +113,8 @@ type TransferItem = {
   seriNumarasi?: string;
 };
 
+type TransferWithId = Transfer & { id: string };
+
 // Timeout wrapper - prevents queries from hanging indefinitely
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -124,6 +126,67 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 const QUERY_TIMEOUT = 30_000; // 30 seconds per query group
+const TRANSFER_ITEMS_FETCH_LIMIT = 250;
+
+async function fetchTransferItemsNoIndex(params: {
+  transfers: TransferWithId[];
+  searchType: 'product' | 'lot' | 'serial';
+  needle: string;
+  needleOriginal: string;
+  uniqueStockCodes: string[];
+}): Promise<TransferItem[]> {
+  const { transfers, searchType, needle, needleOriginal, uniqueStockCodes } = params;
+  if (!transfers.length) return [];
+
+  const selectedTransfers = transfers
+    .sort((a, b) => normDate((b as any).timestamp).getTime() - normDate((a as any).timestamp).getTime())
+    .slice(0, TRANSFER_ITEMS_FETCH_LIMIT);
+
+  const itemSnaps = await Promise.all(
+    selectedTransfers.map(tr =>
+      adminDb.collection('transfers').doc(tr.id).collection('items').get()
+    )
+  );
+
+  const filtered: TransferItem[] = [];
+
+  itemSnaps.forEach((snap, idx) => {
+    const transferId = selectedTransfers[idx]?.id;
+    if (!transferId) return;
+
+    snap.docs.forEach((d: any) => {
+      const data = d.data();
+      const item: TransferItem = {
+        transferId,
+        stokKodu: data.stokKodu,
+        stokAdi: data.stokAdi,
+        lotNumarasi: data.lotNumarasi,
+        miad: data.miad,
+        seriNumarasi: data.seriNumarasi,
+      };
+
+      if (searchType === 'serial') {
+        if ((item.seriNumarasi || '').toLowerCase() === needle || (item.seriNumarasi || '') === needleOriginal) {
+          filtered.push(item);
+        }
+        return;
+      }
+
+      if (searchType === 'lot') {
+        if ((item.lotNumarasi || '').toLowerCase() === needle || (item.lotNumarasi || '') === needleOriginal) {
+          filtered.push(item);
+        }
+        return;
+      }
+
+      if (uniqueStockCodes.includes(item.stokKodu)) {
+        filtered.push(item);
+      }
+    });
+  });
+
+  return filtered;
+}
 
 /**
  * Server Action - Optimized product ledger search.
@@ -250,41 +313,25 @@ export async function searchProductLedger(q: string): Promise<SearchResult> {
     corePromises.push(Promise.resolve({ docs: [] }));
   }
 
-  // [1] Verification Reports
+  // [1] Verification Reports (index-safe: single where + in-memory filter)
   if (searchType === 'serial') {
     corePromises.push(
       adminDb.collection('verificationReports')
         .where('seriNumarasi', '==', needleOriginal)
-        .where('raporTipi', '==', 'mal_kabul')
         .get()
     );
   } else if (searchType === 'lot') {
     corePromises.push(
       adminDb.collection('verificationReports')
         .where('lotNumarasi', '==', needleOriginal)
-        .where('raporTipi', '==', 'mal_kabul')
         .get()
     );
   } else {
     corePromises.push(Promise.resolve({ docs: [] }));
   }
 
-  // [2] Transfer Items (via collectionGroup - efficient)
-  if (searchType === 'serial') {
-    corePromises.push(
-      adminDb.collectionGroup('items').where('seriNumarasi', '==', needleOriginal).get()
-    );
-  } else if (searchType === 'lot') {
-    corePromises.push(
-      adminDb.collectionGroup('items').where('lotNumarasi', '==', needleOriginal).get()
-    );
-  } else if (uniqueStockCodes.length > 0 && uniqueStockCodes.length <= 30) {
-    corePromises.push(
-      adminDb.collectionGroup('items').where('stokKodu', 'in', uniqueStockCodes).get()
-    );
-  } else {
-    corePromises.push(Promise.resolve({ docs: [] }));
-  }
+  // [2] Transfer Items (index-safe path; fetched in phase 3 from transfer subcollections)
+  corePromises.push(Promise.resolve({ docs: [] }));
 
   // [3] Consumption Records
   if (searchType === 'serial') {
@@ -323,18 +370,15 @@ export async function searchProductLedger(q: string): Promise<SearchResult> {
   const [
     depoStokSnap,
     verifSnap,
-    transferItemsSnap,
+    ,
     consumptionSnap,
     destroyedKitsSnap,
   ] = await withTimeout(Promise.all(corePromises), QUERY_TIMEOUT);
 
   // Process core data
   const depoStok: DepoStokItem[] = depoStokSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
-  const verificationReports: any[] = verifSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
-  const transferItems: TransferItem[] = transferItemsSnap?.docs?.map((d: any) => ({
-    transferId: d.ref.parent.parent?.id || '',
-    ...d.data()
-  })) || [];
+  const verificationReports: any[] = (verifSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [])
+    .filter((r: any) => r.raporTipi === 'mal_kabul');
   const consumptionRecords: ConsumptionRecord[] = consumptionSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
   const destroyedKits: any[] = destroyedKitsSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
 
@@ -364,32 +408,42 @@ export async function searchProductLedger(q: string): Promise<SearchResult> {
     phase3Promises.push(Promise.resolve({ docs: [] }));
   }
 
-  // [1] Only fetch referenced transfers (not ALL transfers)
-  const uniqueTransferIds = Array.from(new Set(transferItems.map(it => it.transferId).filter(Boolean)));
-  if (uniqueTransferIds.length > 0) {
-    // Firestore getAll supports up to 100 documents at a time
-    const transferDocRefs = uniqueTransferIds.map(id => adminDb.collection('transfers').doc(id));
-    const batchSize = 100;
-    const transferBatches: any[][] = [];
-    for (let i = 0; i < transferDocRefs.length; i += batchSize) {
-      transferBatches.push(transferDocRefs.slice(i, i + batchSize));
+  // [1] Candidate transfers (index-safe; no collectionGroup dependency)
+  if (depotIds.length > 0) {
+    const depotChunks: string[][] = [];
+    for (let i = 0; i < depotIds.length; i += 30) {
+      depotChunks.push(depotIds.slice(i, i + 30));
     }
     phase3Promises.push(
-      Promise.all(transferBatches.map(batch => adminDb.getAll(...batch)))
-        .then(results => results.flat().filter((doc: any) => doc.exists).map((doc: any) => ({ id: doc.id, ...doc.data() } as Transfer)))
+      Promise.all(depotChunks.map(chunk =>
+        adminDb.collection('transfers').where('sourceDepotId', 'in', chunk).get()
+      )).then(snaps => ({ docs: snaps.flatMap(s => s.docs) }))
     );
   } else {
-    phase3Promises.push(Promise.resolve([]));
+    phase3Promises.push(
+      adminDb.collection('transfers').limit(300).get()
+    );
   }
 
-  const [shipmentsSnap, referencedTransfers] = await withTimeout(
+  const [shipmentsSnap, candidateTransfersSnap] = await withTimeout(
     Promise.all(phase3Promises),
     QUERY_TIMEOUT
   );
 
   const allShipments: Shipment[] = shipmentsSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
+  const candidateTransfers: TransferWithId[] = candidateTransfersSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
+
+  const transferItemsFromSubcollections = await fetchTransferItemsNoIndex({
+    transfers: candidateTransfers,
+    searchType,
+    needle,
+    needleOriginal,
+    uniqueStockCodes,
+  });
+
+  const filteredTransferItems = transferItemsFromSubcollections;
   const transferMap = new Map<string, Transfer>(
-    (referencedTransfers as Transfer[]).map((t: Transfer) => [t.id, t])
+    candidateTransfers.map((t: TransferWithId) => [t.id, t])
   );
 
   // --- Filter shipments by content ---
@@ -406,16 +460,7 @@ export async function searchProductLedger(q: string): Promise<SearchResult> {
     });
   });
 
-  // --- Filter transfer items ---
-  const filteredTransferItems = transferItems.filter(it => {
-    if (searchType === 'serial') {
-      return (it.seriNumarasi || '').toLowerCase() === needle;
-    } else if (searchType === 'lot') {
-      return (it.lotNumarasi || '').toLowerCase() === needle;
-    } else {
-      return uniqueStockCodes.includes(it.stokKodu);
-    }
-  });
+  // Transfer items were filtered during subcollection fetch.
 
   // --- Build Ledger Rows based on search type ---
   const ledgerRows: LedgerRow[] = [];
