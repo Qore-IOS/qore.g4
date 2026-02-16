@@ -88,6 +88,7 @@ import {
   addWeeks,
   addMonths,
   isBefore,
+  startOfDay,
 } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
