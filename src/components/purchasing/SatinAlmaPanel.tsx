@@ -32,6 +32,7 @@ import type {
   Hospital,
   LabPool,
   User,
+  DeviceFaultReport,
 } from '@/lib/types';
 import {
   Plus,
@@ -68,6 +69,7 @@ import {
   MessageSquare,
   Send,
   Settings,
+  Wrench,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -544,6 +546,7 @@ export default function SatinAlmaPanel() {
 
   // State
   const [tasks, setTasks] = useState<PurchasingTask[]>([]);
+  const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -630,6 +633,20 @@ export default function SatinAlmaPanel() {
         setTasksLoading(false);
       }
     );
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'deviceFaultReports'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as DeviceFaultReport[];
+        setFaultReports(items);
+      },
+      (err) => console.error('DeviceFaultReports listen error', err)
+    );
+
     return () => unsub();
   }, []);
 
@@ -1416,6 +1433,56 @@ export default function SatinAlmaPanel() {
     return tasks.filter((t) => setIds.has(t.id));
   }, [tasks, myDayTaskIds]);
 
+  const faultKpi = useMemo(() => {
+    return faultReports.reduce(
+      (acc, fault) => {
+        if (fault.status === 'atama_bekliyor') acc.pendingAssignment += 1;
+        if (fault.status === 'mudahale_bekliyor') acc.pendingIntervention += 1;
+        if (fault.status === 'mudahale_ediliyor') acc.inIntervention += 1;
+        return acc;
+      },
+      { pendingAssignment: 0, pendingIntervention: 0, inIntervention: 0 }
+    );
+  }, [faultReports]);
+
+  const personalCalendarKpi = useMemo(() => {
+    if (!currentUserProfile?.uid) {
+      return { weekCount: 0, monthCount: 0, nextTasks: [] as PurchasingTask[] };
+    }
+
+    const now = new Date();
+    const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+    const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+    const monthStart = startOfMonth(now);
+    const monthEnd = endOfMonth(now);
+
+    const mine = tasks.filter((task) => {
+      if (task.completed) return false;
+      return (
+        task.createdByUid === currentUserProfile.uid ||
+        task.assignedPersonnel?.some((p) => p.uid === currentUserProfile.uid) ||
+        task.accompanyingPersonnel?.some((p) => p.uid === currentUserProfile.uid)
+      );
+    });
+
+    const weekCount = mine.filter((task) => {
+      const taskDate = parseISO(task.date);
+      return taskDate >= weekStart && taskDate <= weekEnd;
+    }).length;
+
+    const monthCount = mine.filter((task) => {
+      const taskDate = parseISO(task.date);
+      return taskDate >= monthStart && taskDate <= monthEnd;
+    }).length;
+
+    const nextTasks = mine
+      .filter((task) => parseISO(task.date) >= startOfDay(now))
+      .sort((a, b) => (a.date === b.date ? (a.startTime > b.startTime ? 1 : -1) : a.date > b.date ? 1 : -1))
+      .slice(0, 3);
+
+    return { weekCount, monthCount, nextTasks };
+  }, [tasks, currentUserProfile?.uid]);
+
   const addToMyDay = (taskId: string) => {
     setMyDayTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
   };
@@ -1586,6 +1653,67 @@ export default function SatinAlmaPanel() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="px-4 md:px-8 mt-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <Link href="/ariza-yonetimi" className="group">
+            <div className="dashboard-kpi-surface rounded-2xl border border-border p-4 transition-all hover:-translate-y-0.5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Wrench className="w-4 h-4" /> Cihaz Arıza KPI
+                </h3>
+                <span className="text-[11px] text-muted-foreground">Detaya Git</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl bg-secondary/50 border border-border p-2">
+                  <p className="text-[11px] text-muted-foreground">Atama Bekleyen</p>
+                  <p className="text-xl font-bold mt-0.5">{faultKpi.pendingAssignment}</p>
+                </div>
+                <div className="rounded-xl bg-secondary/50 border border-border p-2">
+                  <p className="text-[11px] text-muted-foreground">Müdahale Bekleyen</p>
+                  <p className="text-xl font-bold mt-0.5">{faultKpi.pendingIntervention}</p>
+                </div>
+                <div className="rounded-xl bg-secondary/50 border border-border p-2">
+                  <p className="text-[11px] text-muted-foreground">Müdahale Edilen</p>
+                  <p className="text-xl font-bold mt-0.5">{faultKpi.inIntervention}</p>
+                </div>
+              </div>
+            </div>
+          </Link>
+
+          <Link href="/satin-alma/analiz-planlama" className="group">
+            <div className="dashboard-kpi-surface rounded-2xl border border-border p-4 transition-all hover:-translate-y-0.5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <CalendarClock className="w-4 h-4" /> Takvim KPI
+                </h3>
+                <span className="text-[11px] text-muted-foreground">Planlama Paneli</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div className="rounded-xl bg-secondary/50 border border-border p-2">
+                  <p className="text-[11px] text-muted-foreground">1 Haftalık</p>
+                  <p className="text-xl font-bold mt-0.5">{personalCalendarKpi.weekCount}</p>
+                </div>
+                <div className="rounded-xl bg-secondary/50 border border-border p-2">
+                  <p className="text-[11px] text-muted-foreground">1 Aylık</p>
+                  <p className="text-xl font-bold mt-0.5">{personalCalendarKpi.monthCount}</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {personalCalendarKpi.nextTasks.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">Yaklaşan görev bulunmuyor.</p>
+                ) : (
+                  personalCalendarKpi.nextTasks.map((task) => (
+                    <p key={task.id} className="text-[11px] truncate text-muted-foreground">
+                      {task.date} • {task.startTime} • <span className="text-foreground">{task.title}</span>
+                    </p>
+                  ))
+                )}
+              </div>
+            </div>
+          </Link>
         </div>
       </div>
 
