@@ -1,11 +1,12 @@
 
 'use client';
 import React, { useState, useMemo, useEffect } from 'react';
+import Link from 'next/link';
 import { useTheme } from 'next-themes';
-import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats } from '@/lib/types';
+import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { TrendingUp, Zap, ChevronLeft, ChevronRight, Eye, ChevronDown } from 'lucide-react';
+import { TrendingUp, Zap, ChevronLeft, ChevronRight, Eye, ChevronDown, Wrench, CalendarClock } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -25,6 +26,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
+import { collection, onSnapshot, query } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
@@ -58,6 +61,8 @@ export default function DashboardPanel({
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
   const { currentUserProfile } = useAuth();
   const { theme } = useTheme();
+  const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
+  const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
 
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
@@ -65,6 +70,77 @@ export default function DashboardPanel({
   const [efficiencyMonth, setEfficiencyMonth] = useState(new Date().getMonth());
   const [efficiencyYear, setEfficiencyYear] = useState(new Date().getFullYear());
   const [isEfficiencyCardExpanded, setIsEfficiencyCardExpanded] = useState(false);
+
+  useEffect(() => {
+    const faultQuery = query(collection(db, 'deviceFaultReports'));
+    const unsubscribeFaults = onSnapshot(
+      faultQuery,
+      (snapshot) => {
+        const reports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as DeviceFaultReport[];
+        setFaultReports(reports);
+      },
+      (error) => console.error('deviceFaultReports fetch error:', error)
+    );
+
+    const taskQuery = query(collection(db, 'purchasingTasks'));
+    const unsubscribeTasks = onSnapshot(
+      taskQuery,
+      (snapshot) => {
+        const tasks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as PurchasingTask[];
+        setPurchasingTasks(tasks);
+      },
+      (error) => console.error('purchasingTasks fetch error:', error)
+    );
+
+    return () => {
+      unsubscribeFaults();
+      unsubscribeTasks();
+    };
+  }, []);
+
+  const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
+    if (report.status === 'atama_bekliyor') acc.atamaBekleyen += 1;
+    if (report.status === 'mudahale_bekliyor') acc.mudahaleBekleyen += 1;
+    if (report.status === 'mudahale_ediliyor') acc.mudahaleEdilen += 1;
+    return acc;
+  }, { atamaBekleyen: 0, mudahaleBekleyen: 0, mudahaleEdilen: 0 }), [faultReports]);
+
+  const personalCalendarKpi = useMemo(() => {
+    if (!currentUserProfile?.uid) {
+      return { weeklyCount: 0, monthlyCount: 0, upcomingTasks: [] as PurchasingTask[] };
+    }
+
+    const currentDate = new Date();
+    const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+    const monthStart = startOfMonth(currentDate);
+    const monthEnd = endOfMonth(currentDate);
+    const todayKey = format(currentDate, 'yyyy-MM-dd');
+
+    const userTasks = purchasingTasks.filter((task) => {
+      if (task.completed) return false;
+      return task.createdByUid === currentUserProfile.uid
+        || task.assignedPersonnel?.some((person) => person.uid === currentUserProfile.uid)
+        || task.accompanyingPersonnel?.some((person) => person.uid === currentUserProfile.uid);
+    });
+
+    const weeklyCount = userTasks.filter((task) => {
+      const taskDate = toDateFromAny(task.date);
+      return taskDate && taskDate >= weekStart && taskDate <= weekEnd;
+    }).length;
+
+    const monthlyCount = userTasks.filter((task) => {
+      const taskDate = toDateFromAny(task.date);
+      return taskDate && taskDate >= monthStart && taskDate <= monthEnd;
+    }).length;
+
+    const upcomingTasks = userTasks
+      .filter((task) => task.date >= todayKey)
+      .sort((a, b) => (a.date === b.date ? a.startTime.localeCompare(b.startTime) : a.date.localeCompare(b.date)))
+      .slice(0, 3);
+
+    return { weeklyCount, monthlyCount, upcomingTasks };
+  }, [purchasingTasks, currentUserProfile?.uid]);
 
   // Calculate date range for daily stats query
   const { startDateKey, endDateKey } = useMemo(() => {
@@ -372,7 +448,69 @@ export default function DashboardPanel({
               )}
             </Card>
           </motion.div>
-          
+
+          <motion.div {...motionProps}>
+            <Link href="/ariza-yonetimi" className="block h-full">
+              <Card className="dashboard-kpi-surface h-full flex flex-col cursor-pointer">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Wrench className="h-5 w-5" /> Cihaz Arıza KPI
+                  </CardTitle>
+                  <CardDescription>Atama ve müdahale durumlarındaki açık cihaz arızaları.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl bg-secondary/40 border border-border p-2">
+                    <p className="text-[11px] text-muted-foreground">Atama Bekleyen</p>
+                    <p className="text-xl font-bold">{faultKpis.atamaBekleyen}</p>
+                  </div>
+                  <div className="rounded-xl bg-secondary/40 border border-border p-2">
+                    <p className="text-[11px] text-muted-foreground">Müdahale Bekleyen</p>
+                    <p className="text-xl font-bold">{faultKpis.mudahaleBekleyen}</p>
+                  </div>
+                  <div className="rounded-xl bg-secondary/40 border border-border p-2">
+                    <p className="text-[11px] text-muted-foreground">Müdahale Edilen</p>
+                    <p className="text-xl font-bold">{faultKpis.mudahaleEdilen}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          </motion.div>
+
+          <motion.div {...motionProps}>
+            <Link href="/satin-alma/analiz-planlama" className="block h-full">
+              <Card className="dashboard-kpi-surface h-full flex flex-col cursor-pointer">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CalendarClock className="h-5 w-5" /> Takvim KPI
+                  </CardTitle>
+                  <CardDescription>Kişisel görev takvimi özeti (1 hafta / 1 ay).</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl bg-secondary/40 border border-border p-2">
+                      <p className="text-[11px] text-muted-foreground">1 Haftalık</p>
+                      <p className="text-xl font-bold">{personalCalendarKpi.weeklyCount}</p>
+                    </div>
+                    <div className="rounded-xl bg-secondary/40 border border-border p-2">
+                      <p className="text-[11px] text-muted-foreground">1 Aylık</p>
+                      <p className="text-xl font-bold">{personalCalendarKpi.monthlyCount}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    {personalCalendarKpi.upcomingTasks.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Yaklaşan görev bulunmuyor.</p>
+                    ) : (
+                      personalCalendarKpi.upcomingTasks.map((task) => (
+                        <p key={task.id} className="text-xs text-muted-foreground truncate">
+                          {task.date} • {task.startTime} • <span className="text-foreground">{task.title}</span>
+                        </p>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          </motion.div>
         </div>
       </div>
       
