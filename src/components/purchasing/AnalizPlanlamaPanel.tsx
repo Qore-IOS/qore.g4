@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import type { Hospital, PurchasingTask, User } from '@/lib/types';
 import { ArrowLeft, CalendarClock, Building2, FileText, ImageIcon, Flame, CalendarDays } from 'lucide-react';
-import { addMonths, endOfDay, format, isAfter, isBefore, parseISO, startOfDay, subMonths } from 'date-fns';
+import { endOfDay, endOfWeek, format, isAfter, isBefore, parseISO, startOfDay, startOfMonth, startOfWeek, endOfMonth, subMonths } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,7 @@ function getHeatColor(value: number, max: number): string {
 }
 
 export default function AnalizPlanlamaPanel() {
+  const { currentUserProfile } = useAuth();
   const [tasks, setTasks] = useState<PurchasingTask[]>([]);
   const [labs, setLabs] = useState<Hospital[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -35,6 +37,7 @@ export default function AnalizPlanlamaPanel() {
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [heatmapMode, setHeatmapMode] = useState<'weekly' | 'monthly'>('weekly');
   const [selectedUserId, setSelectedUserId] = useState<string>('all');
+  const [personalCalendarMode, setPersonalCalendarMode] = useState<'weekly' | 'monthly'>('weekly');
 
   useEffect(() => {
     const q = query(collection(db, 'purchasingTasks'), orderBy('date', 'desc'));
@@ -123,6 +126,43 @@ export default function AnalizPlanlamaPanel() {
     });
   }, [heatmapMode]);
 
+  useEffect(() => {
+    if (currentUserProfile?.uid) {
+      setSelectedUserId((prev) => (prev === 'all' ? currentUserProfile.uid : prev));
+    }
+  }, [currentUserProfile?.uid]);
+
+  const personalCalendar = useMemo(() => {
+    if (!currentUserProfile?.uid) {
+      return { tasks: [] as PurchasingTask[], rangeLabel: '-' };
+    }
+
+    const now = new Date();
+    const start = personalCalendarMode === 'weekly'
+      ? startOfWeek(now, { weekStartsOn: 1 })
+      : startOfMonth(now);
+    const end = personalCalendarMode === 'weekly'
+      ? endOfWeek(now, { weekStartsOn: 1 })
+      : endOfMonth(now);
+
+    const mine = tasks
+      .filter((t) => {
+        const taskDate = parseISO(t.date);
+        const isMine =
+          t.createdByUid === currentUserProfile.uid ||
+          (t.assignedPersonnel || []).some((p) => p.uid === currentUserProfile.uid) ||
+          (t.accompanyingPersonnel || []).some((p) => p.uid === currentUserProfile.uid);
+
+        return isMine && !t.completed && taskDate >= start && taskDate <= end;
+      })
+      .sort((a, b) => (a.date === b.date ? (a.startTime > b.startTime ? 1 : -1) : a.date > b.date ? 1 : -1));
+
+    return {
+      tasks: mine,
+      rangeLabel: `${format(start, 'd MMM', { locale: tr })} - ${format(end, 'd MMM yyyy', { locale: tr })}`,
+    };
+  }, [tasks, currentUserProfile?.uid, personalCalendarMode]);
+
   const heatmapData = useMemo(() => {
     const filtered = selectedUserId === 'all'
       ? tasks
@@ -171,6 +211,50 @@ export default function AnalizPlanlamaPanel() {
         <div className="px-4 md:px-8 py-16 text-muted-foreground">Veriler yükleniyor...</div>
       ) : (
         <div className="px-4 md:px-8 py-6 space-y-6">
+          <section className="dashboard-kpi-surface rounded-2xl border border-border p-4 md:p-5">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-sm md:text-base font-semibold">Kişisel Takvim KPI</h2>
+                <p className="text-xs text-muted-foreground">Kendi görevlerinizin 1 haftalık veya 1 aylık görünümü</p>
+              </div>
+              <div className="inline-flex rounded-xl border border-border bg-secondary p-1">
+                <button
+                  onClick={() => setPersonalCalendarMode('weekly')}
+                  className={cn('px-3 py-1.5 text-xs rounded-lg transition-colors', personalCalendarMode === 'weekly' ? 'bg-background text-foreground' : 'text-muted-foreground')}
+                >
+                  1 Hafta
+                </button>
+                <button
+                  onClick={() => setPersonalCalendarMode('monthly')}
+                  className={cn('px-3 py-1.5 text-xs rounded-lg transition-colors', personalCalendarMode === 'monthly' ? 'bg-background text-foreground' : 'text-muted-foreground')}
+                >
+                  1 Ay
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 mb-3">
+              <p className="text-[11px] text-muted-foreground">Aralık</p>
+              <p className="text-sm font-medium">{personalCalendar.rangeLabel}</p>
+              <p className="text-xs text-muted-foreground mt-1">Toplam görev: {personalCalendar.tasks.length}</p>
+            </div>
+
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {personalCalendar.tasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Bu aralıkta üzerinize atanmış veya oluşturduğunuz görev bulunmuyor.</p>
+              ) : (
+                personalCalendar.tasks.map((task) => (
+                  <div key={task.id} className="rounded-xl border border-border bg-secondary/20 px-3 py-2">
+                    <p className="text-sm font-medium">{task.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {format(parseISO(task.date), 'd MMMM yyyy EEEE', { locale: tr })} • {task.startTime}-{task.endTime}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
           {/* Laboratuvar Ziyaret Geçmişi */}
           <section className="rounded-2xl border border-border bg-card p-4 md:p-5">
             <div className="flex items-center gap-2 mb-4">
