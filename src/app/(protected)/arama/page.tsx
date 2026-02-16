@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import MainSearch from '@/components/MainSearch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,8 +16,7 @@ import { exportDataToExcel } from '@/lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult } from '@/services/searchService';
-import { useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
+import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult } from '@/actions/searchActions';
 
 // -----------------------------------------------------
 // Types & Helper Components
@@ -48,9 +47,8 @@ const SortableHeader: React.FC<{
 export default function AramaPanel() {
   const { toast } = useToast();
 
-  // Master data from cached hooks (no initial fetch, uses cache)
-  const { data: productCodes = [] } = useProductCodes();
-  const { data: depots = [] } = useDepots();
+  // Search counter to discard stale results from previous searches
+  const searchCounterRef = useRef(0);
 
   // Search state
   const [query, setQuery] = useState('');
@@ -89,19 +87,31 @@ export default function AramaPanel() {
       return;
     }
 
+    // Increment counter to track this search - discard results from stale searches
+    const currentSearch = ++searchCounterRef.current;
+
     setQuery(q);
     setIsSearching(true);
     setHasSearched(true);
     setPage(1);
 
     try {
-      const result: SearchResult = await searchProductLedger(q, productCodes, depots);
+      const result: SearchResult = await searchProductLedger(q);
 
-      setResults(result.ledgerRows);
+      // Discard result if a newer search was started while this one was running
+      if (currentSearch !== searchCounterRef.current) return;
+
+      // Server action returns Date objects as ISO strings - convert them back
+      const ledgerRows = result.ledgerRows.map(row => ({
+        ...row,
+        tarih: row.tarih instanceof Date ? row.tarih : new Date(row.tarih),
+      }));
+
+      setResults(ledgerRows);
       setStockSummary(result.stockSummary);
       setSearchType(result.searchType);
 
-      if (result.ledgerRows.length === 0) {
+      if (ledgerRows.length === 0) {
         toast({
           title: 'Sonuç Bulunamadı',
           description: 'Arama kriterlerine uygun kayıt bulunamadı.',
@@ -110,20 +120,28 @@ export default function AramaPanel() {
       } else {
         toast({
           title: 'Arama Tamamlandı',
-          description: `${result.ledgerRows.length} işlem kaydı bulundu.`,
+          description: `${ledgerRows.length} işlem kaydı bulundu.`,
         });
       }
     } catch (error) {
+      // Don't show error toast for stale/cancelled searches
+      if (currentSearch !== searchCounterRef.current) return;
+
       console.error('Search error:', error);
+      const message = error instanceof Error && error.message.includes('zaman aşımı')
+        ? 'Arama zaman aşımına uğradı. Lütfen daha spesifik bir arama yapın.'
+        : 'Arama sırasında bir hata oluştu. Lütfen tekrar deneyin.';
       toast({
         title: 'Arama Hatası',
-        description: 'Arama sırasında bir hata oluştu. Lütfen tekrar deneyin.',
+        description: message,
         variant: 'destructive'
       });
     } finally {
-      setIsSearching(false);
+      if (currentSearch === searchCounterRef.current) {
+        setIsSearching(false);
+      }
     }
-  }, [toast, productCodes, depots]);
+  }, [toast]);
 
   // ---------------------------------------------------
   // Sorting & Filtering
