@@ -17,16 +17,16 @@ const ModernButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<ty
     <Button
       ref={ref}
       className={cn(
-        "h-auto p-8 text-lg font-headline rounded-xl transition-all duration-200 ease-in-out",
+        "h-auto min-h-[150px] p-5 sm:p-6 text-base sm:text-lg font-headline rounded-xl transition-all duration-200 ease-in-out whitespace-normal text-center",
         "bg-card text-card-foreground hover:bg-accent/10 hover:text-accent-foreground",
         "shadow-lg hover:shadow-xl",
         className
       )}
       {...props}
     >
-      <div className="flex flex-col items-center justify-center">
-        {Icon && <Icon className="h-12 w-12 mb-3 text-primary" />}
-        {children}
+      <div className="flex flex-col items-center justify-center gap-3 leading-tight">
+        {Icon && <Icon className="h-10 w-10 sm:h-12 sm:w-12 text-primary shrink-0" />}
+        <span className="max-w-full break-words">{children}</span>
       </div>
     </Button>
   )
