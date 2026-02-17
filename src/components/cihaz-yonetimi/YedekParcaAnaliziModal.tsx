@@ -79,10 +79,11 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [transferSnap, hospitalsSnap, assignmentsSnap] = await Promise.all([
+        const [transferSnap, hospitalsSnap, assignmentsSnap, devicesSnap] = await Promise.all([
           getDocs(query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'use_on_device'))),
           getDocs(collection(db, 'hospitals')),
           getDocs(collection(db, 'hospitalDeviceAssignments')),
+          getDocs(collection(db, 'devices')),
         ]);
 
         // Build hospitals map
@@ -92,17 +93,32 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
         });
         setHospitalsMap(hMap);
 
-        // Build device -> lab mapping from assignments
+        // Build device -> lab mapping from multiple sources
         const dlMap = new Map<string, { labId: string; labName: string }>();
+
+        // 1. From devices collection (primary source - deviceId in transfer logs
+        //    is a Device doc ID fetched from /teknik-servis/islem-formu/[deviceId])
+        devicesSnap.docs.forEach((d) => {
+          const data = d.data();
+          const labId = data.hospitalId || data.hastaneId || '';
+          if (labId) {
+            const lab = hMap.get(labId);
+            dlMap.set(d.id, { labId, labName: lab?.name || 'Bilinmiyor' });
+          }
+        });
+
+        // 2. From assignments (fallback, covers both assignment IDs and device model FKs)
         assignmentsSnap.docs.forEach((d) => {
           const data = d.data();
           const labId = data.hastaneId || '';
+          if (!labId) return;
           const lab = hMap.get(labId);
-          dlMap.set(data.deviceId || d.id, {
-            labId,
-            labName: lab?.name || 'Bilinmiyor',
-          });
+          const entry = { labId, labName: lab?.name || 'Bilinmiyor' };
+          if (!dlMap.has(d.id)) dlMap.set(d.id, entry);
+          if (data.cihazId && !dlMap.has(data.cihazId)) dlMap.set(data.cihazId, entry);
+          if (data.deviceId && !dlMap.has(data.deviceId)) dlMap.set(data.deviceId, entry);
         });
+
         setDeviceLabMap(dlMap);
 
         setTransferLogs(
