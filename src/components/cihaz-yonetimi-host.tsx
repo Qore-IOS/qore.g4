@@ -11,8 +11,6 @@ import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import QoreAIPanel from '@/components/QoreAIPanel';
-import KurumZiyaretAnaliziModal from '@/components/cihaz-yonetimi/KurumZiyaretAnaliziModal';
-import YedekParcaAnaliziModal from '@/components/cihaz-yonetimi/YedekParcaAnaliziModal';
 
 const ModernButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button> & {icon?: React.ElementType}>(
   ({ className, children, icon: Icon, ...props }, ref) => (
@@ -40,8 +38,6 @@ export default function CihazYonetimiHost() {
   const [subView, setSubView] = useState<CihazYonetimiSubView>('ana');
   const [isLoading, setIsLoading] = useState(true);
   const [isQoreAIPanelOpen, setIsQoreAIPanelOpen] = useState(false);
-  const [isKurumZiyaretOpen, setIsKurumZiyaretOpen] = useState(false);
-  const [isYedekParcaOpen, setIsYedekParcaOpen] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
   const { isAdmin, currentUserProfile } = useAuth();
@@ -139,11 +135,11 @@ export default function CihazYonetimiHost() {
                 Personel İzlem
               </Button>
             )}
-            <Button variant="ghost" onClick={() => setIsKurumZiyaretOpen(true)} className="text-muted-foreground hover:text-primary">
+            <Button variant="ghost" onClick={() => router.push('/kurum-ziyaret-analizi')} className="text-muted-foreground hover:text-primary">
                 <Building2 className="mr-2 h-5 w-5" />
                 Kurum Ziyaret Analizi
             </Button>
-            <Button variant="ghost" onClick={() => setIsYedekParcaOpen(true)} className="text-muted-foreground hover:text-primary">
+            <Button variant="ghost" onClick={() => router.push('/yedek-parca-analizi')} className="text-muted-foreground hover:text-primary">
                 <Package className="mr-2 h-5 w-5" />
                 Yedek Parça Analizi
             </Button>
@@ -156,8 +152,6 @@ export default function CihazYonetimiHost() {
     <>
       <MainMenu />
       <QoreAIPanel open={isQoreAIPanelOpen} onClose={() => setIsQoreAIPanelOpen(false)} />
-      <KurumZiyaretAnaliziModal isOpen={isKurumZiyaretOpen} onClose={() => setIsKurumZiyaretOpen(false)} />
-      <YedekParcaAnaliziModal isOpen={isYedekParcaOpen} onClose={() => setIsYedekParcaOpen(false)} />
     </>
   );
 }
