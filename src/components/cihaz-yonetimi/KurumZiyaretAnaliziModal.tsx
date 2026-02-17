@@ -381,7 +381,7 @@ export default function KurumZiyaretAnaliziModal({ isOpen, onClose }: KurumZiyar
                     <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="start">
+                <PopoverContent className="w-80 p-0 z-[10000]" align="start">
                   <div className="p-2 border-b">
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -442,7 +442,7 @@ export default function KurumZiyaretAnaliziModal({ isOpen, onClose }: KurumZiyar
                     <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-72 p-0" align="start">
+                <PopoverContent className="w-72 p-0 z-[10000]" align="start">
                   <div className="p-2 border-b">
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
