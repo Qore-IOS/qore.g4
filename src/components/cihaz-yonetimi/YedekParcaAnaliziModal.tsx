@@ -6,11 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Loader2, Package, Search, ArrowLeft, Monitor, Users, Warehouse, UserCheck, ChevronRight } from 'lucide-react';
+import { Loader2, Package, Search, ArrowLeft, Monitor, Users, Warehouse, UserCheck, ChevronRight, Clock, CalendarClock, Building2 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
+import type { Hospital } from '@/lib/types';
 
 interface YedekParcaAnaliziModalProps {
   isOpen: boolean;
@@ -31,36 +35,32 @@ interface TransferLog {
   formType?: 'teknik_servis' | 'aplikasyon';
 }
 
-interface PersonalStockItem {
-  id: string;
-  ownerUid: string;
-  ownerName: string;
-  stokKodu: string;
-  stokAdi: string;
-  status: string;
-}
-
-interface DepoStokItem {
-  id: string;
-  stokKodu: string;
-  stokAdi: string;
-  quantity: number;
-  serialNumber?: string;
-}
-
 interface PartSummary {
   stokKodu: string;
   stokAdi: string;
   usageCount: number;
+  lastUsedAt: Date | null;
+}
+
+interface ChangeHistoryEntry {
+  id: string;
+  date: Date;
+  deviceName: string;
+  labName: string;
+  personnelName: string;
+  serialNumber?: string;
+  formType?: string;
 }
 
 interface PartDetail {
   totalUsageCount: number;
-  devices: { deviceId: string; deviceName: string; count: number }[];
+  lastUsedAt: Date | null;
+  devices: { deviceId: string; deviceName: string; labName: string; count: number }[];
   personnel: { uid: string; name: string; count: number }[];
   depoStokCount: number;
   personnelStokCount: number;
   personnelStokByPerson: { uid: string; name: string; count: number }[];
+  changeHistory: ChangeHistoryEntry[];
 }
 
 export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAnaliziModalProps) {
@@ -70,6 +70,8 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPart, setSelectedPart] = useState<PartSummary | null>(null);
   const [partDetail, setPartDetail] = useState<PartDetail | null>(null);
+  const [hospitalsMap, setHospitalsMap] = useState<Map<string, Hospital>>(new Map());
+  const [deviceLabMap, setDeviceLabMap] = useState<Map<string, { labId: string; labName: string }>>(new Map());
 
   useEffect(() => {
     if (!isOpen) return;
@@ -77,12 +79,34 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
     const fetchData = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(
-          query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'use_on_device'))
-        );
+        const [transferSnap, hospitalsSnap, assignmentsSnap] = await Promise.all([
+          getDocs(query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'use_on_device'))),
+          getDocs(collection(db, 'hospitals')),
+          getDocs(collection(db, 'hospitalDeviceAssignments')),
+        ]);
+
+        // Build hospitals map
+        const hMap = new Map<string, Hospital>();
+        hospitalsSnap.docs.forEach((d) => {
+          hMap.set(d.id, { id: d.id, ...d.data() } as Hospital);
+        });
+        setHospitalsMap(hMap);
+
+        // Build device -> lab mapping from assignments
+        const dlMap = new Map<string, { labId: string; labName: string }>();
+        assignmentsSnap.docs.forEach((d) => {
+          const data = d.data();
+          const labId = data.hastaneId || '';
+          const lab = hMap.get(labId);
+          dlMap.set(data.deviceId || d.id, {
+            labId,
+            labName: lab?.name || 'Bilinmiyor',
+          });
+        });
+        setDeviceLabMap(dlMap);
 
         setTransferLogs(
-          snap.docs.map((d) => {
+          transferSnap.docs.map((d) => {
             const data = d.data();
             return {
               id: d.id,
@@ -125,8 +149,16 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
       const existing = map.get(log.stokKodu);
       if (existing) {
         existing.usageCount++;
+        if (!existing.lastUsedAt || log.createdAt > existing.lastUsedAt) {
+          existing.lastUsedAt = log.createdAt;
+        }
       } else {
-        map.set(log.stokKodu, { stokKodu: log.stokKodu, stokAdi: log.stokAdi, usageCount: 1 });
+        map.set(log.stokKodu, {
+          stokKodu: log.stokKodu,
+          stokAdi: log.stokAdi,
+          usageCount: 1,
+          lastUsedAt: log.createdAt,
+        });
       }
     }
     return Array.from(map.values()).sort((a, b) => b.usageCount - a.usageCount);
@@ -155,16 +187,31 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
       setDetailLoading(true);
 
       try {
-        // Get usage details from the already loaded transfer logs
         const usageLogs = transferLogs.filter((l) => l.stokKodu === part.stokKodu);
 
-        // Devices
-        const deviceMap = new Map<string, { deviceId: string; deviceName: string; count: number }>();
+        // Find last usage date
+        let lastUsedAt: Date | null = null;
+        for (const log of usageLogs) {
+          if (!lastUsedAt || log.createdAt > lastUsedAt) lastUsedAt = log.createdAt;
+        }
+
+        // Devices with lab names
+        const deviceMap = new Map<string, { deviceId: string; deviceName: string; labName: string; count: number }>();
         for (const log of usageLogs) {
           if (!log.deviceId) continue;
           const existing = deviceMap.get(log.deviceId);
-          if (existing) existing.count++;
-          else deviceMap.set(log.deviceId, { deviceId: log.deviceId, deviceName: log.deviceName || 'Bilinmiyor', count: 1 });
+          const labInfo = deviceLabMap.get(log.deviceId);
+          const labName = labInfo?.labName || 'Bilinmiyor';
+          if (existing) {
+            existing.count++;
+          } else {
+            deviceMap.set(log.deviceId, {
+              deviceId: log.deviceId,
+              deviceName: log.deviceName || 'Bilinmiyor',
+              labName,
+              count: 1,
+            });
+          }
         }
 
         // Personnel
@@ -175,6 +222,22 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
           if (existing) existing.count++;
           else personnelMap.set(log.createdByUid, { uid: log.createdByUid, name: log.createdByName, count: 1 });
         }
+
+        // Build change history (full extract)
+        const changeHistory: ChangeHistoryEntry[] = usageLogs
+          .map((log) => {
+            const labInfo = deviceLabMap.get(log.deviceId || '');
+            return {
+              id: log.id,
+              date: log.createdAt,
+              deviceName: log.deviceName || 'Bilinmiyor',
+              labName: labInfo?.labName || 'Bilinmiyor',
+              personnelName: log.createdByName,
+              serialNumber: log.serialNumber,
+              formType: log.formType,
+            };
+          })
+          .sort((a, b) => b.date.getTime() - a.date.getTime());
 
         // Fetch depot stock and personnel stock
         const [depoSnap, personalSnap] = await Promise.all([
@@ -201,11 +264,13 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
 
         setPartDetail({
           totalUsageCount: usageLogs.length,
+          lastUsedAt,
           devices: Array.from(deviceMap.values()).sort((a, b) => b.count - a.count),
           personnel: Array.from(personnelMap.values()).sort((a, b) => b.count - a.count),
           depoStokCount,
           personnelStokCount: totalPersonnelStok,
           personnelStokByPerson: Array.from(personnelStokMap.values()).sort((a, b) => b.count - a.count),
+          changeHistory,
         });
       } catch (error) {
         console.error('Parça detay hatası:', error);
@@ -213,8 +278,26 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
         setDetailLoading(false);
       }
     },
-    [transferLogs]
+    [transferLogs, deviceLabMap]
   );
+
+  const formatDate = (date: Date | null) => {
+    if (!date) return '-';
+    try {
+      return format(date, 'dd MMM yyyy HH:mm', { locale: tr });
+    } catch {
+      return '-';
+    }
+  };
+
+  const formatDateShort = (date: Date | null) => {
+    if (!date) return '-';
+    try {
+      return format(date, 'dd.MM.yyyy', { locale: tr });
+    } catch {
+      return '-';
+    }
+  };
 
   const renderPartList = () => (
     <>
@@ -222,7 +305,7 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
       {chartData.length > 0 && (
         <Card className="mb-6">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">En Cok Degisen Yedek Parcalar (Top 15)</CardTitle>
+            <CardTitle className="text-base">En Çok Değişen Yedek Parçalar (Top 15)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
@@ -239,12 +322,12 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
                         <div className="glass-card p-3 text-sm">
                           <p className="font-semibold mb-1">{data?.fullName}</p>
                           <p className="text-muted-foreground text-xs">{data?.stokKodu}</p>
-                          <p className="text-primary font-semibold mt-1">Kullanim: {data?.count}</p>
+                          <p className="text-primary font-semibold mt-1">Kullanım: {data?.count}</p>
                         </div>
                       );
                     }}
                   />
-                  <Bar dataKey="count" fill="#8884d8" name="Kullanim Sayisi" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="count" fill="#8884d8" name="Kullanım Sayısı" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -255,11 +338,11 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
       {/* Search and Part List */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Parca Listesi</CardTitle>
+          <CardTitle className="text-base">Parça Listesi</CardTitle>
           <div className="relative mt-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Stok kodu veya adi ile ara..."
+              placeholder="Stok kodu veya adı ile ara..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9"
@@ -272,8 +355,9 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
               <TableRow>
                 <TableHead className="w-10">#</TableHead>
                 <TableHead>Stok Kodu</TableHead>
-                <TableHead>Stok Adi</TableHead>
-                <TableHead className="text-center">Kullanim Sayisi</TableHead>
+                <TableHead>Stok Adı</TableHead>
+                <TableHead className="text-center">Kullanım</TableHead>
+                <TableHead className="text-center">Son Değişim</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -288,6 +372,9 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
                   <TableCell className="font-mono text-xs">{p.stokKodu}</TableCell>
                   <TableCell className="font-medium">{p.stokAdi}</TableCell>
                   <TableCell className="text-center font-semibold">{p.usageCount}</TableCell>
+                  <TableCell className="text-center text-xs text-muted-foreground">
+                    {formatDateShort(p.lastUsedAt)}
+                  </TableCell>
                   <TableCell>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </TableCell>
@@ -295,8 +382,8 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
               ))}
               {filteredParts.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    {searchTerm ? 'Arama sonucu bulunamadi' : 'Yedek parca verisi bulunamadi'}
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    {searchTerm ? 'Arama sonucu bulunamadı' : 'Yedek parça verisi bulunamadı'}
                   </TableCell>
                 </TableRow>
               )}
@@ -314,7 +401,7 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
       return (
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-3 text-muted-foreground">Parca detaylari yukleniyor...</span>
+          <span className="ml-3 text-muted-foreground">Parça detayları yükleniyor...</span>
         </div>
       );
     }
@@ -336,14 +423,25 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
           <Card>
             <CardContent className="pt-3 pb-2 px-3">
               <div className="flex items-center gap-2">
                 <Package className="h-4 w-4 text-primary" />
                 <div>
-                  <p className="text-xs text-muted-foreground">Toplam Kullanim</p>
+                  <p className="text-xs text-muted-foreground">Toplam Kullanım</p>
                   <p className="text-xl font-bold">{partDetail.totalUsageCount}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-3 pb-2 px-3">
+              <div className="flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-yellow-500" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Son Değişim</p>
+                  <p className="text-sm font-semibold">{formatDateShort(partDetail.lastUsedAt)}</p>
                 </div>
               </div>
             </CardContent>
@@ -353,7 +451,7 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
               <div className="flex items-center gap-2">
                 <Monitor className="h-4 w-4 text-blue-500" />
                 <div>
-                  <p className="text-xs text-muted-foreground">Cihaz Sayisi</p>
+                  <p className="text-xs text-muted-foreground">Cihaz Sayısı</p>
                   <p className="text-xl font-bold">{partDetail.devices.length}</p>
                 </div>
               </div>
@@ -383,12 +481,68 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
           </Card>
         </div>
 
+        {/* Change History / Full Extract */}
+        <Card className="mb-4">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              Değişim Ekstresi ({partDetail.changeHistory.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tarih</TableHead>
+                  <TableHead>Cihaz</TableHead>
+                  <TableHead>Laboratuvar</TableHead>
+                  <TableHead>Personel</TableHead>
+                  <TableHead>Seri No</TableHead>
+                  <TableHead className="text-center">Tip</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {partDetail.changeHistory.map((entry) => (
+                  <TableRow key={entry.id}>
+                    <TableCell className="text-xs whitespace-nowrap">{formatDate(entry.date)}</TableCell>
+                    <TableCell className="font-medium text-sm">{entry.deviceName}</TableCell>
+                    <TableCell className="text-sm">
+                      <span className="flex items-center gap-1">
+                        <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                        {entry.labName}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-sm">{entry.personnelName}</TableCell>
+                    <TableCell className="font-mono text-xs">{entry.serialNumber || '-'}</TableCell>
+                    <TableCell className="text-center">
+                      {entry.formType === 'teknik_servis' ? (
+                        <Badge className="bg-blue-500/20 text-blue-400 text-xs">Teknik</Badge>
+                      ) : entry.formType === 'aplikasyon' ? (
+                        <Badge className="bg-green-500/20 text-green-400 text-xs">App</Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {partDetail.changeHistory.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-4">
+                      Değişim kaydı bulunamadı
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
         {/* Devices Table */}
         <Card className="mb-4">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <Monitor className="h-4 w-4" />
-              Kullanildigi Cihazlar
+              Kullanıldığı Cihazlar
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -396,19 +550,26 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
               <TableHeader>
                 <TableRow>
                   <TableHead>Cihaz</TableHead>
-                  <TableHead className="text-center">Kullanim Sayisi</TableHead>
+                  <TableHead>Laboratuvar</TableHead>
+                  <TableHead className="text-center">Kullanım Sayısı</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {partDetail.devices.map((d) => (
                   <TableRow key={d.deviceId}>
                     <TableCell className="font-medium">{d.deviceName}</TableCell>
+                    <TableCell>
+                      <span className="flex items-center gap-1 text-sm">
+                        <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                        {d.labName}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-center">{d.count}</TableCell>
                   </TableRow>
                 ))}
                 {partDetail.devices.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={2} className="text-center text-muted-foreground py-4">
+                    <TableCell colSpan={3} className="text-center text-muted-foreground py-4">
                       Cihaz verisi yok
                     </TableCell>
                   </TableRow>
@@ -423,7 +584,7 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <Users className="h-4 w-4" />
-              Personel Bazli Kullanim
+              Personel Bazlı Kullanım
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -431,7 +592,7 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
               <TableHeader>
                 <TableRow>
                   <TableHead>Personel</TableHead>
-                  <TableHead className="text-center">Kullanim Sayisi</TableHead>
+                  <TableHead className="text-center">Kullanım Sayısı</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -459,7 +620,7 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 <UserCheck className="h-4 w-4" />
-                Personel Stok Dagilimi
+                Personel Stok Dağılımı
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -492,17 +653,17 @@ export default function YedekParcaAnaliziModal({ isOpen, onClose }: YedekParcaAn
         <DialogHeader className="p-6 pb-3">
           <DialogTitle className="flex items-center gap-2 text-xl">
             <Package className="h-5 w-5 text-primary" />
-            Yedek Parca Analizi
+            Yedek Parça Analizi
           </DialogTitle>
           <DialogDescription>
-            En cok degisen yedek parcalar ve detayli parca ekstresi
+            En çok değişen yedek parçalar ve detaylı parça ekstresi
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="ml-3 text-muted-foreground">Veriler yukleniyor...</span>
+            <span className="ml-3 text-muted-foreground">Veriler yükleniyor...</span>
           </div>
         ) : (
           <ScrollArea className="flex-1 px-6 pb-6">
