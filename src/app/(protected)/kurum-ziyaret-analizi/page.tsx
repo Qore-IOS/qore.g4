@@ -176,7 +176,7 @@ export default function KurumZiyaretAnaliziPage() {
     return set;
   }, [selectedLabIds, labOptions]);
 
-  const analysis = useMemo(() => {
+  const filteredData = useMemo(() => {
     let filteredTeknik = teknikForms;
     let filteredApp = aplikasyonForms;
     let filteredFaults = faultReports;
@@ -192,6 +192,12 @@ export default function KurumZiyaretAnaliziPage() {
       filteredApp = filteredApp.filter((f) => f.createdByUid && selectedPersonnelUids.has(f.createdByUid));
       filteredFaults = filteredFaults.filter((f) => f.assignedToUid && selectedPersonnelUids.has(f.assignedToUid));
     }
+
+    return { filteredTeknik, filteredApp, filteredFaults };
+  }, [teknikForms, aplikasyonForms, faultReports, selectedLabIdsFull, selectedPersonnelUids]);
+
+  const analysis = useMemo(() => {
+    const { filteredTeknik, filteredApp, filteredFaults } = filteredData;
 
     const teknikFormCount = filteredTeknik.length;
     const appFormCount = filteredApp.length;
@@ -230,7 +236,7 @@ export default function KurumZiyaretAnaliziPage() {
     }));
 
     return { totalTeknik, totalApp, teknikFormCount, appFormCount, teknikFaultVisitCount: teknikFaultVisits.length, appFaultVisitCount: appFaultVisits.length, personnelList, chartData };
-  }, [teknikForms, aplikasyonForms, faultReports, usersMap, selectedLabIdsFull, selectedPersonnelUids]);
+  }, [filteredData, usersMap]);
 
   const availablePersonnel = useMemo(() => {
     const personSet = new Map<string, string>();
@@ -291,20 +297,20 @@ export default function KurumZiyaretAnaliziPage() {
       detailsMap.set(detailKey, current);
     };
 
-    teknikForms
+    filteredData.filteredTeknik
       .filter((f) => f.createdByUid === selectedChartPersonnelUid)
       .forEach((f) => addDetail(f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), 'teknik_servis'));
 
-    aplikasyonForms
+    filteredData.filteredApp
       .filter((f) => f.createdByUid === selectedChartPersonnelUid)
       .forEach((f) => addDetail(f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), 'aplikasyon'));
 
-    faultReports
+    filteredData.filteredFaults
       .filter((f) => f.interventionType === 'kurum_ziyaret' && f.assignedToUid === selectedChartPersonnelUid)
       .forEach((f) => addDetail(f.labName || (f.labId ? hospitalNamesMap.get(f.labId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), f.faultType));
 
     return Array.from(detailsMap.values()).sort((a, b) => b.visitCount - a.visitCount || a.institutionName.localeCompare(b.institutionName, 'tr'));
-  }, [selectedChartPersonnelUid, teknikForms, aplikasyonForms, faultReports, hospitalNamesMap]);
+  }, [selectedChartPersonnelUid, filteredData, hospitalNamesMap]);
 
   const selectedChartPersonnel = useMemo(() => {
     if (!selectedChartPersonnelUid) return null;
