@@ -13,6 +13,7 @@ import { db } from '@/lib/firebase';
 import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import type { Hospital, LabPool, User } from '@/lib/types';
@@ -44,6 +45,12 @@ interface LabOption {
   memberIds: string[];
 }
 
+interface PersonnelVisitDetail {
+  institutionName: string;
+  visitCount: number;
+  visitType: 'teknik_servis' | 'aplikasyon';
+}
+
 export default function KurumZiyaretAnaliziPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -52,6 +59,7 @@ export default function KurumZiyaretAnaliziPage() {
   const [faultReports, setFaultReports] = useState<FaultReport[]>([]);
   const [usersMap, setUsersMap] = useState<Map<string, User>>(new Map());
   const [labOptions, setLabOptions] = useState<LabOption[]>([]);
+  const [hospitalNamesMap, setHospitalNamesMap] = useState<Map<string, string>>(new Map());
 
   const [selectedLabIds, setSelectedLabIds] = useState<Set<string>>(new Set());
   const [selectedPersonnelUids, setSelectedPersonnelUids] = useState<Set<string>>(new Set());
@@ -59,6 +67,7 @@ export default function KurumZiyaretAnaliziPage() {
   const [personnelSearchTerm, setPersonnelSearchTerm] = useState('');
   const [labPopoverOpen, setLabPopoverOpen] = useState(false);
   const [personnelPopoverOpen, setPersonnelPopoverOpen] = useState(false);
+  const [selectedChartPersonnelUid, setSelectedChartPersonnelUid] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -81,9 +90,13 @@ export default function KurumZiyaretAnaliziPage() {
         setUsersMap(uMap);
 
         const hospitalsMap = new Map<string, Hospital>();
+        const hospitalsNameMap = new Map<string, string>();
         hospitalsSnap.docs.forEach((d) => {
-          hospitalsMap.set(d.id, { id: d.id, ...d.data() } as Hospital);
+          const hospital = { id: d.id, ...d.data() } as Hospital;
+          hospitalsMap.set(d.id, hospital);
+          hospitalsNameMap.set(d.id, hospital.name || 'Bilinmiyor');
         });
+        setHospitalNamesMap(hospitalsNameMap);
 
         const pools: LabPool[] = labPoolsSnap.docs
           .map((d) => ({ id: d.id, ...d.data() } as LabPool))
@@ -163,7 +176,7 @@ export default function KurumZiyaretAnaliziPage() {
     return set;
   }, [selectedLabIds, labOptions]);
 
-  const analysis = useMemo(() => {
+  const filteredData = useMemo(() => {
     let filteredTeknik = teknikForms;
     let filteredApp = aplikasyonForms;
     let filteredFaults = faultReports;
@@ -179,6 +192,12 @@ export default function KurumZiyaretAnaliziPage() {
       filteredApp = filteredApp.filter((f) => f.createdByUid && selectedPersonnelUids.has(f.createdByUid));
       filteredFaults = filteredFaults.filter((f) => f.assignedToUid && selectedPersonnelUids.has(f.assignedToUid));
     }
+
+    return { filteredTeknik, filteredApp, filteredFaults };
+  }, [teknikForms, aplikasyonForms, faultReports, selectedLabIdsFull, selectedPersonnelUids]);
+
+  const analysis = useMemo(() => {
+    const { filteredTeknik, filteredApp, filteredFaults } = filteredData;
 
     const teknikFormCount = filteredTeknik.length;
     const appFormCount = filteredApp.length;
@@ -211,12 +230,13 @@ export default function KurumZiyaretAnaliziPage() {
 
     const personnelList = Array.from(personnelMap.entries()).map(([uid, data]) => ({ uid, ...data })).sort((a, b) => b.visitCount - a.visitCount);
     const chartData = personnelList.slice(0, 15).map((p) => ({
+      uid: p.uid,
       name: p.name.length > 15 ? p.name.substring(0, 15) + '...' : p.name,
       fullName: p.name, role: p.role, ziyaret: p.visitCount,
     }));
 
     return { totalTeknik, totalApp, teknikFormCount, appFormCount, teknikFaultVisitCount: teknikFaultVisits.length, appFaultVisitCount: appFaultVisits.length, personnelList, chartData };
-  }, [teknikForms, aplikasyonForms, faultReports, usersMap, selectedLabIdsFull, selectedPersonnelUids]);
+  }, [filteredData, usersMap]);
 
   const availablePersonnel = useMemo(() => {
     const personSet = new Map<string, string>();
@@ -264,6 +284,38 @@ export default function KurumZiyaretAnaliziPage() {
     if (role === 'aplikasyon') return 'bg-green-500/20 text-green-400';
     return 'bg-gray-500/20 text-gray-400';
   };
+
+  const selectedPersonnelVisitDetails = useMemo(() => {
+    if (!selectedChartPersonnelUid) return [] as PersonnelVisitDetail[];
+
+    const detailsMap = new Map<string, PersonnelVisitDetail>();
+    const addDetail = (institutionName: string, visitType: 'teknik_servis' | 'aplikasyon') => {
+      const normalizedName = institutionName || 'Bilinmeyen Kurum';
+      const detailKey = `${visitType}_${normalizedName}`;
+      const current = detailsMap.get(detailKey) || { institutionName: normalizedName, visitType, visitCount: 0 };
+      current.visitCount += 1;
+      detailsMap.set(detailKey, current);
+    };
+
+    filteredData.filteredTeknik
+      .filter((f) => f.createdByUid === selectedChartPersonnelUid)
+      .forEach((f) => addDetail(f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), 'teknik_servis'));
+
+    filteredData.filteredApp
+      .filter((f) => f.createdByUid === selectedChartPersonnelUid)
+      .forEach((f) => addDetail(f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), 'aplikasyon'));
+
+    filteredData.filteredFaults
+      .filter((f) => f.interventionType === 'kurum_ziyaret' && f.assignedToUid === selectedChartPersonnelUid)
+      .forEach((f) => addDetail(f.labName || (f.labId ? hospitalNamesMap.get(f.labId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), f.faultType));
+
+    return Array.from(detailsMap.values()).sort((a, b) => b.visitCount - a.visitCount || a.institutionName.localeCompare(b.institutionName, 'tr'));
+  }, [selectedChartPersonnelUid, filteredData, hospitalNamesMap]);
+
+  const selectedChartPersonnel = useMemo(() => {
+    if (!selectedChartPersonnelUid) return null;
+    return analysis.personnelList.find((p) => p.uid === selectedChartPersonnelUid) || null;
+  }, [selectedChartPersonnelUid, analysis.personnelList]);
 
   if (loading) {
     return (
@@ -460,7 +512,19 @@ export default function KurumZiyaretAnaliziPage() {
                       );
                     }}
                   />
-                  <Bar dataKey="ziyaret" fill="#8884d8" name="Ziyaret Sayısı" radius={[0, 4, 4, 0]}>
+                  <Bar
+                    dataKey="ziyaret"
+                    fill="#8884d8"
+                    name="Ziyaret Sayısı"
+                    radius={[0, 4, 4, 0]}
+                    onClick={(barData) => {
+                      const payload = barData?.payload as { uid?: string } | undefined;
+                      if (payload?.uid) {
+                        setSelectedChartPersonnelUid(payload.uid);
+                      }
+                    }}
+                    className="cursor-pointer"
+                  >
                     {analysis.chartData.map((entry, i) => (
                       <Cell key={`cell-${i}`} fill={entry.role === 'teknik_servis' || entry.role === 'teknisyen' ? '#60a5fa' : entry.role === 'aplikasyon' ? '#34d399' : '#a78bfa'} />
                     ))}
@@ -507,6 +571,49 @@ export default function KurumZiyaretAnaliziPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(selectedChartPersonnelUid)} onOpenChange={(open) => !open && setSelectedChartPersonnelUid(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedChartPersonnel?.name || 'Personel'} - Ziyaret Edilen Kurumlar
+            </DialogTitle>
+            <DialogDescription>
+              Grafikte seçilen personelin kurum ziyaretlerinin kurum bazlı listesi.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[420px] overflow-auto border rounded-md">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Kurum</TableHead>
+                  <TableHead className="text-center">Tür</TableHead>
+                  <TableHead className="text-center">Ziyaret</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {selectedPersonnelVisitDetails.map((detail) => (
+                  <TableRow key={`${detail.visitType}-${detail.institutionName}`}>
+                    <TableCell className="font-medium">{detail.institutionName}</TableCell>
+                    <TableCell className="text-center">
+                      <Badge className={cn('text-xs', getRoleBadgeColor(detail.visitType))}>{getRoleLabel(detail.visitType)}</Badge>
+                    </TableCell>
+                    <TableCell className="text-center font-semibold">{detail.visitCount}</TableCell>
+                  </TableRow>
+                ))}
+                {selectedPersonnelVisitDetails.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground py-6">
+                      Bu personel için kurum ziyareti bulunamadı.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
