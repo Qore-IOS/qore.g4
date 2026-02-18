@@ -3,7 +3,7 @@
 import React, { useState, useEffect, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, writeBatch, deleteDoc, setDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,6 +39,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   const [isLoading, setIsLoading] = useState(false);
   const [selectedSearch, setSelectedSearch] = useState('');
   const [unselectedSearch, setUnselectedSearch] = useState('');
+  const [existingRuleCodes, setExistingRuleCodes] = useState<Set<string>>(new Set());
   
   const collectionName = targetType === 'depot' ? 'depots' : 'hospitals';
 
@@ -63,6 +64,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           }
         });
         setRules(fetchedRules);
+        setExistingRuleCodes(new Set(Object.keys(fetchedRules)));
       } catch (error) {
         console.error(`Error fetching min-max rules for ${targetType}:`, error);
         toast({ title: "Hata", description: "Min-Max kuralları yüklenirken bir sorun oluştu.", variant: "destructive" });
@@ -97,37 +99,59 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     }));
   };
 
-  const handleExcelUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleExcelUpdateExisting = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setIsLoading(true);
     try {
       const jsonData = await readExcelData(file, toast);
-      const newRules: RuleState = {};
-      let validRows = 0;
+      const updatedRules: RuleState = {};
+      let updatedRows = 0;
+      let skippedRows = 0;
+
       jsonData.forEach((row: any) => {
-        const stock_code = String(row['stock_code'] || row['Stok Kodu'] || '').trim();
+        const stockCode = String(row['stock_code'] || row['Stok Kodu'] || '').trim();
+        if (!existingRuleCodes.has(stockCode)) {
+          skippedRows++;
+          return;
+        }
+
         const min = Number(row['min']);
         const max = Number(row['max']);
         const maxGun = Number(row['max_gun'] || row['Max Gün']);
         const aylikTuketimLimiti = Number(row['aylik_tuketim_limiti'] || row['Aylık Tüketim Limiti']);
-        if (productCodes.some(p => p.stokKodu === stock_code) && !isNaN(min) && !isNaN(max) && min >= 0 && max >= min) {
-          newRules[stock_code] = { min, max, maxGun: isNaN(maxGun) ? '' : maxGun, aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti, enabled: true };
-          validRows++;
+
+        if (isNaN(min) || isNaN(max) || min < 0 || max < min) {
+          skippedRows++;
+          return;
         }
+
+        updatedRules[stockCode] = {
+          min,
+          max,
+          maxGun: isNaN(maxGun) ? '' : maxGun,
+          aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti,
+          enabled: rules[stockCode]?.enabled ?? true
+        };
+        updatedRows++;
       });
-      setRules(prev => ({...prev, ...newRules}));
-      toast({ title: "Başarılı", description: `${validRows} kural Excel'den yüklendi ve mevcut kurallarla birleştirildi.` });
+
+      if (updatedRows === 0) {
+        toast({ title: "Güncellenecek Veri Yok", description: "Excel dosyasında mevcut kurallarla eşleşen geçerli satır bulunamadı.", variant: "destructive" });
+        return;
+      }
+
+      setRules(prev => ({ ...prev, ...updatedRules }));
+      toast({
+        title: "Başarılı",
+        description: `${updatedRows} mevcut kural Excel ile güncellendi${skippedRows > 0 ? `, ${skippedRows} satır atlandı` : ''}.`
+      });
     } catch (error) {
-      toast({ title: "Excel Hatası", description: "Excel dosyası işlenirken bir sorun oluştu.", variant: "destructive" });
+      toast({ title: "Excel Hatası", description: "Güncelleme Excel'i işlenirken bir sorun oluştu.", variant: "destructive" });
     } finally {
       setIsLoading(false);
       if(event.target) event.target.value = '';
     }
-  };
-
-  const downloadTemplate = () => {
-    exportDataToExcel([{ 'Stok Kodu': '', min: 0, max: 0, 'Max Gün': '', 'Aylık Tüketim Limiti': 0 }], 'MinMax_Sablonu', 'Kurallar', toast);
   };
 
   const handleExportCurrentRules = () => {
@@ -264,6 +288,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         snapshot.forEach(doc => batch.delete(doc.ref));
         await batch.commit();
         setRules({});
+        setExistingRuleCodes(new Set());
         toast({ title: "Başarılı", description: `${target.name} için tüm min-max kuralları sıfırlandı.`});
     } catch (error) {
         console.error("Error resetting rules:", error);
@@ -276,7 +301,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
+      <DialogContent className="w-[96vw] max-w-[96vw] h-[92vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-xl flex items-center">
             <SlidersHorizontal className="mr-2 h-6 w-6" /> Min-Max Stok Seviyeleri: {target.name}
@@ -292,9 +317,11 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
               <CardTitle className="text-lg">Toplu İşlemler</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
-              <Button onClick={downloadTemplate} variant="outline" size="sm" disabled={isLoading}><Download className="mr-2 h-4 w-4"/>Şablon</Button>
+              <p className="w-full text-xs text-muted-foreground">
+                Güncelle butonu sadece mevcut kuralları (Mevcut Kuralları İndir çıktısı) Excel üzerinden günceller, yeni kural eklemez.
+              </p>
               <Button onClick={handleExportCurrentRules} variant="outline" size="sm" disabled={isLoading}><Download className="mr-2 h-4 w-4"/>Mevcut Kuralları İndir</Button>
-              <Button asChild variant="outline" size="sm" disabled={isLoading}><label htmlFor="minmax-excel-upload" className="cursor-pointer flex items-center"><Upload className="mr-2 h-4 w-4"/>Yükle<input id="minmax-excel-upload" type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} /></label></Button>
+              <Button asChild variant="outline" size="sm" disabled={isLoading || existingRuleCodes.size === 0}><label htmlFor="minmax-excel-update" className="cursor-pointer flex items-center"><Upload className="mr-2 h-4 w-4"/>Güncelle<input id="minmax-excel-update" type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpdateExisting} /></label></Button>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm" disabled={isLoading}><Trash2 className="mr-2 h-4 w-4"/>Tüm Kuralları Sıfırla</Button>
@@ -328,7 +355,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
               </div>
               <ScrollArea className="flex-1">
                 {isLoading && !Object.keys(rules).length ? <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin"/></div> :
-                <Table>
+                <Table className="min-w-[860px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12">Aktif</TableHead>
@@ -419,7 +446,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                 />
               </div>
               <ScrollArea className="flex-1">
-                <Table>
+                <Table className="min-w-[420px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12">Aktif</TableHead>
