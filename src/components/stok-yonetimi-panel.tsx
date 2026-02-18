@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type {
@@ -196,6 +196,12 @@ export default function StokYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
+  // Legacy-safe placeholders: previous bundle revisions may still reference these at runtime.
+  const pageCursorsRef = useRef<Record<number, unknown>>({});
+  const [totalStockCount, setTotalStockCount] = useState(0);
+  void pageCursorsRef;
+  void totalStockCount;
+  void setTotalStockCount;
   const [monthlyConsumptionByStockCode, setMonthlyConsumptionByStockCode] = useState<Record<string, number>>({});
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number | string>('');
