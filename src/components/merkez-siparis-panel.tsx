@@ -195,7 +195,8 @@ export default function MerkezSiparisPanel() {
 
   const productByStockCode = useMemo(() => {
     return productCodes.reduce<Record<string, ProductCode>>((acc, product) => {
-      if (product.stokKodu) acc[product.stokKodu] = product;
+      const stockCode = (product.stokKodu ?? '').trim();
+      if (stockCode) acc[stockCode] = product;
       return acc;
     }, {});
   }, [productCodes]);
@@ -206,45 +207,102 @@ export default function MerkezSiparisPanel() {
     selectedDepotIds.forEach(depotId => {
       const rules = depotRulesMap[depotId] ?? {};
       const depotName = depots.find(d => d.id === depotId)?.name ?? depotId;
-      Object.values(rules).forEach(rule => items.push({ locationType: 'depot', locationId: depotId, locationName: depotName, rule }));
+      Object.values(rules).forEach(rule => {
+        const stokKodu = (rule.stokKodu ?? '').trim();
+        if (!stokKodu) return;
+        items.push({
+          locationType: 'depot',
+          locationId: depotId,
+          locationName: depotName,
+          rule: { ...rule, stokKodu },
+        });
+      });
     });
 
     selectedLabIds.forEach(labId => {
       const rules = hospitalRulesMap[labId] ?? {};
       const labName = hospitals.find(h => h.id === labId)?.name ?? labId;
-      Object.values(rules).forEach(rule => items.push({ locationType: 'hospital', locationId: labId, locationName: labName, rule }));
+      Object.values(rules).forEach(rule => {
+        const stokKodu = (rule.stokKodu ?? '').trim();
+        if (!stokKodu) return;
+        items.push({
+          locationType: 'hospital',
+          locationId: labId,
+          locationName: labName,
+          rule: { ...rule, stokKodu },
+        });
+      });
     });
 
     return items;
   }, [selectedDepotIds, selectedLabIds, depotRulesMap, hospitalRulesMap, depots, hospitals]);
 
+  const uniqueSelectedProducts = useMemo(() => {
+    const byStockCode = new Map<string, ProductCode>();
+
+    selectedRules.forEach(({ rule }) => {
+      const product = productByStockCode[rule.stokKodu];
+      if (!product) return;
+      if (!byStockCode.has(rule.stokKodu)) byStockCode.set(rule.stokKodu, product);
+    });
+
+    return Array.from(byStockCode.values());
+  }, [selectedRules, productByStockCode]);
+
   const availableBrands = useMemo(() => {
     const brands = new Set<string>();
-    selectedRules.forEach(({ rule }) => {
-      const brand = productByStockCode[rule.stokKodu]?.marka;
+    uniqueSelectedProducts.forEach(product => {
+      const brand = (product.marka ?? '').trim();
       if (brand) brands.add(brand);
     });
     return Array.from(brands).sort((a, b) => a.localeCompare(b, 'tr'));
-  }, [selectedRules, productByStockCode]);
+  }, [uniqueSelectedProducts]);
+
+  const productsAfterBrandFilter = useMemo(() => {
+    if (selectedBrands.length === 0) return uniqueSelectedProducts;
+    return uniqueSelectedProducts.filter(product => {
+      const brand = (product.marka ?? '').trim();
+      return selectedBrands.includes(brand);
+    });
+  }, [uniqueSelectedProducts, selectedBrands]);
 
   const availableProductGroups = useMemo(() => {
     const groups = new Set<string>();
-    selectedRules.forEach(({ rule }) => {
-      const group = productByStockCode[rule.stokKodu]?.urunGrubu;
+    productsAfterBrandFilter.forEach(product => {
+      const group = (product.urunGrubu ?? '').trim();
       if (group) groups.add(group);
     });
     return Array.from(groups).sort((a, b) => a.localeCompare(b, 'tr'));
-  }, [selectedRules, productByStockCode]);
+  }, [productsAfterBrandFilter]);
+
+  const productsAfterGroupFilter = useMemo(() => {
+    if (selectedProductGroups.length === 0) return productsAfterBrandFilter;
+    return productsAfterBrandFilter.filter(product => {
+      const group = (product.urunGrubu ?? '').trim();
+      return selectedProductGroups.includes(group);
+    });
+  }, [productsAfterBrandFilter, selectedProductGroups]);
 
   const availableDeviceGroups = useMemo(() => {
     const groups = new Set<string>();
-    selectedRules.forEach(({ rule }) => {
-      const group = productByStockCode[rule.stokKodu]?.cihazGrubu;
+    productsAfterGroupFilter.forEach(product => {
+      const group = (product.cihazGrubu ?? '').trim();
       if (group) groups.add(group);
     });
     return Array.from(groups).sort((a, b) => a.localeCompare(b, 'tr'));
-  }, [selectedRules, productByStockCode]);
+  }, [productsAfterGroupFilter]);
 
+  useEffect(() => {
+    setSelectedBrands(prev => prev.filter(brand => availableBrands.includes(brand)));
+  }, [availableBrands]);
+
+  useEffect(() => {
+    setSelectedProductGroups(prev => prev.filter(group => availableProductGroups.includes(group)));
+  }, [availableProductGroups]);
+
+  useEffect(() => {
+    setSelectedDeviceGroups(prev => prev.filter(group => availableDeviceGroups.includes(group)));
+  }, [availableDeviceGroups]);
   const toggleSelection = (value: string, selected: string[], setter: React.Dispatch<React.SetStateAction<string[]>>) => {
     setter(prev => (prev.includes(value) ? prev.filter(x => x !== value) : [...prev, value]));
   };
@@ -258,12 +316,19 @@ export default function MerkezSiparisPanel() {
   };
 
   const applyFilters = (rule: MinMaxRule) => {
-    const product = productByStockCode[rule.stokKodu];
+    const product = productByStockCode[(rule.stokKodu ?? '').trim()];
     if (!product) return false;
 
-    if (selectedBrands.length > 0 && !selectedBrands.includes(product.marka ?? '')) return false;
-    if (selectedProductGroups.length > 0 && !selectedProductGroups.includes(product.urunGrubu ?? '')) return false;
-    if (selectedDeviceGroups.length > 0 && !selectedDeviceGroups.includes(product.cihazGrubu ?? '')) return false;
+    const brand = (product.marka ?? '').trim();
+    const productGroup = (product.urunGrubu ?? '').trim();
+    const deviceGroup = (product.cihazGrubu ?? '').trim();
+
+    if (selectedBrands.length > 0 && !selectedBrands.includes(brand)) return false;
+    if (selectedProductGroups.length > 0 && !selectedProductGroups.includes(productGroup)) return false;
+
+    if (availableDeviceGroups.length > 0 && selectedDeviceGroups.length > 0 && !selectedDeviceGroups.includes(deviceGroup)) {
+      return false;
+    }
 
     return true;
   };
@@ -393,6 +458,7 @@ export default function MerkezSiparisPanel() {
     values: string[],
     selected: string[],
     setSelected: React.Dispatch<React.SetStateAction<string[]>>,
+    emptyMessage?: string,
   ) => (
     <div className="space-y-2">
       <Label className="text-sm font-medium">{title}</Label>
@@ -408,7 +474,7 @@ export default function MerkezSiparisPanel() {
               <span>{value}</span>
             </label>
           ))}
-          {values.length === 0 && <p className="text-xs text-muted-foreground">Seçim için önce depo/laboratuvar belirleyin.</p>}
+          {values.length === 0 && <p className="text-xs text-muted-foreground">{emptyMessage ?? 'Seçim için önce depo/laboratuvar belirleyin.'}</p>}
         </div>
       </ScrollArea>
     </div>
@@ -481,9 +547,9 @@ export default function MerkezSiparisPanel() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  {renderMultiSelect('Marka', availableBrands, selectedBrands, setSelectedBrands)}
-                  {renderMultiSelect('Ürün Grubu', availableProductGroups, selectedProductGroups, setSelectedProductGroups)}
-                  {renderMultiSelect('Cihaz Grubu', availableDeviceGroups, selectedDeviceGroups, setSelectedDeviceGroups)}
+                  {renderMultiSelect('Marka', availableBrands, selectedBrands, setSelectedBrands, 'Seçili konumların min-max ürünlerinde marka bulunamadı.')}
+                  {renderMultiSelect('Ürün Grubu', availableProductGroups, selectedProductGroups, setSelectedProductGroups, 'Seçili marka filtresine göre ürün grubu bulunamadı.')}
+                  {renderMultiSelect('Cihaz Grubu', availableDeviceGroups, selectedDeviceGroups, setSelectedDeviceGroups, 'Seçili ürün gruplarında cihaz grubu bulunmuyor, bu filtre opsiyoneldir.')}
                 </div>
 
                 <div className="flex flex-wrap gap-3 items-end">
@@ -494,6 +560,9 @@ export default function MerkezSiparisPanel() {
                   <Button onClick={handleGenerate} disabled={isGenerating || isLoading}>Max'a Göre Sipariş Oluştur</Button>
                   <Button variant="default" onClick={handleSave} disabled={isSaving || generatedItems.length === 0}>Kaydet</Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Cihaz grubu listesi sadece seçili marka + ürün grubu kombinasyonunda gerçekten cihaz grubu olan ürünler için gösterilir.
+                </p>
 
                 <div className="border rounded-md">
                   <ScrollArea className="h-[420px]">
