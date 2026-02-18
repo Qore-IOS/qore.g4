@@ -38,6 +38,8 @@ interface GeneratedOrderItem {
   urunGrubu?: string;
   cihazGrubu?: string;
   mevcutAdet: number;
+  laboratuvarAdet: number;
+  toplamAdet: number;
   hedefAdet: number;
   siparisAdedi: number;
   min: number;
@@ -315,6 +317,22 @@ export default function MerkezSiparisPanel() {
     return depoStok.filter(st => st.hedefKurumId === locationId && st.isShipped && st.stokKodu === stokKodu).length;
   };
 
+  const getLinkedLaboratoryStockCount = (depotId: string, stokKodu: string) => {
+    const depot = depots.find(d => d.id === depotId);
+    const linkedLabIds = depot?.linkedLaboratoryIds || [];
+    if (linkedLabIds.length === 0) return 0;
+
+    const relevantLabIds = linkedLabIds.filter(labId => Boolean(hospitalRulesMap[labId]?.[stokKodu]));
+    if (relevantLabIds.length === 0) return 0;
+
+    return depoStok.filter(st => (
+      st.isShipped
+      && Boolean(st.hedefKurumId)
+      && relevantLabIds.includes(st.hedefKurumId as string)
+      && st.stokKodu === stokKodu
+    )).length;
+  };
+
   const applyFilters = (rule: MinMaxRule) => {
     const product = productByStockCode[(rule.stokKodu ?? '').trim()];
     if (!product) return false;
@@ -363,8 +381,12 @@ export default function MerkezSiparisPanel() {
           ? Math.ceil((hedefGun / maxGun) * max)
           : max;
 
-        const mevcutAdet = getCurrentStockCount(locationType, locationId, rule.stokKodu);
-        const siparisAdedi = Math.max(0, hedefAdet - mevcutAdet);
+        const depoAdet = getCurrentStockCount(locationType, locationId, rule.stokKodu);
+        const laboratuvarAdet = locationType === 'depot'
+          ? getLinkedLaboratoryStockCount(locationId, rule.stokKodu)
+          : 0;
+        const toplamAdet = depoAdet + laboratuvarAdet;
+        const siparisAdedi = Math.max(0, hedefAdet - toplamAdet);
 
         if (siparisAdedi <= 0) return;
 
@@ -378,7 +400,9 @@ export default function MerkezSiparisPanel() {
           marka: product.marka,
           urunGrubu: product.urunGrubu,
           cihazGrubu: product.cihazGrubu,
-          mevcutAdet,
+          mevcutAdet: depoAdet,
+          laboratuvarAdet,
+          toplamAdet,
           hedefAdet,
           siparisAdedi,
           min: Number(rule.min ?? 0),
@@ -572,7 +596,9 @@ export default function MerkezSiparisPanel() {
                           <TableHead>Konum</TableHead>
                           <TableHead>Stok Kodu</TableHead>
                           <TableHead>Ürün</TableHead>
-                          <TableHead>Mevcut</TableHead>
+                          <TableHead>Depo Adet</TableHead>
+                          <TableHead>Lab Adet</TableHead>
+                          <TableHead>Toplam</TableHead>
                           <TableHead>Hedef</TableHead>
                           <TableHead>Sipariş</TableHead>
                           <TableHead>Max/Max Gün</TableHead>
@@ -585,6 +611,8 @@ export default function MerkezSiparisPanel() {
                             <TableCell>{item.stokKodu}</TableCell>
                             <TableCell>{item.stokAdi}</TableCell>
                             <TableCell>{item.mevcutAdet}</TableCell>
+                            <TableCell>{item.laboratuvarAdet}</TableCell>
+                            <TableCell>{item.toplamAdet}</TableCell>
                             <TableCell>{item.hedefAdet}</TableCell>
                             <TableCell className="font-semibold">{item.siparisAdedi}</TableCell>
                             <TableCell>{item.max} / {item.maxGun ?? '-'}</TableCell>
@@ -592,7 +620,7 @@ export default function MerkezSiparisPanel() {
                         ))}
                         {generatedItems.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center text-muted-foreground py-10">Henüz sipariş oluşturulmadı.</TableCell>
+                            <TableCell colSpan={9} className="text-center text-muted-foreground py-10">Henüz sipariş oluşturulmadı.</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
