@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, ChangeEvent } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type {
@@ -10,7 +10,6 @@ import type {
   DepoStokItem,
   MinMaxRule,
   AddressDefinition,
-  ConsumptionRecord,
   Hospital,
 } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -40,7 +39,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, where, writeBatch, doc, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  writeBatch,
+  doc,
+  addDoc,
+  serverTimestamp,
+  getCountFromServer,
+} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AlertTriangle, PackageSearch, Search, Warehouse, Trash2, FileSpreadsheet, Loader2, Map as MapIcon, SlidersHorizontal, X, Building, ShoppingCart, Truck, ChevronUp, ChevronDown, History, Pencil, Save, XCircle, Filter, Nfc, ListChecks, Undo } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
@@ -70,6 +79,8 @@ interface GroupedStock {
     items: DepoStokItem[];
   };
 }
+
+type GroupedStockRow = GroupedStock[string] & { key: string };
 
 interface Filter {
   group: 'marka' | 'urunGrubu';
@@ -185,6 +196,13 @@ export default function StokYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
+  // Legacy-safe placeholders: previous bundle revisions may still reference these at runtime.
+  const pageCursorsRef = useRef<Record<number, unknown>>({});
+  const [totalStockCount, setTotalStockCount] = useState(0);
+  void pageCursorsRef;
+  void totalStockCount;
+  void setTotalStockCount;
+  const [monthlyConsumptionByStockCode, setMonthlyConsumptionByStockCode] = useState<Record<string, number>>({});
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number | string>('');
   const [colorFilter, setColorFilter] = useState<'none' | 'nearMin' | 'expiringSoon' | 'expiringVerySoon'>('none');
@@ -234,15 +252,16 @@ export default function StokYonetimiPanel() {
       setDepotStock([]);
       return;
     }
+
     setIsStockLoading(true);
     try {
-      // Server-side query: only fetch unshipped items for selected depot
-      const stockQuery = query(
+      const baseQuery = query(
         collection(db, 'depoStok'),
         where('depotId', '==', depotId),
         where('isShipped', '==', false)
       );
-      const snapshot = await getDocs(stockQuery);
+
+      const snapshot = await getDocs(baseQuery);
       const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
       setDepotStock(items);
     } catch (e) {
@@ -254,7 +273,6 @@ export default function StokYonetimiPanel() {
     }
   }, [toast]);
 
-  // Fetch depot stock when depot changes
   useEffect(() => {
     if (selectedDepotId) {
       fetchDepotStock(selectedDepotId);
@@ -278,7 +296,7 @@ export default function StokYonetimiPanel() {
     fetchRules();
   }, [selectedDepotId]);
 
-  const handleStartEditing = (group: (typeof sortedAndGroupedStock)[0]) => {
+  const handleStartEditing = (group: GroupedStockRow) => {
     setEditingRowKey(group.key);
     setEditingQuantity(group.items.length);
   };
@@ -290,7 +308,7 @@ export default function StokYonetimiPanel() {
 
   const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
 
-  const handleQuantityChange = async (group: (typeof sortedAndGroupedStock)[0]) => {
+  const handleQuantityChange = async (group: GroupedStockRow) => {
     const newQuantity = typeof editingQuantity === 'string' ? parseInt(editingQuantity, 10) : editingQuantity;
     if (newQuantity < 0 || !Number.isInteger(newQuantity)) {
       toast({ title: "Hata", description: "Geçersiz adet.", variant: "destructive" });
@@ -347,7 +365,7 @@ export default function StokYonetimiPanel() {
         }
       });
       toast({ title: 'Başarılı', description: `${group.stokAdi} adedi güncellendi.` });
-      await fetchDepotStock(selectedDepotId); // Refetch to get the latest state
+      await fetchDepotStock(selectedDepotId); // Refetch depot stock
     } catch (error) {
       toast({ title: "Hata", description: "Adet güncellenirken hata oluştu.", variant: "destructive" });
       console.error(error);
@@ -454,7 +472,7 @@ export default function StokYonetimiPanel() {
     }, {});
   }, [sortedStock, productCodes]);
 
-  const sortedAndGroupedStock = useMemo(() => {
+  const sortedAndGroupedStock = useMemo<GroupedStockRow[]>(() => {
     let baseList = Object.values(groupedStock).map(g => ({ ...g, key: `${g.stokKodu}-${g.lotNumarasi}-${g.miad}` }));
     if (colorFilter !== 'none') {
       baseList = baseList.filter(group => {
@@ -471,7 +489,7 @@ export default function StokYonetimiPanel() {
     return baseList;
   }, [groupedStock, colorFilter, minMaxRules]);
 
-  const totalPages = Math.ceil(sortedAndGroupedStock.length / rowsPerPage);
+  const totalPages = Math.max(1, Math.ceil(sortedAndGroupedStock.length / rowsPerPage));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
     return sortedAndGroupedStock.slice(start, start + rowsPerPage);
@@ -480,6 +498,66 @@ export default function StokYonetimiPanel() {
   useEffect(() => {
     setCurrentPage(1);
   }, [rowsPerPage, debouncedSearchTerm, activeFilters, sortBy, sortOrder]);
+
+  useEffect(() => {
+    if (sortedAndGroupedStock.length === 0) {
+      setMonthlyConsumptionByStockCode({});
+      return;
+    }
+
+    let isCancelled = false;
+    const now = new Date();
+    const monthsToAverage = 6;
+    const periodStart = new Date(now.getFullYear(), now.getMonth() - monthsToAverage + 1, 1);
+
+    const fetchAverageMonthlyConsumption = async () => {
+      try {
+        const uniqueCodes = Array.from(new Set(sortedAndGroupedStock.map(item => item.stokKodu).filter(Boolean)));
+        const countResults = await Promise.allSettled(uniqueCodes.map(async stokKodu => {
+          try {
+            const consumptionQuery = query(
+              collection(db, 'tuketimKayitlari'),
+              where('stokKodu', '==', stokKodu),
+              where('consumptionTimestamp', '>=', periodStart)
+            );
+            const countSnapshot = await getCountFromServer(consumptionQuery);
+            return { stokKodu, average: countSnapshot.data().count / monthsToAverage };
+          } catch (error) {
+            console.warn(`Aylık tüketim aggregation fallback (${stokKodu})`, error);
+            const fallbackQuery = query(
+              collection(db, 'tuketimKayitlari'),
+              where('stokKodu', '==', stokKodu)
+            );
+            const fallbackSnapshot = await getDocs(fallbackQuery);
+            const filteredCount = fallbackSnapshot.docs.filter(doc => {
+              const rawDate = doc.data().consumptionTimestamp;
+              const consumptionDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate);
+              return isValid(consumptionDate) && consumptionDate >= periodStart;
+            }).length;
+            return { stokKodu, average: filteredCount / monthsToAverage };
+          }
+        }));
+
+        if (isCancelled) return;
+
+        const consumptionMap = countResults.reduce<Record<string, number>>((acc, result) => {
+          if (result.status === 'fulfilled') {
+            acc[result.value.stokKodu] = result.value.average;
+          }
+          return acc;
+        }, {});
+
+        setMonthlyConsumptionByStockCode(consumptionMap);
+      } catch (error) {
+        console.error('Aylık tüketim ortalaması hesaplanamadı:', error);
+      }
+    };
+
+    fetchAverageMonthlyConsumption();
+    return () => {
+      isCancelled = true;
+    };
+  }, [sortedAndGroupedStock]);
   
   const handleLabCountExport = async () => {
     if (selectedLabsForReport.length === 0) {
@@ -584,7 +662,7 @@ export default function StokYonetimiPanel() {
     }
   };
 
-  const getRowClass = (group: (typeof sortedAndGroupedStock)[0]): string => {
+  const getRowClass = (group: GroupedStockRow): string => {
     const rule = minMaxRules[group.stokKodu];
     const miadDate = parse(group.miad || '', 'dd.MM.yyyy', new Date());
     if (!isValid(miadDate)) return '';
@@ -666,33 +744,34 @@ export default function StokYonetimiPanel() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Stok Adı</TableHead>
-                    <TableHead>Lot</TableHead>
-                    <TableHead>Miad</TableHead>
-                    <TableHead>Adet</TableHead>
-                    <TableHead>Raf Adresi</TableHead>
+                    <TableHead className="border-r border-border/60">Stok Adı</TableHead>
+                    <TableHead className="border-r border-border/60">Lot</TableHead>
+                    <TableHead className="border-r border-border/60">Miad</TableHead>
+                    <TableHead className="border-r border-border/60">Adet</TableHead>
+                    <TableHead className="border-r border-border/60">Raf Adresi</TableHead>
+                    <TableHead className="border-r border-border/60">Ort. Aylık Tüketim</TableHead>
                     <TableHead className="text-right">İşlemler</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {paginatedData.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-10">
+                      <TableCell colSpan={7} className="text-center py-10">
                         Sonuç bulunamadı.
                       </TableCell>
                     </TableRow>
                   ) : (
                     paginatedData.map((g) => (
                       <TableRow key={g.key} className={getRowClass(g)}>
-                        <TableCell data-label="Stok Adı" data-primary="true">
+                        <TableCell className="border-r border-border/40" data-label="Stok Adı" data-primary="true">
                           {g.stokAdi}
                           <span className="block text-xs text-muted-foreground font-mono">
                             ({g.stokKodu})
                           </span>
                         </TableCell>
-                        <TableCell data-label="Lot">{g.lotNumarasi}</TableCell>
-                        <TableCell data-label="Miad">{g.miad}</TableCell>
-                        <TableCell data-label="Adet">
+                        <TableCell className="border-r border-border/40" data-label="Lot">{g.lotNumarasi}</TableCell>
+                        <TableCell className="border-r border-border/40" data-label="Miad">{g.miad}</TableCell>
+                        <TableCell className="border-r border-border/40" data-label="Adet">
                           {editingRowKey === g.key ? (
                             <Input
                               type="number"
@@ -705,7 +784,8 @@ export default function StokYonetimiPanel() {
                             <Badge variant="outline" className="font-bold text-foreground dark:text-white bg-background">{g.items.length} {g.anaBirim}</Badge>
                           )}
                         </TableCell>
-                        <TableCell data-label="Raf">{g.rafAdresi}</TableCell>
+                        <TableCell className="border-r border-border/40" data-label="Raf">{g.rafAdresi}</TableCell>
+                        <TableCell className="border-r border-border/40" data-label="Ort. Aylık Tüketim">{(monthlyConsumptionByStockCode[g.stokKodu] ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 1 })}</TableCell>
                         <TableCell data-label="İşlemler" className="text-right">
                           <div className="flex gap-1 justify-end">
                             {editingRowKey === g.key ? (
