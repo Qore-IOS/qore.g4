@@ -101,6 +101,46 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "tuketimKayitlari",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "stokKodu",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "consumptionTimestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "depotId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isShipped",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "stokKodu",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lotNumarasi",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "miad",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
