@@ -244,12 +244,13 @@ export default function StokYonetimiPanel() {
   }, [fetchMasterData]);
 
   /**
-   * Fetch depot stock with server-side filtering
+   * Fetch depot stock page with server-side pagination
    * Uses composite index: depotId + isShipped
    */
-  const fetchDepotStock = useCallback(async (depotId: string) => {
+  const fetchDepotStock = useCallback(async (depotId: string, page: number, pageSize: number) => {
     if (!depotId) {
       setDepotStock([]);
+      setTotalStockCount(0);
       return;
     }
 
@@ -264,10 +265,18 @@ export default function StokYonetimiPanel() {
       const snapshot = await getDocs(baseQuery);
       const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
       setDepotStock(items);
+
+      const lastDoc = snapshot.docs.at(-1) ?? null;
+      if (lastDoc) {
+        pageCursorsRef.current[page + 1] = lastDoc;
+      } else {
+        delete pageCursorsRef.current[page + 1];
+      }
     } catch (e) {
       console.error('Depo stoğu yüklenemedi:', e);
       toast({ title: 'Hata', description: 'Depo stoğu yüklenemedi.', variant: 'destructive' });
       setDepotStock([]);
+      setTotalStockCount(0);
     } finally {
       setIsStockLoading(false);
     }
@@ -275,9 +284,9 @@ export default function StokYonetimiPanel() {
 
   useEffect(() => {
     if (selectedDepotId) {
-      fetchDepotStock(selectedDepotId);
+      fetchDepotStock(selectedDepotId, currentPage, rowsPerPage);
     }
-  }, [selectedDepotId, fetchDepotStock]);
+  }, [selectedDepotId, currentPage, rowsPerPage, fetchDepotStock]);
 
   useEffect(() => {
     if (!selectedDepotId) return;
@@ -754,14 +763,14 @@ export default function StokYonetimiPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedData.length === 0 ? (
+                  {sortedAndGroupedStock.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-10">
                         Sonuç bulunamadı.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    paginatedData.map((g) => (
+                    sortedAndGroupedStock.map((g) => (
                       <TableRow key={g.key} className={getRowClass(g)}>
                         <TableCell className="border-r border-border/40" data-label="Stok Adı" data-primary="true">
                           {g.stokAdi}
@@ -828,7 +837,7 @@ export default function StokYonetimiPanel() {
           <div className="flex items-center space-x-2">
               <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage <= 1}>Önceki</Button>
               <span className="text-sm">Sayfa {currentPage} / {totalPages}</span>
-              <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage >= totalPages}>Sonraki</Button>
+              <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage >= totalPages || sortedAndGroupedStock.length === 0}>Sonraki</Button>
           </div>
         </CardFooter>
       </Card>
