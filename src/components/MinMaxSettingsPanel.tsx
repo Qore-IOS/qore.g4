@@ -28,6 +28,7 @@ interface RuleState {
   [stockCode: string]: {
     min: number | string;
     max: number | string;
+    maxGun?: number | string;
     aylikTuketimLimiti?: number | string;
     enabled: boolean;
   }
@@ -36,6 +37,8 @@ interface RuleState {
 export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetType, productCodes, toast }: MinMaxSettingsPanelProps) {
   const [rules, setRules] = useState<RuleState>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedSearch, setSelectedSearch] = useState('');
+  const [unselectedSearch, setUnselectedSearch] = useState('');
   
   const collectionName = targetType === 'depot' ? 'depots' : 'hospitals';
 
@@ -53,6 +56,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
             fetchedRules[data.stokKodu] = {
               min: data.min ?? 0,
               max: data.max ?? 0,
+              maxGun: (data.maxGun ?? '') as string | number,
               aylikTuketimLimiti: (data.aylikTuketimLimiti ?? '') as string | number,
               enabled: true
             };
@@ -73,23 +77,23 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     setRules(prev => {
         const newRules = { ...prev };
         if (checked) {
-            newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', aylikTuketimLimiti: '' }), enabled: true };
+            newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '' }), enabled: true };
         } else {
             if(newRules[stockCode]) {
               newRules[stockCode].enabled = false;
             } else {
-              newRules[stockCode] = { min: '', max: '', aylikTuketimLimiti: '', enabled: false };
+              newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', enabled: false };
             }
         }
         return newRules;
     });
   };
   
-  const handleRuleChange = (stockCode: string, field: 'min' | 'max' | 'aylikTuketimLimiti', value: string) => {
+  const handleRuleChange = (stockCode: string, field: 'min' | 'max' | 'maxGun' | 'aylikTuketimLimiti', value: string) => {
     const numValue = value === '' ? '' : Number(value);
     setRules(prev => ({
         ...prev,
-        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', aylikTuketimLimiti: '', enabled: true }), [field]: numValue }
+        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', enabled: true }), [field]: numValue }
     }));
   };
 
@@ -105,9 +109,10 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         const stock_code = String(row['stock_code'] || row['Stok Kodu'] || '').trim();
         const min = Number(row['min']);
         const max = Number(row['max']);
+        const maxGun = Number(row['max_gun'] || row['Max Gün']);
         const aylikTuketimLimiti = Number(row['aylik_tuketim_limiti'] || row['Aylık Tüketim Limiti']);
         if (productCodes.some(p => p.stokKodu === stock_code) && !isNaN(min) && !isNaN(max) && min >= 0 && max >= min) {
-          newRules[stock_code] = { min, max, aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti, enabled: true };
+          newRules[stock_code] = { min, max, maxGun: isNaN(maxGun) ? '' : maxGun, aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti, enabled: true };
           validRows++;
         }
       });
@@ -122,7 +127,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   };
 
   const downloadTemplate = () => {
-    exportDataToExcel([{ 'Stok Kodu': '', min: 0, max: 0, 'Aylık Tüketim Limiti': 0 }], 'MinMax_Sablonu', 'Kurallar', toast);
+    exportDataToExcel([{ 'Stok Kodu': '', min: 0, max: 0, 'Max Gün': '', 'Aylık Tüketim Limiti': 0 }], 'MinMax_Sablonu', 'Kurallar', toast);
   };
 
   const handleExportCurrentRules = () => {
@@ -136,6 +141,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       'Stok Kodu': stockCode,
       min: rule.min,
       max: rule.max,
+      'Max Gün': rule.maxGun,
       'Aylık Tüketim Limiti': rule.aylikTuketimLimiti
     }));
 
@@ -161,15 +167,19 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       if (rule.enabled) {
         const min = Number(rule.min);
         const max = Number(rule.max);
+        const maxGun = rule.maxGun === '' ? undefined : Number(rule.maxGun);
         const aylikTuketimLimiti = rule.aylikTuketimLimiti === '' ? undefined : Number(rule.aylikTuketimLimiti);
 
-        if (isNaN(min) || isNaN(max) || min < 0 || max < min || (aylikTuketimLimiti !== undefined && isNaN(aylikTuketimLimiti))) {
+        if (isNaN(min) || isNaN(max) || min < 0 || max < min || (maxGun !== undefined && (isNaN(maxGun) || maxGun < 0)) || (aylikTuketimLimiti !== undefined && isNaN(aylikTuketimLimiti))) {
           toast({ title: `Hata: ${stockCode}`, description: `Geçersiz değerler. Kayıt atlandı.`, variant: "destructive" });
           hasError = true;
           continue; 
         }
         
         const dataToSet: MinMaxRule = { stokKodu: stockCode, min, max };
+        if (maxGun !== undefined) {
+          dataToSet.maxGun = maxGun;
+        }
         if (aylikTuketimLimiti !== undefined) {
           dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
         }
@@ -189,6 +199,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                 stokKodu: stockCode,
                 min: null,
                 max: null,
+                maxGun: null,
                 aylikTuketimLimiti: null,
                 locationId: target.id,
                 locationType: targetType,
@@ -217,6 +228,26 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       setIsLoading(false);
     }
   };
+
+  const matchesSearch = (product: ProductCode, searchTerm: string) => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return true;
+
+    return (
+      (product.stokAdi ?? '').toLowerCase().includes(keyword)
+      || (product.stokKodu ?? '').toLowerCase().includes(keyword)
+    );
+  };
+
+  const selectedProducts = productCodes.filter(product => {
+    const stockCode = product.stokKodu ?? '';
+    return Boolean(rules[stockCode]?.enabled) && matchesSearch(product, selectedSearch);
+  });
+
+  const unselectedProducts = productCodes.filter(product => {
+    const stockCode = product.stokKodu ?? '';
+    return !rules[stockCode]?.enabled && matchesSearch(product, unselectedSearch);
+  });
   
   const handleResetRules = async () => {
     setIsLoading(true);
@@ -284,28 +315,123 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
             </CardContent>
           </Card>
 
-          <div className="flex-grow border rounded-md overflow-hidden">
-            <ScrollArea className="h-full">
-              {isLoading && !Object.keys(rules).length ? <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin"/></div> : 
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">Aktif</TableHead>
-                    <TableHead>Ürün Adı (Stok Kodu)</TableHead>
-                    <TableHead className="w-28">Min</TableHead>
-                    <TableHead className="w-28">Max</TableHead>
-                    <TableHead className="w-40">Aylık Max Tüketim</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {productCodes.map(product => {
-                    const rule = rules[product.stokKodu!];
-                    const isEnabled = rule?.enabled ?? false;
-                    return (
+          <div className="flex-grow grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-0">
+            <div className="border rounded-md overflow-hidden flex flex-col min-h-0">
+              <div className="p-3 border-b space-y-2">
+                <p className="font-medium text-sm">Seçilen Ürünler ({selectedProducts.length})</p>
+                <Input
+                  placeholder="Seçilenlerde ürün ara..."
+                  value={selectedSearch}
+                  onChange={(e) => setSelectedSearch(e.target.value)}
+                  className="h-8"
+                />
+              </div>
+              <ScrollArea className="flex-1">
+                {isLoading && !Object.keys(rules).length ? <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin"/></div> :
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">Aktif</TableHead>
+                      <TableHead>Ürün Adı (Stok Kodu)</TableHead>
+                      <TableHead className="w-24">Min</TableHead>
+                      <TableHead className="w-24">Max</TableHead>
+                      <TableHead className="w-24">Max Gün</TableHead>
+                      <TableHead className="w-32">Aylık Max Tüketim</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedProducts.map(product => {
+                      const rule = rules[product.stokKodu!];
+                      const isEnabled = rule?.enabled ?? false;
+                      return (
+                        <TableRow key={product.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={isEnabled}
+                              onCheckedChange={(checked) => handleCheckboxChange(product.stokKodu!, checked)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <p className="font-medium">{product.stokAdi}</p>
+                            <p className="text-xs text-muted-foreground font-code">{product.stokKodu}</p>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={isEnabled ? (rule?.min ?? '') : ''}
+                              onChange={e => handleRuleChange(product.stokKodu!, 'min', e.target.value)}
+                              disabled={!isEnabled}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={isEnabled ? (rule?.max ?? '') : ''}
+                              onChange={e => handleRuleChange(product.stokKodu!, 'max', e.target.value)}
+                              disabled={!isEnabled}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={isEnabled ? (rule?.maxGun ?? '') : ''}
+                              onChange={e => handleRuleChange(product.stokKodu!, 'maxGun', e.target.value)}
+                              disabled={!isEnabled}
+                              className="h-8"
+                              placeholder="Boş bırak"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
+                              onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
+                              disabled={!isEnabled || targetType === 'depot'}
+                              className="h-8"
+                              placeholder={targetType === 'depot' ? 'N/A' : 'Limit'}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {selectedProducts.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                          Seçilen ürün bulunamadı.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>}
+              </ScrollArea>
+            </div>
+
+            <div className="border rounded-md overflow-hidden flex flex-col min-h-0">
+              <div className="p-3 border-b space-y-2">
+                <p className="font-medium text-sm">Seçilmeyen Ürünler ({unselectedProducts.length})</p>
+                <Input
+                  placeholder="Seçilmeyenlerde ürün ara..."
+                  value={unselectedSearch}
+                  onChange={(e) => setUnselectedSearch(e.target.value)}
+                  className="h-8"
+                />
+              </div>
+              <ScrollArea className="flex-1">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">Aktif</TableHead>
+                      <TableHead>Ürün Adı (Stok Kodu)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {unselectedProducts.map(product => (
                       <TableRow key={product.id}>
                         <TableCell>
                           <Checkbox
-                            checked={isEnabled}
+                            checked={false}
                             onCheckedChange={(checked) => handleCheckboxChange(product.stokKodu!, checked)}
                           />
                         </TableCell>
@@ -313,40 +439,19 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                           <p className="font-medium">{product.stokAdi}</p>
                           <p className="text-xs text-muted-foreground font-code">{product.stokKodu}</p>
                         </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            value={isEnabled ? (rule?.min ?? '') : ''}
-                            onChange={e => handleRuleChange(product.stokKodu!, 'min', e.target.value)}
-                            disabled={!isEnabled}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            value={isEnabled ? (rule?.max ?? '') : ''}
-                            onChange={e => handleRuleChange(product.stokKodu!, 'max', e.target.value)}
-                            disabled={!isEnabled}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
-                            onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
-                            disabled={!isEnabled || targetType === 'depot'}
-                            className="h-8"
-                            placeholder={targetType === 'depot' ? 'N/A' : 'Limit'}
-                          />
+                      </TableRow>
+                    ))}
+                    {unselectedProducts.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={2} className="text-center text-muted-foreground py-6">
+                          Seçilmeyen ürün bulunamadı.
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>}
-            </ScrollArea>
+                    )}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
           </div>
         </div>
 
