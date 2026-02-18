@@ -101,6 +101,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "tuketimKayitlari",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "stokKodu",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "consumptionTimestamp",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
