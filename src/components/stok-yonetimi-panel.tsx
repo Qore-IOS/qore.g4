@@ -247,7 +247,7 @@ export default function StokYonetimiPanel() {
   }, [fetchMasterData]);
 
   /**
-   * Fetch depot stock with server-side filtering
+   * Fetch depot stock page with server-side pagination
    * Uses composite index: depotId + isShipped
    */
   const fetchDepotStock = useCallback(async (depotId: string, page: number, pageSize: number) => {
@@ -845,14 +845,14 @@ export default function StokYonetimiPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedData.length === 0 ? (
+                  {sortedAndGroupedStock.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-10">
                         Sonuç bulunamadı.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    paginatedData.map((g) => (
+                    sortedAndGroupedStock.map((g) => (
                       <TableRow key={g.key} className={getRowClass(g)}>
                         <TableCell className="border-r border-border/40" data-label="Stok Adı" data-primary="true">
                           {g.stokAdi}
