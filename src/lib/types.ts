@@ -117,6 +117,7 @@ export interface MinMaxRule {
   stokKodu: string; // Add stokKodu to be able to identify the rule
   min: number;
   max: number;
+  maxGun?: number;
   aylikTuketimLimiti?: number; // Monthly consumption limit
 }
 
