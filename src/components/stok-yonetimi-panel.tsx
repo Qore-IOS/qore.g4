@@ -49,6 +49,12 @@ import {
   addDoc,
   serverTimestamp,
   getCountFromServer,
+  orderBy,
+  limit,
+  startAfter,
+  documentId,
+  QueryDocumentSnapshot,
+  DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AlertTriangle, PackageSearch, Search, Warehouse, Trash2, FileSpreadsheet, Loader2, Map as MapIcon, SlidersHorizontal, X, Building, ShoppingCart, Truck, ChevronUp, ChevronDown, History, Pencil, Save, XCircle, Filter, Nfc, ListChecks, Undo } from 'lucide-react';
@@ -196,12 +202,8 @@ export default function StokYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
-  // Legacy-safe placeholders: previous bundle revisions may still reference these at runtime.
-  const pageCursorsRef = useRef<Record<number, unknown>>({});
+  const pageCursorsRef = useRef<Record<number, QueryDocumentSnapshot<DocumentData> | null>>({ 1: null });
   const [totalStockCount, setTotalStockCount] = useState(0);
-  void pageCursorsRef;
-  void totalStockCount;
-  void setTotalStockCount;
   const [monthlyConsumptionByStockCode, setMonthlyConsumptionByStockCode] = useState<Record<string, number>>({});
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number | string>('');
@@ -262,7 +264,20 @@ export default function StokYonetimiPanel() {
         where('isShipped', '==', false)
       );
 
-      const snapshot = await getDocs(baseQuery);
+      const countSnapshot = await getCountFromServer(baseQuery);
+      setTotalStockCount(countSnapshot.data().count);
+
+      const pageCursor = pageCursorsRef.current[page] ?? null;
+      if (page > 1 && !pageCursor) {
+        setCurrentPage(1);
+        return;
+      }
+
+      const pageQuery = pageCursor
+        ? query(baseQuery, orderBy(documentId()), startAfter(pageCursor), limit(pageSize))
+        : query(baseQuery, orderBy(documentId()), limit(pageSize));
+
+      const snapshot = await getDocs(pageQuery);
       const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
       setDepotStock(items);
 
@@ -281,6 +296,11 @@ export default function StokYonetimiPanel() {
       setIsStockLoading(false);
     }
   }, [toast]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    pageCursorsRef.current = { 1: null };
+  }, [selectedDepotId, rowsPerPage]);
 
   useEffect(() => {
     if (selectedDepotId) {
@@ -374,7 +394,7 @@ export default function StokYonetimiPanel() {
         }
       });
       toast({ title: 'Başarılı', description: `${group.stokAdi} adedi güncellendi.` });
-      await fetchDepotStock(selectedDepotId); // Refetch depot stock
+      await fetchDepotStock(selectedDepotId, currentPage, rowsPerPage); // Refetch current page
     } catch (error) {
       toast({ title: "Hata", description: "Adet güncellenirken hata oluştu.", variant: "destructive" });
       console.error(error);
@@ -498,15 +518,13 @@ export default function StokYonetimiPanel() {
     return baseList;
   }, [groupedStock, colorFilter, minMaxRules]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedAndGroupedStock.length / rowsPerPage));
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return sortedAndGroupedStock.slice(start, start + rowsPerPage);
-  }, [sortedAndGroupedStock, currentPage, rowsPerPage]);
+  const totalPages = Math.max(1, Math.ceil(totalStockCount / rowsPerPage));
+  const paginatedData = sortedAndGroupedStock;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [rowsPerPage, debouncedSearchTerm, activeFilters, sortBy, sortOrder]);
+    pageCursorsRef.current = { 1: null };
+  }, [debouncedSearchTerm, activeFilters, sortBy, sortOrder]);
 
   useEffect(() => {
     if (sortedAndGroupedStock.length === 0) {
