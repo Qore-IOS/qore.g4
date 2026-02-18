@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, ChangeEvent } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type {
@@ -48,13 +48,7 @@ import {
   doc,
   addDoc,
   serverTimestamp,
-  orderBy,
-  limit,
-  startAfter,
-  documentId,
   getCountFromServer,
-  QueryDocumentSnapshot,
-  DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AlertTriangle, PackageSearch, Search, Warehouse, Trash2, FileSpreadsheet, Loader2, Map as MapIcon, SlidersHorizontal, X, Building, ShoppingCart, Truck, ChevronUp, ChevronDown, History, Pencil, Save, XCircle, Filter, Nfc, ListChecks, Undo } from 'lucide-react';
@@ -202,8 +196,6 @@ export default function StokYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
-  const [totalStockCount, setTotalStockCount] = useState(0);
-  const pageCursorsRef = useRef<Record<number, QueryDocumentSnapshot<DocumentData> | null>>({ 1: null });
   const [monthlyConsumptionByStockCode, setMonthlyConsumptionByStockCode] = useState<Record<string, number>>({});
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number | string>('');
@@ -264,21 +256,7 @@ export default function StokYonetimiPanel() {
         where('isShipped', '==', false)
       );
 
-      const countSnapshot = await getCountFromServer(baseQuery);
-      setTotalStockCount(countSnapshot.data().count);
-
-      const pageCursor = pageCursorsRef.current[page] ?? null;
-      if (page > 1 && !pageCursor) {
-        setCurrentPage(1);
-        setIsStockLoading(false);
-        return;
-      }
-
-      const pageQuery = pageCursor
-        ? query(baseQuery, orderBy(documentId()), startAfter(pageCursor), limit(pageSize))
-        : query(baseQuery, orderBy(documentId()), limit(pageSize));
-
-      const snapshot = await getDocs(pageQuery);
+      const snapshot = await getDocs(baseQuery);
       const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
       setDepotStock(items);
 
@@ -297,11 +275,6 @@ export default function StokYonetimiPanel() {
       setIsStockLoading(false);
     }
   }, [toast]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-    pageCursorsRef.current = { 1: null };
-  }, [selectedDepotId, rowsPerPage]);
 
   useEffect(() => {
     if (selectedDepotId) {
@@ -395,7 +368,7 @@ export default function StokYonetimiPanel() {
         }
       });
       toast({ title: 'Başarılı', description: `${group.stokAdi} adedi güncellendi.` });
-      await fetchDepotStock(selectedDepotId, currentPage, rowsPerPage); // Refetch current page
+      await fetchDepotStock(selectedDepotId); // Refetch depot stock
     } catch (error) {
       toast({ title: "Hata", description: "Adet güncellenirken hata oluştu.", variant: "destructive" });
       console.error(error);
@@ -519,12 +492,15 @@ export default function StokYonetimiPanel() {
     return baseList;
   }, [groupedStock, colorFilter, minMaxRules]);
 
-  const totalPages = Math.max(1, Math.ceil(totalStockCount / rowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(sortedAndGroupedStock.length / rowsPerPage));
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * rowsPerPage;
+    return sortedAndGroupedStock.slice(start, start + rowsPerPage);
+  }, [sortedAndGroupedStock, currentPage, rowsPerPage]);
 
   useEffect(() => {
     setCurrentPage(1);
-    pageCursorsRef.current = { 1: null };
-  }, [debouncedSearchTerm, activeFilters, sortBy, sortOrder]);
+  }, [rowsPerPage, debouncedSearchTerm, activeFilters, sortBy, sortOrder]);
 
   useEffect(() => {
     if (sortedAndGroupedStock.length === 0) {
@@ -540,20 +516,37 @@ export default function StokYonetimiPanel() {
     const fetchAverageMonthlyConsumption = async () => {
       try {
         const uniqueCodes = Array.from(new Set(sortedAndGroupedStock.map(item => item.stokKodu).filter(Boolean)));
-        const countResults = await Promise.all(uniqueCodes.map(async stokKodu => {
-          const consumptionQuery = query(
-            collection(db, 'tuketimKayitlari'),
-            where('stokKodu', '==', stokKodu),
-            where('consumptionTimestamp', '>=', periodStart)
-          );
-          const countSnapshot = await getCountFromServer(consumptionQuery);
-          return { stokKodu, average: countSnapshot.data().count / monthsToAverage };
+        const countResults = await Promise.allSettled(uniqueCodes.map(async stokKodu => {
+          try {
+            const consumptionQuery = query(
+              collection(db, 'tuketimKayitlari'),
+              where('stokKodu', '==', stokKodu),
+              where('consumptionTimestamp', '>=', periodStart)
+            );
+            const countSnapshot = await getCountFromServer(consumptionQuery);
+            return { stokKodu, average: countSnapshot.data().count / monthsToAverage };
+          } catch (error) {
+            console.warn(`Aylık tüketim aggregation fallback (${stokKodu})`, error);
+            const fallbackQuery = query(
+              collection(db, 'tuketimKayitlari'),
+              where('stokKodu', '==', stokKodu)
+            );
+            const fallbackSnapshot = await getDocs(fallbackQuery);
+            const filteredCount = fallbackSnapshot.docs.filter(doc => {
+              const rawDate = doc.data().consumptionTimestamp;
+              const consumptionDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate);
+              return isValid(consumptionDate) && consumptionDate >= periodStart;
+            }).length;
+            return { stokKodu, average: filteredCount / monthsToAverage };
+          }
         }));
 
         if (isCancelled) return;
 
-        const consumptionMap = countResults.reduce<Record<string, number>>((acc, item) => {
-          acc[item.stokKodu] = item.average;
+        const consumptionMap = countResults.reduce<Record<string, number>>((acc, result) => {
+          if (result.status === 'fulfilled') {
+            acc[result.value.stokKodu] = result.value.average;
+          }
           return acc;
         }, {});
 
