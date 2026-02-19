@@ -24,7 +24,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { generateId } from '@/lib/utils';
+import { exportDataToExcel, generateId } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
 
 type LocationType = 'depot' | 'hospital';
 
@@ -70,6 +71,7 @@ interface GeneratedOrderItem {
   min: number;
   max: number;
   maxGun?: number;
+  costPerUnit: number;
 }
 
 interface CentralOrderItem {
@@ -119,6 +121,7 @@ const toDate = (value: unknown): Date | undefined => {
 export default function MerkezSiparisPanel() {
   const { toast } = useToast();
   const router = useRouter();
+  const { currentUserProfile, currentUser } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -145,6 +148,7 @@ export default function MerkezSiparisPanel() {
   const [labSearch, setLabSearch] = useState('');
   const [showSelectionPanel, setShowSelectionPanel] = useState(true);
   const [generatedItems, setGeneratedItems] = useState<GeneratedOrderItem[]>([]);
+  const [tableFilters, setTableFilters] = useState<Record<string, string>>({});
 
   const [openOrders, setOpenOrders] = useState<CentralOrder[]>([]);
   const [completedOrders, setCompletedOrders] = useState<CentralOrder[]>([]);
@@ -482,6 +486,7 @@ export default function MerkezSiparisPanel() {
           min: Number(rule.min ?? 0),
           max,
           maxGun: maxGun > 0 ? maxGun : undefined,
+          costPerUnit: Number(product.cost ?? 0),
         });
       });
 
@@ -526,6 +531,8 @@ export default function MerkezSiparisPanel() {
         selectedProductGroups,
         selectedDeviceGroups,
         yeterlilikGun: Number(yeterlilikGun),
+        createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
+        createdById: currentUserProfile?.uid || currentUser?.uid || '',
         items,
       });
 
@@ -540,6 +547,8 @@ export default function MerkezSiparisPanel() {
         selectedProductGroups,
         selectedDeviceGroups,
         yeterlilikGun: Number(yeterlilikGun),
+        createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
+        createdById: currentUserProfile?.uid || currentUser?.uid || '',
         items,
       }, ...prev]);
       setGeneratedItems([]);
@@ -590,6 +599,80 @@ export default function MerkezSiparisPanel() {
 
   const filteredDepots = depots.filter(d => d.name?.toLowerCase().includes(depotSearch.toLowerCase()));
   const filteredLabs = hospitals.filter(h => h.name?.toLowerCase().includes(labSearch.toLowerCase()));
+
+  const handleGeneratedItemChange = (key: string, field: 'cihazUstuAdet' | 'siparisAdedi', value: string) => {
+    const numericValue = Math.max(0, Number(value) || 0);
+    setGeneratedItems(prev => prev.map(item => {
+      if (item.key !== key) return item;
+      if (field === 'siparisAdedi') {
+        return { ...item, siparisAdedi: numericValue };
+      }
+
+      const cihazUstuKutu = Math.ceil(numericValue / Math.max(1, item.min || 1));
+      const genelToplam = item.toplamAdet + numericValue;
+      const siparisAdedi = Math.max(0, item.hedefAdet - genelToplam);
+      return {
+        ...item,
+        cihazUstuAdet: numericValue,
+        cihazUstuKutu,
+        genelToplam,
+        siparisAdedi,
+      };
+    }));
+  };
+
+  const filteredGeneratedItems = useMemo(() => {
+    return generatedItems.filter(item => {
+      return Object.entries(tableFilters).every(([column, filterValue]) => {
+        if (!filterValue?.trim()) return true;
+        const normalizedFilter = filterValue.toLowerCase();
+        const value = String((item as Record<string, unknown>)[column] ?? '').toLowerCase();
+        return value.includes(normalizedFilter);
+      });
+    });
+  }, [generatedItems, tableFilters]);
+
+  const totalVisibleCost = useMemo(() => {
+    return filteredGeneratedItems.reduce((sum, item) => sum + (item.costPerUnit * item.siparisAdedi), 0);
+  }, [filteredGeneratedItems]);
+
+  const handleExportGeneratedList = () => {
+    if (filteredGeneratedItems.length === 0) {
+      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak sipariş listesi bulunamadı.' });
+      return;
+    }
+
+    const rows = filteredGeneratedItems.map(item => ({
+      Konum: item.locationName,
+      KonumTipi: item.locationType === 'depot' ? 'Depo' : 'Laboratuvar',
+      StokKodu: item.stokKodu,
+      UrunAdi: item.stokAdi,
+      DepoAdet: item.mevcutAdet,
+      LabAdet: item.laboratuvarAdet,
+      ToplamAdet: item.toplamAdet,
+      CihazUstuAdet: item.cihazUstuAdet,
+      CihazUstuKutu: item.cihazUstuKutu,
+      GenelToplam: item.genelToplam,
+      HedefAdet: item.hedefAdet,
+      SiparisAdedi: item.siparisAdedi,
+      BirimFiyatTL: item.costPerUnit,
+      SatirMaliyetTL: item.costPerUnit * item.siparisAdedi,
+    }));
+
+    exportDataToExcel(rows, 'Merkez_Siparis_Olusturulan_Liste', 'Siparis', toast);
+  };
+
+  const getOrderMeta = (order: CentralOrder) => {
+    const brands = Array.from(new Set(order.items.map(i => (i.marka ?? '').trim()).filter(Boolean))).join(', ') || '-';
+    const locations = Array.from(new Set(order.items.map(i => i.locationName).filter(Boolean))).join(', ') || '-';
+    const orderCost = order.items.reduce((sum, item) => {
+      const product = productByStockCode[item.stokKodu];
+      const unitPrice = Number(product?.cost ?? 0);
+      return sum + (unitPrice * Number(item.orderedQty ?? 0));
+    }, 0);
+
+    return { brands, locations, orderCost };
+  };
 
   return (
     <div className="space-y-4">
@@ -679,10 +762,16 @@ export default function MerkezSiparisPanel() {
                   </div>
                   <Button onClick={handleGenerate} disabled={isGenerating || isLoading}>Max'a Göre Sipariş Oluştur</Button>
                   <Button variant="default" onClick={handleSave} disabled={isSaving || generatedItems.length === 0}>Kaydet</Button>
+                  <Button variant="outline" onClick={handleExportGeneratedList} disabled={filteredGeneratedItems.length === 0}>Excel'e Aktar</Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Cihaz üstü veriler seçili ay/yıl dönemindeki cihazUstuGecmisi kayıtlarından alınır; kutu karşılığı ambalaj değerine göre yukarı yuvarlanır.
                 </p>
+
+                <div className="flex justify-end items-center gap-4 text-sm">
+                  <span className="font-medium">Sipariş Maliyeti: {totalVisibleCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL</span>
+                  <Badge variant="secondary">Toplam Ürün: {filteredGeneratedItems.length}</Badge>
+                </div>
 
                 <div className="border rounded-md">
                   <ScrollArea className="h-[420px]">
@@ -702,9 +791,34 @@ export default function MerkezSiparisPanel() {
                           <TableHead>Sipariş</TableHead>
                           <TableHead>Max/Max Gün</TableHead>
                         </TableRow>
+                        <TableRow>
+                          {[
+                            'locationName',
+                            'stokKodu',
+                            'stokAdi',
+                            'mevcutAdet',
+                            'laboratuvarAdet',
+                            'toplamAdet',
+                            'cihazUstuAdet',
+                            'cihazUstuKutu',
+                            'genelToplam',
+                            'hedefAdet',
+                            'siparisAdedi',
+                            'max',
+                          ].map(column => (
+                            <TableHead key={column}>
+                              <Input
+                                value={tableFilters[column] ?? ''}
+                                onChange={e => setTableFilters(prev => ({ ...prev, [column]: e.target.value }))}
+                                placeholder="Filtre"
+                                className="h-8"
+                              />
+                            </TableHead>
+                          ))}
+                        </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {generatedItems.map(item => (
+                        {filteredGeneratedItems.map(item => (
                           <TableRow key={item.key}>
                             <TableCell>{item.locationName} <Badge variant="secondary" className="ml-2">{item.locationType === 'depot' ? 'Depo' : 'Lab'}</Badge></TableCell>
                             <TableCell>{item.stokKodu}</TableCell>
@@ -712,15 +826,31 @@ export default function MerkezSiparisPanel() {
                             <TableCell>{item.mevcutAdet}</TableCell>
                             <TableCell>{item.laboratuvarAdet}</TableCell>
                             <TableCell>{item.toplamAdet}</TableCell>
-                            <TableCell>{item.cihazUstuAdet}</TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={item.cihazUstuAdet}
+                                onChange={e => handleGeneratedItemChange(item.key, 'cihazUstuAdet', e.target.value)}
+                                className="w-24"
+                              />
+                            </TableCell>
                             <TableCell>{item.cihazUstuKutu}</TableCell>
                             <TableCell>{item.genelToplam}</TableCell>
                             <TableCell>{item.hedefAdet}</TableCell>
-                            <TableCell className="font-semibold">{item.siparisAdedi}</TableCell>
+                            <TableCell className="font-semibold">
+                              <Input
+                                type="number"
+                                min="0"
+                                value={item.siparisAdedi}
+                                onChange={e => handleGeneratedItemChange(item.key, 'siparisAdedi', e.target.value)}
+                                className="w-24"
+                              />
+                            </TableCell>
                             <TableCell>{item.max} / {item.maxGun ?? '-'}</TableCell>
                           </TableRow>
                         ))}
-                        {generatedItems.length === 0 && (
+                        {filteredGeneratedItems.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={12} className="text-center text-muted-foreground py-10">Henüz sipariş oluşturulmadı.</TableCell>
                           </TableRow>
@@ -739,7 +869,9 @@ export default function MerkezSiparisPanel() {
             <CardHeader><CardTitle>Açık Siparişler</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {openOrders.map(order => (
+                {openOrders.map(order => {
+                  const meta = getOrderMeta(order);
+                  return (
                   <button
                     key={order.id}
                     className="w-full text-left border rounded-md p-3 hover:bg-muted"
@@ -747,13 +879,16 @@ export default function MerkezSiparisPanel() {
                   >
                     <div className="flex justify-between items-center">
                       <div>
-                        <p className="font-semibold">Merkez Sipariş #{order.id}</p>
-                        <p className="text-xs text-muted-foreground">{order.createdAt ? order.createdAt.toLocaleString('tr-TR') : '-'}</p>
+                        <p className="font-semibold">{meta.brands} - {meta.orderCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL</p>
+                        <p className="text-xs text-muted-foreground">
+                          {order.createdAt ? order.createdAt.toLocaleString('tr-TR') : '-'} • {order.createdBy ?? '-'} • {meta.locations}
+                        </p>
                       </div>
                       <Badge>{order.items.length} ürün</Badge>
                     </div>
                   </button>
-                ))}
+                  );
+                })}
                 {openOrders.length === 0 && <p className="text-muted-foreground">Açık sipariş yok.</p>}
               </div>
             </CardContent>
@@ -765,7 +900,9 @@ export default function MerkezSiparisPanel() {
             <CardHeader><CardTitle>Tamamlanan Siparişler</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {completedOrders.map(order => (
+                {completedOrders.map(order => {
+                  const meta = getOrderMeta(order);
+                  return (
                   <button
                     key={order.id}
                     className="w-full text-left border rounded-md p-3 hover:bg-muted"
@@ -773,13 +910,16 @@ export default function MerkezSiparisPanel() {
                   >
                     <div className="flex justify-between items-center gap-4">
                       <div>
-                        <p className="font-semibold">Merkez Sipariş #{order.id}</p>
-                        <p className="text-xs text-muted-foreground">{order.createdAt ? order.createdAt.toLocaleString('tr-TR') : '-'}</p>
+                        <p className="font-semibold">{meta.brands} - {meta.orderCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL</p>
+                        <p className="text-xs text-muted-foreground">
+                          {order.createdAt ? order.createdAt.toLocaleString('tr-TR') : '-'} • {order.createdBy ?? '-'} • {meta.locations}
+                        </p>
                       </div>
                       <p className="text-sm">{mismatchSummaryText(order)}</p>
                     </div>
                   </button>
-                ))}
+                    );
+                })}
                 {completedOrders.length === 0 && <p className="text-muted-foreground">Tamamlanan sipariş yok.</p>}
               </div>
             </CardContent>
