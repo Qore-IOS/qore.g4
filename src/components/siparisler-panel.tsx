@@ -488,9 +488,8 @@ export default function SiparislerPanel(): JSX.Element {
                     </Button>
                     <Button
                       variant="outline"
-                      onClick={() => setShowBulk(!showBulk)}
-                      aria-expanded={showBulk}
-                      aria-controls="bulk-order-section"
+                      onClick={() => router.push('/merkez-siparis')}
+                      aria-label="Merkez sipariş paneline git"
                     >
                       Toplu Sipariş
                     </Button>
