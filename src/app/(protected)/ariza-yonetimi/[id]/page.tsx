@@ -876,7 +876,7 @@ export default function FaultDetailPage() {
   if (!fault) return null;
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="device-module-page p-4 space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-2">
         <BackButton fallback="/ariza-yonetimi" />
         <div className="flex items-center gap-2">

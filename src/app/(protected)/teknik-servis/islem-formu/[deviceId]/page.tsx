@@ -1394,7 +1394,7 @@ export default function IslemFormuPage() {
 
   return (
     <>
-      <div className="p-4 space-y-4">
+      <div className="device-module-page p-4 space-y-4">
         <BackButton fallback={`/teknik-servis/${device.hospitalId}`} />
         <Card>
           <CardHeader>

@@ -327,7 +327,7 @@ export default function KurumZiyaretAnaliziPage() {
   }
 
   return (
-    <div className="container max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
+    <div className="device-module-page container max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => router.push('/cihaz-yonetimi-ana')}>
