@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Depot, ProductCode, AddressDefinition } from '@/lib/types';
+import type { Depot, ProductCode, AddressDefinition, Hospital } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -24,6 +24,7 @@ export default function DepoYonetimPanel() {
   const { toast } = useToast();
   const [depots, setDepots] = useState<Depot[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -39,13 +40,15 @@ export default function DepoYonetimPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [depotsSnap, productsSnap, addressesSnap] = await Promise.all([
+      const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap] = await Promise.all([
         getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'productCodes')),
+        getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'addressDefinitions')),
       ]);
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
       setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setAddressDefinitions(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -91,6 +94,7 @@ export default function DepoYonetimPanel() {
         address: currentDepot.address || '',
         lat: currentDepot.lat ?? null,
         lng: currentDepot.lng ?? null,
+        linkedLaboratoryIds: (currentDepot.linkedLaboratoryIds || []).filter(Boolean),
       };
 
       if (currentDepot.id) {
@@ -154,6 +158,7 @@ export default function DepoYonetimPanel() {
                     <TableHead>Depo Adı</TableHead>
                     <TableHead>Adres</TableHead>
                     <TableHead>Konum</TableHead>
+                    <TableHead>Bağlı Lab</TableHead>
                     <TableHead className="text-right">İşlemler</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -171,6 +176,9 @@ export default function DepoYonetimPanel() {
                         ) : (
                           <span className="text-xs text-muted-foreground">-</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        {(d.linkedLaboratoryIds || []).length}
                       </TableCell>
                       <TableCell className="text-right space-x-1">
                         <Button variant="ghost" size="icon" onClick={() => { setMinMaxTarget(d); setIsMinMaxPanelOpen(true); }}><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
@@ -224,6 +232,32 @@ export default function DepoYonetimPanel() {
                   </p>
                 </div>
               )}
+
+              <div>
+                <label className="text-sm text-muted-foreground">Depoya Bağlı Laboratuvarlar (Toplu Sipariş için)</label>
+                <ScrollArea className="h-40 border rounded-md p-2 mt-1">
+                  <div className="space-y-2">
+                    {hospitals.map(h => {
+                      const selected = (currentDepot.linkedLaboratoryIds || []).includes(h.id);
+                      return (
+                        <label key={h.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(e) => {
+                              const prev = currentDepot.linkedLaboratoryIds || [];
+                              const next = e.target.checked ? [...prev, h.id] : prev.filter(id => id !== h.id);
+                              setCurrentDepot({ ...currentDepot, linkedLaboratoryIds: next });
+                            }}
+                          />
+                          <span>{h.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+                <p className="text-xs text-muted-foreground mt-1">Bu seçim yalnızca Merkez/Toplu Sipariş hesaplarında kullanılır.</p>
+              </div>
             </div>
             <div className="h-80 rounded-md overflow-hidden border">
               <LocationPicker

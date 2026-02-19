@@ -105,6 +105,7 @@ export interface Depot {
   id: string;
   name: string;
   mapDefinition?: GridDefinition;
+  linkedLaboratoryIds?: string[];
   companies?: string[]; // Added for Borç Depo
   // Konum bilgileri - rota planlama için
   lat?: number;
@@ -117,6 +118,7 @@ export interface MinMaxRule {
   stokKodu: string; // Add stokKodu to be able to identify the rule
   min: number;
   max: number;
+  maxGun?: number;
   aylikTuketimLimiti?: number; // Monthly consumption limit
 }
 

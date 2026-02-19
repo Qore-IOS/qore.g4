@@ -555,6 +555,7 @@ declare module "@/lib/types" {
     min: number;
     max: number;
     stokKodu: string;
+    maxGun?: number;
     aylikTuketimLimiti?: number;
     [k: string]: unknown;
   }
