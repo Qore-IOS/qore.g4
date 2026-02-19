@@ -35,6 +35,20 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 
+const normalizeStockCode = (value: unknown) => String(value ?? '').trim();
+const stockCodeVariants = (value: unknown) => {
+  const code = normalizeStockCode(value);
+  if (!code) return [];
+  const trimmedZero = code.replace(/^0+/, '');
+  return Array.from(new Set([code, trimmedZero].filter(Boolean)));
+};
+const normalizePeriodKey = (value: unknown) => {
+  const raw = String(value ?? '').trim();
+  const m = raw.match(/^(\d{1,2})-(\d{4})$/);
+  if (!m) return raw;
+  return `${m[1].padStart(2, '0')}-${m[2]}`;
+};
+
 interface GeneratedOrderItem {
   key: string;
   locationType: LocationType;
@@ -129,6 +143,7 @@ export default function MerkezSiparisPanel() {
 
   const [depotSearch, setDepotSearch] = useState('');
   const [labSearch, setLabSearch] = useState('');
+  const [showSelectionPanel, setShowSelectionPanel] = useState(true);
   const [generatedItems, setGeneratedItems] = useState<GeneratedOrderItem[]>([]);
 
   const [openOrders, setOpenOrders] = useState<CentralOrder[]>([]);
@@ -192,17 +207,19 @@ export default function MerkezSiparisPanel() {
         cihazUstuSnap.docs.forEach(d => {
           const data = d.data() as any;
           const hospitalId = String(data.hospitalId ?? '').trim();
-          const period = String(data.period ?? '').trim();
+          const period = normalizePeriodKey(data.period);
           if (!hospitalId || !period) return;
 
           if (!cihazMap[period]) cihazMap[period] = {};
           const items = Array.isArray(data.items) ? data.items : [];
           items.forEach((item: any) => {
-            const productId = String(item.productId ?? '').trim();
+            const productId = normalizeStockCode(item.productId);
             const value = Number(item.value ?? 0);
             if (!productId || Number.isNaN(value)) return;
-            const key = `${hospitalId}::${productId}`;
-            cihazMap[period][key] = (cihazMap[period][key] ?? 0) + value;
+            stockCodeVariants(productId).forEach(variant => {
+              const key = `${hospitalId}::${variant}`;
+              cihazMap[period][key] = (cihazMap[period][key] ?? 0) + value;
+            });
           });
         });
         setCihazUstuMap(cihazMap);
@@ -367,21 +384,20 @@ export default function MerkezSiparisPanel() {
     )).length;
   };
 
-  const periodKey = `${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
+  const periodKey = normalizePeriodKey(`${String(selectedMonth).padStart(2, '0')}-${selectedYear}`);
 
   const getCihazUstuAdet = (locationType: LocationType, locationId: string, stokKodu: string) => {
     const periodData = cihazUstuMap[periodKey] || {};
 
     if (locationType === 'hospital') {
-      return periodData[`${locationId}::${stokKodu}`] ?? 0;
+      return stockCodeVariants(stokKodu).reduce((sum, variant) => sum + (periodData[`${locationId}::${variant}`] ?? 0), 0);
     }
 
     const depot = depots.find(d => d.id === locationId);
     const linkedLabIds = depot?.linkedLaboratoryIds || [];
     if (linkedLabIds.length === 0) return 0;
 
-    const relevantLabIds = linkedLabIds.filter(labId => Boolean(hospitalRulesMap[labId]?.[stokKodu]));
-    return relevantLabIds.reduce((sum, labId) => sum + (periodData[`${labId}::${stokKodu}`] ?? 0), 0);
+    return linkedLabIds.reduce((sum, labId) => sum + stockCodeVariants(stokKodu).reduce((sub, variant) => sub + (periodData[`${labId}::${variant}`] ?? 0), 0), 0);
   };
 
   const applyFilters = (rule: MinMaxRule) => {
@@ -586,6 +602,7 @@ export default function MerkezSiparisPanel() {
 
         <TabsContent value="create" className="mt-4">
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+            {showSelectionPanel && (
             <Card className="xl:col-span-4">
               <CardHeader>
                 <CardTitle>Depo / Laboratuvar Seçimi</CardTitle>
@@ -622,10 +639,14 @@ export default function MerkezSiparisPanel() {
                 </div>
               </CardContent>
             </Card>
+            )}
 
-            <Card className="xl:col-span-8">
-              <CardHeader>
+            <Card className={showSelectionPanel ? "xl:col-span-8" : "xl:col-span-12"}>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Sipariş Ayarları</CardTitle>
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowSelectionPanel(prev => !prev)}>
+                  {showSelectionPanel ? 'Seçim Panelini Gizle' : 'Seçim Panelini Göster'}
+                </Button>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
