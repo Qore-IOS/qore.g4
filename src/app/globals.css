@@ -105,6 +105,37 @@
 }
 
 @layer components {
+    /* Device management unified light neumorphic primitives */
+    .cihaz-shell {
+      background: var(--dashboard-bg);
+      color: var(--dashboard-text);
+    }
+
+    .cihaz-card {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised-soft);
+      border-radius: 22px;
+    }
+
+    .cihaz-card-strong {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised);
+      border-radius: 24px;
+    }
+
+    .cihaz-pressed {
+      background: var(--dashboard-surface-2);
+      box-shadow: var(--dashboard-pressed);
+      border-radius: 14px;
+    }
+
+    .cihaz-focus-ring:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px var(--dashboard-focus-glow);
+    }
+
     /* --- NEU-CARD: Neumorphic (Light) / Liquid Glass (Dark) --- */
     .neu-card {
         /* Light mode: Neumorphic */

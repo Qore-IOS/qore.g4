@@ -454,6 +454,39 @@ export default function StokYonetimiPanel() {
     }, {});
   }, [sortedStock, productCodes]);
 
+  const totalStockByProductCode = useMemo(() => {
+    return depotStock.reduce<Record<string, number>>((acc, item) => {
+      if (!item.stokKodu) return acc;
+      acc[item.stokKodu] = (acc[item.stokKodu] || 0) + 1;
+      return acc;
+    }, {});
+  }, [depotStock]);
+
+  const getCoverageDaysLabel = useCallback((stokKodu: string): string => {
+    const rule = minMaxRules[stokKodu];
+    if (!rule || !rule.max || !rule.maxGun) return '-';
+
+    const totalProductStock = totalStockByProductCode[stokKodu] || 0;
+    const periodDays = Math.floor(rule.maxGun);
+    if (periodDays <= 0) return '-';
+
+    const today = new Date();
+    const businessDays = Array.from({ length: periodDays }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() + index + 1);
+      const day = date.getDay();
+      return day !== 0 && day !== 6;
+    }).filter(Boolean).length;
+
+    if (businessDays <= 0) return '-';
+
+    const dailyNeed = rule.max / businessDays;
+    if (dailyNeed <= 0) return '-';
+
+    const coverageDays = Math.floor(totalProductStock / dailyNeed);
+    return `${coverageDays} gün`;
+  }, [minMaxRules, totalStockByProductCode]);
+
   const sortedAndGroupedStock = useMemo(() => {
     let baseList = Object.values(groupedStock).map(g => ({ ...g, key: `${g.stokKodu}-${g.lotNumarasi}-${g.miad}` }));
     if (colorFilter !== 'none') {
@@ -671,13 +704,14 @@ export default function StokYonetimiPanel() {
                     <TableHead>Miad</TableHead>
                     <TableHead>Adet</TableHead>
                     <TableHead>Raf Adresi</TableHead>
+                    <TableHead>Stok Yeterlilik</TableHead>
                     <TableHead className="text-right">İşlemler</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {paginatedData.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-10">
+                      <TableCell colSpan={7} className="text-center py-10">
                         Sonuç bulunamadı.
                       </TableCell>
                     </TableRow>
@@ -706,6 +740,7 @@ export default function StokYonetimiPanel() {
                           )}
                         </TableCell>
                         <TableCell data-label="Raf">{g.rafAdresi}</TableCell>
+                        <TableCell data-label="Stok Yeterlilik">{getCoverageDaysLabel(g.stokKodu)}</TableCell>
                         <TableCell data-label="İşlemler" className="text-right">
                           <div className="flex gap-1 justify-end">
                             {editingRowKey === g.key ? (
