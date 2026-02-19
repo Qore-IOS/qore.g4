@@ -125,7 +125,7 @@ export default function DashboardPanel({
 
     const timelineItems = [
       ...pastCompleted,
-      { id: 'today-marker', label: format(currentDate, "dd MMMM yyyy • Bugün", { locale: tr }), type: 'today' as const },
+      { id: 'today-marker', label: format(currentDate, "dd MMMM yyyy", { locale: tr }) + " • Bugün", type: 'today' as const },
       ...futureTasks,
     ];
 
