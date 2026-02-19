@@ -645,15 +645,13 @@ export default function TotalVerimlilikPanel({
           prevYear = selectedYear - 1;
         }
 
-        // Önceki ayın kaydını kontrol et
+        // Önceki ayın kaydını kontrol et (önce ay sonu kaydı, yoksa ara kayıt)
         const prevDocId = `${selectedPoolId}-${prevYear}-${prevMonth}`;
+        const prevAraKayitDocId = `araKayit-${selectedPoolId}-${prevYear}-${prevMonth}`;
         try {
           const prevDocSnap = await getDoc(doc(db, 'totalEfficiencyRecords', prevDocId));
-          if (prevDocSnap.exists()) {
-            const prevData = prevDocSnap.data();
-            const prevRows = prevData.rows as TableRow[] || [];
 
-            // Önceki ayın dönem sonu değerlerini bu ayın başlangıç değerlerine aktar
+          const applyCarryover = (prevRows: TableRow[], source: string) => {
             newRows.forEach(row => {
               const prevRow = prevRows.find(pr => pr.id === row.id);
               if (prevRow) {
@@ -662,11 +660,23 @@ export default function TotalVerimlilikPanel({
                 row.ayBasiCihazUstuTest = prevRow.donemSonuCihazUstuTest || 0;
               }
             });
-
             toast({
               title: 'Devir Yapıldı',
-              description: `${MONTHS[prevMonth]?.label} ${prevYear} döneminden stok devri alındı.`,
+              description: `${MONTHS[prevMonth]?.label} ${prevYear} ${source} stok devri alındı.`,
             });
+          };
+
+          if (prevDocSnap.exists()) {
+            // Ay sonu kaydı var → oradan devret
+            const prevRows = (prevDocSnap.data().rows as TableRow[]) || [];
+            applyCarryover(prevRows, 'döneminden');
+          } else {
+            // Ay sonu kaydı yok → ara kayıt var mı kontrol et
+            const prevAraKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', prevAraKayitDocId));
+            if (prevAraKayitSnap.exists()) {
+              const prevRows = (prevAraKayitSnap.data().rows as TableRow[]) || [];
+              applyCarryover(prevRows, 'ara kaydından');
+            }
           }
         } catch (e) {
           totalVerimlilikLogger.warn('Önceki dönem verileri yüklenirken hata oluştu', {
@@ -947,45 +957,37 @@ export default function TotalVerimlilikPanel({
       const startDate = new Date(selectedYear, selectedMonth, 1);
       const endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
 
-      // Seçilen depodan yapılan sevkiyatları çek
-      // NOT: depotId (equality) + timestamp (range) composite index gerektirdiğinden
-      // sadece depotId ile sorgulayıp tarih filtresini client-side yapıyoruz
-      const shipmentsQuery = query(
-        collection(db, 'shipments'),
-        where('depotId', '==', selectedDepotForSevkiyat)
+      // Seçilen depodan yapılan transferleri çek (transfers collection)
+      // sourceDepotId + mode='lab' ile filtrele; tarih ve lab filtrelemesi client-side
+      const transfersQuery = query(
+        collection(db, 'transfers'),
+        where('sourceDepotId', '==', selectedDepotForSevkiyat),
+        where('mode', '==', 'lab')
       );
-      const shipmentsSnap = await getDocs(shipmentsQuery);
+      const transfersSnap = await getDocs(transfersQuery);
 
-      // Seçilen lab isimlerini hazırla (recipientHospital name ile eşleştirmek için)
-      const selectedLabNames = new Map<string, string>(); // labName -> labId
-      for (const labId of selectedLabsForSevkiyat) {
-        const lab = hospitals.find(h => h.id === labId);
-        if (lab) {
-          selectedLabNames.set(lab.name, labId);
-        }
-      }
+      // Seçilen lab ID'lerini Set olarak hazırla (doğrudan targetHospitalId ile eşleştirmek için)
+      const selectedLabIds = new Set(Array.from(selectedLabsForSevkiyat));
 
-      // Her sevkiyat için item'ları grupla: labId -> stokKodu -> toplam adet
+      // Her transfer için item'ları grupla: labId -> stokKodu -> toplam adet
       const labProductCounts: Record<string, Record<string, number>> = {};
 
-      for (const shipmentDoc of shipmentsSnap.docs) {
-        const shipmentData = shipmentDoc.data();
+      for (const transferDoc of transfersSnap.docs) {
+        const transferData = transferDoc.data();
 
         // Tarih filtresini client-side uygula
-        const shipmentTimestamp = shipmentData.timestamp?.toDate ? shipmentData.timestamp.toDate() : new Date(shipmentData.timestamp);
-        if (shipmentTimestamp < startDate || shipmentTimestamp > endDate) continue;
+        const transferTimestamp = transferData.timestamp?.toDate ? transferData.timestamp.toDate() : new Date(transferData.timestamp);
+        if (transferTimestamp < startDate || transferTimestamp > endDate) continue;
 
-        const recipientName = shipmentData.recipientHospital;
+        // targetHospitalId ile seçilen lab'ları doğrudan eşleştir
+        const matchedLabId = transferData.targetHospitalId;
+        if (!matchedLabId || !selectedLabIds.has(matchedLabId)) continue;
 
-        // recipientHospital ismi ile seçilen lab'ları eşleştir
-        const matchedLabId = selectedLabNames.get(recipientName);
-        if (!matchedLabId) continue;
-
-        // Sevkiyat item'larını say (items doküman içinde gömülü dizi)
-        const items = shipmentData.items || [];
-        for (const item of items) {
-          const stokKodu = item.stokKodu;
-          const quantity = item.quantity || 0;
+        // Items subcollection'ını çek (her belge = 1 adet)
+        const itemsSnap = await getDocs(collection(db, 'transfers', transferDoc.id, 'items'));
+        for (const itemDoc of itemsSnap.docs) {
+          const stokKodu = itemDoc.data().stokKodu;
+          if (!stokKodu) continue;
 
           if (!labProductCounts[matchedLabId]) {
             labProductCounts[matchedLabId] = {};
@@ -993,7 +995,7 @@ export default function TotalVerimlilikPanel({
           if (!labProductCounts[matchedLabId][stokKodu]) {
             labProductCounts[matchedLabId][stokKodu] = 0;
           }
-          labProductCounts[matchedLabId][stokKodu] += quantity;
+          labProductCounts[matchedLabId][stokKodu] += 1; // Her item dokümanı = 1 adet
         }
       }
 
@@ -1044,7 +1046,7 @@ export default function TotalVerimlilikPanel({
           description: `${selectedDepotName} deposundan seçilen laboratuvarlara ${MONTHS[selectedMonth]?.label} ${selectedYear} döneminde sevkiyat bulunamadı.`,
         });
       } else {
-        const totalSevkiyat = shipmentsSnap.docs.length;
+        const totalSevkiyat = transfersSnap.docs.length;
         toast({
           title: 'Sevkiyat Verileri Çekildi',
           description: (
