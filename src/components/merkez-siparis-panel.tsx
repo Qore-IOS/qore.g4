@@ -19,6 +19,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -26,6 +27,13 @@ import { useToast } from '@/hooks/use-toast';
 import { generateId } from '@/lib/utils';
 
 type LocationType = 'depot' | 'hospital';
+
+const MONTHS = Array.from({ length: 12 }, (_, i) => ({
+  value: i + 1,
+  label: new Date(2000, i, 1).toLocaleString('tr-TR', { month: 'long' }),
+}));
+const CURRENT_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 
 interface GeneratedOrderItem {
   key: string;
@@ -40,6 +48,9 @@ interface GeneratedOrderItem {
   mevcutAdet: number;
   laboratuvarAdet: number;
   toplamAdet: number;
+  cihazUstuAdet: number;
+  cihazUstuKutu: number;
+  genelToplam: number;
   hedefAdet: number;
   siparisAdedi: number;
   min: number;
@@ -113,6 +124,8 @@ export default function MerkezSiparisPanel() {
   const [selectedProductGroups, setSelectedProductGroups] = useState<string[]>([]);
   const [selectedDeviceGroups, setSelectedDeviceGroups] = useState<string[]>([]);
   const [yeterlilikGun, setYeterlilikGun] = useState<number | string>('');
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
 
   const [depotSearch, setDepotSearch] = useState('');
   const [labSearch, setLabSearch] = useState('');
@@ -120,18 +133,20 @@ export default function MerkezSiparisPanel() {
 
   const [openOrders, setOpenOrders] = useState<CentralOrder[]>([]);
   const [completedOrders, setCompletedOrders] = useState<CentralOrder[]>([]);
+  const [cihazUstuMap, setCihazUstuMap] = useState<Record<string, Record<string, number>>>({});
 
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [depotsSnap, hospitalsSnap, productsSnap, stokSnap, groupsSnap, centralOrdersSnap] = await Promise.all([
+        const [depotsSnap, hospitalsSnap, productsSnap, stokSnap, groupsSnap, centralOrdersSnap, cihazUstuSnap] = await Promise.all([
           getDocs(collection(db, 'depots')),
           getDocs(collection(db, 'hospitals')),
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'depoStok')),
           getDocs(collection(db, 'deviceGroups')),
           getDocs(query(collection(db, 'centralOrders'), orderBy('createdAt', 'desc'))),
+          getDocs(collection(db, 'cihazUstuGecmisi')),
         ]);
 
         const depotsData = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
@@ -172,6 +187,25 @@ export default function MerkezSiparisPanel() {
 
         setDepotRulesMap(Object.fromEntries(depotRuleEntries));
         setHospitalRulesMap(Object.fromEntries(hospitalRuleEntries));
+
+        const cihazMap: Record<string, Record<string, number>> = {};
+        cihazUstuSnap.docs.forEach(d => {
+          const data = d.data() as any;
+          const hospitalId = String(data.hospitalId ?? '').trim();
+          const period = String(data.period ?? '').trim();
+          if (!hospitalId || !period) return;
+
+          if (!cihazMap[period]) cihazMap[period] = {};
+          const items = Array.isArray(data.items) ? data.items : [];
+          items.forEach((item: any) => {
+            const productId = String(item.productId ?? '').trim();
+            const value = Number(item.value ?? 0);
+            if (!productId || Number.isNaN(value)) return;
+            const key = `${hospitalId}::${productId}`;
+            cihazMap[period][key] = (cihazMap[period][key] ?? 0) + value;
+          });
+        });
+        setCihazUstuMap(cihazMap);
 
         const orders = centralOrdersSnap.docs.map(d => {
           const data = d.data() as Record<string, unknown>;
@@ -333,6 +367,23 @@ export default function MerkezSiparisPanel() {
     )).length;
   };
 
+  const periodKey = `${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
+
+  const getCihazUstuAdet = (locationType: LocationType, locationId: string, stokKodu: string) => {
+    const periodData = cihazUstuMap[periodKey] || {};
+
+    if (locationType === 'hospital') {
+      return periodData[`${locationId}::${stokKodu}`] ?? 0;
+    }
+
+    const depot = depots.find(d => d.id === locationId);
+    const linkedLabIds = depot?.linkedLaboratoryIds || [];
+    if (linkedLabIds.length === 0) return 0;
+
+    const relevantLabIds = linkedLabIds.filter(labId => Boolean(hospitalRulesMap[labId]?.[stokKodu]));
+    return relevantLabIds.reduce((sum, labId) => sum + (periodData[`${labId}::${stokKodu}`] ?? 0), 0);
+  };
+
   const applyFilters = (rule: MinMaxRule) => {
     const product = productByStockCode[(rule.stokKodu ?? '').trim()];
     if (!product) return false;
@@ -386,7 +437,11 @@ export default function MerkezSiparisPanel() {
           ? getLinkedLaboratoryStockCount(locationId, rule.stokKodu)
           : 0;
         const toplamAdet = depoAdet + laboratuvarAdet;
-        const siparisAdedi = Math.max(0, hedefAdet - toplamAdet);
+        const cihazUstuAdet = getCihazUstuAdet(locationType, locationId, rule.stokKodu);
+        const ambalaj = Number(product.ambalajDegeri ?? 0);
+        const cihazUstuKutu = ambalaj > 0 ? Math.ceil(cihazUstuAdet / ambalaj) : 0;
+        const genelToplam = toplamAdet + cihazUstuKutu;
+        const siparisAdedi = Math.max(0, hedefAdet - genelToplam);
 
         if (siparisAdedi <= 0) return;
 
@@ -403,6 +458,9 @@ export default function MerkezSiparisPanel() {
           mevcutAdet: depoAdet,
           laboratuvarAdet,
           toplamAdet,
+          cihazUstuAdet,
+          cihazUstuKutu,
+          genelToplam,
           hedefAdet,
           siparisAdedi,
           min: Number(rule.min ?? 0),
@@ -578,6 +636,23 @@ export default function MerkezSiparisPanel() {
 
                 <div className="flex flex-wrap gap-3 items-end">
                   <div className="space-y-1">
+                    <Label>Dönem (Ay / Yıl)</Label>
+                    <div className="flex gap-2">
+                      <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(Number(v))}>
+                        <SelectTrigger className="w-40"><SelectValue placeholder="Ay" /></SelectTrigger>
+                        <SelectContent>
+                          {MONTHS.map(m => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+                        <SelectTrigger className="w-28"><SelectValue placeholder="Yıl" /></SelectTrigger>
+                        <SelectContent>
+                          {YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
                     <Label>Yeterlilik Günü</Label>
                     <Input type="number" min="1" value={yeterlilikGun} onChange={e => setYeterlilikGun(e.target.value)} className="w-40" />
                   </div>
@@ -585,7 +660,7 @@ export default function MerkezSiparisPanel() {
                   <Button variant="default" onClick={handleSave} disabled={isSaving || generatedItems.length === 0}>Kaydet</Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Cihaz grubu listesi sadece seçili marka + ürün grubu kombinasyonunda gerçekten cihaz grubu olan ürünler için gösterilir.
+                  Cihaz üstü veriler seçili ay/yıl dönemindeki cihazUstuGecmisi kayıtlarından alınır; kutu karşılığı ambalaj değerine göre yukarı yuvarlanır.
                 </p>
 
                 <div className="border rounded-md">
@@ -599,6 +674,9 @@ export default function MerkezSiparisPanel() {
                           <TableHead>Depo Adet</TableHead>
                           <TableHead>Lab Adet</TableHead>
                           <TableHead>Toplam</TableHead>
+                          <TableHead>Cihaz Üstü Adet</TableHead>
+                          <TableHead>Cihaz Üstü Kutu</TableHead>
+                          <TableHead>Genel Toplam</TableHead>
                           <TableHead>Hedef</TableHead>
                           <TableHead>Sipariş</TableHead>
                           <TableHead>Max/Max Gün</TableHead>
@@ -613,6 +691,9 @@ export default function MerkezSiparisPanel() {
                             <TableCell>{item.mevcutAdet}</TableCell>
                             <TableCell>{item.laboratuvarAdet}</TableCell>
                             <TableCell>{item.toplamAdet}</TableCell>
+                            <TableCell>{item.cihazUstuAdet}</TableCell>
+                            <TableCell>{item.cihazUstuKutu}</TableCell>
+                            <TableCell>{item.genelToplam}</TableCell>
                             <TableCell>{item.hedefAdet}</TableCell>
                             <TableCell className="font-semibold">{item.siparisAdedi}</TableCell>
                             <TableCell>{item.max} / {item.maxGun ?? '-'}</TableCell>
@@ -620,7 +701,7 @@ export default function MerkezSiparisPanel() {
                         ))}
                         {generatedItems.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={9} className="text-center text-muted-foreground py-10">Henüz sipariş oluşturulmadı.</TableCell>
+                            <TableCell colSpan={12} className="text-center text-muted-foreground py-10">Henüz sipariş oluşturulmadı.</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
