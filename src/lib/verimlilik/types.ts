@@ -586,6 +586,8 @@ export interface MinMaxRule {
   min?: number;
   /** Maximum quantity */
   max?: number;
+  /** Max quantity day coverage */
+  maxGun?: number;
 }
 
 /**
