@@ -265,7 +265,7 @@ export default function TeknikServisPanel({
     }
 
     return (
-      <div className={"space-y-6 p-4 sm:p-6"}>
+      <div className={"device-module-page space-y-6 p-4 sm:p-6"}>
         <Button variant="ghost" onClick={() => setExpandedPoolId(null)} className="mb-2">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Geri
@@ -409,7 +409,7 @@ export default function TeknikServisPanel({
             </div>
           ) : selectedFormDetail ? (
             // Form Detail View
-            <div className="space-y-4">
+            <div className="device-module-page space-y-4">
               <div className="flex items-center justify-between">
                 <Button variant="ghost" size="sm" onClick={() => setSelectedFormDetail(null)}>
                   <ArrowLeft className="h-4 w-4 mr-2" />

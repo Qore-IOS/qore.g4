@@ -35,6 +35,37 @@
     --ring: 35 90% 50%;
     
     --radius: 1rem;
+
+    /* Dashboard neumorphic tokens (light mode) */
+    --dashboard-bg: #E9E7E3;
+    --dashboard-surface: #F3F2EF;
+    --dashboard-surface-2: #EEECE7;
+    --dashboard-stroke: rgba(0, 0, 0, .045);
+    --dashboard-text: #2B2F33;
+    --dashboard-muted: #6C727A;
+    --dashboard-accent: #F2994A;
+    --dashboard-focus-glow: rgba(185, 182, 214, .55);
+    --dashboard-raised: -10px -10px 22px rgba(255,255,255,.85), 10px 10px 22px rgba(120,120,120,.16);
+    --dashboard-raised-soft: -6px -6px 14px rgba(255,255,255,.75), 6px 6px 14px rgba(120,120,120,.14);
+    --dashboard-pressed: inset -8px -8px 16px rgba(255,255,255,.80), inset 8px 8px 16px rgba(120,120,120,.16);
+
+    /* Device management module tokens */
+    --device-bg: #ECEDEF;
+    --device-surface: #F3F4F6;
+    --device-surface-2: #E7E9ED;
+    --device-border: rgba(20, 23, 28, 0.08);
+    --device-text: #1F2328;
+    --device-muted: #6B7280;
+    --device-accent: #F59E0B;
+    --device-accent-weak: rgba(245, 158, 11, 0.18);
+    --device-success: #16A34A;
+    --device-danger: #B91C1C;
+    --device-info: #2563EB;
+    --device-purple: #7C3AED;
+    --device-focus-ring: rgba(245, 158, 11, 0.25);
+    --device-elev-1: -6px -6px 12px rgba(255,255,255,.85), 6px 6px 12px rgba(17,24,39,.10);
+    --device-elev-2: -10px -10px 20px rgba(255,255,255,.85), 10px 10px 20px rgba(17,24,39,.10);
+    --device-pressed: inset -6px -6px 12px rgba(255,255,255,.85), inset 6px 6px 12px rgba(17,24,39,.10);
   }
 
   .dark {
@@ -323,6 +354,211 @@
   box-shadow:
     0 14px 40px rgba(15, 30, 60, 0.35),
     inset 0 1px 2px rgba(255, 255, 255, 0.15);
+}
+
+/* Dashboard light-mode systemic classes */
+:root:not(.dark) .dashboard-neu-page {
+  background:
+    radial-gradient(1200px 600px at 20% 0%, rgba(255,255,255,.55), transparent 60%),
+    linear-gradient(var(--dashboard-bg), #E6E4E0);
+  border-radius: 28px;
+}
+
+:root:not(.dark) .dashboard-neu-page .glass-card {
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-stroke);
+  border-radius: 24px;
+  box-shadow: var(--dashboard-raised);
+}
+
+:root:not(.dark) .dashboard-neu-button {
+  background: var(--dashboard-surface-2);
+  border-color: var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+:root:not(.dark) .dashboard-neu-button:hover {
+  box-shadow: var(--dashboard-raised);
+}
+
+:root:not(.dark) .dashboard-neu-button:active {
+  box-shadow: var(--dashboard-pressed);
+}
+
+:root:not(.dark) .dashboard-segment {
+  background: var(--dashboard-surface-2);
+  border: 1px solid var(--dashboard-stroke);
+  border-radius: 999px;
+  box-shadow: var(--dashboard-pressed);
+  padding: 6px;
+  gap: 6px;
+}
+
+:root:not(.dark) .dashboard-segment-trigger {
+  border-radius: 999px;
+  color: var(--dashboard-muted);
+}
+
+:root:not(.dark) .dashboard-segment-trigger[data-state="active"] {
+  background: var(--dashboard-surface);
+  color: var(--dashboard-text);
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+:root:not(.dark) .dashboard-segment-trigger:hover {
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+:root:not(.dark) .dashboard-segment-trigger:focus-visible,
+:root:not(.dark) .dashboard-neu-button:focus-visible,
+:root:not(.dark) .dashboard-panel-tile:focus-visible,
+:root:not(.dark) .dashboard-kpi-mini:focus-visible,
+:root:not(.dark) .dashboard-timeline-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--dashboard-focus-glow), var(--dashboard-raised-soft);
+}
+
+:root:not(.dark) .dashboard-kpi-mini {
+  background: var(--dashboard-surface-2);
+  border: 1px solid var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised-soft);
+  transition: transform .14s ease, box-shadow .14s ease;
+}
+
+:root:not(.dark) .dashboard-kpi-mini:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dashboard-raised);
+}
+
+:root:not(.dark) .dashboard-kpi-mini:active {
+  transform: translateY(0);
+  box-shadow: var(--dashboard-pressed);
+}
+
+:root:not(.dark) .dashboard-timeline-row {
+  border-radius: 999px;
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised-soft);
+  transition: transform .14s ease, box-shadow .14s ease;
+}
+
+:root:not(.dark) .dashboard-timeline-row:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--dashboard-raised);
+}
+
+:root:not(.dark) .dashboard-timeline-row-active {
+  border-color: rgba(242,153,74,.35);
+  box-shadow: var(--dashboard-raised), 0 0 0 4px rgba(242,153,74,.16);
+}
+
+:root:not(.dark) .dashboard-panel-tile {
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+:root:not(.dark) .dashboard-panel-tile-frequent {
+  border-color: rgba(242,153,74,.25);
+}
+
+:root:not(.dark) .dashboard-panel-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dashboard-raised);
+}
+
+:root:not(.dark) .dashboard-panel-tile:active {
+  transform: translateY(0);
+  box-shadow: var(--dashboard-pressed);
+}
+
+:root:not(.dark) .dashboard-panel-icon {
+  background: var(--dashboard-surface-2);
+  box-shadow: var(--dashboard-pressed);
+}
+
+/* Device management module neumorphic system */
+:root:not(.dark) .device-module-page {
+  background:
+    radial-gradient(1200px 500px at 20% 0%, rgba(255, 255, 255, 0.55), transparent 60%),
+    linear-gradient(var(--device-bg), #E7E9ED);
+  border-radius: 24px;
+  color: var(--device-text);
+}
+
+:root:not(.dark) .device-module-page .text-primary {
+  color: var(--device-text);
+}
+
+:root:not(.dark) .device-module-page .text-muted-foreground {
+  color: var(--device-muted);
+}
+
+:root:not(.dark) .device-module-page .bg-muted\/30,
+:root:not(.dark) .device-module-page .bg-muted\/50,
+:root:not(.dark) .device-module-page .bg-muted {
+  background: color-mix(in srgb, var(--device-surface-2) 78%, white 22%);
+}
+
+:root:not(.dark) .device-module-page .rounded-lg {
+  border-radius: 16px;
+}
+
+:root:not(.dark) .device-module-page .rounded-xl,
+:root:not(.dark) .device-module-page .rounded-2xl {
+  border-radius: 20px;
+}
+
+:root:not(.dark) .device-module-page .bg-card,
+:root:not(.dark) .device-module-page [class*="card"] {
+  border-color: var(--device-border);
+}
+
+:root:not(.dark) .device-module-page .shadow-sm,
+:root:not(.dark) .device-module-page .shadow,
+:root:not(.dark) .device-module-page .shadow-md,
+:root:not(.dark) .device-module-page .shadow-lg {
+  box-shadow: var(--device-elev-1);
+}
+
+:root:not(.dark) .device-module-page .hover\:shadow-lg:hover {
+  box-shadow: var(--device-elev-2);
+}
+
+:root:not(.dark) .device-module-page .bg-background,
+:root:not(.dark) .device-module-page .bg-card,
+:root:not(.dark) .device-module-page .bg-popover {
+  background: var(--device-surface);
+}
+
+:root:not(.dark) .device-module-page .border,
+:root:not(.dark) .device-module-page [class*="border-"] {
+  border-color: var(--device-border);
+}
+
+:root:not(.dark) .device-module-page button[class*="variant-outline"],
+:root:not(.dark) .device-module-page .border-input,
+:root:not(.dark) .device-module-page [role="combobox"],
+:root:not(.dark) .device-module-page [data-state][class*="select-trigger"] {
+  background: var(--device-surface-2);
+  border-color: var(--device-border);
+  box-shadow: var(--device-pressed);
+}
+
+:root:not(.dark) .device-module-page button:focus-visible,
+:root:not(.dark) .device-module-page [role="button"]:focus-visible,
+:root:not(.dark) .device-module-page input:focus-visible,
+:root:not(.dark) .device-module-page textarea:focus-visible,
+:root:not(.dark) .device-module-page [role="combobox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--device-focus-ring), var(--device-elev-1);
+}
+
+:root:not(.dark) .device-module-page .sticky,
+:root:not(.dark) .device-module-page .sticky.top-0,
+:root:not(.dark) .device-module-page .sticky.bottom-0 {
+  backdrop-filter: blur(4px);
 }
 
     .text-gradient-primary {

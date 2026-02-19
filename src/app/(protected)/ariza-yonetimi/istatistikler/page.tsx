@@ -558,7 +558,7 @@ export default function ArizaIstatistikleriPage() {
   }
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="device-module-page p-4 space-y-6">
       {/* Header with filters */}
       <div className="flex justify-between items-center flex-wrap gap-4">
         <BackButton fallback="/cihaz-yonetimi-ana" />

@@ -318,7 +318,7 @@ export default function ArizaYonetimiPage() {
 
   return (
     <PageShell>
-      <div className="space-y-4">
+      <div className="device-module-page space-y-4">
         <BackButton fallback="/cihaz-yonetimi-ana" />
         <Card>
           <CardHeader>

@@ -1040,7 +1040,7 @@ export default function PersonelIzlemPage() {
   const aplikasyonPersonel = performances.filter(p => p.user.role === 'aplikasyon');
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="device-module-page p-4 space-y-6">
       <BackButton fallback="/cihaz-yonetimi" />
 
       <Card>

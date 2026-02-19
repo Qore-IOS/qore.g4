@@ -1,12 +1,11 @@
 
 'use client';
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { TrendingUp, Zap, ChevronLeft, ChevronRight, Eye, ChevronDown, Wrench, CalendarClock } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -16,26 +15,17 @@ import { tr } from 'date-fns/locale';
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 import { ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
 import { cn } from '@/lib/utils';
-import EfficiencyDetailsModal from '@/components/EfficiencyDetailsModal';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-
-const CURRENT_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
-const MONTHS = Array.from({ length: 12 }, (_, i) => ({
-  value: i,
-  label: format(new Date(2000, i), 'LLLL', { locale: tr }),
-}));
-
+import { VIEWS } from '@/lib/constants';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -53,11 +43,8 @@ type TrendPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export default function DashboardPanel({
     hospitals,
-    productCodes,
     tuketimKayitlari,
-    efficiencyHistoryRecords,
 }: DashboardPanelProps) {
-  const [isEfficiencyModalOpen, setIsEfficiencyModalOpen] = useState(false);
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
   const { currentUserProfile } = useAuth();
   const { theme } = useTheme();
@@ -67,9 +54,7 @@ export default function DashboardPanel({
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
 
-  const [efficiencyMonth, setEfficiencyMonth] = useState(new Date().getMonth());
-  const [efficiencyYear, setEfficiencyYear] = useState(new Date().getFullYear());
-  const [isEfficiencyCardExpanded, setIsEfficiencyCardExpanded] = useState(false);
+  const calendarScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const faultQuery = query(collection(db, 'deviceFaultReports'));
@@ -107,40 +92,55 @@ export default function DashboardPanel({
 
   const personalCalendarKpi = useMemo(() => {
     if (!currentUserProfile?.uid) {
-      return { weeklyCount: 0, monthlyCount: 0, upcomingTasks: [] as PurchasingTask[] };
+      return {
+        timelineItems: [] as Array<{ id: string; label: string; type: 'past' | 'today' | 'future' }>,
+      };
     }
 
     const currentDate = new Date();
-    const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-    const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
-    const monthStart = startOfMonth(currentDate);
-    const monthEnd = endOfMonth(currentDate);
     const todayKey = format(currentDate, 'yyyy-MM-dd');
 
     const userTasks = purchasingTasks.filter((task) => {
-      if (task.completed) return false;
       return task.createdByUid === currentUserProfile.uid
         || task.assignedPersonnel?.some((person) => person.uid === currentUserProfile.uid)
         || task.accompanyingPersonnel?.some((person) => person.uid === currentUserProfile.uid);
     });
 
-    const weeklyCount = userTasks.filter((task) => {
-      const taskDate = toDateFromAny(task.date);
-      return taskDate && taskDate >= weekStart && taskDate <= weekEnd;
-    }).length;
-
-    const monthlyCount = userTasks.filter((task) => {
-      const taskDate = toDateFromAny(task.date);
-      return taskDate && taskDate >= monthStart && taskDate <= monthEnd;
-    }).length;
-
-    const upcomingTasks = userTasks
-      .filter((task) => task.date >= todayKey)
+    const sortedTasks = userTasks
       .sort((a, b) => (a.date === b.date ? a.startTime.localeCompare(b.startTime) : a.date.localeCompare(b.date)))
-      .slice(0, 3);
+      .map((task) => ({
+        id: task.id ?? `${task.date}-${task.startTime}-${task.title}`,
+        label: `${task.date} • ${task.startTime} • ${task.title}`,
+        date: task.date,
+        completed: !!task.completed,
+      }));
 
-    return { weeklyCount, monthlyCount, upcomingTasks };
+    const pastCompleted = sortedTasks
+      .filter((task) => task.completed && task.date < todayKey)
+      .map((task) => ({ id: task.id, label: task.label, type: 'past' as const }));
+
+    const futureTasks = sortedTasks
+      .filter((task) => task.date > todayKey)
+      .map((task) => ({ id: task.id, label: task.label, type: 'future' as const }));
+
+    const timelineItems = [
+      ...pastCompleted,
+      { id: 'today-marker', label: format(currentDate, "dd MMMM yyyy", { locale: tr }) + " • Bugün", type: 'today' as const },
+      ...futureTasks,
+    ];
+
+    return { timelineItems };
   }, [purchasingTasks, currentUserProfile?.uid]);
+
+  useEffect(() => {
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    const todayNode = el.querySelector<HTMLElement>('[data-today="true"]');
+    if (!todayNode) return;
+
+    const top = todayNode.offsetTop - (el.clientHeight / 2) + (todayNode.clientHeight / 2);
+    el.scrollTo({ top: Math.max(0, top) });
+  }, [personalCalendarKpi.timelineItems]);
 
   // Calculate date range for daily stats query
   const { startDateKey, endDateKey } = useMemo(() => {
@@ -297,53 +297,48 @@ export default function DashboardPanel({
     setTrendDate(current => fns[trendPeriod][direction](current, 1));
   };
   
-  const periodEfficiencyData = useMemo(() => {
-    if (!efficiencyHistoryRecords) return [];
-    const recordsForPeriod = efficiencyHistoryRecords.filter(
-        record => record.month === efficiencyMonth && record.year === efficiencyYear
-    );
-    
-    return recordsForPeriod.map(record => {
-      let totalWeightedEfficiency = 0;
-      let totalConsumption = 0;
-      if (record.rows) {
-        record.rows.forEach((res: any) => {
-          const anaTuketim = (res.anaTuketimTestAdeti ?? ((res.carryOverPrev || 0) + (res.consumption || 0) - (res.eomDeviceOn || 0)));
-          if (anaTuketim > 0) { // Avoid division by zero and negative consumption effects
-             const kitEff = (res.kitEffPct ?? 0);
-             totalWeightedEfficiency += kitEff * anaTuketim;
-             totalConsumption += anaTuketim;
-          }
-        });
-      }
-      const weightedAvg = totalConsumption > 0 ? totalWeightedEfficiency / totalConsumption : 0;
-      
-      return {
-        name: record.hospitalName || 'Bilinmeyen',
-        period: format(new Date(record.year, record.month), 'LLLL yyyy', { locale: tr }),
-        Verimlilik: Math.max(0, weightedAvg),
-      };
-    }).sort((a, b) => b.Verimlilik - a.Verimlilik);
-  }, [efficiencyHistoryRecords, efficiencyMonth, efficiencyYear]);
+  const visiblePanels = useMemo(() => {
+    const allowed = new Set(currentUserProfile?.accessibleViews ?? []);
+    return VIEWS.filter((view) => view.type === 'nav' && !!view.href && allowed.has(view.key) && view.key !== 'dashboard');
+  }, [currentUserProfile?.accessibleViews]);
 
-  const displayedEfficiencyData = useMemo(() => {
-      return isEfficiencyCardExpanded ? periodEfficiencyData : periodEfficiencyData.slice(0, 5);
-  }, [periodEfficiencyData, isEfficiencyCardExpanded]);
-
-
-  const getProgressColor = (percentage: number) => {
-    if (percentage <= 80) return 'bg-destructive';
-    if (percentage <= 90) return 'bg-orange-500';
-    return 'bg-green-600';
-  };
+  const faultStatusCards = [
+    {
+      key: 'atama',
+      label: 'Atama Bekleyen',
+      value: faultKpis.atamaBekleyen,
+      href: '/ariza-yonetimi?status=atama_bekliyor',
+      icon: UserPlus2,
+      tone: 'text-amber-600',
+      progressClass: 'bg-amber-400/70',
+    },
+    {
+      key: 'mudahale-bekleyen',
+      label: 'Müdahale Bekleyen',
+      value: faultKpis.mudahaleBekleyen,
+      href: '/ariza-yonetimi?status=mudahale_bekliyor',
+      icon: TimerReset,
+      tone: 'text-orange-600',
+      progressClass: 'bg-orange-400/70',
+    },
+    {
+      key: 'mudahale-edilen',
+      label: 'Müdahale Edilen',
+      value: faultKpis.mudahaleEdilen,
+      href: '/ariza-yonetimi?status=mudahale_ediliyor',
+      icon: ActivitySquare,
+      tone: 'text-emerald-600',
+      progressClass: 'bg-emerald-400/70',
+    },
+  ];
 
   return (
     <>
-      <div className={cn("p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-12 sm:pt-16")}>
+      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-12 sm:pt-16")}>
 
         <h1 className={cn(
           "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-6 sm:mt-10",
-          theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-gradient-neon'
+          theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-slate-800'
         )}>
           {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
         </h1>
@@ -358,21 +353,21 @@ export default function DashboardPanel({
                     <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" /> Tüketim Trendi
                   </CardTitle>
                   <Tabs value={trendPeriod} onValueChange={(v) => setTrendPeriod(v as TrendPeriod)} className="w-full sm:w-auto">
-                    <TabsList className="grid grid-cols-4 w-full sm:w-auto">
-                      <TabsTrigger value="daily" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Günlük</TabsTrigger>
-                      <TabsTrigger value="weekly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Haftalık</TabsTrigger>
-                      <TabsTrigger value="monthly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Aylık</TabsTrigger>
-                      <TabsTrigger value="yearly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Yıllık</TabsTrigger>
+                    <TabsList className="dashboard-segment grid grid-cols-4 w-full sm:w-auto">
+                      <TabsTrigger value="daily" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Günlük</TabsTrigger>
+                      <TabsTrigger value="weekly" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Haftalık</TabsTrigger>
+                      <TabsTrigger value="monthly" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Aylık</TabsTrigger>
+                      <TabsTrigger value="yearly" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Yıllık</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
                 <div className="flex items-center justify-between mt-1 sm:mt-2">
                    <CardDescription className="text-[10px] sm:text-xs md:text-sm">{trendTitle}</CardDescription>
-                   <div className="flex items-center gap-1">
-                      <Button variant="outline" size="icon" className="h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('prev')}>
+                    <div className="flex items-center gap-1">
+                      <Button variant="outline" size="icon" className="dashboard-neu-button h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('prev')}>
                         <ChevronLeft className="h-3 w-3 sm:h-4 sm:w-4" />
                       </Button>
-                      <Button variant="outline" size="icon" className="h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('next')}>
+                      <Button variant="outline" size="icon" className="dashboard-neu-button h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('next')}>
                         <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4" />
                       </Button>
                    </div>
@@ -405,105 +400,53 @@ export default function DashboardPanel({
           
           <motion.div {...motionProps}>
             <Card className="glass-card h-full flex flex-col">
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                    <CardTitle className="flex items-center gap-2"><Zap/> Verimlilik Oranları</CardTitle>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 -mt-2 -mr-2" onClick={() => setIsEfficiencyModalOpen(true)}>
-                        <Eye className="h-4 w-4" />
-                    </Button>
-                </div>
-                <div className="flex gap-2 items-center pt-2">
-                    <Select value={String(efficiencyMonth)} onValueChange={(v) => setEfficiencyMonth(Number(v))}>
-                        <SelectTrigger className="w-[120px] h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent>{MONTHS.map(m => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}</SelectContent>
-                    </Select>
-                    <Select value={String(efficiencyYear)} onValueChange={(v) => setEfficiencyYear(Number(v))}>
-                        <SelectTrigger className="w-[100px] h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent>{YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
-                    </Select>
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-col flex-grow justify-center space-y-3">
-                {displayedEfficiencyData.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">Bu dönem için hesaplanmış verimlilik verisi bulunmuyor.</p>
-                ) : (
-                    displayedEfficiencyData.map((data, index) => (
-                        <div key={index}>
-                            <div className="flex justify-between text-sm mb-1">
-                                <span className="font-medium truncate" title={data.name}>{data.name}</span>
-                                <span className="font-bold">{data.Verimlilik.toFixed(1)}%</span>
-                            </div>
-                            <Progress value={data.Verimlilik} className="h-2.5" indicatorClassName={getProgressColor(data.Verimlilik)} />
-                        </div>
-                    ))
-                )}
+              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3">
+                {faultStatusCards.map((item) => {
+                  const Icon = item.icon;
+                  const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
+                  const rate = total > 0 ? Math.round((item.value / total) * 100) : 0;
+
+                  return (
+                    <Link key={item.key} href={item.href} className="dashboard-kpi-mini group rounded-2xl p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className={cn("text-xs font-semibold", item.tone)}>{item.label}</p>
+                        <Icon className={cn("h-4 w-4", item.tone)} />
+                      </div>
+                      <p className="mt-2 text-3xl font-bold text-slate-700">{item.value}</p>
+                      <div className="mt-3 h-1.5 rounded-full bg-white/60">
+                        <div className={cn("h-1.5 rounded-full transition-all duration-300", item.progressClass)} style={{ width: `${Math.max(rate, 10)}%` }} />
+                      </div>
+                    </Link>
+                  );
+                })}
               </CardContent>
-              {periodEfficiencyData.length > 5 && (
-                <CardFooter className="pt-2">
-                    <Button variant="link" size="sm" onClick={() => setIsEfficiencyCardExpanded(prev => !prev)} className="w-full">
-                        {isEfficiencyCardExpanded ? 'Daha Az Göster' : `Tümünü Göster (${periodEfficiencyData.length})`}
-                        <ChevronDown className={cn("ml-1 h-4 w-4 transition-transform", isEfficiencyCardExpanded && "rotate-180")}/>
-                    </Button>
-                </CardFooter>
-              )}
             </Card>
           </motion.div>
 
           <motion.div {...motionProps}>
-            <Link href="/ariza-yonetimi" className="block h-full">
-              <Card className="dashboard-kpi-surface h-full flex flex-col cursor-pointer">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Wrench className="h-5 w-5" /> Cihaz Arıza KPI
-                  </CardTitle>
-                  <CardDescription>Atama ve müdahale durumlarındaki açık cihaz arızaları.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid grid-cols-3 gap-2">
-                  <div className="rounded-xl bg-secondary/40 border border-border p-2">
-                    <p className="text-[11px] text-muted-foreground">Atama Bekleyen</p>
-                    <p className="text-xl font-bold">{faultKpis.atamaBekleyen}</p>
-                  </div>
-                  <div className="rounded-xl bg-secondary/40 border border-border p-2">
-                    <p className="text-[11px] text-muted-foreground">Müdahale Bekleyen</p>
-                    <p className="text-xl font-bold">{faultKpis.mudahaleBekleyen}</p>
-                  </div>
-                  <div className="rounded-xl bg-secondary/40 border border-border p-2">
-                    <p className="text-[11px] text-muted-foreground">Müdahale Edilen</p>
-                    <p className="text-xl font-bold">{faultKpis.mudahaleEdilen}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          </motion.div>
-
-          <motion.div {...motionProps}>
             <Link href="/satin-alma/analiz-planlama" className="block h-full">
-              <Card className="dashboard-kpi-surface h-full flex flex-col cursor-pointer">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <CalendarClock className="h-5 w-5" /> Takvim KPI
-                  </CardTitle>
-                  <CardDescription>Kişisel görev takvimi özeti (1 hafta / 1 ay).</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-xl bg-secondary/40 border border-border p-2">
-                      <p className="text-[11px] text-muted-foreground">1 Haftalık</p>
-                      <p className="text-xl font-bold">{personalCalendarKpi.weeklyCount}</p>
-                    </div>
-                    <div className="rounded-xl bg-secondary/40 border border-border p-2">
-                      <p className="text-[11px] text-muted-foreground">1 Aylık</p>
-                      <p className="text-xl font-bold">{personalCalendarKpi.monthlyCount}</p>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    {personalCalendarKpi.upcomingTasks.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Yaklaşan görev bulunmuyor.</p>
+              <Card className="glass-card h-full flex flex-col cursor-pointer">
+                <CardContent className="pt-6">
+                  <div
+                    ref={calendarScrollRef}
+                    className="h-[252px] space-y-2 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  >
+                    {personalCalendarKpi.timelineItems.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Takvim kaydı bulunmuyor.</p>
                     ) : (
-                      personalCalendarKpi.upcomingTasks.map((task) => (
-                        <p key={task.id} className="text-xs text-muted-foreground truncate">
-                          {task.date} • {task.startTime} • <span className="text-foreground">{task.title}</span>
-                        </p>
+                      personalCalendarKpi.timelineItems.map((item) => (
+                        <div
+                          key={item.id}
+                          data-today={item.type === 'today'}
+                          className={cn(
+                            'dashboard-timeline-row px-3 py-2',
+                            item.type === 'today' && 'dashboard-timeline-row-active text-center text-base font-semibold text-slate-700',
+                            item.type === 'past' && 'text-xs text-slate-500 line-through',
+                            item.type === 'future' && 'text-xs text-slate-500'
+                          )}
+                        >
+                          {item.label}
+                        </div>
                       ))
                     )}
                   </div>
@@ -512,17 +455,34 @@ export default function DashboardPanel({
             </Link>
           </motion.div>
         </div>
+
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle>Paneller</CardTitle>
+            <CardDescription>Yetkiniz dahilinde erişebileceğiniz modüller</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12">
+              {visiblePanels.map((panel) => {
+                const Icon = panel.icon;
+                const isFrequent = ['arama', 'stok-yonetimi', 'laboratuvar-yonetimi', 'satin-alma'].includes(panel.key);
+                const hasAttention = ['siparisler', 'sarf-dagitim', 'cihaz-yonetimi-ana'].includes(panel.key);
+
+                return (
+                  <Link key={panel.key} href={panel.href!} className={cn('dashboard-panel-tile group relative flex flex-col items-center gap-2 rounded-2xl p-3 text-center transition', isFrequent && 'dashboard-panel-tile-frequent')}>
+                    {hasAttention && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-orange-400" />}
+                    <span className="dashboard-panel-icon flex h-10 w-10 items-center justify-center rounded-full text-primary transition group-hover:text-orange-500">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    {isFrequent && <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-medium text-orange-600">Sık</span>}
+                    <span className="text-xs text-muted-foreground group-hover:text-foreground">{panel.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
       </div>
-      
-      {isEfficiencyModalOpen && (
-        <EfficiencyDetailsModal
-          isOpen={isEfficiencyModalOpen}
-          onClose={() => setIsEfficiencyModalOpen(false)}
-          efficiencyHistoryRecords={efficiencyHistoryRecords} // Changed
-          productCodes={productCodes}
-          hospitals={hospitals}
-        />
-      )}
       
       {isConsumptionModalOpen && (
         <ConsumptionTrendModal
