@@ -225,23 +225,23 @@ export default function AplikasyonPanel({
   // Reusable device dot indicators
   const DeviceDots = ({ devices: devs }: { devices: Device[] }) => {
     if (devs.length === 0) return null;
+    const faultyCount = devs.filter((device) => isDeviceFaulty(device)).length;
+    const healthyCount = devs.length - faultyCount;
+
     return (
-      <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3 pt-3 border-t">
-        {devs.map((device) => {
-          const faulty = isDeviceFaulty(device);
-          return (
-            <span
-              key={device.id}
-              className={cn(
-                "h-2.5 w-2.5 rounded-full transition-all",
-                faulty
-                  ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]'
-                  : 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
-              )}
-              title={`${device.cihazAdi || device.model} - ${faulty ? 'Arızalı' : 'Sağlıklı'}`}
-            ></span>
-          );
-        })}
+      <div className="mt-3 pt-3 border-t border-[var(--dashboard-stroke)] space-y-2">
+        <div className="flex items-center justify-between text-xs text-[var(--dashboard-muted)]">
+          <span>Toplam {devs.length} cihaz</span>
+          <span className="text-red-600">{faultyCount} arızalı</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-red-700">
+            <span className="h-2 w-2 rounded-full bg-red-500" />Arızalı: {faultyCount}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />Sağlıklı: {healthyCount}
+          </span>
+        </div>
       </div>
     );
   };
@@ -255,15 +255,15 @@ export default function AplikasyonPanel({
     }
 
     return (
-      <div className={"space-y-6 p-4 sm:p-6"}>
+      <div className={"cihaz-shell space-y-4 sm:space-y-6 p-4 sm:p-6"}>
         <Button variant="ghost" onClick={() => setExpandedPoolId(null)} className="mb-2">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Geri
         </Button>
-        <Card>
+        <Card className="cihaz-card-strong border-0">
           <CardHeader>
             <div className="flex justify-between items-center">
-              <CardTitle className="text-2xl font-headline flex items-center text-primary">
+              <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]">
                 <Layers className="mr-3 h-7 w-7" />
                 {poolGroup.pool.name || poolGroup.mainLab.name}
               </CardTitle>
@@ -274,8 +274,8 @@ export default function AplikasyonPanel({
           </CardHeader>
         </Card>
 
-        <div className="overflow-y-auto max-h-[calc(100vh-20rem)] p-4 -m-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="overflow-y-auto max-h-[calc(100vh-20rem)] p-2 sm:p-4 -m-2 sm:-m-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
             {poolGroup.memberLabs.map(hospital => {
               const stats = getHospitalStats(hospital.id);
               return (
@@ -283,11 +283,11 @@ export default function AplikasyonPanel({
                   key={hospital.id}
                   onClick={() => router.push(`/aplikasyon-paneli/${hospital.id}`)}
                   className={cn(
-                    "cursor-pointer hover:shadow-lg transition-shadow"
+                    "cihaz-card cihaz-focus-ring cursor-pointer border-0 transition-all hover:-translate-y-0.5"
                   )}
                 >
-                  <CardHeader className="pb-2 pt-4">
-                    <CardTitle className="text-base font-headline text-primary truncate" title={hospital.name}>
+                  <CardHeader className="pb-1 pt-3">
+                    <CardTitle className="text-sm sm:text-base font-headline text-[var(--dashboard-text)] truncate" title={hospital.name}>
                       {hospital.name}
                     </CardTitle>
                   </CardHeader>
@@ -305,12 +305,12 @@ export default function AplikasyonPanel({
 
   // Main view - show pools and standalone labs
   return (
-    <div className={"space-y-6 p-4 sm:p-6"}>
+    <div className={"cihaz-shell space-y-4 sm:space-y-6 p-4 sm:p-6"}>
       <BackButton fallback="/cihaz-yonetimi-ana" />
-      <Card>
+      <Card className="cihaz-card-strong border-0">
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
-            <CardTitle className="text-2xl font-headline flex items-center text-primary"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
+            <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
             <div className="flex w-full flex-col gap-2 sm:w-auto">
               <Button variant="outline" onClick={openAllFormsDialog} className="w-full sm:w-auto">
                 <FileText className="mr-2 h-4 w-4" />
@@ -326,8 +326,8 @@ export default function AplikasyonPanel({
         </CardHeader>
       </Card>
 
-      <div className="overflow-y-auto max-h-[calc(100vh-20rem)] p-4 -m-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="overflow-y-auto max-h-[calc(100vh-20rem)] p-2 sm:p-4 -m-2 sm:-m-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
           {/* Pool cards - show main lab as representative */}
           {poolGroups.map(({ pool, mainLab, memberLabs }) => {
             const stats = getPoolStats(memberLabs.map(l => l.id));
@@ -336,12 +336,12 @@ export default function AplikasyonPanel({
                 key={pool.id}
                 onClick={() => setExpandedPoolId(pool.id)}
                 className={cn(
-                  "cursor-pointer hover:shadow-lg transition-shadow border-2 border-primary/20"
+                  "cihaz-card cihaz-focus-ring cursor-pointer border border-amber-300/40 transition-all hover:-translate-y-0.5"
                 )}
               >
-                <CardHeader className="pb-2 pt-4">
+                <CardHeader className="pb-1 pt-3">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-base font-headline text-primary truncate" title={mainLab.name}>
+                    <CardTitle className="text-sm sm:text-base font-headline text-[var(--dashboard-text)] truncate" title={mainLab.name}>
                       {mainLab.name}
                     </CardTitle>
                     <div className="flex items-center text-muted-foreground">
@@ -369,11 +369,11 @@ export default function AplikasyonPanel({
                 key={hospital.id}
                 onClick={() => router.push(`/aplikasyon-paneli/${hospital.id}`)}
                 className={cn(
-                  "cursor-pointer hover:shadow-lg transition-shadow"
+                  "cihaz-card cihaz-focus-ring cursor-pointer border-0 transition-all hover:-translate-y-0.5"
                 )}
               >
-                <CardHeader className="pb-2 pt-4">
-                  <CardTitle className="text-base font-headline text-primary truncate" title={hospital.name}>{hospital.name}</CardTitle>
+                <CardHeader className="pb-1 pt-3">
+                  <CardTitle className="text-sm sm:text-base font-headline text-[var(--dashboard-text)] truncate" title={hospital.name}>{hospital.name}</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0 pb-4">
                   <DeviceDots devices={stats.devices} />

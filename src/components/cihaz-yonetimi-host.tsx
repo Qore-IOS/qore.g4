@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Settings, Server, Wrench, Loader2, History, ShieldAlert, FileCode, FlaskConical, Users, BarChart3, Sparkles, CalendarClock, Building2, Package } from 'lucide-react';
+import { Settings, Wrench, ShieldAlert, FileCode, FlaskConical, Users, BarChart3, Sparkles, CalendarClock, Building2, Package, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import { collection, getDocs } from 'firebase/firestore';
@@ -17,15 +17,14 @@ const ModernButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<ty
     <Button
       ref={ref}
       className={cn(
-        "h-auto min-h-[150px] p-5 sm:p-6 text-base sm:text-lg font-headline rounded-xl transition-all duration-200 ease-in-out whitespace-normal text-center",
-        "bg-card text-card-foreground hover:bg-accent/10 hover:text-accent-foreground",
-        "shadow-lg hover:shadow-xl",
+        "cihaz-card cihaz-focus-ring h-auto min-h-[120px] sm:min-h-[132px] p-4 sm:p-5 text-sm sm:text-base font-headline rounded-2xl transition-all duration-200 ease-in-out whitespace-normal text-center",
+        "text-[var(--dashboard-text)] hover:-translate-y-0.5 hover:shadow-[var(--dashboard-raised)]",
         className
       )}
       {...props}
     >
       <div className="flex flex-col items-center justify-center gap-3 leading-tight">
-        {Icon && <Icon className="h-10 w-10 sm:h-12 sm:w-12 text-primary shrink-0" />}
+        {Icon && <Icon className="h-8 w-8 sm:h-9 sm:w-9 text-amber-500 shrink-0" />}
         <span className="max-w-full break-words">{children}</span>
       </div>
     </Button>
@@ -77,24 +76,23 @@ export default function CihazYonetimiHost() {
   const commonProps = { hospitals, devices, setDevices, hospitalDeviceAssignments, setHospitalDeviceAssignments, toast, setSubView, fetchAllApplicationData };
 
   const MainMenu = () => (
-     <div className="flex flex-col items-center justify-center min-h-full p-4 sm:p-8">
+     <div className="cihaz-shell flex flex-col items-center justify-center min-h-full p-4 sm:p-8">
       <Card className={cn(
-        "w-full max-w-4xl p-6 sm:p-10 rounded-3xl",
-        "shadow-2xl relative"
+        "cihaz-card-strong w-full max-w-6xl p-4 sm:p-8 rounded-3xl relative"
       )}>
         {/* Qore AI Button - Top Right */}
         <Button
           variant="outline"
           onClick={() => setIsQoreAIPanelOpen(true)}
-          className="absolute top-4 right-4 gap-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 hover:from-purple-500/20 hover:to-blue-500/20 border-purple-500/30"
+          className="cihaz-focus-ring absolute top-4 right-4 gap-2 bg-white/70 hover:bg-white border-[var(--dashboard-stroke)] text-[var(--dashboard-text)]"
         >
           <Sparkles className="h-4 w-4 text-purple-500" />
           Qore AI
         </Button>
         <CardHeader className="text-center mb-8">
-          <CardTitle className="text-3xl sm:text-4xl font-headline text-primary">Cihaz Yönetim Merkezi</CardTitle>
+          <CardTitle className="text-2xl sm:text-3xl font-headline text-[var(--dashboard-text)]">Cihaz Yönetim Merkezi</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-10">
+        <CardContent className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
           {currentUserProfile?.role !== 'aplikasyon' && (
             <ModernButton onClick={() => router.push('/teknik-servis')} icon={Wrench}>
               Teknik Servis
@@ -112,37 +110,29 @@ export default function CihazYonetimiHost() {
             Nöbet Vardiyası
           </ModernButton>
         </CardContent>
-        <div className="mt-12 flex flex-wrap justify-center gap-4">
-            <Button variant="ghost" onClick={() => router.push('/cihaz-tanimlamalari')} className="text-muted-foreground hover:text-primary">
-                <Settings className="mr-2 h-5 w-5" />
-                Cihaz Modelleri
-            </Button>
-            <Button variant="ghost" onClick={() => router.push('/ariza-tanimlamalari')} className="text-muted-foreground hover:text-primary">
-                <ShieldAlert className="mr-2 h-5 w-5" />
-                Arıza Tanımlamaları
-            </Button>
-            <Button variant="ghost" onClick={() => router.push('/ariza-yonetimi/istatistikler')} className="text-muted-foreground hover:text-primary">
-                <BarChart3 className="mr-2 h-5 w-5" />
-                Arıza İstatistikleri
-            </Button>
-            <Button variant="ghost" onClick={() => window.open('/raporlama/ariza-raporu', '_blank')} className="text-muted-foreground hover:text-primary">
-              <FileCode className="mr-2 h-5 w-5" />
-              HTML Raporu
-            </Button>
-            {isAdmin && (
-              <Button variant="ghost" onClick={() => router.push('/personel-izlem')} className="text-muted-foreground hover:text-primary">
-                <Users className="mr-2 h-5 w-5" />
-                Personel İzlem
+        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+            {[
+              { label: 'Cihaz Modelleri', icon: Settings, href: '/cihaz-tanimlamalari' },
+              { label: 'Arıza Tanımlamaları', icon: ShieldAlert, href: '/ariza-tanimlamalari' },
+              { label: 'Arıza İstatistikleri', icon: BarChart3, href: '/ariza-yonetimi/istatistikler' },
+              { label: 'HTML Raporu', icon: FileCode, href: '/raporlama/ariza-raporu', external: true },
+              ...(isAdmin ? [{ label: 'Personel İzlem', icon: Users, href: '/personel-izlem' }] : []),
+              { label: 'Kurum Ziyaret Analizi', icon: Building2, href: '/kurum-ziyaret-analizi' },
+              { label: 'Yedek Parça Analizi', icon: Package, href: '/yedek-parca-analizi' },
+            ].map((item) => (
+              <Button
+                key={item.label}
+                variant="ghost"
+                className="cihaz-card cihaz-focus-ring h-auto justify-between px-4 py-3 text-[var(--dashboard-text)] hover:bg-white"
+                onClick={() => item.external ? window.open(item.href, '_blank') : router.push(item.href)}
+              >
+                <span className="flex items-center gap-2 text-sm sm:text-base">
+                  <item.icon className="h-4 w-4 text-amber-500" />
+                  {item.label}
+                </span>
+                <ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)]" />
               </Button>
-            )}
-            <Button variant="ghost" onClick={() => router.push('/kurum-ziyaret-analizi')} className="text-muted-foreground hover:text-primary">
-                <Building2 className="mr-2 h-5 w-5" />
-                Kurum Ziyaret Analizi
-            </Button>
-            <Button variant="ghost" onClick={() => router.push('/yedek-parca-analizi')} className="text-muted-foreground hover:text-primary">
-                <Package className="mr-2 h-5 w-5" />
-                Yedek Parça Analizi
-            </Button>
+            ))}
         </div>
       </Card>
     </div>
