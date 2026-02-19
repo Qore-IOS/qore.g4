@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -302,13 +302,43 @@ export default function DashboardPanel({
     return VIEWS.filter((view) => view.type === 'nav' && !!view.href && allowed.has(view.key) && view.key !== 'dashboard');
   }, [currentUserProfile?.accessibleViews]);
 
+  const faultStatusCards = [
+    {
+      key: 'atama',
+      label: 'Atama Bekleyen',
+      value: faultKpis.atamaBekleyen,
+      href: '/ariza-yonetimi?status=atama_bekliyor',
+      icon: UserPlus2,
+      tone: 'text-amber-600',
+      progressClass: 'bg-amber-400/70',
+    },
+    {
+      key: 'mudahale-bekleyen',
+      label: 'Müdahale Bekleyen',
+      value: faultKpis.mudahaleBekleyen,
+      href: '/ariza-yonetimi?status=mudahale_bekliyor',
+      icon: TimerReset,
+      tone: 'text-orange-600',
+      progressClass: 'bg-orange-400/70',
+    },
+    {
+      key: 'mudahale-edilen',
+      label: 'Müdahale Edilen',
+      value: faultKpis.mudahaleEdilen,
+      href: '/ariza-yonetimi?status=mudahale_ediliyor',
+      icon: ActivitySquare,
+      tone: 'text-emerald-600',
+      progressClass: 'bg-emerald-400/70',
+    },
+  ];
+
   return (
     <>
-      <div className={cn("p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-12 sm:pt-16")}>
+      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-12 sm:pt-16")}>
 
         <h1 className={cn(
           "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-6 sm:mt-10",
-          theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-gradient-neon'
+          theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-slate-800'
         )}>
           {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
         </h1>
@@ -323,21 +353,21 @@ export default function DashboardPanel({
                     <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" /> Tüketim Trendi
                   </CardTitle>
                   <Tabs value={trendPeriod} onValueChange={(v) => setTrendPeriod(v as TrendPeriod)} className="w-full sm:w-auto">
-                    <TabsList className="grid grid-cols-4 w-full sm:w-auto">
-                      <TabsTrigger value="daily" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Günlük</TabsTrigger>
-                      <TabsTrigger value="weekly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Haftalık</TabsTrigger>
-                      <TabsTrigger value="monthly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Aylık</TabsTrigger>
-                      <TabsTrigger value="yearly" className="text-[10px] sm:text-xs px-1.5 sm:px-3">Yıllık</TabsTrigger>
+                    <TabsList className="dashboard-segment grid grid-cols-4 w-full sm:w-auto">
+                      <TabsTrigger value="daily" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Günlük</TabsTrigger>
+                      <TabsTrigger value="weekly" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Haftalık</TabsTrigger>
+                      <TabsTrigger value="monthly" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Aylık</TabsTrigger>
+                      <TabsTrigger value="yearly" className="dashboard-segment-trigger text-[10px] sm:text-xs px-1.5 sm:px-3">Yıllık</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
                 <div className="flex items-center justify-between mt-1 sm:mt-2">
                    <CardDescription className="text-[10px] sm:text-xs md:text-sm">{trendTitle}</CardDescription>
-                   <div className="flex items-center gap-1">
-                      <Button variant="outline" size="icon" className="h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('prev')}>
+                    <div className="flex items-center gap-1">
+                      <Button variant="outline" size="icon" className="dashboard-neu-button h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('prev')}>
                         <ChevronLeft className="h-3 w-3 sm:h-4 sm:w-4" />
                       </Button>
-                      <Button variant="outline" size="icon" className="h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('next')}>
+                      <Button variant="outline" size="icon" className="dashboard-neu-button h-6 w-6 sm:h-7 sm:w-7" onClick={() => handleTrendNav('next')}>
                         <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4" />
                       </Button>
                    </div>
@@ -370,19 +400,25 @@ export default function DashboardPanel({
           
           <motion.div {...motionProps}>
             <Card className="glass-card h-full flex flex-col">
-              <CardContent className="grid h-full grid-cols-1 gap-2 sm:grid-cols-3">
-                <Link href="/ariza-yonetimi?status=atama_bekliyor" className="rounded-xl border border-border/60 bg-secondary/30 p-3 transition-colors hover:bg-secondary/50">
-                  <p className="text-xs font-medium text-amber-500">Atama Bekleyen</p>
-                  <p className="text-2xl font-bold text-foreground">{faultKpis.atamaBekleyen}</p>
-                </Link>
-                <Link href="/ariza-yonetimi?status=mudahale_bekliyor" className="rounded-xl border border-border/60 bg-secondary/30 p-3 transition-colors hover:bg-secondary/50">
-                  <p className="text-xs font-medium text-orange-500">Müdahale Bekleyen</p>
-                  <p className="text-2xl font-bold text-foreground">{faultKpis.mudahaleBekleyen}</p>
-                </Link>
-                <Link href="/ariza-yonetimi?status=mudahale_ediliyor" className="rounded-xl border border-border/60 bg-secondary/30 p-3 transition-colors hover:bg-secondary/50">
-                  <p className="text-xs font-medium text-emerald-500">Müdahale Edilen</p>
-                  <p className="text-2xl font-bold text-foreground">{faultKpis.mudahaleEdilen}</p>
-                </Link>
+              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3">
+                {faultStatusCards.map((item) => {
+                  const Icon = item.icon;
+                  const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
+                  const rate = total > 0 ? Math.round((item.value / total) * 100) : 0;
+
+                  return (
+                    <Link key={item.key} href={item.href} className="dashboard-kpi-mini group rounded-2xl p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className={cn("text-xs font-semibold", item.tone)}>{item.label}</p>
+                        <Icon className={cn("h-4 w-4", item.tone)} />
+                      </div>
+                      <p className="mt-2 text-3xl font-bold text-slate-700">{item.value}</p>
+                      <div className="mt-3 h-1.5 rounded-full bg-white/60">
+                        <div className={cn("h-1.5 rounded-full transition-all duration-300", item.progressClass)} style={{ width: `${Math.max(rate, 10)}%` }} />
+                      </div>
+                    </Link>
+                  );
+                })}
               </CardContent>
             </Card>
           </motion.div>
@@ -403,10 +439,10 @@ export default function DashboardPanel({
                           key={item.id}
                           data-today={item.type === 'today'}
                           className={cn(
-                            'rounded-lg border border-border/50 px-3 py-2 transition-colors',
-                            item.type === 'today' && 'bg-primary/15 text-center text-base font-semibold text-primary',
-                            item.type === 'past' && 'text-xs text-muted-foreground line-through',
-                            item.type === 'future' && 'text-xs text-muted-foreground'
+                            'dashboard-timeline-row px-3 py-2',
+                            item.type === 'today' && 'dashboard-timeline-row-active text-center text-base font-semibold text-slate-700',
+                            item.type === 'past' && 'text-xs text-slate-500 line-through',
+                            item.type === 'future' && 'text-xs text-slate-500'
                           )}
                         >
                           {item.label}
@@ -429,11 +465,16 @@ export default function DashboardPanel({
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12">
               {visiblePanels.map((panel) => {
                 const Icon = panel.icon;
+                const isFrequent = ['arama', 'stok-yonetimi', 'laboratuvar-yonetimi', 'satin-alma'].includes(panel.key);
+                const hasAttention = ['siparisler', 'sarf-dagitim', 'cihaz-yonetimi-ana'].includes(panel.key);
+
                 return (
-                  <Link key={panel.key} href={panel.href!} className="group flex flex-col items-center gap-2 rounded-xl border border-border/50 p-3 text-center transition hover:border-primary/40 hover:bg-primary/5">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary/40 text-primary transition group-hover:bg-primary/15">
+                  <Link key={panel.key} href={panel.href!} className={cn('dashboard-panel-tile group relative flex flex-col items-center gap-2 rounded-2xl p-3 text-center transition', isFrequent && 'dashboard-panel-tile-frequent')}>
+                    {hasAttention && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-orange-400" />}
+                    <span className="dashboard-panel-icon flex h-10 w-10 items-center justify-center rounded-full text-primary transition group-hover:text-orange-500">
                       <Icon className="h-5 w-5" />
                     </span>
+                    {isFrequent && <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-medium text-orange-600">Sık</span>}
                     <span className="text-xs text-muted-foreground group-hover:text-foreground">{panel.label}</span>
                   </Link>
                 );
