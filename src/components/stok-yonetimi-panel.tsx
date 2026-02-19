@@ -467,7 +467,23 @@ export default function StokYonetimiPanel() {
     if (!rule || !rule.max || !rule.maxGun) return '-';
 
     const totalProductStock = totalStockByProductCode[stokKodu] || 0;
-    const coverageDays = Math.round((totalProductStock / rule.max) * rule.maxGun);
+    const periodDays = Math.floor(rule.maxGun);
+    if (periodDays <= 0) return '-';
+
+    const today = new Date();
+    const businessDays = Array.from({ length: periodDays }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() + index + 1);
+      const day = date.getDay();
+      return day !== 0 && day !== 6;
+    }).filter(Boolean).length;
+
+    if (businessDays <= 0) return '-';
+
+    const dailyNeed = rule.max / businessDays;
+    if (dailyNeed <= 0) return '-';
+
+    const coverageDays = Math.floor(totalProductStock / dailyNeed);
     return `${coverageDays} gün`;
   }, [minMaxRules, totalStockByProductCode]);
 
