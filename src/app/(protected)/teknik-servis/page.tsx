@@ -86,7 +86,14 @@ export default function TeknikServisPage() {
 
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-full"><Loader2 className="h-10 w-10 animate-spin text-primary" /><p className="ml-4 text-lg">Teknik Servis Paneli Yükleniyor...</p></div>
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Teknik Servis Paneli yükleniyor&hellip;</p>
+        </div>
+      </div>
+    );
   }
 
   const commonProps = {
