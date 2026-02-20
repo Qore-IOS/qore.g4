@@ -1012,9 +1012,9 @@ export default function TotalVerimlilikPanel({
           // Sadece seçilen lab'lara ait satırları güncelle
           if (!selectedLabsForSevkiyat.has(row.labId)) return row;
           const counts = labProductCounts[row.labId]?.[row.stokKodu] || 0;
-          // Adet sayısını kutuya çevir (ambalaj değerine böl, yuvarla)
-          const kutuSayisi = row.ambalajDegeri > 0 ? Math.round(counts / row.ambalajDegeri) : counts;
-          return { ...row, goztepeSevkiyat: kutuSayisi };
+          // transfer/items koleksiyonunda her doküman 1 kutuyu temsil eder.
+          // Bu yüzden ambalaj değerine göre tekrar dönüştürme yapmadan doğrudan kutu adetini yaz.
+          return { ...row, goztepeSevkiyat: counts };
         });
 
         // Toast özet bilgisini oluştur
@@ -1027,7 +1027,7 @@ export default function TotalVerimlilikPanel({
             if (adet <= 0) continue;
             const matchedRow = prevRows.find(r => r.labId === labId && r.stokKodu === stokKodu);
             const stokAdi = matchedRow?.stokAdi || stokKodu;
-            const kutu = matchedRow && matchedRow.ambalajDegeri > 0 ? Math.round(adet / matchedRow.ambalajDegeri) : adet;
+            const kutu = adet;
             items.push({ stokAdi, kutu });
           }
           if (items.length > 0) {
