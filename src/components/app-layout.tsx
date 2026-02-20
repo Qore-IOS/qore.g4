@@ -73,7 +73,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
 
   const {
     dockItems,
