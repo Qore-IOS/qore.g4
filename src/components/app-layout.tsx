@@ -73,6 +73,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
+
   const {
     dockItems,
     isVerimlilikSwitchOpen,
@@ -200,7 +202,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">
         <PersistentNotificationToast />
-        <PageShell className="w-full flex-1">{children}</PageShell>
+        <PageShell className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}>{children}</PageShell>
 
         {!isMobile && !isTeknisyen && (
           <div

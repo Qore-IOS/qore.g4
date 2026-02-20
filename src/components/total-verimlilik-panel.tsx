@@ -2709,9 +2709,9 @@ export default function TotalVerimlilikPanel({
               <ScrollArea className="w-full" ref={scrollContainerRef}>
                 <div ref={tableParentRef} className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'} style={{ willChange: 'transform' }}>
                   <Table aria-label="Total verimlilik veri tablosu">
-                    <TableHeader>
+                    <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:backdrop-blur-sm">
                       <TableRow>
-                        <TableHead className="min-w-[180px] bg-muted/50 sticky left-0 z-10">
+                        <TableHead className="w-[180px] min-w-[180px] bg-muted/50 sticky left-0 z-50">
                           <div className="flex items-center gap-1">
                             <span>1. Laboratuvar</span>
                             <Popover>
@@ -2769,8 +2769,8 @@ export default function TotalVerimlilikPanel({
                             </Popover>
                           </div>
                         </TableHead>
-                        <TableHead className="min-w-[120px]">2. Stok Kodu</TableHead>
-                        <TableHead className="min-w-[200px]">
+                        <TableHead className="w-[120px] min-w-[120px] bg-background sticky left-[180px] z-50">2. Stok Kodu</TableHead>
+                        <TableHead className="w-[200px] min-w-[200px] bg-background sticky left-[300px] z-50">
                           <div className="flex items-center gap-1">
                             <span>3. Ürün Adı</span>
                             <Popover>
@@ -3268,7 +3268,7 @@ export default function TotalVerimlilikPanel({
                               contain: 'layout style paint',
                             } as React.CSSProperties}
                           >
-                            <TableCell className="font-medium bg-muted/30 sticky left-0 z-10">
+                            <TableCell className="w-[180px] min-w-[180px] font-medium bg-muted/30 sticky left-0 z-40">
                               <div>
                                 <span>{row.labName}</span>
                                 {row.labKod && (
@@ -3278,8 +3278,8 @@ export default function TotalVerimlilikPanel({
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
-                            <TableCell>{row.stokAdi}</TableCell>
+                            <TableCell className="w-[120px] min-w-[120px] font-mono text-xs bg-background sticky left-[180px] z-30">{row.stokKodu}</TableCell>
+                            <TableCell className="w-[200px] min-w-[200px] bg-background sticky left-[300px] z-30">{row.stokAdi}</TableCell>
                             {!showResultsOnly && (
                               <>
                                 <TableCell className="text-muted-foreground">{row.testAdi || '-'}</TableCell>
