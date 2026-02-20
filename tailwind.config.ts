@@ -64,6 +64,14 @@ const config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        "neumo": "20px",
+        "neumo-lg": "24px",
+        "pill": "999px",
+      },
+      boxShadow: {
+        "neumo-1": "-6px -6px 14px rgba(255,255,255,.75), 6px 6px 14px rgba(120,120,120,.14)",
+        "neumo-2": "-10px -10px 22px rgba(255,255,255,.85), 10px 10px 22px rgba(120,120,120,.16)",
+        "neumo-inset": "inset -8px -8px 16px rgba(255,255,255,.80), inset 8px 8px 16px rgba(120,120,120,.16)",
       },
       keyframes: {
         "accordion-down": {
