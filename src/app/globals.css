@@ -105,19 +105,26 @@
 }
 
 @layer components {
-    /* Device management unified light neumorphic primitives */
+    /* ===== Device Management – Unified Light Neumorphic Primitives ===== */
+
+    /* Shell / page background */
     .cihaz-shell {
-      background: var(--dashboard-bg);
+      background:
+        radial-gradient(1200px 600px at 20% 0%, rgba(255,255,255,.50), transparent 60%),
+        linear-gradient(var(--dashboard-bg), #E4E2DE);
       color: var(--dashboard-text);
+      min-height: 100dvh;
     }
 
+    /* E1 – subtle card / list-item (small elevation) */
     .cihaz-card {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
       box-shadow: var(--dashboard-raised-soft);
-      border-radius: 22px;
+      border-radius: 20px;
     }
 
+    /* E2 – primary card / container (strong elevation) */
     .cihaz-card-strong {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -125,15 +132,66 @@
       border-radius: 24px;
     }
 
+    /* E0 – pressed / active / inset state */
     .cihaz-pressed {
       background: var(--dashboard-surface-2);
       box-shadow: var(--dashboard-pressed);
       border-radius: 14px;
     }
 
+    /* Focus ring – accessible keyboard indicator */
     .cihaz-focus-ring:focus-visible {
       outline: none;
       box-shadow: 0 0 0 3px var(--dashboard-focus-glow);
+    }
+
+    /* ===== Action tile – main hub buttons ===== */
+    .cihaz-action-tile {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised-soft);
+      border-radius: 20px;
+      transition: transform .18s ease, box-shadow .18s ease;
+      cursor: pointer;
+    }
+
+    .cihaz-action-tile:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--dashboard-raised);
+    }
+
+    .cihaz-action-tile:active {
+      transform: translateY(0);
+      box-shadow: var(--dashboard-pressed);
+    }
+
+    /* ===== Tool list item – secondary actions ===== */
+    .cihaz-tool-item {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised-soft);
+      border-radius: 16px;
+      transition: transform .14s ease, box-shadow .14s ease;
+      cursor: pointer;
+    }
+
+    .cihaz-tool-item:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--dashboard-raised);
+    }
+
+    .cihaz-tool-item:active {
+      transform: translateY(0);
+      box-shadow: var(--dashboard-pressed);
+    }
+
+    /* ===== Section header (label + divider) ===== */
+    .cihaz-section-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--dashboard-muted);
     }
 
     /* --- NEU-CARD: Neumorphic (Light) / Liquid Glass (Dark) --- */

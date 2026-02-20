@@ -65,6 +65,8 @@ export default function YedekParcaStokGirisPage() {
 
   // New row state
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [manualStokKodu, setManualStokKodu] = useState('');
+  const [manualStokAdi, setManualStokAdi] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
   const [quantity, setQuantity] = useState<number>(1);
   const [productSearchOpen, setProductSearchOpen] = useState(false);
@@ -128,8 +130,11 @@ export default function YedekParcaStokGirisPage() {
   };
 
   const addRow = useCallback(() => {
-    if (!selectedProduct) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen bir ürün seçin.', variant: 'destructive' });
+    const manualCode = manualStokKodu.trim();
+    const manualName = manualStokAdi.trim();
+
+    if (!selectedProduct && (!manualCode || !manualName)) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen ürün seçin veya stok kodu ve stok adı girin.', variant: 'destructive' });
       return;
     }
 
@@ -142,12 +147,15 @@ export default function YedekParcaStokGirisPage() {
       return;
     }
 
+    const rowStokKodu = selectedProduct?.stokKodu || manualCode;
+    const rowStokAdi = selectedProduct?.stokAdi || manualName;
+
     const newRow: StokGirisRow = {
       id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      productCodeId: selectedProduct.id,
-      stokKodu: selectedProduct.stokKodu || '',
-      stokAdi: selectedProduct.stokAdi || '',
-      cihazGrubu: selectedProduct.cihazGrubu || '',
+      productCodeId: selectedProduct?.id || '',
+      stokKodu: rowStokKodu,
+      stokAdi: rowStokAdi,
+      cihazGrubu: selectedProduct?.cihazGrubu || '',
       serialNumber: sn,
       quantity: qty,
     };
@@ -155,13 +163,16 @@ export default function YedekParcaStokGirisPage() {
     setRows(prev => [...prev, newRow]);
     setSerialNumber('');
     setQuantity(1);
+    setManualStokKodu('');
+    setManualStokAdi('');
+    setSelectedProductId('');
     toast({
       title: 'Eklendi',
       description: sn
-        ? `${selectedProduct.stokAdi} (SN: ${sn}) listeye eklendi.`
-        : `${selectedProduct.stokAdi} x${qty} listeye eklendi.`,
+        ? `${rowStokAdi} (SN: ${sn}) listeye eklendi.`
+        : `${rowStokAdi} x${qty} listeye eklendi.`,
     });
-  }, [selectedProduct, serialNumber, quantity, rows, toast]);
+  }, [selectedProduct, serialNumber, quantity, rows, toast, manualStokKodu, manualStokAdi]);
 
   const removeRow = (rowId: string) => {
     setRows(prev => prev.filter(r => r.id !== rowId));
@@ -439,6 +450,9 @@ export default function YedekParcaStokGirisPage() {
     );
   }
 
+  const canAddManualProduct = manualStokKodu.trim().length > 0 && manualStokAdi.trim().length > 0;
+  const canAddRow = !!selectedProductId || canAddManualProduct;
+
   if (!isAuthorized) {
     return (
       <div className="p-6 text-center">
@@ -541,6 +555,24 @@ export default function YedekParcaStokGirisPage() {
                     </Popover>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label>Stok Kodu (Stok kartı yoksa)</Label>
+                    <Input
+                      placeholder="Örn: ORN-MNL-001"
+                      value={manualStokKodu}
+                      onChange={(e) => setManualStokKodu(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Stok Adı (Stok kartı yoksa)</Label>
+                    <Input
+                      placeholder="Ürün adını girin"
+                      value={manualStokAdi}
+                      onChange={(e) => setManualStokAdi(e.target.value)}
+                    />
+                  </div>
+
                   {/* Serial number input (optional) */}
                   <div className="space-y-2">
                     <Label>Seri Numarası (Opsiyonel)</Label>
@@ -548,7 +580,7 @@ export default function YedekParcaStokGirisPage() {
                       placeholder="Seri numarasını girin"
                       value={serialNumber}
                       onChange={(e) => handleSerialNumberChange(e.target.value)}
-                      disabled={!selectedProductId}
+                      disabled={!canAddRow}
                     />
                   </div>
 
@@ -560,7 +592,7 @@ export default function YedekParcaStokGirisPage() {
                       min={1}
                       value={serialNumber.trim() ? 1 : quantity}
                       onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                      disabled={!selectedProductId || !!serialNumber.trim()}
+                      disabled={!canAddRow || !!serialNumber.trim()}
                     />
                     {serialNumber.trim() && (
                       <p className="text-xs text-muted-foreground">Seri numaralı ürünlerde adet 1 olmalıdır.</p>
@@ -571,7 +603,7 @@ export default function YedekParcaStokGirisPage() {
                   <div className="flex items-end">
                     <Button
                       onClick={addRow}
-                      disabled={!selectedProductId}
+                      disabled={!canAddRow}
                       className="w-full"
                     >
                       <Plus className="h-4 w-4 mr-2" />
