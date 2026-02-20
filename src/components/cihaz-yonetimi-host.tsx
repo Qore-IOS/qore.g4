@@ -1,8 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Hospital, Device, AssignedDevice } from '@/lib/types';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Settings,
   Wrench,
@@ -14,6 +12,7 @@ import {
   CalendarClock,
   Building2,
   Package,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
@@ -22,34 +21,78 @@ import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import QoreAIPanel from '@/components/QoreAIPanel';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-const ModernButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button> & {icon?: React.ElementType}>(
-  ({ className, children, icon: Icon, ...props }, ref) => (
-    <Button
-      ref={ref}
+/* ─── Reusable sub-components ─── */
+
+interface ActionTileProps {
+  icon: React.ElementType;
+  label: string;
+  description?: string;
+  onClick: () => void;
+  className?: string;
+}
+
+function ActionTile({ icon: Icon, label, description, onClick, className }: ActionTileProps) {
+  return (
+    <button
+      onClick={onClick}
       className={cn(
-        "cihaz-card cihaz-focus-ring h-auto min-h-[120px] sm:min-h-[132px] p-4 sm:p-5 text-sm sm:text-base font-headline rounded-2xl transition-all duration-200 ease-in-out whitespace-normal text-center",
-        "text-[var(--dashboard-text)] hover:-translate-y-0.5 hover:shadow-[var(--dashboard-raised)]",
+        'cihaz-action-tile cihaz-focus-ring flex flex-col items-center justify-center gap-2.5 p-5 sm:p-6 text-center w-full',
         className
       )}
-      {...props}
     >
-      <div className="flex flex-col items-center justify-center gap-3 leading-tight">
-        {Icon && <Icon className="h-8 w-8 sm:h-9 sm:w-9 text-amber-500 shrink-0" />}
-        <span className="max-w-full break-words">{children}</span>
-      </div>
-    </Button>
-  )
-);
-ModernButton.displayName = "ModernButton";
+      <span className="flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+        <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-[var(--dashboard-accent)]" />
+      </span>
+      <span className="text-[15px] sm:text-base font-semibold text-[var(--dashboard-text)] leading-snug">
+        {label}
+      </span>
+      {description && (
+        <span className="text-xs text-[var(--dashboard-muted)] leading-tight">
+          {description}
+        </span>
+      )}
+    </button>
+  );
+}
 
+interface ToolItemProps {
+  icon: React.ElementType;
+  label: string;
+  onClick: () => void;
+}
+
+function ToolItem({ icon: Icon, label, onClick }: ToolItemProps) {
+  return (
+    <button
+      onClick={onClick}
+      className="cihaz-tool-item cihaz-focus-ring flex items-center gap-3 px-4 py-3 sm:py-3.5 w-full text-left"
+    >
+      <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] shrink-0">
+        <Icon className="h-4 w-4 text-[var(--dashboard-accent)]" />
+      </span>
+      <span className="text-sm font-medium text-[var(--dashboard-text)] flex-1">
+        {label}
+      </span>
+      <ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)] shrink-0" />
+    </button>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 px-1">
+      <span className="cihaz-section-label">{children}</span>
+      <span className="flex-1 h-px bg-[var(--dashboard-stroke)]" />
+    </div>
+  );
+}
+
+/* ─── Main component ─── */
 
 export default function CihazYonetimiHost() {
   const [isLoading, setIsLoading] = useState(true);
   const [isQoreAIPanelOpen, setIsQoreAIPanelOpen] = useState(false);
-  const [isDefinitionsModalOpen, setIsDefinitionsModalOpen] = useState(false);
-  const [isAnalysesModalOpen, setIsAnalysesModalOpen] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
   const { isAdmin, currentUserProfile } = useAuth();
@@ -61,20 +104,19 @@ export default function CihazYonetimiHost() {
   const fetchAllApplicationData = useCallback(async () => {
     setIsLoading(true);
     try {
-        const [hospitalsSnap, devicesSnap, assignmentsSnap] = await Promise.all([
-            getDocs(collection(db, 'hospitals')),
-            getDocs(collection(db, 'devices')),
-            getDocs(collection(db, 'hospitalDeviceAssignments'))
-        ]);
-        
-        setHospitals(hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()}) as Hospital));
-        setDevices(devicesSnap.docs.map(d => ({id: d.id, ...d.data()}) as Device));
-        setHospitalDeviceAssignments(assignmentsSnap.docs.map(d => ({id: d.id, ...d.data()}) as AssignedDevice));
+      const [hospitalsSnap, devicesSnap, assignmentsSnap] = await Promise.all([
+        getDocs(collection(db, 'hospitals')),
+        getDocs(collection(db, 'devices')),
+        getDocs(collection(db, 'hospitalDeviceAssignments'))
+      ]);
+      setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Hospital));
+      setDevices(devicesSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Device));
+      setHospitalDeviceAssignments(assignmentsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as AssignedDevice));
     } catch (error) {
-        console.error("Device management data fetch error:", error);
-        toast({ title: "Veri Hatası", description: "Cihaz yönetimi verileri yüklenemedi.", variant: 'destructive'});
+      console.error("Device management data fetch error:", error);
+      toast({ title: "Veri Hatası", description: "Cihaz yönetimi verileri yüklenemedi.", variant: 'destructive' });
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   }, [toast]);
 
@@ -82,133 +124,130 @@ export default function CihazYonetimiHost() {
     fetchAllApplicationData();
   }, [fetchAllApplicationData]);
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-full"><div className="custom-loader" /><p className="ml-4 text-lg">Cihaz Yönetim Paneli Yükleniyor...</p></div>
-  }
-
+  /* ── Role-based primary action ── */
   const rolePrimaryAction = currentUserProfile?.role === 'aplikasyon'
-    ? {
-        label: 'Aplikasyon',
-        icon: FlaskConical,
-        href: '/aplikasyon-paneli',
-      }
-    : {
-        label: 'Teknik Servis',
-        icon: Wrench,
-        href: '/teknik-servis',
-      };
+    ? { label: 'Aplikasyon', description: 'Aplikasyon paneli', icon: FlaskConical, href: '/aplikasyon-paneli' }
+    : { label: 'Teknik Servis', description: 'Servis paneli', icon: Wrench, href: '/teknik-servis' };
 
-  const definitionActions = [
+  /* ── Quick stats from loaded data ── */
+  const totalHospitals = hospitals.length;
+  const totalDevices = devices.length;
+  const totalAssignments = hospitalDeviceAssignments.length;
+
+  /* ── Tool / secondary action lists ── */
+  const definitionTools = [
     { label: 'Cihaz Modelleri', icon: Settings, href: '/cihaz-tanimlamalari' },
     { label: 'Arıza Tanımlamaları', icon: ShieldAlert, href: '/ariza-tanimlamalari' },
   ];
 
-  const analysisActions = [
+  const analysisTools = [
     { label: 'Arıza İstatistikleri', icon: BarChart3, href: '/ariza-yonetimi/istatistikler' },
     ...(isAdmin ? [{ label: 'Personel İzlem', icon: Users, href: '/personel-izlem' }] : []),
     { label: 'Yedek Parça Analizi', icon: Package, href: '/yedek-parca-analizi' },
     { label: 'Kurum Ziyaret Analizi', icon: Building2, href: '/kurum-ziyaret-analizi' },
   ];
 
-  const MainMenu = () => (
-     <div className="cihaz-shell flex flex-col items-center justify-center min-h-full p-4 sm:p-8">
-      <Card className={cn(
-        "cihaz-card-strong w-full max-w-6xl p-4 sm:p-8 rounded-3xl relative"
-      )}>
-        {/* Qore AI Button - Top Right */}
-        <Button
-          variant="outline"
-          onClick={() => setIsQoreAIPanelOpen(true)}
-          className="cihaz-focus-ring absolute top-4 right-4 gap-2 bg-white/70 hover:bg-white border-[var(--dashboard-stroke)] text-[var(--dashboard-text)]"
-        >
-          <Sparkles className="h-4 w-4 text-purple-500" />
-          Qore AI
-        </Button>
-        <CardHeader className="text-center mb-8">
-          <CardTitle className="text-2xl sm:text-3xl font-headline text-[var(--dashboard-text)]">Cihaz Yönetim Merkezi</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5">
-          <ModernButton onClick={() => router.push(rolePrimaryAction.href)} icon={rolePrimaryAction.icon}>
-            {rolePrimaryAction.label}
-          </ModernButton>
-          <ModernButton onClick={() => router.push('/ariza-yonetimi')} icon={ShieldAlert}>
-            Tüm Arızalar
-          </ModernButton>
-          <ModernButton onClick={() => router.push('/nobet-yonetimi')} icon={CalendarClock}>
-            Nöbet Vardiyası
-          </ModernButton>
-        </CardContent>
-        <div className="mt-4 sm:mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
-          <ModernButton
-            className="min-h-[100px] sm:min-h-[112px]"
-            onClick={() => setIsDefinitionsModalOpen(true)}
-            icon={Settings}
-          >
-            Tanımlamalar
-          </ModernButton>
-          <ModernButton
-            className="min-h-[100px] sm:min-h-[112px]"
-            onClick={() => setIsAnalysesModalOpen(true)}
-            icon={BarChart3}
-          >
-            Analizler
-          </ModernButton>
+  /* ── Loading state ── */
+  if (isLoading) {
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <div className="custom-loader" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor&hellip;</p>
         </div>
-        <div className="h-32 sm:h-40" />
-      </Card>
-    </div>
-  );
+      </div>
+    );
+  }
 
   return (
     <>
-      <MainMenu />
-      <Dialog open={isDefinitionsModalOpen} onOpenChange={setIsDefinitionsModalOpen}>
-        <DialogContent className="cihaz-card-strong border-[var(--dashboard-stroke)] bg-[var(--dashboard-card)] text-[var(--dashboard-text)] max-w-md">
-          <DialogHeader>
-            <DialogTitle>Tanımlamalar</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-1 gap-3 mt-2">
-            {definitionActions.map((item) => (
-              <Button
-                key={item.label}
-                variant="outline"
-                className="cihaz-focus-ring justify-start gap-2 border-[var(--dashboard-stroke)] bg-white/70 hover:bg-white text-[var(--dashboard-text)]"
-                onClick={() => {
-                  setIsDefinitionsModalOpen(false);
-                  router.push(item.href);
-                }}
-              >
-                <item.icon className="h-4 w-4 text-amber-500" />
-                {item.label}
-              </Button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <div className="cihaz-shell flex flex-col items-center px-4 py-6 sm:px-8 sm:py-10">
+        {/* ── Container card ── */}
+        <div className="cihaz-card-strong w-full max-w-2xl lg:max-w-4xl p-5 sm:p-8 relative">
 
-      <Dialog open={isAnalysesModalOpen} onOpenChange={setIsAnalysesModalOpen}>
-        <DialogContent className="cihaz-card-strong border-[var(--dashboard-stroke)] bg-[var(--dashboard-card)] text-[var(--dashboard-text)] max-w-md">
-          <DialogHeader>
-            <DialogTitle>Analizler</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-1 gap-3 mt-2">
-            {analysisActions.map((item) => (
-              <Button
-                key={item.label}
-                variant="outline"
-                className="cihaz-focus-ring justify-start gap-2 border-[var(--dashboard-stroke)] bg-white/70 hover:bg-white text-[var(--dashboard-text)]"
-                onClick={() => {
-                  setIsAnalysesModalOpen(false);
-                  router.push(item.href);
-                }}
-              >
-                <item.icon className="h-4 w-4 text-amber-500" />
-                {item.label}
-              </Button>
-            ))}
+          {/* ── Header row ── */}
+          <div className="flex items-start justify-between mb-6 sm:mb-8">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] leading-tight tracking-tight">
+                Cihaz Yönetim Merkezi
+              </h1>
+              <p className="mt-1 text-xs sm:text-sm text-[var(--dashboard-muted)]">
+                {totalHospitals} kurum &middot; {totalDevices} model &middot; {totalAssignments} atama
+              </p>
+            </div>
+            <button
+              onClick={() => setIsQoreAIPanelOpen(true)}
+              className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm shrink-0"
+            >
+              <Sparkles className="h-4 w-4 text-purple-500" />
+              <span className="hidden sm:inline text-[var(--dashboard-text)] font-medium">Qore AI</span>
+            </button>
           </div>
-        </DialogContent>
-      </Dialog>
+
+          {/* ── Primary actions – 2x2 mobile, 4-col desktop ── */}
+          <section className="mb-6 sm:mb-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <ActionTile
+                icon={rolePrimaryAction.icon}
+                label={rolePrimaryAction.label}
+                description={rolePrimaryAction.description}
+                onClick={() => router.push(rolePrimaryAction.href)}
+              />
+              <ActionTile
+                icon={ShieldAlert}
+                label="Tüm Arızalar"
+                description="Arıza yönetimi"
+                onClick={() => router.push('/ariza-yonetimi')}
+              />
+              <ActionTile
+                icon={CalendarClock}
+                label="Nöbet Vardiyası"
+                description="Vardiya takibi"
+                onClick={() => router.push('/nobet-yonetimi')}
+              />
+              <ActionTile
+                icon={BarChart3}
+                label="Dashboard"
+                description="Genel bakış"
+                onClick={() => router.push('/cihaz-yonetimi/dashboard')}
+              />
+            </div>
+          </section>
+
+          {/* ── Definitions section ── */}
+          <section className="mb-6 sm:mb-8">
+            <SectionLabel>Tanımlamalar</SectionLabel>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+              {definitionTools.map((item) => (
+                <ToolItem
+                  key={item.label}
+                  icon={item.icon}
+                  label={item.label}
+                  onClick={() => router.push(item.href)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* ── Analysis tools section ── */}
+          <section>
+            <SectionLabel>Analizler</SectionLabel>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+              {analysisTools.map((item) => (
+                <ToolItem
+                  key={item.label}
+                  icon={item.icon}
+                  label={item.label}
+                  onClick={() => router.push(item.href)}
+                />
+              ))}
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      {/* ── Qore AI Panel ── */}
       <QoreAIPanel open={isQoreAIPanelOpen} onClose={() => setIsQoreAIPanelOpen(false)} />
     </>
   );
