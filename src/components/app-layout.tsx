@@ -73,6 +73,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+
   const {
     dockItems,
     isVerimlilikSwitchOpen,
