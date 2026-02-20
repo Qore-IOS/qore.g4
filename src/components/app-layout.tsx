@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useTheme } from "next-themes";
 import { Dock } from "@/components/dock";
@@ -70,7 +70,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Check if user is a teknisyen - hide dock for them
   const isTeknisyen = currentUserProfile?.role === 'teknisyen';
   const { setTheme } = useTheme();
-  const pathname = usePathname();
   const router = useRouter();
 
 
