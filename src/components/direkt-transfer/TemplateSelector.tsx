@@ -10,10 +10,8 @@
 import { useMemo, useState, useCallback } from 'react';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Label } from '../ui/label';
 import type { TransferTemplate, TransferTemplateItem, DepoStokItem } from '@/lib/types';
-import { Loader2, ChevronDown, ChevronUp, Check, Plus, X } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type LotPayload = { code: string; name: string; lot: string; miad: string; qty: number };
@@ -232,30 +230,30 @@ export default function TemplateSelector({
   if (!visible) return null;
 
   return (
-    <div className="mt-2 rounded-xl border bg-background/40 p-3">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">Şablondan Ekle</h3>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Şablondan Ekle</p>
+        <button onClick={onClose} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors">
+          <X className="h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
+        </button>
       </div>
 
       {templatesLoading ? (
         <div className="flex items-center justify-center py-4">
-          <Loader2 className="h-5 w-5 animate-spin mr-2" />
-          <span className="text-sm text-muted-foreground">Şablonlar yükleniyor...</span>
+          <Loader2 className="h-5 w-5 animate-spin text-[var(--dashboard-accent)] mr-2" />
+          <span className="text-sm text-[var(--dashboard-muted)]">Şablonlar yükleniyor...</span>
         </div>
       ) : templates.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-4">
+        <p className="text-sm text-[var(--dashboard-muted)] text-center py-4">
           Henüz şablon oluşturulmamış.
         </p>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {/* Template Selector */}
           <div>
-            <Label className="text-xs text-muted-foreground mb-1 block">Şablon Seç</Label>
+            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Şablon Seç</label>
             <Select value={selectedTemplateId} onValueChange={handleTemplateSelect}>
-              <SelectTrigger className="w-full max-w-md">
+              <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
                 <SelectValue placeholder="Şablon seçin..." />
               </SelectTrigger>
               <SelectContent>
@@ -272,19 +270,23 @@ export default function TemplateSelector({
           {selectedTemplate && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">Şablon Ürünleri</Label>
-                <Button
-                  size="sm"
+                <span className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Şablon Ürünleri</span>
+                <button
                   onClick={handleAddAllItems}
                   disabled={!canAddAll}
-                  className="text-xs"
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all",
+                    canAddAll
+                      ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0"
+                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                  )}
                 >
-                  <Plus className="h-3 w-3 mr-1" />
+                  <Plus className="h-3 w-3" />
                   Tümünü Ekle
-                </Button>
+                </button>
               </div>
 
-              <div className="space-y-2 max-h-64 overflow-y-auto">
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
                 {selectedTemplate.items.map((item, idx) => {
                   const selection = itemSelections[item.stokKodu];
                   const isExpanded = expandedItems.has(item.stokKodu);
@@ -292,111 +294,93 @@ export default function TemplateSelector({
                   const availableLots = availableLotsMap[item.stokKodu] || [];
                   const totalStock = totalStockMap[item.stokKodu] || 0;
                   const selectedLotInfo = availableLots.find(l => l.key === selection?.selectedLotKey);
+                  const hasStock = isLotTracked ? availableLots.length > 0 : totalStock > 0;
 
                   return (
-                    <div key={item.stokKodu} className="border rounded-lg overflow-hidden">
+                    <div key={item.stokKodu} className="rounded-xl overflow-hidden border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
                       {/* Item Header */}
                       <div
-                        className="flex items-center justify-between p-3 bg-muted/30 cursor-pointer"
+                        className="flex items-center justify-between p-2.5 cursor-pointer hover:bg-[var(--dashboard-surface-2)] transition-colors"
                         onClick={() => toggleExpanded(item.stokKodu)}
                       >
-                        <div className="flex items-center gap-2">
-                          {isExpanded ? (
-                            <ChevronUp className="h-4 w-4" />
-                          ) : (
-                            <ChevronDown className="h-4 w-4" />
-                          )}
-                          <div>
-                            <p className="text-sm font-medium">{item.stokAdi}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {item.stokKodu} - {getTrackingLabel(item.tracking)}
-                            </p>
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-[var(--dashboard-muted)] shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-[var(--dashboard-muted)] shrink-0" />}
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                            <p className="text-[10px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
                           </div>
                         </div>
-                        <span className="text-xs px-2 py-1 bg-muted rounded">
-                          {isLotTracked
-                            ? availableLots.length > 0 ? `${availableLots.length} lot` : 'Stok yok'
-                            : `Stok: ${totalStock}`
-                          }
+                        <span className={cn(
+                          "text-[10px] px-2 py-0.5 rounded-lg font-medium shrink-0",
+                          hasStock
+                            ? "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]"
+                            : "bg-amber-100 text-amber-700"
+                        )}>
+                          {isLotTracked ? (hasStock ? `${availableLots.length} lot` : 'Stok yok') : `Stok: ${totalStock}`}
                         </span>
                       </div>
 
                       {/* Item Details (Expanded) */}
                       {isExpanded && (
-                        <div className="p-3 border-t space-y-3">
+                        <div className="px-2.5 pb-2.5 pt-1 border-t border-[var(--dashboard-stroke)] space-y-2">
                           {isLotTracked ? (
-                            // Lot-tracked: show lot selector + quantity
                             <>
                               <div>
-                                <Label className="text-xs text-muted-foreground mb-1 block">Lot / Miad (Kalan Stok)</Label>
-                                <Select
-                                  value={selection?.selectedLotKey || ''}
-                                  onValueChange={(v) => handleLotChange(item.stokKodu, v)}
-                                >
-                                  <SelectTrigger className="w-full">
-                                    <SelectValue placeholder="Lot seçin..." />
-                                  </SelectTrigger>
+                                <label className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Lot / Miad</label>
+                                <Select value={selection?.selectedLotKey || ''} onValueChange={(v) => handleLotChange(item.stokKodu, v)}>
+                                  <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-9 text-xs"><SelectValue placeholder="Lot seçin..." /></SelectTrigger>
                                   <SelectContent>
                                     {availableLots.length === 0 ? (
                                       <SelectItem value="__none__" disabled>Stokta lot bulunamadı</SelectItem>
                                     ) : (
                                       availableLots.map(lot => (
-                                        <SelectItem key={lot.key} value={lot.key}>
-                                          {lot.label} ({lot.remaining})
-                                        </SelectItem>
+                                        <SelectItem key={lot.key} value={lot.key}>{lot.label} ({lot.remaining})</SelectItem>
                                       ))
                                     )}
                                   </SelectContent>
                                 </Select>
                               </div>
-                              <div className="flex items-center gap-3">
-                                <div>
-                                  <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                                  <Input
-                                    type="number"
-                                    min={1}
-                                    max={selectedLotInfo?.remaining || 1}
-                                    value={selection?.quantity || 1}
-                                    onChange={(e) => handleQtyChange(item.stokKodu, parseInt(e.target.value) || 1)}
-                                    className="w-24"
-                                  />
+                              <div className="flex items-end gap-2">
+                                <div className="flex-1">
+                                  <label className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
+                                  <Input type="number" min={1} max={selectedLotInfo?.remaining || 1} value={selection?.quantity || 1} onChange={(e) => handleQtyChange(item.stokKodu, parseInt(e.target.value) || 1)} className="h-9 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl text-xs" />
                                 </div>
-                                <Button
-                                  size="sm"
+                                <button
                                   onClick={() => handleAddItem(item)}
                                   disabled={!selection?.selectedLotKey}
-                                  className="mt-5"
+                                  className={cn(
+                                    "h-9 px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1",
+                                    selection?.selectedLotKey
+                                      ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                                  )}
                                 >
-                                  <Plus className="h-4 w-4" />
-                                </Button>
+                                  <Plus className="h-3.5 w-3.5" /> Ekle
+                                </button>
                               </div>
                             </>
                           ) : (
-                            // Qty-tracked: show stock + quantity
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-2">
-                                <Label className="text-xs text-muted-foreground">Depo Stoğu:</Label>
-                                <span className="text-sm font-semibold text-primary">{totalStock}</span>
+                            <div className="flex items-end gap-2">
+                              <div className="flex items-center gap-2 p-1.5 rounded-lg bg-[var(--dashboard-surface-2)] shrink-0">
+                                <span className="text-[10px] text-[var(--dashboard-muted)]">Stok:</span>
+                                <span className="text-xs font-bold text-[var(--dashboard-accent)]">{totalStock}</span>
                               </div>
-                              <div>
-                                <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                                <Input
-                                  type="number"
-                                  min={1}
-                                  max={totalStock}
-                                  value={selection?.quantity || 1}
-                                  onChange={(e) => handleQtyChange(item.stokKodu, parseInt(e.target.value) || 1)}
-                                  className="w-24"
-                                />
+                              <div className="flex-1">
+                                <label className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
+                                <Input type="number" min={1} max={totalStock} value={selection?.quantity || 1} onChange={(e) => handleQtyChange(item.stokKodu, parseInt(e.target.value) || 1)} className="h-9 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl text-xs" />
                               </div>
-                              <Button
-                                size="sm"
+                              <button
                                 onClick={() => handleAddItem(item)}
                                 disabled={totalStock <= 0}
-                                className="mt-5"
+                                className={cn(
+                                  "h-9 px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1",
+                                  totalStock > 0
+                                    ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                                )}
                               >
-                                <Plus className="h-4 w-4" />
-                              </Button>
+                                <Plus className="h-3.5 w-3.5" /> Ekle
+                              </button>
                             </div>
                           )}
                         </div>
