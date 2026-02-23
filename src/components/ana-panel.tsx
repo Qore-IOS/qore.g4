@@ -41,7 +41,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Label } from '@/components/ui/label';
 
 // Icons
-import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine } from 'lucide-react';
+import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 
 // Firebase
 import { db } from '@/lib/firebase';
@@ -1034,15 +1034,53 @@ export default function AnaPanel(props: AnaPanelProps) {
     );
   };
 
+  // Stepper progress: compute which steps are complete
+  const stepperState = useMemo(() => {
+    const hasDepot = !!selectedDepotId;
+    const hasItems = unprocessedScannedItems > 0;
+    const itemsWithMeta = scannedItems.filter(i => !i.isProcessed && !!i.rafAdresi && !!i.irsaliyeNumarasi).length;
+    const hasMeta = itemsWithMeta > 0;
+    return { hasDepot, hasItems, hasMeta, readyCount: itemsWithMeta };
+  }, [selectedDepotId, unprocessedScannedItems, scannedItems]);
+
+  // Selection mode state
+  const isSelectionMode = selectedItemsCount > 0;
+
   return (
-    <div className="flex flex-col h-full space-y-3 sm:space-y-4">
-      {/* Header Section - Mobile Responsive */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-        <div className="flex-1 w-full sm:max-w-sm">
-            <Label className="text-xs sm:text-sm font-medium">Çalışma Deposu</Label>
+    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
+
+      {/* ── STEP 1: Header – Depo Seçimi ── */}
+      <header className="cihaz-card-strong px-4 py-4 sm:px-6 sm:py-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+          {/* Stepper indicator */}
+          <div className="flex items-center gap-2 mr-2">
+            <div className={cn(
+              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
+              stepperState.hasDepot
+                ? "bg-[var(--dashboard-accent)] text-white"
+                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+            )}>1</div>
+            <div className={cn("w-6 h-0.5 rounded", stepperState.hasItems ? "bg-[var(--dashboard-accent)]" : "bg-[var(--dashboard-surface-2)]")} />
+            <div className={cn(
+              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
+              stepperState.hasItems
+                ? "bg-[var(--dashboard-accent)] text-white"
+                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+            )}>2</div>
+            <div className={cn("w-6 h-0.5 rounded", stepperState.hasMeta ? "bg-[var(--dashboard-accent)]" : "bg-[var(--dashboard-surface-2)]")} />
+            <div className={cn(
+              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
+              stepperState.hasMeta
+                ? "bg-[var(--dashboard-accent)] text-white"
+                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+            )}>3</div>
+          </div>
+
+          <div className="flex-1 w-full sm:max-w-xs">
+            <Label className="text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Çalışma Deposu</Label>
             <Select value={selectedDepotId} onValueChange={(v: string) => setSelectedDepotId(v)}>
-              <SelectTrigger className="w-full mt-1">
-                <SelectValue placeholder="Çalışma Deposu seçin" />
+              <SelectTrigger className="w-full mt-1 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl">
+                <SelectValue placeholder="Depo seçin..." />
               </SelectTrigger>
               <SelectContent>
                 {depots.filter(d => !!d.id).map(dep => (
@@ -1050,244 +1088,445 @@ export default function AnaPanel(props: AnaPanelProps) {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <button
+            onClick={() => router.push('/mal-kabul/gecmis')}
+            className="cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center sm:ml-auto"
+          >
+            <History className="h-4 w-4" />
+            <span>Geçmiş</span>
+          </button>
         </div>
-        <Button onClick={() => router.push('/mal-kabul/gecmis')} variant="outline" className="self-stretch sm:self-end">
-            <History className="h-4 w-4" /> <span className="ml-2">Geçmiş</span>
-        </Button>
+      </header>
+
+      {/* ── KPI Row – 3 metric cards ── */}
+      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+        {/* KPI 1: Son Okutulan */}
+        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
+          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Son Okutulan</p>
+          {lastScannedProduct ? (
+            <div className="space-y-0.5">
+              <p className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)] truncate">{lastScannedProduct.stokAdi || ''}</p>
+              <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">
+                {lastScannedProduct.seriNumarasi ? `SN: ${lastScannedProduct.seriNumarasi}` : `Lot: ${lastScannedProduct.lotNumarasi || '-'}`}
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-[var(--dashboard-muted)]">-</p>
+          )}
+        </div>
+
+        {/* KPI 2: Bu Lot / Ürün */}
+        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
+          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
+            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">lot</span>
+          </div>
+          <div className="flex items-baseline gap-1 mt-0.5">
+            <span className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
+            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">ürün</span>
+          </div>
+        </div>
+
+        {/* KPI 3: Toplam */}
+        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
+          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Toplam</p>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-accent)]">{scannedItems.reduce((n, it) => n + (it.adet ?? 1), 0)}</span>
+            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">adet</span>
+          </div>
+          <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] mt-0.5">
+            {groupedScannedItems.length} grup
+          </p>
+        </div>
       </div>
 
-      {/* KPI Cards Grid - Mobile Responsive */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
-        <Card>
-            <CardHeader>
-                <CardTitle>Son Okutulan Ürün</CardTitle>
-                 <CardDescription>Toplam Okutulan: {scannedItems.length}</CardDescription>
-            </CardHeader>
-            <CardContent>
-                {lastScannedProduct ? (
-                <div className="space-y-1 text-sm">
-                    <p><strong>{lastScannedProduct.stokAdi || ''}</strong></p>
-                    <p className="text-muted-foreground">Seri: <span className="font-mono">{lastScannedProduct.seriNumarasi || ''}</span></p>
-                    <p className="text-muted-foreground">Lot: {lastScannedProduct.lotNumarasi || ''} | Miad: {lastScannedProduct.miad || ''}</p>
-                </div>
-                ) : (
-                <p className="text-muted-foreground">Henüz ürün okutulmadı.</p>
-                )}
-            </CardContent>
-        </Card>
-        
-        <Card>
-            <CardHeader>
-                <CardTitle>Okuma Adetleri</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-lg">
-                <p className="font-medium">Bu Lottan: <span className="font-bold text-primary">{lotCount}</span></p>
-                <p className="font-medium">Ürün Toplamı: <span className="font-bold text-primary">{totalCountForProduct}</span></p>
-            </CardContent>
-        </Card>
+      {/* ── STEP 2: İşlemler (Ürün Ekle) + Son Okutulan Detay ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr] gap-3 sm:gap-4">
+        {/* Left: Action tiles 2x2 */}
+        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5">
+          <p className="cihaz-overline text-xs mb-3">Ürün Ekle</p>
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+            <button
+              onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+            >
+              <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
+            </button>
+            <button
+              onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+              style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}
+            >
+              <Camera className="h-5 w-5" />
+              <span className="text-xs sm:text-sm font-medium">Seri Tarama</span>
+            </button>
+            <button
+              onClick={() => setShowManualInline(v => !v)}
+              className={cn("cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center", showManualInline && "cihaz-pressed")}
+            >
+              <PlusCircle className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
+            </button>
+            <button
+              onClick={() => setIsOcrModalOpen(true)}
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+            >
+              <ScanLine className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
+            </button>
+          </div>
+        </div>
 
-        <Card>
-            <CardHeader><CardTitle>İşlemler</CardTitle></CardHeader>
-            <CardContent className="space-y-2 sm:space-y-3">
-                {/* Button Grid - 2x2 on mobile, row layout on larger screens */}
-                <div className="grid grid-cols-2 gap-2 sm:gap-3 mal-kabul-actions">
-                    <Button
-                      onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
-                    >
-                      <Camera className="h-4 w-4 flex-shrink-0"/>
-                      <span className="hidden xs:inline sm:inline">Tekli Tara</span>
-                      <span className="xs:hidden sm:hidden">Tekli</span>
-                    </Button>
-                    <Button
-                      onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-                      className="flex items-center justify-center gap-1.5 sm:gap-2 bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm"
-                      size="sm"
-                    >
-                      <Camera className="h-4 w-4 flex-shrink-0"/>
-                      <span className="hidden xs:inline sm:inline">Seri Tarama</span>
-                      <span className="xs:hidden sm:hidden">Seri</span>
-                    </Button>
-                    <Button
-                      onClick={() => setShowManualInline(v => !v)}
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
-                    >
-                      <PlusCircle className="h-4 w-4 flex-shrink-0"/>
-                      <span className="hidden xs:inline sm:inline">Manuel Ürün</span>
-                      <span className="xs:hidden sm:hidden">Manuel</span>
-                    </Button>
-                    <Button
-                      onClick={() => setIsOcrModalOpen(true)}
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
-                    >
-                      <ScanLine className="h-4 w-4 flex-shrink-0"/>
-                      <span className="hidden xs:inline sm:inline">İrsaliye (OCR)</span>
-                      <span className="xs:hidden sm:hidden">OCR</span>
-                    </Button>
+        {/* Right: Last scanned detail + undo */}
+        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5">
+          <p className="cihaz-overline text-xs mb-3">Son Okutulan Detay</p>
+          {lastScannedProduct ? (
+            <div className="space-y-2">
+              <div className="p-3 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                <p className="font-semibold text-sm text-[var(--dashboard-text)]">{lastScannedProduct.stokAdi || ''}</p>
+                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">{lastScannedProduct.stokKodu}</p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {lastScannedProduct.seriNumarasi && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
+                      SN: {lastScannedProduct.seriNumarasi}
+                    </span>
+                  )}
+                  {lastScannedProduct.lotNumarasi && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
+                      Lot: {lastScannedProduct.lotNumarasi}
+                    </span>
+                  )}
+                  {lastScannedProduct.miad && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
+                      SKT: {lastScannedProduct.miad}
+                    </span>
+                  )}
                 </div>
-            </CardContent>
-        </Card>
+              </div>
+              {/* Scan status indicator */}
+              {scanStatus !== 'idle' && (
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all",
+                  scanStatus === 'success' && "bg-green-100 text-green-800",
+                  scanStatus === 'error' && "bg-red-100 text-red-800"
+                )}>
+                  {scanStatus === 'success' ? <Package className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                  {scanStatus === 'success' ? 'Okuma başarılı' : 'Okuma hatası'}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-3">
+                <Package className="h-5 w-5 text-[var(--dashboard-muted)]" />
+              </div>
+              <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun veya manuel ürün ekleyin</p>
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* ── Manuel Giriş Paneli (collapsible drawer) ── */}
       {showManualInline && (
-        <ManualInlineAdder
+        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 relative">
+          <div className="flex items-center justify-between mb-3">
+            <p className="cihaz-overline text-xs">Manuel Ürün Girişi</p>
+            <button
+              onClick={() => setShowManualInline(false)}
+              className="cihaz-tool-item p-1.5 rounded-lg"
+              title="Manuel Girişi Gizle"
+            >
+              <X className="h-4 w-4 text-[var(--dashboard-muted)]" />
+            </button>
+          </div>
+          <ManualInlineAdder
             visible={showManualInline}
             onClose={() => setShowManualInline(false)}
             manualProducts={allNonSerialProducts.filter(p => p.tracking === 'lot_manual' || p.tracking === 'qty_manual')}
             barcodeProducts={allNonSerialProducts.filter(p => p.tracking === 'lot_barcode' || p.tracking === 'qty_barcode')}
             onAddLot={({ code, name, lot, miad, qty }) => {
-                upsertGroupedRow(
+              upsertGroupedRow(
                 setScannedItems,
                 { stokKodu: code, stokAdi: name, lot, miad, barkod: 'MANUAL' },
                 (r) => !!(r.isGroup && r.stokKodu === code && r.lotNumarasi === lot && r.miad === miad),
                 qty
-                );
+              );
             }}
             onAddQty={({ code, name, qty }) => {
-                upsertGroupedRow(
+              upsertGroupedRow(
                 setScannedItems,
                 { stokKodu: code, stokAdi: name, barkod: 'MANUAL' },
                 (r) => !!(r.isGroup && r.stokKodu === code && !r.lotNumarasi),
                 qty
-                );
+              );
             }}
-        />
+          />
+        </div>
       )}
 
-      <Card className="flex-1 flex flex-col">
-        <CardHeader className="space-y-3 sm:space-y-4">
-          {/* Title and Actions - Mobile Responsive */}
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-            <div className="flex-shrink-0">
-              <CardTitle className="text-base sm:text-lg font-headline">Okutulan Ürünler ({scannedItems.length})</CardTitle>
-              <CardDescription className="text-xs sm:text-sm">Stoğa eklenecek ürünlerin listesi.</CardDescription>
-            </div>
-            {/* Action Buttons - Grid on mobile, flex on larger screens */}
-            <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3 sm:justify-end">
-              <Button
-                onClick={handleOpenAddressModal}
-                variant="outline"
-                size="sm"
-                disabled={malKabulIsLoading || selectedItemsCount === 0}
-                className="text-xs sm:text-sm"
-              >
-                <span className="hidden sm:inline">Adres Ata</span>
-                <span className="sm:hidden">Adres</span>
-                <span className="ml-1">({selectedItemsCount})</span>
-              </Button>
-              <Button
-                onClick={handleOpenIrsaliyeModal}
-                variant="outline"
-                size="sm"
-                disabled={malKabulIsLoading || selectedItemsCount === 0}
-                className="text-xs sm:text-sm"
-              >
-                <span className="hidden sm:inline">İrsaliye No Ata</span>
-                <span className="sm:hidden">İrsaliye</span>
-                <span className="ml-1">({selectedItemsCount})</span>
-              </Button>
-              <Button
+      {/* ── STEP 3: Okutulan Ürünler Tablosu ── */}
+      <div className="cihaz-card-strong flex-1 flex flex-col overflow-hidden">
+        {/* ── Selection mode sticky bar ── */}
+        {isSelectionMode && (
+          <div className="sticky top-0 z-10 flex items-center gap-2 sm:gap-3 px-4 py-2.5 bg-[var(--dashboard-accent)] text-white rounded-t-[18px]">
+            <span className="text-sm font-semibold">{selectedItemsCount} seçildi</span>
+            <div className="flex-1" />
+            <button
+              onClick={handleOpenAddressModal}
+              disabled={malKabulIsLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-xs sm:text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              Adres Ata
+            </button>
+            <button
+              onClick={handleOpenIrsaliyeModal}
+              disabled={malKabulIsLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-xs sm:text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              İrsaliye Ata
+            </button>
+            <button
+              onClick={() => setScannedItems(prev => prev.map(item => ({ ...item, isSelected: false })))}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-xs sm:text-sm font-medium transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Seçimi Temizle</span>
+            </button>
+          </div>
+        )}
+
+        {/* ── Table toolbar ── */}
+        <div className={cn(
+          "flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]",
+          isSelectionMode && "rounded-t-none"
+        )}>
+          <div className="flex-shrink-0">
+            <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
+              Okutulan Ürünler
+              <span className="ml-1.5 text-[var(--dashboard-muted)]">({scannedItems.length})</span>
+            </h2>
+            <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">Stoğa eklenecek ürünlerin listesi</p>
+          </div>
+          <div className="flex-1" />
+          {/* Non-selection mode toolbar */}
+          {!isSelectionMode && (
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
+              <button
                 onClick={() => {
                   const anySelected = scannedItems.some(i => !i.isProcessed && i.isSelected);
                   setScannedItems(prev => prev.map(item => (!item.isProcessed ? { ...item, isSelected: !anySelected } : item)));
                 }}
-                variant="outline"
-                size="sm"
                 disabled={malKabulIsLoading || unprocessedScannedItems === 0}
-                className="text-xs sm:text-sm"
+                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                title={unprocessedScannedItems === 0 ? 'Önce ürün ekleyin' : undefined}
               >
-                <CheckSquare className="h-4 w-4 sm:mr-1.5" />
-                <span className="hidden sm:inline">
-                  {scannedItems.some(i => !i.isProcessed && i.isSelected) ? 'Seçimi Kaldır' : `Seç (${unprocessedScannedItems})`}
-                </span>
-                <span className="sm:hidden ml-1">({unprocessedScannedItems})</span>
-              </Button>
-              <Button
+                <CheckSquare className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Seç ({unprocessedScannedItems})</span>
+                <span className="sm:hidden">{unprocessedScannedItems}</span>
+              </button>
+              <button
                 onClick={clearAllScannedItems}
-                variant="destructive"
-                size="sm"
                 disabled={malKabulIsLoading || scannedItems.length === 0}
-                className="text-xs sm:text-sm"
+                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                title={scannedItems.length === 0 ? 'Liste boş' : undefined}
               >
-                <Trash2 className="h-4 w-4 sm:mr-1.5" />
+                <Trash2 className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Temizle</span>
-              </Button>
-              <Button
-                onClick={handlePreCheckAndDogrulamasizMalKabul}
-                className="col-span-2 sm:col-span-1 bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm"
-                size="sm"
-                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0}
-              >
-                {(malKabulIsLoading || isLoading) && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                <span className="hidden sm:inline">Kabul Et ve Stoğa Ekle</span>
-                <span className="sm:hidden">Kabul Et</span>
-              </Button>
+              </button>
             </div>
+          )}
+        </div>
+
+        {/* ── Table header (desktop) ── */}
+        {scannedItems.length > 0 && (
+          <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+            <span></span>
+            <span>Ürün</span>
+            <span>Lot</span>
+            <span>Miad</span>
+            <span>Adres</span>
+            <span>İrsaliye</span>
+            <span className="text-right">Adet</span>
+            <span></span>
           </div>
-        </CardHeader>
-        <CardContent className="flex-1 p-0">
+        )}
+
+        {/* ── Table body ── */}
+        <div className="flex-1 overflow-hidden">
           {scannedItems.length === 0 ? (
-            <div className="flex items-center justify-center h-[40vh] text-muted-foreground p-4">
-              <Search className="mr-2 h-6 w-6" /> Okutulmuş ürün bulunmuyor.
+            <div className="flex flex-col items-center justify-center h-[35vh] sm:h-[40vh] text-center px-4">
+              <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
+              </div>
+              <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Okutulmuş ürün bulunmuyor</p>
+              <p className="text-xs text-[var(--dashboard-muted)] mb-4">Başlamak için bir yöntem seçin:</p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                <button
+                  onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                >
+                  <Camera className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
+                  Seri Tarama Başlat
+                </button>
+                <button
+                  onClick={() => setIsOcrModalOpen(true)}
+                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                >
+                  <ScanLine className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
+                  PDF İrsaliye Yükle
+                </button>
+              </div>
             </div>
           ) : (
-            <VirtualizedList
+            <VirtualizedList<ScanRow>
               items={groupedScannedItems}
               height="40vh"
-              estimateSize={60}
+              estimateSize={72}
               overscan={10}
-              getItemKey={(item) => item.key || item.id}
-              className="p-2"
-              renderItem={(group, groupIndex) => {
+              getItemKey={(item: ScanRow) => item.key || item.id}
+              className=""
+              renderItem={(group: ScanRow, groupIndex: number) => {
                 const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
                 const hasSerials = trackingMode === 'serial';
+                const missingAddress = !group.rafAdresi;
+                const missingIrsaliye = !group.irsaliyeNumarasi;
+                const hasWarnings = missingAddress || missingIrsaliye;
+
                 return (
-                  <div className="border-b last:border-b-0 py-1">
-                    <div className="flex items-center p-2 cursor-pointer hover:bg-muted/50 w-full text-left gap-2">
-                      <div className="px-2">
-                        <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} />
+                  <div className={cn(
+                    "border-b border-[var(--dashboard-stroke)] transition-colors",
+                    group.isSelected && "bg-[var(--dashboard-accent)]/5"
+                  )}>
+                    {/* Desktop row */}
+                    <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5 cursor-pointer hover:bg-[var(--dashboard-surface-2)]/60">
+                      <div>
+                        <Checkbox
+                          checked={group.isSelected}
+                          onCheckedChange={() => toggleGroupSelection(group.key)}
+                        />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="font-medium truncate block">{group.stokAdi}</span>
-                        <span className="text-xs text-muted-foreground">{group.stokKodu}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
+                        <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
                       </div>
-                      <div className="flex-1 text-sm hidden sm:block">{group.lotNumarasi || '-'}</div>
-                      <div className="flex-1 text-sm hidden sm:block">{group.miad || '-'}</div>
-                      <div className="flex-1 text-sm hidden md:block">{group.rafAdresi || '-'}</div>
-                      <div className="flex-1 text-sm hidden md:block">{group.irsaliyeNumarasi || '-'}</div>
-                      <div className="font-bold text-lg text-right w-24">
+                      <p className="text-xs text-[var(--dashboard-text)] truncate">{group.lotNumarasi || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
+                      <p className="text-xs text-[var(--dashboard-text)] truncate">{group.miad || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
+                      <div>
+                        {group.rafAdresi ? (
+                          <p className="text-xs text-[var(--dashboard-text)] truncate">{group.rafAdresi}</p>
+                        ) : (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            Adres yok
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        {group.irsaliyeNumarasi ? (
+                          <p className="text-xs text-[var(--dashboard-text)] truncate">{group.irsaliyeNumarasi}</p>
+                        ) : (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            İrsaliye yok
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-right">
                         {hasSerials ? (
-                          <span>{group.adet} ADET</span>
+                          <span className="text-sm font-bold text-[var(--dashboard-text)]">{group.adet}</span>
                         ) : (
                           <Input
                             type="number"
                             value={group.adet}
                             onChange={(e) => handleAdetChange(group.key, e.target.value)}
-                            className="h-8 w-20 text-center font-bold text-lg"
+                            className="h-7 w-16 text-center font-bold text-sm bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg ml-auto"
                             min="1"
                           />
                         )}
                       </div>
-                      <div className="w-12 text-right">
-                        <Button variant="ghost" size="icon" onClick={() => deleteGroup(group.key)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                      <div className="text-center">
+                        <button
+                          onClick={() => deleteGroup(group.key)}
+                          className="p-1 rounded-lg hover:bg-red-100 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                        </button>
                       </div>
                     </div>
+
+                    {/* Mobile row (card layout with column structure) */}
+                    <div className="sm:hidden px-3 py-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <Checkbox
+                          checked={group.isSelected}
+                          onCheckedChange={() => toggleGroupSelection(group.key)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
+                              <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {hasSerials ? (
+                                <span className="text-base font-bold text-[var(--dashboard-accent)]">{group.adet}</span>
+                              ) : (
+                                <Input
+                                  type="number"
+                                  value={group.adet}
+                                  onChange={(e) => handleAdetChange(group.key, e.target.value)}
+                                  className="h-7 w-14 text-center font-bold text-sm bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
+                                  min="1"
+                                />
+                              )}
+                              <button onClick={() => deleteGroup(group.key)} className="p-1">
+                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                              </button>
+                            </div>
+                          </div>
+                          {/* Mobile meta row with label+value pairs */}
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px]">
+                            {group.lotNumarasi && (
+                              <span className="text-[var(--dashboard-muted)]">Lot: <strong className="text-[var(--dashboard-text)]">{group.lotNumarasi}</strong></span>
+                            )}
+                            {group.miad && (
+                              <span className="text-[var(--dashboard-muted)]">SKT: <strong className="text-[var(--dashboard-text)]">{group.miad}</strong></span>
+                            )}
+                            {group.rafAdresi ? (
+                              <span className="text-[var(--dashboard-muted)]">Adres: <strong className="text-[var(--dashboard-text)]">{group.rafAdresi}</strong></span>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+                                <AlertTriangle className="h-2.5 w-2.5" /> Adres yok
+                              </span>
+                            )}
+                            {group.irsaliyeNumarasi ? (
+                              <span className="text-[var(--dashboard-muted)]">İrs: <strong className="text-[var(--dashboard-text)]">{group.irsaliyeNumarasi}</strong></span>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+                                <AlertTriangle className="h-2.5 w-2.5" /> İrsaliye yok
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Serial number expansion */}
                     {hasSerials && group.items && group.items.length > 0 && (
-                      <div className="px-6 py-2 bg-muted/50 max-h-32 overflow-y-auto">
-                        <div className="text-xs font-mono grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1">
+                      <div className="px-5 sm:px-10 py-2 bg-[var(--dashboard-surface-2)] border-t border-[var(--dashboard-stroke)]">
+                        <div className="text-[10px] font-mono grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-0.5 text-[var(--dashboard-muted)]">
                           {group.items.slice(0, 100).map(item => (
                             <span key={item.id} className="truncate">{item.seriNumarasi}</span>
                           ))}
                           {group.items.length > 100 && (
-                            <span className="text-muted-foreground">+{group.items.length - 100} daha...</span>
+                            <span>+{group.items.length - 100} daha...</span>
                           )}
                         </div>
                       </div>
@@ -1297,65 +1536,139 @@ export default function AnaPanel(props: AnaPanelProps) {
               }}
             />
           )}
-        </CardContent>
-      </Card>
-      
+        </div>
+
+        {/* ── Primary CTA: Kabul Et ve Stoğa Ekle ── */}
+        {unprocessedScannedItems > 0 && (
+          <div className="px-4 py-3 sm:px-5 sm:py-4 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+            <div className="flex items-center justify-between gap-3">
+              {/* Info text */}
+              <p className="text-xs text-[var(--dashboard-muted)] hidden sm:block">
+                {stepperState.readyCount > 0
+                  ? `${stepperState.readyCount} / ${unprocessedScannedItems} ürün kabule hazır (adres + irsaliye atanmış)`
+                  : 'Kabul için ürünlere adres ve irsaliye atayın.'
+                }
+              </p>
+              {commitInfo && (
+                <div className="flex items-center gap-2 text-xs text-[var(--dashboard-muted)]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Yazılıyor... ({commitInfo.commits} batch)</span>
+                </div>
+              )}
+              <button
+                onClick={handlePreCheckAndDogrulamasizMalKabul}
+                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0 || stepperState.readyCount === 0}
+                className={cn(
+                  "flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-2xl text-sm sm:text-base font-semibold transition-all",
+                  "disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none",
+                  stepperState.readyCount > 0
+                    ? "bg-green-600 hover:bg-green-700 active:bg-green-800 text-white shadow-lg shadow-green-600/30 hover:shadow-xl hover:shadow-green-600/40"
+                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+                )}
+                title={stepperState.readyCount === 0 ? 'Önce ürünlere adres ve irsaliye atayın' : undefined}
+              >
+                {(malKabulIsLoading || isLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
+                <Package className="h-4 w-4" />
+                {selectedItemsCount > 0
+                  ? `Seçilenleri Kabul Et (${selectedItemsCount})`
+                  : `Kabul Et ve Stoğa Ekle (${stepperState.readyCount})`
+                }
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ══════════════════════ MODALS ══════════════════════ */}
+
+      {/* Camera Scanner */}
       <Dialog open={isCameraScannerOpen} onOpenChange={(open: boolean) => {
-          if (!open && isBatchScanning) setIsBatchScanning(false);
-          setIsCameraScannerOpen(open);
-        }}>
+        if (!open && isBatchScanning) setIsBatchScanning(false);
+        setIsCameraScannerOpen(open);
+      }}>
         <DialogContent className="max-w-xl p-0">
           <DialogHeader className="p-4 pb-0">
             <DialogTitle>Kamera ile Barkod Tara</DialogTitle>
-             {isBatchScanning && <DialogDescription className="px-4">Seri tarama modu aktif. Tarayıcı her okumadan sonra açık kalacaktır. Bitirdiğinizde bu pencereyi kapatın.</DialogDescription>}
+            {isBatchScanning && (
+              <DialogDescription className="px-4">
+                Seri tarama modu aktif. Tarayıcı her okumadan sonra açık kalacaktır. Bitirdiğinizde bu pencereyi kapatın.
+              </DialogDescription>
+            )}
           </DialogHeader>
-          <Suspense fallback={<div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>}>
-              <DynamicCameraBarcodeScanner
-                  onScanSuccess={handleCameraScanSuccess}
-                  onClose={() => isBatchScanning ? setIsBatchScanning(false) : setIsCameraScannerOpen(false)}
-              />
+          <Suspense fallback={
+            <div className="flex items-center justify-center p-8">
+              <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+              <p className="ml-2 text-[var(--dashboard-muted)]">Kamera Yükleniyor...</p>
+            </div>
+          }>
+            <DynamicCameraBarcodeScanner
+              onScanSuccess={handleCameraScanSuccess}
+              onClose={() => isBatchScanning ? setIsBatchScanning(false) : setIsCameraScannerOpen(false)}
+            />
           </Suspense>
         </DialogContent>
       </Dialog>
+
+      {/* Address Assignment Modal */}
       <Dialog open={isAddressModalOpen} onOpenChange={setIsAddressModalOpen}>
         <DialogContent>
-            <DialogHeader><DialogTitle>Adres Ata</DialogTitle></DialogHeader>
-            <div className="py-4 space-y-4">
-                <Select value={selectedAddressBarcode} onValueChange={setSelectedAddressBarcode}>
-                    <SelectTrigger><SelectValue placeholder="Tanımlı Adres Seçin..." /></SelectTrigger>
-                    <SelectContent>
-                        {addressDefinitions.map(ad => <SelectItem key={ad.id} value={ad.addressBarcode || ''}>{ad.addressName}</SelectItem>)}
-                    </SelectContent>
-                </Select>
-                <Input value={addressAssignmentInput} onChange={e => setAddressAssignmentInput(e.target.value)} placeholder="Veya manuel adres girin"/>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              Adres Ata
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div>
+              <Label className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">Tanımlı Adresler</Label>
+              <Select value={selectedAddressBarcode} onValueChange={setSelectedAddressBarcode}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Adres seçin..." /></SelectTrigger>
+                <SelectContent>
+                  {addressDefinitions.map(ad => <SelectItem key={ad.id} value={ad.addressBarcode || ''}>{ad.addressName}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
-            <DialogFooter>
-                <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
-                <Button onClick={handleAssignAddress}>Ata</Button>
-            </DialogFooter>
+            <div>
+              <Label className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">Manuel Adres</Label>
+              <Input value={addressAssignmentInput} onChange={e => setAddressAssignmentInput(e.target.value)} placeholder="Veya manuel adres girin" className="mt-1" />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
+            <Button onClick={handleAssignAddress}>Ata</Button>
+          </DialogFooter>
         </DialogContent>
-    </Dialog>
+      </Dialog>
 
-    <Dialog open={isIrsaliyeModalOpen} onOpenChange={setIsIrsaliyeModalOpen}>
+      {/* İrsaliye No Assignment Modal */}
+      <Dialog open={isIrsaliyeModalOpen} onOpenChange={setIsIrsaliyeModalOpen}>
         <DialogContent>
-            <DialogHeader><DialogTitle>İrsaliye No Ata</DialogTitle></DialogHeader>
-            <div className="py-4">
-                <Input value={irsaliyeNoInput} onChange={e => setIrsaliyeNoInput(e.target.value)} placeholder="İrsaliye Numarası"/>
-            </div>
-            <DialogFooter>
-                <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
-                <Button onClick={handleAssignIrsaliyeNo}>Ata</Button>
-            </DialogFooter>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              İrsaliye No Ata
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Label className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">İrsaliye Numarası</Label>
+            <Input value={irsaliyeNoInput} onChange={e => setIrsaliyeNoInput(e.target.value)} placeholder="İrsaliye numarasını girin" className="mt-1" />
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
+            <Button onClick={handleAssignIrsaliyeNo}>Ata</Button>
+          </DialogFooter>
         </DialogContent>
-    </Dialog>
-     {isOcrModalOpen && (
-      <IrsaliyeOcrModal
-        isOpen={isOcrModalOpen}
-        onClose={() => setIsOcrModalOpen(false)}
-        productCodes={productCodes}
-        onResults={handleOcrResults}
-      />
-     )}
+      </Dialog>
+
+      {/* OCR Modal */}
+      {isOcrModalOpen && (
+        <IrsaliyeOcrModal
+          isOpen={isOcrModalOpen}
+          onClose={() => setIsOcrModalOpen(false)}
+          productCodes={productCodes}
+          onResults={handleOcrResults}
+        />
+      )}
     </div>
   );
 }

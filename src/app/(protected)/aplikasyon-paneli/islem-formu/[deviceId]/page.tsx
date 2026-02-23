@@ -1803,14 +1803,15 @@ export default function AplikasyonIslemFormuPage() {
                 </TableBody>
               </Table>
             </ScrollArea>
-          </CardContent>
-          <CardFooter className="justify-end">
+
+            {/* Save Button */}
+            <div className="flex justify-end pt-4">
               <Button onClick={startSaveProcess} disabled={isSaving || actions.length === 0}>
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
                   Kaydet
               </Button>
-          </CardFooter>
-        </Card>
+            </div>
+        </div>
       </div>
 
       {/* Operation Selection Modal */}

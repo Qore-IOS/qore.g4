@@ -87,25 +87,25 @@ export default function ManualInlineAdder({
   if (!visible) return null;
 
   return (
-    <div className="mt-2 rounded-xl border bg-background/40 p-3">
+    <div>
       <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as 'manual' | 'barcode')} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="manual">Manuel Takip</TabsTrigger>
-          <TabsTrigger value="barcode">Barkodsuz Giriş (Lot/Adet)</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-2 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1">
+          <TabsTrigger value="manual" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)]">Manuel Takip</TabsTrigger>
+          <TabsTrigger value="barcode" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)]">Barkodsuz Giriş</TabsTrigger>
         </TabsList>
-        <TabsContent value={activeTab} className="mt-4">
-           <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[340px]">
-                <Label className="text-xs text-muted-foreground mb-1 block">Ürün Seç</Label>
+        <TabsContent value={activeTab} className="mt-3">
+           <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+              <div className="w-full sm:min-w-[300px] sm:w-auto sm:flex-1">
+                <Label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] mb-1 block">Ürün Seç</Label>
                  <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
                         role="combobox"
                         aria-expanded={isProductPopoverOpen}
-                        className="w-full justify-between font-normal"
+                        className="w-full justify-between font-normal bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-xl"
                       >
-                        <span className="truncate">
+                        <span className="truncate text-sm">
                           {selectedProductCode ? productsForCurrentTab.find((p: ManualProductOption) => p.code === selectedProductCode)?.name : 'Ürün seçin...'}
                         </span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -128,8 +128,8 @@ export default function ManualInlineAdder({
                               >
                                 <Check className={cn("mr-2 h-4 w-4", selectedProductCode === p.code ? "opacity-100" : "opacity-0")} />
                                 <div className="flex flex-col">
-                                    <span>{p.name}</span>
-                                    <span className="text-xs text-muted-foreground">{p.code}</span>
+                                    <span className="text-sm">{p.name}</span>
+                                    <span className="text-xs text-[var(--dashboard-muted)] font-mono">{p.code}</span>
                                 </div>
                               </CommandItem>
                             ))}
@@ -141,39 +141,43 @@ export default function ManualInlineAdder({
               </div>
 
               {chosenProduct && (chosenProduct.tracking === 'qty_manual' || chosenProduct.tracking === 'qty_barcode') && (
-                <>
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={quantity}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value)}
-                      className="w-28"
-                    />
-                  </div>
-                </>
+                <div>
+                  <Label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] mb-1 block">Adet</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={quantity}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value)}
+                    className="w-24 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-xl"
+                  />
+                </div>
               )}
 
               {chosenProduct && (chosenProduct.tracking === 'lot_manual' || chosenProduct.tracking === 'lot_barcode') && (
                 <>
                   <div>
-                    <Label className="text-xs text-muted-foreground mb-1 block">Lot</Label>
-                    <Input value={lot} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLot(e.target.value)} className="w-40" placeholder="Lot Numarası"/>
+                    <Label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] mb-1 block">Lot</Label>
+                    <Input value={lot} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLot(e.target.value)} className="w-36 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-xl" placeholder="Lot No"/>
                   </div>
                   <div>
-                    <Label className="text-xs text-muted-foreground mb-1 block">Miad</Label>
-                    <ExpiryDateInput value={miad} onChange={setMiad} className="w-44 h-9 rounded-md border px-3 bg-background" />
+                    <Label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] mb-1 block">Miad</Label>
+                    <ExpiryDateInput value={miad} onChange={setMiad} className="w-40 h-9 rounded-xl border border-[var(--dashboard-stroke)] px-3 bg-[var(--dashboard-surface-2)]" />
                   </div>
                   <div>
-                    <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                    <Input type="number" min={1} value={quantity} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value)} className="w-28" />
+                    <Label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] mb-1 block">Adet</Label>
+                    <Input type="number" min={1} value={quantity} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value)} className="w-24 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-xl" />
                   </div>
                 </>
               )}
 
-              <Button onClick={handleAdd} disabled={!chosenProduct || ((chosenProduct.tracking.includes('lot')) && (!lot || !miad))}>Ekle</Button>
-              <Button variant="ghost" onClick={onClose} className="ml-auto">Kapat</Button>
+              <button
+                onClick={handleAdd}
+                disabled={!chosenProduct || ((chosenProduct.tracking.includes('lot')) && (!lot || !miad))}
+                className="cihaz-action-tile px-4 py-2 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                style={chosenProduct && !((chosenProduct.tracking.includes('lot')) && (!lot || !miad)) ? { background: 'var(--dashboard-accent)', color: '#fff', border: 'none' } : undefined}
+              >
+                Ekle
+              </button>
            </div>
         </TabsContent>
       </Tabs>
