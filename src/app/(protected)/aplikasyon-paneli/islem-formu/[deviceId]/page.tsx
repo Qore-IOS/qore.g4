@@ -6,8 +6,6 @@ import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -1382,45 +1380,67 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   if (loading) {
-    return <div className="p-6 flex justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor...</p>
+        </div>
+      </div>
+    );
   }
   if (!device) {
-    return <div className="p-6 text-center">Cihaz bilgileri yüklenemedi.</div>;
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <p className="text-[var(--dashboard-muted)]">Cihaz bilgileri yüklenemedi.</p>
+      </div>
+    );
   }
 
   return (
     <>
-      <div className="device-module-page p-4 space-y-4">
+      <div className="cihaz-shell px-4 py-6 sm:px-6 sm:py-8 space-y-6">
         <BackButton fallback={`/aplikasyon-paneli/${device.hospitalId}`} />
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-start">
-              <div className="flex flex-col sm:flex-row gap-4 items-start">
-                  {device.imageUrl && (
-                      <div className="w-32 h-32 flex-shrink-0 bg-muted rounded-lg p-2">
-                          <Image src={`/${device.imageUrl}`} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
-                      </div>
-                  )}
-                  <div>
-                    <CardTitle className="text-2xl font-headline">Aplikasyon İşlem Formu: {device.cihazAdi}</CardTitle>
-                    <CardDescription>Seri No: {device.seriNumarasi}</CardDescription>
-                    <p className="text-sm mt-2"><strong>Laboratuvar:</strong> {hospital?.name || '-'}</p>
-                    <p className="text-sm"><strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</p>
-                    <p className="text-sm"><strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
-                  </div>
+
+        {/* Header */}
+        <header className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              {device.imageUrl && (
+                <div className="w-28 h-28 flex-shrink-0 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2">
+                  <Image src={`/${device.imageUrl}`} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
                 </div>
-                <Button variant="outline" size="sm" onClick={() => router.push(`/aplikasyon-paneli/gecmis/${deviceId}`)}>
-                    <History className="h-4 w-4 mr-2" />
-                    Geçmiş
-                </Button>
+              )}
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">
+                  Aplikasyon İşlem Formu
+                </h1>
+                <p className="text-base font-medium text-[var(--dashboard-accent)]">{device.cihazAdi}</p>
+                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">Seri No: {device.seriNumarasi}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-[var(--dashboard-muted)]">
+                  <span><strong className="text-[var(--dashboard-text)]">Lab:</strong> {hospital?.name || '-'}</span>
+                  <span><strong className="text-[var(--dashboard-text)]">İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
+                  <span><strong className="text-[var(--dashboard-text)]">Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
+                </div>
+              </div>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
+            <button
+              onClick={() => router.push(`/aplikasyon-paneli/gecmis/${deviceId}`)}
+              className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium self-start"
+            >
+              <History className="h-4 w-4" />
+              <span>Geçmiş</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Form Body */}
+        <div className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6 space-y-6">
             {/* İşlem Türü Seçici */}
-            <div className="p-4 border rounded-lg bg-muted/30">
+            <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
               <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Cog className="h-4 w-4" />
+                <Label className="flex items-center gap-2 text-[var(--dashboard-text)]">
+                  <Cog className="h-4 w-4 text-[var(--dashboard-accent)]" />
                   İşlem Türü
                 </Label>
                 <Select value={islemTuru} onValueChange={(v) => {
@@ -1438,7 +1458,7 @@ export default function AplikasyonIslemFormuPage() {
                     <SelectItem value="roche_bilgisayar_arizasi">Roche Bilgisayar Arızası</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-[var(--dashboard-muted)]">
                   İşlem türünü belirtmek opsiyoneldir.
                 </p>
               </div>
@@ -1446,14 +1466,14 @@ export default function AplikasyonIslemFormuPage() {
 
             {/* Arıza Seçimi - only when ariza selected */}
             {islemTuru === 'ariza' && (
-              <div className="p-4 border rounded-lg bg-red-50/50 dark:bg-red-950/20 space-y-4">
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
+              <div className="p-4 rounded-2xl bg-red-50/80 border border-red-200/60 space-y-4">
+                <div>
+                  <Label className="flex items-center gap-2 mb-4 text-[var(--dashboard-text)]">
                     <AlertTriangle className="h-4 w-4 text-red-600" />
-                    Arıza Türü <span className="text-destructive">*</span>
+                    Arıza Türü <span className="text-red-500">*</span>
                   </Label>
                   <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
-                    <SelectTrigger className="w-full sm:w-80">
+                    <SelectTrigger>
                       <SelectValue placeholder="Tespit edilen arızayı seçin..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -1469,32 +1489,28 @@ export default function AplikasyonIslemFormuPage() {
                         placeholder="Arıza açıklamasını girin... (zorunlu)"
                         value={customFaultName}
                         onChange={(e) => setCustomFaultName(e.target.value)}
-                        className="border-red-300 dark:border-red-700"
+                        className="border-red-300"
                       />
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    Arıza seçildiğinde form kaydedilirken otomatik olarak çözülmüş arıza kaydı oluşturulacaktır.
-                  </p>
                 </div>
 
                 {/* İlişkili Test Seçimi */}
-                <div className="pt-3 border-t border-red-200 dark:border-red-800">
+                <div className="pt-3 border-t border-red-200/60">
                   <div className="flex items-center justify-between mb-2">
-                    <Label className="text-sm">İlişkili Testler (Opsiyonel)</Label>
-                    <Button
+                    <Label className="text-sm text-[var(--dashboard-text)]">İlişkili Testler (Opsiyonel)</Label>
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
                       onClick={() => setIsTestModalOpen(true)}
                       disabled={availableTests.length === 0}
+                      className="cihaz-tool-item flex items-center gap-1 px-3 py-1.5 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Plus className="h-4 w-4 mr-1" />
+                      <Plus className="h-3.5 w-3.5" />
                       Test Seç
-                    </Button>
+                    </button>
                   </div>
                   {availableTests.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-[var(--dashboard-muted)]">
                       Bu laboratuvara tanımlı test bulunamadı.
                     </p>
                   ) : selectedTests.length > 0 ? (
@@ -1502,7 +1518,7 @@ export default function AplikasyonIslemFormuPage() {
                       {selectedTests.map(test => (
                         <span
                           key={test}
-                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs rounded-full"
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-100/80 text-red-800 text-xs rounded-full"
                         >
                           {test}
                           <button
@@ -1516,7 +1532,7 @@ export default function AplikasyonIslemFormuPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-[var(--dashboard-muted)]">
                       Arızayla ilişkili test seçilmedi.
                     </p>
                   )}

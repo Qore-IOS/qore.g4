@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
@@ -34,7 +34,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -510,60 +510,73 @@ export default function AplikasyonPaneliDetayPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Yükleniyor...</p>
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor…</p>
+        </div>
       </div>
     );
   }
 
   if (!hospital) {
-    return <div className="text-center p-8">Hastane bulunamadı.</div>;
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <p className="text-[var(--dashboard-muted)]">Hastane bulunamadı.</p>
+      </div>
+    );
   }
 
   return (
     <>
-      <div className="device-module-page space-y-6 p-4 sm:p-6">
+      <div className="cihaz-shell px-4 py-6 sm:px-6 sm:py-8 space-y-6">
         <BackButton fallback="/aplikasyon-paneli" />
-        <CardHeader className="px-0 sm:px-6">
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-2xl font-headline text-primary">
-              {hospital.name} - Cihaz Durumları
-            </CardTitle>
+
+        {/* Header */}
+        <header className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                <Building2 className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">{hospital.name}</h1>
+                <p className="text-sm text-[var(--dashboard-muted)]">Cihaz Durumları</p>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant={showMaintenance ? "default" : "outline"}
-                size="sm"
+              <button
                 onClick={() => setShowMaintenance(prev => !prev)}
-                className="flex items-center gap-2"
+                className={cn(
+                  "cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium",
+                  showMaintenance && "bg-[var(--dashboard-accent)] text-white shadow-none"
+                )}
               >
                 {showMaintenance ? <RotateCcw className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}
-                <span className="hidden sm:inline">{showMaintenance ? 'Cihazlara Dön' : 'Bakım Periyotlarını Göster'}</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
+                <span className="hidden sm:inline">{showMaintenance ? 'Cihazlara Dön' : 'Bakım Periyotları'}</span>
+              </button>
+              <button
                 onClick={openDigerFirmaModal}
-                className="flex items-center gap-2"
+                className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium"
               >
                 <Building2 className="h-4 w-4" />
                 <span className="hidden sm:inline">Diğer Firma Arıza</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
+              </button>
+              <button
                 onClick={openPersonalStockModal}
-                className="flex items-center gap-2"
+                className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium"
               >
                 <Package className="h-4 w-4" />
                 <span className="hidden sm:inline">Şahsi Stoğum</span>
-              </Button>
+              </button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="px-0 sm:px-6">
+        </header>
+
+        {/* Device Grid */}
+        <div>
           {devicesByHospital.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">
+            <p className="text-[var(--dashboard-muted)] text-center py-8">
               Bu hastane için tanımlı cihaz bulunmuyor.
             </p>
           ) : (
@@ -580,33 +593,34 @@ export default function AplikasyonPaneliDetayPage() {
                     <div className={cn("device-flip-inner", showMaintenance && "flipped")}>
                       {/* FRONT - Device Image */}
                       <div className="device-flip-front">
-                        <button
-                          className="flex flex-col items-center group text-center cursor-pointer w-full"
-                          onClick={() => handleDeviceClick(device)}
-                        >
-                          <div className="mb-2">
-                            <p className="font-semibold text-sm truncate" title={device.cihazAdi || device.model}>
-                              {device.cihazAdi || device.model}
-                            </p>
-                            <p className="text-xs text-muted-foreground font-mono">
-                              {device.seriNumarasi || 'SN yok'}
-                            </p>
-                          </div>
-                          <div className="relative w-full aspect-square">
-                            {device.imageUrl ? (
-                              <Image
-                                src={`/${device.imageUrl}`}
-                                alt={device.cihazAdi || device.model || ''}
-                                width={1024}
-                                height={1024}
-                                className="object-contain"
-                                priority
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground rounded-md">
-                                Görsel Yok
-                              </div>
-                            )}
+                        <div className="cihaz-card p-4">
+                          <button
+                            className="flex flex-col items-center group text-center cursor-pointer w-full"
+                            onClick={() => handleDeviceClick(device)}
+                          >
+                            <div className="mb-2">
+                              <p className="font-semibold text-sm truncate text-[var(--dashboard-text)]" title={device.cihazAdi || device.model}>
+                                {device.cihazAdi || device.model}
+                              </p>
+                              <p className="text-xs text-[var(--dashboard-muted)] font-mono">
+                                {device.seriNumarasi || 'SN yok'}
+                              </p>
+                            </div>
+                            <div className="relative w-full aspect-square">
+                              {device.imageUrl ? (
+                                <Image
+                                  src={`/${device.imageUrl}`}
+                                  alt={device.cihazAdi || device.model || ''}
+                                  width={1024}
+                                  height={1024}
+                                  className="object-contain"
+                                  priority
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-[var(--dashboard-surface-2)] flex items-center justify-center text-xs text-[var(--dashboard-muted)] rounded-md">
+                                  Görsel Yok
+                                </div>
+                              )}
                           </div>
                           <div
                               className={cn(
@@ -623,7 +637,7 @@ export default function AplikasyonPaneliDetayPage() {
                                   Arızalı (Aplikasyon)
                                 </p>
                                 {device.arizaAciklamasi && (
-                                  <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
+                                  <p className="text-xs text-[var(--dashboard-muted)] truncate" title={device.arizaAciklamasi}>
                                     {device.arizaAciklamasi}
                                   </p>
                                 )}
@@ -635,7 +649,7 @@ export default function AplikasyonPaneliDetayPage() {
                                   Arızalı (Teknik Servis)
                                 </p>
                                 {device.arizaAciklamasi && (
-                                  <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
+                                  <p className="text-xs text-[var(--dashboard-muted)] truncate" title={device.arizaAciklamasi}>
                                     {device.arizaAciklamasi}
                                   </p>
                                 )}
@@ -651,8 +665,8 @@ export default function AplikasyonPaneliDetayPage() {
                           {/* Mini Fault History */}
                           {deviceFaultHistory[device.id]?.length > 0 && (
                             <div className="w-full mt-2 text-left" onClick={(e) => e.stopPropagation()}>
-                              <div className="border rounded-md p-2 bg-muted/30">
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                              <div className="border border-[var(--dashboard-stroke)] rounded-md p-2 bg-[var(--dashboard-surface-2)]">
+                                <div className="flex items-center gap-1 text-xs text-[var(--dashboard-muted)] mb-1">
                                   <History className="h-3 w-3" />
                                   <span className="font-medium">Son Arızalar</span>
                                 </div>
@@ -660,11 +674,11 @@ export default function AplikasyonPaneliDetayPage() {
                                   {deviceFaultHistory[device.id]
                                     .slice(0, expandedDevices.has(device.id) ? 10 : 3)
                                     .map((fault, idx) => (
-                                      <div key={idx} className="text-xs border-l-2 border-primary/30 pl-2 py-0.5">
-                                        <p className="text-muted-foreground truncate" title={fault.description}>
+                                      <div key={idx} className="text-xs border-l-2 border-[var(--dashboard-accent)]/30 pl-2 py-0.5">
+                                        <p className="text-[var(--dashboard-muted)] truncate" title={fault.description}>
                                           {fault.description}
                                         </p>
-                                        <p className="text-[10px] text-muted-foreground/70">
+                                        <p className="text-[10px] text-[var(--dashboard-muted)]/70">
                                           {format(fault.closedAt, 'dd.MM.yy', { locale: tr })}
                                         </p>
                                       </div>
@@ -673,7 +687,7 @@ export default function AplikasyonPaneliDetayPage() {
                                 {deviceFaultHistory[device.id].length > 3 && (
                                   <button
                                     onClick={(e) => toggleDeviceExpand(device.id, e)}
-                                    className="w-full mt-1 text-xs text-primary hover:text-primary/80 flex items-center justify-center gap-1 py-1"
+                                    className="w-full mt-1 text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-1 py-1"
                                   >
                                     {expandedDevices.has(device.id) ? (
                                       <>
@@ -692,29 +706,30 @@ export default function AplikasyonPaneliDetayPage() {
                             </div>
                           )}
                         </button>
+                        </div>
                       </div>
 
                       {/* BACK - Maintenance Info */}
                       <div className="device-flip-back">
                         <div className="maintenance-card-neumorphic p-4 h-full">
                           <div className="mb-3">
-                            <p className="font-semibold text-sm truncate" title={device.cihazAdi || device.model}>
+                            <p className="font-semibold text-sm truncate text-[var(--dashboard-text)]" title={device.cihazAdi || device.model}>
                               {device.cihazAdi || device.model}
                             </p>
-                            <p className="text-xs text-muted-foreground font-mono">
+                            <p className="text-xs text-[var(--dashboard-muted)] font-mono">
                               {device.seriNumarasi || 'SN yok'}
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 mb-3">
-                            <CalendarClock className="h-4 w-4 text-primary" />
-                            <span className="text-xs font-semibold text-primary">Bakım Periyotları</span>
+                            <CalendarClock className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                            <span className="text-xs font-semibold text-[var(--dashboard-accent)]">Bakım Periyotları</span>
                           </div>
                           {maintenanceLoading ? (
                             <div className="flex items-center justify-center py-6">
-                              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                              <Loader2 className="h-5 w-5 animate-spin text-[var(--dashboard-accent)]" />
                             </div>
                           ) : deviceMaintenanceItems.length === 0 ? (
-                            <p className="text-xs text-muted-foreground text-center py-4">
+                            <p className="text-xs text-[var(--dashboard-muted)] text-center py-4">
                               Tanımlı bakım periyodu yok
                             </p>
                           ) : (
@@ -725,10 +740,10 @@ export default function AplikasyonPaneliDetayPage() {
                                   className={cn(
                                     "flex items-start justify-between gap-2 p-2 rounded-lg text-xs",
                                     item.daysRemaining <= 0
-                                      ? "bg-red-100 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50"
+                                      ? "bg-red-100 border border-red-200"
                                       : item.daysRemaining <= 7
-                                      ? "bg-amber-100 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50"
-                                      : "bg-muted/50 dark:bg-white/5 border border-transparent"
+                                      ? "bg-amber-100 border border-amber-200"
+                                      : "bg-[var(--dashboard-surface-2)] border border-transparent"
                                   )}
                                 >
                                   <div className="flex-1 min-w-0">
@@ -747,10 +762,10 @@ export default function AplikasyonPaneliDetayPage() {
                                   <span className={cn(
                                     "font-bold whitespace-nowrap flex-shrink-0",
                                     item.daysRemaining <= 0
-                                      ? "text-red-600 dark:text-red-400"
+                                      ? "text-red-600"
                                       : item.daysRemaining <= 7
-                                      ? "text-amber-600 dark:text-amber-400"
-                                      : "text-muted-foreground"
+                                      ? "text-amber-600"
+                                      : "text-[var(--dashboard-muted)]"
                                   )}>
                                     {item.daysRemaining <= 0
                                       ? `${Math.abs(item.daysRemaining)} gün gecikti`
@@ -768,7 +783,7 @@ export default function AplikasyonPaneliDetayPage() {
               })}
             </div>
           )}
-        </CardContent>
+        </div>
       </div>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
