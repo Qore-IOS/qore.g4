@@ -2,8 +2,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Upload, Camera, FileText, Scan, CheckCircle, AlertTriangle, Trash2, UploadCloud, FolderOpen, FileSpreadsheet, Clock } from 'lucide-react';
+import { Loader2, Upload, Camera, FileText, Scan, CheckCircle, AlertTriangle, Trash2, UploadCloud, FolderOpen, FileSpreadsheet, Clock, Search } from 'lucide-react';
 import { extractTextFromPdf, renderFirstPageToBlob, ocrBlob } from '@/lib/pdf';
 import { parseIrsaliyeText, IrsaliyeParseResult } from '@/lib/irsaliye-parser';
 import type { ProductCode } from '@/lib/types';
@@ -46,17 +47,15 @@ export default function IrsaliyeOcrModal({
   const [showCamera, setShowCamera] = useState(false);
   const [detectedItems, setDetectedItems] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'camera' | 'pdf'>('camera');
-  const [pdfSource, setPdfSource] = useState<'upload' | 'files'>('upload');
   const [savedFiles, setSavedFiles] = useState<SavedIrsaliyeFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
 
-  // Load saved invoice files when PDF tab is active and "files" source is selected
+  // Load saved invoice files
   useEffect(() => {
     if (!isOpen) return;
 
     setLoadingFiles(true);
-    const now = Timestamp.now();
     const q = query(
       collection(db, 'irsaliyeDosyalari'),
       orderBy('uploadedAt', 'desc')
@@ -66,7 +65,6 @@ export default function IrsaliyeOcrModal({
       const files: SavedIrsaliyeFile[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        // Only show non-expired files
         if (data.expiresAt && data.expiresAt.toMillis() > Date.now()) {
           files.push({ id: docSnap.id, ...data } as SavedIrsaliyeFile);
         }
@@ -83,18 +81,16 @@ export default function IrsaliyeOcrModal({
 
   const processExtractedText = (text: string, source: 'Camera' | 'PDF') => {
     setOcrText(text);
-    console.log(`[OCR Modal] Processing ${source} text, length: ${text.length}`);
     const rawItems = parseIrsaliyeText(text, productCodes);
-    console.log(`[OCR Modal] Parser returned ${rawItems.length} items:`, rawItems);
 
     const processedItems = rawItems.map(item => {
         const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-
         return {
             ...item,
             productName: product?.stokAdi || "Bilinmeyen Ürün",
             quantity: item.quantity || 1,
-            unit: "Adet"
+            unit: "Adet",
+            confidence: product ? 'high' : 'low',
         };
     });
 
@@ -161,7 +157,6 @@ export default function IrsaliyeOcrModal({
     toast({ title: 'İşleniyor', description: `${file.fileName} okunuyor...` });
 
     try {
-      // Download via server-side API proxy to avoid CORS issues with Firebase Storage
       const response = await fetch('/api/storage/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -195,19 +190,29 @@ export default function IrsaliyeOcrModal({
     setDetectedItems((prev: any[]) => prev.filter((_: any, i: number) => i !== index));
   };
 
+  const updateItemField = (index: number, field: string, value: string | number) => {
+    setDetectedItems((prev: any[]) => prev.map((item: any, i: number) =>
+      i === index ? { ...item, [field]: value } : item
+    ));
+  };
+
   const handleModalClose = () => {
     setShowCamera(false);
     setProcessing(false);
     setImagePreview(null);
     setOcrText('');
     setDetectedItems([]);
-    setPdfSource('upload');
     setSelectedFileId(null);
     onClose();
   };
 
   const confirmAdd = () => {
-    onResults(detectedItems);
+    const validItems = detectedItems.filter((item: any) => item.stokKodu && item.quantity > 0);
+    if (validItems.length === 0) {
+      toast({ title: 'Uyarı', description: 'Eklenecek geçerli kalem bulunamadı.', variant: 'default' });
+      return;
+    }
+    onResults(validItems);
     handleModalClose();
   };
 
@@ -218,175 +223,233 @@ export default function IrsaliyeOcrModal({
   };
 
   const pdfFiles = savedFiles.filter(f => f.fileType === 'pdf');
+  const validItemCount = detectedItems.filter((item: any) => item.stokKodu && item.quantity > 0).length;
 
   return (
     <Dialog open={isOpen} onOpenChange={handleModalClose}>
-      <DialogContent className="max-w-4xl h-[90vh] flex flex-col p-0">
-        <DialogHeader className="p-6 pb-2">
-          <DialogTitle>Akıllı İrsaliye Tarama (OCR)</DialogTitle>
-          <DialogDescription>
-            Resim veya PDF formatındaki irsaliyeyi yükleyerek veya kamerasını kullanarak ürünleri otomatik olarak listeye ekleyin.
+      <DialogContent className="max-w-4xl h-[90vh] flex flex-col p-0 gap-0">
+        <DialogHeader className="px-5 py-4 sm:px-6 border-b border-[var(--dashboard-stroke)]">
+          <DialogTitle className="flex items-center gap-2 text-[var(--dashboard-text)]">
+            <Scan className="h-5 w-5 text-[var(--dashboard-accent)]" />
+            İrsaliye Tara (OCR)
+          </DialogTitle>
+          <DialogDescription className="text-xs text-[var(--dashboard-muted)]">
+            Kamera veya PDF ile irsaliyeyi tarayın, tespit edilen kalemleri kontrol edip listeye ekleyin.
           </DialogDescription>
         </DialogHeader>
 
         {showCamera ? (
           <CameraCapture onCapture={handleCapture} onClose={() => setShowCamera(false)} />
         ) : (
-          <div className="flex-1 flex flex-col overflow-hidden px-6">
-            <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as 'camera' | 'pdf')} className="w-full mb-4">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="camera">Kamera ile Tara</TabsTrigger>
-                <TabsTrigger value="pdf">PDF İrsaliye Yükle</TabsTrigger>
-              </TabsList>
-              <TabsContent value="camera" className="py-8 flex justify-center">
-                <Button size="lg" className="h-24 w-64 text-lg gap-3" onClick={() => setShowCamera(true)} disabled={processing}>
-                  <Camera className="h-8 w-8" />
-                  {processing ? "İşleniyor..." : "Kamerayı Aç"}
-                </Button>
-              </TabsContent>
-              <TabsContent value="pdf" className="py-4">
-                {/* PDF Source Toggle */}
-                <div className="flex gap-2 mb-4 justify-center">
-                  <Button
-                    variant={pdfSource === 'upload' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setPdfSource('upload')}
-                    className="gap-2"
-                  >
-                    <UploadCloud className="h-4 w-4" />
-                    Dosya Yükle
-                  </Button>
-                  <Button
-                    variant={pdfSource === 'files' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setPdfSource('files')}
-                    className="gap-2"
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    Dosyalardan Seç
-                    {pdfFiles.length > 0 && (
-                      <span className="ml-1 bg-primary-foreground text-primary text-xs px-1.5 py-0.5 rounded-full">
-                        {pdfFiles.length}
-                      </span>
-                    )}
-                  </Button>
-                </div>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Source selector */}
+            <div className="px-5 pt-4 sm:px-6">
+              <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as 'camera' | 'pdf')} className="w-full">
+                <TabsList className="grid w-full grid-cols-2 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1">
+                  <TabsTrigger value="camera" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)]">
+                    <Camera className="h-3.5 w-3.5 mr-1.5" />
+                    Kamera ile Tara
+                  </TabsTrigger>
+                  <TabsTrigger value="pdf" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)]">
+                    <FileText className="h-3.5 w-3.5 mr-1.5" />
+                    PDF / Dosya
+                  </TabsTrigger>
+                </TabsList>
 
-                {pdfSource === 'upload' ? (
-                  <div className="flex items-center justify-center w-full max-w-md mx-auto">
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-600">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <UploadCloud className="w-8 h-8 mb-3 text-slate-400" />
-                        <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">PDF Yüklemek için Tıkla</span></p>
-                      </div>
-                      <input type="file" ref={fileInputRef} className="hidden" accept=".pdf" onChange={handlePdfUpload} disabled={processing} />
+                <TabsContent value="camera" className="py-6 flex justify-center">
+                  <button
+                    onClick={() => setShowCamera(true)}
+                    disabled={processing}
+                    className="cihaz-action-tile flex flex-col items-center justify-center gap-3 w-56 h-28 disabled:opacity-50"
+                  >
+                    <Camera className="h-8 w-8 text-[var(--dashboard-accent)]" />
+                    <span className="text-sm font-medium text-[var(--dashboard-text)]">
+                      {processing ? "İşleniyor..." : "Kamerayı Aç"}
+                    </span>
+                  </button>
+                </TabsContent>
+
+                <TabsContent value="pdf" className="py-4">
+                  {/* Unified dropzone + saved files */}
+                  <div className="space-y-3 max-w-lg mx-auto">
+                    {/* Primary: Dropzone for upload */}
+                    <label className="flex flex-col items-center justify-center w-full h-28 rounded-2xl cursor-pointer transition-all bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] hover:shadow-[var(--dashboard-raised-soft)] border-2 border-dashed border-[var(--dashboard-stroke)]">
+                      <UploadCloud className="w-7 h-7 mb-2 text-[var(--dashboard-accent)]" />
+                      <p className="text-sm font-medium text-[var(--dashboard-text)]">PDF Dosya Seç veya Sürükle</p>
+                      <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">PDF / JPG / PNG</p>
+                      <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={handlePdfUpload} disabled={processing} />
                     </label>
-                  </div>
-                ) : (
-                  <div className="w-full max-w-md mx-auto">
-                    {loadingFiles ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : pdfFiles.length === 0 ? (
-                      <div className="text-center py-8 border-2 border-dashed rounded-lg border-slate-300 dark:border-slate-600">
-                        <FolderOpen className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                        <p className="text-sm text-muted-foreground mb-2">
-                          Kayıtlı PDF dosyası bulunamadı.
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Raporlama &gt; Dosya Yönetimi panelinden irsaliye yükleyebilirsiniz.
-                        </p>
-                      </div>
-                    ) : (
-                      <ScrollArea className="max-h-[200px] border rounded-lg">
-                        <div className="divide-y">
-                          {pdfFiles.map((file) => (
-                            <button
-                              key={file.id}
-                              className="flex items-center gap-3 w-full p-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left disabled:opacity-50"
-                              onClick={() => handleSelectSavedFile(file)}
-                              disabled={processing}
-                            >
-                              <FileText className="h-6 w-6 text-red-500 shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-medium truncate">{file.fileName}</p>
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                  <span>{formatFileSize(file.fileSize)}</span>
-                                  <span>{file.uploadedByName}</span>
+
+                    {/* Saved files list */}
+                    {pdfFiles.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] mb-2">Kayıtlı Dosyalar</p>
+                        <ScrollArea className="max-h-[140px] rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+                          <div className="divide-y divide-[var(--dashboard-stroke)]">
+                            {pdfFiles.map((file) => (
+                              <button
+                                key={file.id}
+                                className="flex items-center gap-3 w-full px-3 py-2.5 hover:bg-[var(--dashboard-surface-2)] transition-colors text-left disabled:opacity-50"
+                                onClick={() => handleSelectSavedFile(file)}
+                                disabled={processing}
+                              >
+                                <FileText className="h-5 w-5 text-red-500 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium text-[var(--dashboard-text)] truncate">{file.fileName}</p>
+                                  <div className="flex items-center gap-2 text-[10px] text-[var(--dashboard-muted)]">
+                                    <span>{formatFileSize(file.fileSize)}</span>
+                                    <span>{file.uploadedByName}</span>
+                                  </div>
                                 </div>
-                              </div>
-                              {selectedFileId === file.id && processing ? (
-                                <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                              ) : (
-                                <Scan className="h-4 w-4 text-muted-foreground shrink-0" />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </ScrollArea>
+                                {selectedFileId === file.id && processing ? (
+                                  <Loader2 className="h-4 w-4 animate-spin text-[var(--dashboard-accent)] shrink-0" />
+                                ) : (
+                                  <Scan className="h-4 w-4 text-[var(--dashboard-muted)] shrink-0" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </div>
                     )}
                   </div>
-                )}
-              </TabsContent>
-            </Tabs>
+                </TabsContent>
+              </Tabs>
+            </div>
+
+            {/* Processing indicator */}
             {processing && (
-              <div className="flex flex-col items-center gap-4">
-                <Loader2 className="w-12 h-12 animate-spin text-primary" />
-                <p className="text-muted-foreground">Lütfen bekleyin, belge analiz ediliyor...</p>
-                {imagePreview && <img src={imagePreview} alt="Preview" className="max-w-xs rounded-md" />}
+              <div className="flex flex-col items-center gap-3 py-4 px-5">
+                <Loader2 className="w-10 h-10 animate-spin text-[var(--dashboard-accent)]" />
+                <p className="text-xs text-[var(--dashboard-muted)]">Belge analiz ediliyor...</p>
+                {imagePreview && <img src={imagePreview} alt="Preview" className="max-w-xs rounded-xl" />}
               </div>
             )}
-            <div className="flex-1 overflow-hidden flex flex-col bg-slate-50 dark:bg-slate-900 rounded-lg border">
-              <div className="p-3 border-b bg-white dark:bg-slate-800 font-semibold flex justify-between items-center">
-                <span>Tespit Edilen Kalemler ({detectedItems.length})</span>
+
+            {/* Detected items – inline editable table */}
+            <div className="flex-1 overflow-hidden flex flex-col mx-5 mb-4 sm:mx-6 rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+              <div className="px-4 py-2.5 border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] flex justify-between items-center rounded-t-2xl">
+                <span className="text-xs font-semibold text-[var(--dashboard-text)]">
+                  Tespit Edilen Kalemler
+                  <span className="ml-1.5 text-[var(--dashboard-muted)]">({detectedItems.length})</span>
+                </span>
                 {detectedItems.length > 0 && (
-                  <Button variant="ghost" size="sm" onClick={() => setDetectedItems([])} className="text-red-500 h-8">
+                  <button
+                    onClick={() => setDetectedItems([])}
+                    className="text-[10px] font-medium text-red-500 hover:text-red-700 transition-colors"
+                  >
                     Tümünü Temizle
-                  </Button>
+                  </button>
                 )}
               </div>
-              <ScrollArea className="flex-1 p-3">
+
+              {/* Table header */}
+              {detectedItems.length > 0 && (
+                <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_32px] gap-2 px-4 py-1.5 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)]">
+                  <span>Ürün</span>
+                  <span>Lot</span>
+                  <span>SKT</span>
+                  <span className="text-right">Adet</span>
+                  <span></span>
+                </div>
+              )}
+
+              <ScrollArea className="flex-1">
                 {detectedItems.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-10">
-                    Henüz ürün taranmadı.
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-3">
+                      <Search className="h-5 w-5 text-[var(--dashboard-muted)]" />
+                    </div>
+                    <p className="text-xs text-[var(--dashboard-muted)]">Henüz ürün taranmadı.</p>
+                    <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">Yukarıdan kamera veya dosya seçin.</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="divide-y divide-[var(--dashboard-stroke)]">
                     {detectedItems.map((item: any, idx: number) => (
-                      <div key={idx} className="bg-white dark:bg-slate-800 p-3 rounded border shadow-sm flex flex-col gap-2 relative group">
-                        <div className="flex justify-between items-start">
+                      <div key={idx} className="relative group">
+                        {/* Desktop: inline row */}
+                        <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_32px] gap-2 items-center px-4 py-2.5 hover:bg-[var(--dashboard-surface-2)]/60">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs font-medium text-[var(--dashboard-text)] truncate">{item.productName}</p>
+                              {item.confidence === 'low' && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700 shrink-0">
+                                  <AlertTriangle className="h-2.5 w-2.5" />
+                                  Eşleşmedi
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
+                          </div>
                           <div>
-                            <div className="font-bold text-primary text-lg">{item.stokKodu}</div>
-                            <div className="text-sm text-slate-700 dark:text-slate-300">{item.productName}</div>
+                            <Input
+                              value={item.lot || ''}
+                              onChange={(e) => updateItemField(idx, 'lot', e.target.value)}
+                              className="h-7 text-xs bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
+                              placeholder="-"
+                            />
                           </div>
-                          <div className="text-right">
-                            <div className="font-bold text-lg bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded inline-block">
-                              {item.quantity} {item.unit}
+                          <div>
+                            <Input
+                              value={item.miad || ''}
+                              onChange={(e) => updateItemField(idx, 'miad', e.target.value)}
+                              className="h-7 text-xs bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
+                              placeholder="-"
+                            />
+                          </div>
+                          <div>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={item.quantity}
+                              onChange={(e) => updateItemField(idx, 'quantity', parseInt(e.target.value) || 0)}
+                              className="h-7 text-xs text-center font-bold bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
+                            />
+                          </div>
+                          <button
+                            onClick={() => removeItem(idx)}
+                            className="p-1 rounded-lg hover:bg-red-100 transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </button>
+                        </div>
+
+                        {/* Mobile: card row */}
+                        <div className="sm:hidden px-4 py-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="text-xs font-medium text-[var(--dashboard-text)]">{item.stokKodu}</p>
+                                {item.confidence === 'low' && (
+                                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">
+                                    <AlertTriangle className="h-2.5 w-2.5" /> Eşleşmedi
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[var(--dashboard-muted)] truncate">{item.productName}</p>
                             </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Input
+                                type="number"
+                                min={1}
+                                value={item.quantity}
+                                onChange={(e) => updateItemField(idx, 'quantity', parseInt(e.target.value) || 0)}
+                                className="h-7 w-14 text-center font-bold text-xs bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
+                              />
+                              <button onClick={() => removeItem(idx)} className="p-1">
+                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 mt-2">
+                            {item.lot && (
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">Lot: <strong>{item.lot}</strong></span>
+                            )}
+                            {item.miad && (
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">SKT: <strong>{item.miad}</strong></span>
+                            )}
                           </div>
                         </div>
-                        <div className="flex gap-4 text-xs text-slate-500 border-t pt-2 mt-1">
-                          {item.lot && (
-                            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
-                              <span className="font-semibold">Lot:</span> {item.lot}
-                            </div>
-                          )}
-                          {item.miad && (
-                            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
-                              <span className="font-semibold">SKT:</span> {item.miad}
-                            </div>
-                          )}
-                        </div>
-                        {item.note && (
-                          <div className="text-xs text-amber-600 flex items-center gap-1 mt-1">
-                            <AlertTriangle className="h-3 w-3" />
-                            {item.note}
-                          </div>
-                        )}
-                        <Button variant="ghost" size="icon" className="absolute -top-2 -right-2 h-6 w-6 bg-red-100 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-200" onClick={() => removeItem(idx)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
                       </div>
                     ))}
                   </div>
@@ -395,13 +458,25 @@ export default function IrsaliyeOcrModal({
             </div>
           </div>
         )}
-        <DialogFooter className="p-6 pt-4 border-t">
-          <Button variant="ghost" onClick={handleModalClose}>İptal</Button>
-          <Button onClick={confirmAdd} disabled={detectedItems.length === 0} className="gap-2">
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 px-5 py-3 sm:px-6 border-t border-[var(--dashboard-stroke)]">
+          <button
+            onClick={handleModalClose}
+            className="cihaz-tool-item px-4 py-2 text-xs sm:text-sm font-medium"
+          >
+            İptal
+          </button>
+          <button
+            onClick={confirmAdd}
+            disabled={validItemCount === 0}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            style={validItemCount > 0 ? { background: 'var(--dashboard-accent)', color: '#fff' } : { background: 'var(--dashboard-surface-2)', color: 'var(--dashboard-muted)' }}
+          >
             <CheckCircle className="h-4 w-4" />
-            Listeye Ekle
-          </Button>
-        </DialogFooter>
+            Listeye Ekle ({validItemCount})
+          </button>
+        </div>
       </DialogContent>
     </Dialog>
   );
