@@ -61,7 +61,7 @@ type OperationType =
 type IslemTipi = 'cihaz' | 'ups' | 'su_sistemi' | '';
 
 // İşlem Türü
-type IslemTuru = 'kontrol' | 'periyodik_bakim' | 'cihaz_kurulumu' | 'ariza' | 'sw_update' | '';
+type IslemTuru = 'kontrol' | 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'cihaz_kurulumu' | 'ariza' | 'sw_update' | 'alis' | 'roche_bilgisayar_arizasi' | '';
 
 // Cihaz Durumu
 type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
@@ -84,8 +84,12 @@ type ActionFormRecord = {
     actions: ActionItem[];
     islemTipi?: IslemTipi;
     islemTuru?: IslemTuru;
+    aciklama?: string;
     cihazDurumu?: CihazDurumu;
     cihazDurumuAciklama?: string;
+    selectedMaintenanceTasks?: { id: string; taskName: string }[];
+    selectedFaultName?: string;
+    selectedTests?: string[];
     eslikEdenPersonel?: { uid: string; name: string; role: string }[];
     personnelSignature?: string;
     technicianSignature?: string;
@@ -111,10 +115,13 @@ const ISLEM_TIPI_LABELS: Record<IslemTipi, string> = {
 const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
   '': '-',
   kontrol: 'Kontrol',
+  rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
   periyodik_bakim: 'Periyodik Bakım',
   cihaz_kurulumu: 'Cihaz Kurulumu',
   ariza: 'Arıza',
   sw_update: 'SW Update',
+  alis: 'ALIS',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {
@@ -280,6 +287,71 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
       });
 
       currentY = (doc as any).lastAutoTable.finalY + 15;
+
+      // --- ACIKLAMA SECTION ---
+      if (actionRecord.aciklama?.trim()) {
+        doc.setFont(FONT, 'bold');
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.line(padX, currentY, pageW - padX, currentY);
+        doc.text(txt('Açıklama', useTurkish), padX, currentY + 12);
+        currentY += 18;
+
+        autoTable(doc, {
+          body: [[txt(actionRecord.aciklama, useTurkish)]],
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
+
+      // --- ISLEM TURUNE OZEL DETAYLAR ---
+      const hasPeriyodikDetay = actionRecord.islemTuru === 'periyodik_bakim' && (actionRecord.selectedMaintenanceTasks?.length ?? 0) > 0;
+      const hasArizaDetay = actionRecord.islemTuru === 'ariza' && (Boolean(actionRecord.selectedFaultName) || (actionRecord.selectedTests?.length ?? 0) > 0);
+
+      if (hasPeriyodikDetay || hasArizaDetay) {
+        doc.setFont(FONT, 'bold');
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.line(padX, currentY, pageW - padX, currentY);
+        doc.text(txt('İşlem Türüne Özel Detaylar', useTurkish), padX, currentY + 12);
+        currentY += 18;
+
+        const detailRows: string[][] = [];
+
+        if (hasPeriyodikDetay) {
+          detailRows.push([
+            txt('Periyodik Bakım İşleri', useTurkish),
+            txt(actionRecord.selectedMaintenanceTasks!.map(task => task.taskName).join(', '), useTurkish),
+          ]);
+        }
+
+        if (hasArizaDetay) {
+          detailRows.push([
+            txt('Tespit Edilen Arıza', useTurkish),
+            txt(actionRecord.selectedFaultName || '-', useTurkish),
+          ]);
+
+          if ((actionRecord.selectedTests?.length ?? 0) > 0) {
+            detailRows.push([
+              txt('Arıza ile İlişkili Testler', useTurkish),
+              txt(actionRecord.selectedTests!.join(', '), useTurkish),
+            ]);
+          }
+        }
+
+        autoTable(doc, {
+          body: detailRows,
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 10, cellPadding: { top: 5, bottom: 5 } },
+          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
 
       // --- ISLEM TIPI & TURU SECTION ---
       doc.setFont(FONT, 'bold');
