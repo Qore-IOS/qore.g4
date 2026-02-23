@@ -6,8 +6,6 @@ import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -1386,46 +1384,68 @@ export default function IslemFormuPage() {
   };
 
   if (loading) {
-    return <div className="p-6 flex justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor…</p>
+        </div>
+      </div>
+    );
   }
   if (!device) {
-    return <div className="p-6 text-center">Cihaz bilgileri yüklenemedi.</div>;
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <p className="text-[var(--dashboard-muted)]">Cihaz bilgileri yüklenemedi.</p>
+      </div>
+    );
   }
 
   return (
     <>
-      <div className="device-module-page p-4 space-y-4">
+      <div className="cihaz-shell px-4 py-6 sm:px-6 sm:py-8 space-y-6">
         <BackButton fallback={`/teknik-servis/${device.hospitalId}`} />
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-start">
-              <div className="flex flex-col sm:flex-row gap-4 items-start">
-                  {device.imageUrl && (
-                      <div className="w-32 h-32 flex-shrink-0 bg-muted rounded-lg p-2">
-                          <Image src={`/${device.imageUrl}`} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
-                      </div>
-                  )}
-                  <div>
-                    <CardTitle className="text-2xl font-headline">Teknik Servis İşlem Formu: {device.cihazAdi}</CardTitle>
-                    <CardDescription>Seri No: {device.seriNumarasi}</CardDescription>
-                    <p className="text-sm mt-2"><strong>Laboratuvar:</strong> {hospital?.name || '-'}</p>
-                    <p className="text-sm"><strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</p>
-                    <p className="text-sm"><strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
-                  </div>
+
+        {/* Header */}
+        <header className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              {device.imageUrl && (
+                <div className="w-28 h-28 flex-shrink-0 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2">
+                  <Image src={`/${device.imageUrl}`} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
                 </div>
-                <Button variant="outline" size="sm" onClick={() => router.push(`/teknik-servis/gecmis/${deviceId}`)}>
-                    <History className="h-4 w-4 mr-2" />
-                    Geçmiş
-                </Button>
+              )}
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">
+                  Teknik Servis İşlem Formu
+                </h1>
+                <p className="text-base font-medium text-[var(--dashboard-accent)]">{device.cihazAdi}</p>
+                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">Seri No: {device.seriNumarasi}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-[var(--dashboard-muted)]">
+                  <span><strong className="text-[var(--dashboard-text)]">Lab:</strong> {hospital?.name || '-'}</span>
+                  <span><strong className="text-[var(--dashboard-text)]">İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
+                  <span><strong className="text-[var(--dashboard-text)]">Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
+                </div>
+              </div>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
+            <button
+              onClick={() => router.push(`/teknik-servis/gecmis/${deviceId}`)}
+              className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium self-start"
+            >
+              <History className="h-4 w-4" />
+              <span>Geçmiş</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Form Body */}
+        <div className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6 space-y-6">
             {/* İşlem Tipi ve Türü Seçicileri */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 border rounded-lg bg-muted/30">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
               <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Settings className="h-4 w-4" />
-                  İşlem Tipi <span className="text-destructive">*</span>
+                <Label className="flex items-center gap-2 text-[var(--dashboard-text)]">
+                  <Settings className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                  İşlem Tipi <span className="text-red-500">*</span>
                 </Label>
                 <Select value={islemTipi} onValueChange={(v) => setIslemTipi(v as IslemTipi)}>
                   <SelectTrigger>
@@ -1439,9 +1459,9 @@ export default function IslemFormuPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Cog className="h-4 w-4" />
-                  İşlem Türü <span className="text-destructive">*</span>
+                <Label className="flex items-center gap-2 text-[var(--dashboard-text)]">
+                  <Cog className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                  İşlem Türü <span className="text-red-500">*</span>
                 </Label>
                 <Select value={islemTuru} onValueChange={(v) => setIslemTuru(v as IslemTuru)}>
                   <SelectTrigger>
@@ -1462,11 +1482,11 @@ export default function IslemFormuPage() {
 
             {/* Arıza Seçimi - only when ariza selected */}
             {islemTuru === 'ariza' && (
-              <div className="p-4 border rounded-lg bg-red-50 dark:bg-red-950/20 space-y-4">
+              <div className="p-4 rounded-2xl bg-red-50/80 border border-red-200/60 space-y-4">
                 <div>
-                  <Label className="flex items-center gap-2 mb-4">
+                  <Label className="flex items-center gap-2 mb-4 text-[var(--dashboard-text)]">
                     <AlertTriangle className="h-4 w-4 text-red-600" />
-                    Tespit Edilen Arıza <span className="text-destructive">*</span>
+                    Tespit Edilen Arıza <span className="text-red-500">*</span>
                   </Label>
                   <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
                     <SelectTrigger>
@@ -1487,29 +1507,28 @@ export default function IslemFormuPage() {
                         placeholder="Arıza açıklamasını girin... (zorunlu)"
                         value={customFaultName}
                         onChange={(e) => setCustomFaultName(e.target.value)}
-                        className="border-red-300 dark:border-red-700"
+                        className="border-red-300"
                       />
                     </div>
                   )}
                 </div>
 
                 {/* İlişkili Test Seçimi */}
-                <div className="pt-3 border-t border-red-200 dark:border-red-800">
+                <div className="pt-3 border-t border-red-200/60">
                   <div className="flex items-center justify-between mb-2">
-                    <Label className="text-sm">İlişkili Testler (Opsiyonel)</Label>
-                    <Button
+                    <Label className="text-sm text-[var(--dashboard-text)]">İlişkili Testler (Opsiyonel)</Label>
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
                       onClick={() => setIsTestModalOpen(true)}
                       disabled={availableTests.length === 0}
+                      className="cihaz-tool-item flex items-center gap-1 px-3 py-1.5 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Plus className="h-4 w-4 mr-1" />
+                      <Plus className="h-3.5 w-3.5" />
                       Test Seç
-                    </Button>
+                    </button>
                   </div>
                   {availableTests.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-[var(--dashboard-muted)]">
                       Bu laboratuvara tanımlı test bulunamadı.
                     </p>
                   ) : selectedTests.length > 0 ? (
@@ -1517,7 +1536,7 @@ export default function IslemFormuPage() {
                       {selectedTests.map(test => (
                         <span
                           key={test}
-                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs rounded-full"
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-100/80 text-red-800 text-xs rounded-full"
                         >
                           {test}
                           <button
@@ -1531,7 +1550,7 @@ export default function IslemFormuPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-[var(--dashboard-muted)]">
                       Arızayla ilişkili test seçilmedi.
                     </p>
                   )}
@@ -1541,47 +1560,47 @@ export default function IslemFormuPage() {
 
             {/* Periyodik Bakım İş Listesi - only when periyodik_bakim selected */}
             {islemTuru === 'periyodik_bakim' && (
-              <div className="p-4 border rounded-lg bg-muted/30">
-                <Label className="flex items-center gap-2 mb-4">
-                  <ClipboardList className="h-4 w-4" />
+              <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                <Label className="flex items-center gap-2 mb-4 text-[var(--dashboard-text)]">
+                  <ClipboardList className="h-4 w-4 text-[var(--dashboard-accent)]" />
                   Periyodik Bakım İş Listesi
                 </Label>
                 {maintenanceTasksWithStatus.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-[var(--dashboard-muted)]">
                     Bu cihaz için tanımlı periyodik bakım planı bulunmuyor.
                     Cihaz tanımlama panelinden bakım planı ekleyebilirsiniz.
                   </p>
                 ) : (
-                  <div className="border rounded-md">
+                  <div className="rounded-xl overflow-hidden border border-[var(--dashboard-stroke)]">
                     <Table>
                       <TableHeader>
-                        <TableRow>
+                        <TableRow className="bg-[var(--dashboard-surface)]">
                           <TableHead className="w-12"></TableHead>
-                          <TableHead>İş Adı</TableHead>
-                          <TableHead className="w-24 text-center">Periyot</TableHead>
-                          <TableHead className="w-32 text-center">Kalan Gün</TableHead>
+                          <TableHead className="text-[var(--dashboard-muted)]">İş Adı</TableHead>
+                          <TableHead className="w-24 text-center text-[var(--dashboard-muted)]">Periyot</TableHead>
+                          <TableHead className="w-32 text-center text-[var(--dashboard-muted)]">Kalan Gün</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
-                          <TableRow key={plan.id} className="cursor-pointer hover:bg-muted/50" onClick={() => toggleMaintenanceTask(plan.id)}>
+                          <TableRow key={plan.id} className="cursor-pointer hover:bg-[var(--dashboard-surface-2)] transition-colors" onClick={() => toggleMaintenanceTask(plan.id)}>
                             <TableCell>
                               <Checkbox
                                 checked={selectedMaintenanceTasks.includes(plan.id)}
                                 onCheckedChange={() => toggleMaintenanceTask(plan.id)}
                               />
                             </TableCell>
-                            <TableCell className="font-medium">{plan.taskName}</TableCell>
-                            <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
+                            <TableCell className="font-medium text-[var(--dashboard-text)]">{plan.taskName}</TableCell>
+                            <TableCell className="text-center text-sm text-[var(--dashboard-muted)]">{periodLabel}</TableCell>
                             <TableCell className="text-center">
                               {daysRemaining === null ? (
-                                <span className="text-xs text-muted-foreground italic">Henüz yapılmadı</span>
+                                <span className="text-xs text-[var(--dashboard-muted)] italic">Henüz yapılmadı</span>
                               ) : isOverdue ? (
-                                <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                                <span className="text-xs font-medium text-red-600">
                                   {Math.abs(daysRemaining)} gün gecikmiş
                                 </span>
                               ) : (
-                                <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+                                <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600' : 'text-green-600'}`}>
                                   {daysRemaining} gün
                                 </span>
                               )}
@@ -1593,7 +1612,7 @@ export default function IslemFormuPage() {
                   </div>
                 )}
                 {selectedMaintenanceTasks.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
+                  <p className="text-xs text-[var(--dashboard-muted)] mt-2">
                     {selectedMaintenanceTasks.length} bakım işi seçildi
                   </p>
                 )}
@@ -1602,26 +1621,26 @@ export default function IslemFormuPage() {
 
             {/* Periyodik Parça Değişimi Listesi - only when periyodik_bakim selected */}
             {islemTuru === 'periyodik_bakim' && periodicPartChangesWithStatus.length > 0 && (
-              <div className="p-4 border rounded-lg bg-muted/30">
-                <Label className="flex items-center gap-2 mb-4">
-                  <Package className="h-4 w-4" />
+              <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                <Label className="flex items-center gap-2 mb-4 text-[var(--dashboard-text)]">
+                  <Package className="h-4 w-4 text-[var(--dashboard-accent)]" />
                   Periyodik Parça Değişimleri
                 </Label>
-                <div className="border rounded-md">
+                <div className="rounded-xl overflow-hidden border border-[var(--dashboard-stroke)]">
                   <Table>
                     <TableHeader>
-                      <TableRow>
+                      <TableRow className="bg-[var(--dashboard-surface)]">
                         <TableHead className="w-12"></TableHead>
-                        <TableHead>Ürün</TableHead>
-                        <TableHead className="w-24 text-center">Periyot</TableHead>
-                        <TableHead className="w-36 text-center">Kalan Gün</TableHead>
+                        <TableHead className="text-[var(--dashboard-muted)]">Ürün</TableHead>
+                        <TableHead className="w-24 text-center text-[var(--dashboard-muted)]">Periyot</TableHead>
+                        <TableHead className="w-36 text-center text-[var(--dashboard-muted)]">Kalan Gün</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
                         <TableRow
                           key={partChange.id}
-                          className="cursor-pointer hover:bg-muted/50"
+                          className="cursor-pointer hover:bg-[var(--dashboard-surface-2)] transition-colors"
                           onClick={() => togglePeriodicPart(partChange.id)}
                         >
                           <TableCell>
@@ -1632,21 +1651,21 @@ export default function IslemFormuPage() {
                           </TableCell>
                           <TableCell>
                             <div>
-                              <p className="font-medium">{partChange.stokAdi}</p>
-                              <p className="text-xs text-muted-foreground font-mono">{partChange.stokKodu}</p>
+                              <p className="font-medium text-[var(--dashboard-text)]">{partChange.stokAdi}</p>
+                              <p className="text-xs text-[var(--dashboard-muted)] font-mono">{partChange.stokKodu}</p>
                             </div>
                           </TableCell>
-                          <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
+                          <TableCell className="text-center text-sm text-[var(--dashboard-muted)]">{periodLabel}</TableCell>
                           <TableCell className="text-center">
                             {daysRemaining === null ? (
-                              <span className="text-xs text-muted-foreground italic">Henüz değişilmedi</span>
+                              <span className="text-xs text-[var(--dashboard-muted)] italic">Henüz değişilmedi</span>
                             ) : isOverdue ? (
-                              <span className="text-xs font-medium text-red-600 dark:text-red-400 flex items-center justify-center gap-1">
+                              <span className="text-xs font-medium text-red-600 flex items-center justify-center gap-1">
                                 <AlertTriangle className="h-3 w-3" />
                                 {Math.abs(daysRemaining)} gün gecikmiş
                               </span>
                             ) : (
-                              <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+                              <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600' : 'text-green-600'}`}>
                                 {daysRemaining} gün kaldı
                               </span>
                             )}
@@ -1657,7 +1676,7 @@ export default function IslemFormuPage() {
                   </Table>
                 </div>
                 {selectedPeriodicParts.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
+                  <p className="text-xs text-[var(--dashboard-muted)] mt-2">
                     {selectedPeriodicParts.length} periyodik parça değişimi seçildi (otomatik olarak değişen parçalar listesine eklendi)
                   </p>
                 )}
@@ -1665,14 +1684,14 @@ export default function IslemFormuPage() {
             )}
 
             {/* Başlangıç ve Bitiş Tarihleri/Saatleri (Zorunlu) */}
-            <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-              <Label className="flex items-center gap-2 mb-4">
-                <Clock className="h-4 w-4" />
-                İşlem Tarihi ve Saatleri <span className="text-destructive">*</span>
+            <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200/40">
+              <Label className="flex items-center gap-2 mb-4 text-[var(--dashboard-text)]">
+                <Clock className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                İşlem Tarihi ve Saatleri <span className="text-red-500">*</span>
               </Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="baslangicTarihi" className="text-sm">Başlangıç Tarihi <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="baslangicTarihi" className="text-sm text-[var(--dashboard-text)]">Başlangıç Tarihi <span className="text-red-500">*</span></Label>
                   <Input
                     id="baslangicTarihi"
                     type="date"
@@ -1682,7 +1701,7 @@ export default function IslemFormuPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="baslangicSaati" className="text-sm">Başlangıç Saati <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="baslangicSaati" className="text-sm text-[var(--dashboard-text)]">Başlangıç Saati <span className="text-red-500">*</span></Label>
                   <Input
                     id="baslangicSaati"
                     type="time"
@@ -1692,7 +1711,7 @@ export default function IslemFormuPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="bitisTarihi" className="text-sm">Bitiş Tarihi <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="bitisTarihi" className="text-sm text-[var(--dashboard-text)]">Bitiş Tarihi <span className="text-red-500">*</span></Label>
                   <Input
                     id="bitisTarihi"
                     type="date"
@@ -1702,7 +1721,7 @@ export default function IslemFormuPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="bitisSaati" className="text-sm">Bitiş Saati <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="bitisSaati" className="text-sm text-[var(--dashboard-text)]">Bitiş Saati <span className="text-red-500">*</span></Label>
                   <Input
                     id="bitisSaati"
                     type="time"
@@ -1712,17 +1731,17 @@ export default function IslemFormuPage() {
                   />
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
+              <p className="text-xs text-[var(--dashboard-muted)] mt-2">
                 İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz. Bu alanlar zorunludur.
               </p>
             </div>
 
             {/* Açıklama Alanı (Zorunlu) */}
-            <div className="p-4 border rounded-lg bg-muted/30">
+            <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
               <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Açıklama <span className="text-destructive">*</span>
+                <Label className="flex items-center gap-2 text-[var(--dashboard-text)]">
+                  <FileText className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                  Açıklama <span className="text-red-500">*</span>
                 </Label>
                 <Textarea
                   placeholder="Yapılan işlem hakkında açıklama yazın... (zorunlu)"
@@ -1731,70 +1750,70 @@ export default function IslemFormuPage() {
                   rows={3}
                   className={!aciklama.trim() ? 'border-amber-500/50' : ''}
                 />
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-[var(--dashboard-muted)]">
                   Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
                 </p>
               </div>
             </div>
 
             {/* Butonlar */}
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={openPartModal} variant="outline">
-                <Wrench className="mr-2 h-4 w-4" /> Değişen Parça Ekle
-              </Button>
-              <Button onClick={openOperationModal} variant="outline">
-                <ClipboardList className="mr-2 h-4 w-4" /> Yapılan İşlemi Seç
-              </Button>
+            <div className="flex flex-wrap gap-3">
+              <button onClick={openPartModal} className="cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
+                <Wrench className="h-4 w-4 text-[var(--dashboard-accent)]" /> Değişen Parça Ekle
+              </button>
+              <button onClick={openOperationModal} className="cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
+                <ClipboardList className="h-4 w-4 text-[var(--dashboard-accent)]" /> Yapılan İşlemi Seç
+              </button>
             </div>
 
             {/* İşlem Listesi */}
-            <ScrollArea className="h-72 border rounded-md">
+            <ScrollArea className="h-72 rounded-xl border border-[var(--dashboard-stroke)] overflow-hidden">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-20">Tür</TableHead>
-                    <TableHead>İşlem/Parça</TableHead>
-                    <TableHead className="w-28">Seri No</TableHead>
-                    <TableHead className="w-28">Çıkan Seri</TableHead>
+                  <TableRow className="bg-[var(--dashboard-surface)]">
+                    <TableHead className="w-20 text-[var(--dashboard-muted)]">Tür</TableHead>
+                    <TableHead className="text-[var(--dashboard-muted)]">İşlem/Parça</TableHead>
+                    <TableHead className="w-28 text-[var(--dashboard-muted)]">Seri No</TableHead>
+                    <TableHead className="w-28 text-[var(--dashboard-muted)]">Çıkan Seri</TableHead>
                     <TableHead className="w-16"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {actions.length === 0 ? (
-                    <TableRow><TableCell colSpan={5} className="text-center h-24 text-muted-foreground">Henüz işlem eklenmedi. Yukarıdaki butonları kullanarak parça değişimi veya işlem ekleyin.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={5} className="text-center h-24 text-[var(--dashboard-muted)]">Henüz işlem eklenmedi. Yukarıdaki butonları kullanarak parça değişimi veya işlem ekleyin.</TableCell></TableRow>
                   ) : (
                     actions.map(item => (
-                      <TableRow key={item.id}>
+                      <TableRow key={item.id} className="hover:bg-[var(--dashboard-surface-2)] transition-colors">
                         <TableCell>
-                          <span className={`text-xs font-medium px-2 py-1 rounded ${item.type === 'part_change' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'}`}>
+                          <span className={`text-xs font-medium px-2 py-1 rounded-lg ${item.type === 'part_change' ? 'bg-amber-100/80 text-amber-800' : 'bg-blue-100/80 text-blue-800'}`}>
                             {item.type === 'part_change' ? 'Parça' : 'İşlem'}
                           </span>
                         </TableCell>
                         <TableCell>
                           <div>
-                            <span className="font-medium">{getActionLabel(item)}</span>
-                            {item.isManualEntry && <span className="ml-2 text-xs text-muted-foreground">(Manuel)</span>}
+                            <span className="font-medium text-[var(--dashboard-text)]">{getActionLabel(item)}</span>
+                            {item.isManualEntry && <span className="ml-2 text-xs text-[var(--dashboard-muted)]">(Manuel)</span>}
                             {item.type === 'part_change' && (
-                              <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                              <p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
                             )}
                           </div>
                         </TableCell>
                         <TableCell>
                           {item.type === 'part_change' ? (
-                            <span className="font-mono text-xs">{item.serialNumber || '-'}</span>
+                            <span className="font-mono text-xs text-[var(--dashboard-text)]">{item.serialNumber || '-'}</span>
                           ) : (
-                            <span className="text-muted-foreground">-</span>
+                            <span className="text-[var(--dashboard-muted)]">-</span>
                           )}
                         </TableCell>
                         <TableCell>
                           {item.type === 'part_change' && item.removedPartSerialNumber ? (
-                            <span className="font-mono text-xs text-amber-700 dark:text-amber-400">{item.removedPartSerialNumber}</span>
+                            <span className="font-mono text-xs text-amber-700">{item.removedPartSerialNumber}</span>
                           ) : (
-                            <span className="text-muted-foreground">-</span>
+                            <span className="text-[var(--dashboard-muted)]">-</span>
                           )}
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => removeActionRow(item.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                          <button onClick={() => removeActionRow(item.id)} className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"><Trash2 className="h-4 w-4 text-red-500" /></button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -1802,14 +1821,18 @@ export default function IslemFormuPage() {
                 </TableBody>
               </Table>
             </ScrollArea>
-          </CardContent>
-          <CardFooter className="justify-end">
-              <Button onClick={startSaveProcess} disabled={isSaving || actions.length === 0}>
-                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                  Kaydet
-              </Button>
-          </CardFooter>
-        </Card>
+          {/* Save Button */}
+          <div className="flex justify-end pt-2">
+            <button
+              onClick={startSaveProcess}
+              disabled={isSaving || actions.length === 0}
+              className="cihaz-tool-item flex items-center gap-2 px-6 py-3 text-sm font-semibold bg-[var(--dashboard-accent)] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Kaydet
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Operation Selection Modal */}
@@ -1826,17 +1849,21 @@ export default function IslemFormuPage() {
                   checked={selectedOperations.includes(op)}
                   onCheckedChange={() => toggleOperation(op)}
                 />
-                <Label htmlFor={op} className="cursor-pointer font-medium">
+                <Label htmlFor={op} className="cursor-pointer font-medium text-[var(--dashboard-text)]">
                   {OPERATION_LABELS[op]}
                 </Label>
               </div>
             ))}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsOperationModalOpen(false)}>İptal</Button>
-            <Button onClick={addSelectedOperations} disabled={selectedOperations.length === 0}>
+          <DialogFooter className="gap-2">
+            <button onClick={() => setIsOperationModalOpen(false)} className="cihaz-tool-item px-4 py-2.5 text-sm font-medium">İptal</button>
+            <button
+              onClick={addSelectedOperations}
+              disabled={selectedOperations.length === 0}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               Ekle ({selectedOperations.length})
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1850,13 +1877,13 @@ export default function IslemFormuPage() {
         setIsPartModalOpen(open);
       }}>
         <DialogContent className="left-0 right-0 top-auto bottom-0 translate-x-0 translate-y-0 w-screen max-w-none h-[100dvh] max-h-[100dvh] rounded-none border-0 bg-background p-0 shadow-none overflow-hidden sm:left-[50%] sm:right-auto sm:top-[50%] sm:bottom-auto sm:w-full sm:max-w-2xl sm:h-auto sm:max-h-[90vh] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border sm:shadow-lg">
-          <DialogHeader className="px-4 sm:px-6 py-4 border-b">
-            <DialogTitle className="text-lg font-semibold tracking-tight">Yedek Parça Değişimi</DialogTitle>
+          <DialogHeader className="px-4 sm:px-6 py-4 border-b border-[var(--dashboard-stroke)]">
+            <DialogTitle className="text-lg font-semibold tracking-tight text-[var(--dashboard-text)]">Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
           <div className="flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto">
             {/* Section 1: Select part from personal stock */}
-            <div className="p-4 border border-border rounded-lg bg-background space-y-3">
-              <Label className="font-semibold text-sm">1. Şahsi Stokunuzdan Parça Seçin</Label>
+            <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] space-y-3">
+              <Label className="font-semibold text-sm text-[var(--dashboard-text)]">1. Şahsi Stokunuzdan Parça Seçin</Label>
               {!showManualEntry ? (
                 <>
                   <div className="relative">
@@ -1868,9 +1895,9 @@ export default function IslemFormuPage() {
                       className="pl-10"
                     />
                   </div>
-                  <ScrollArea className="h-44 border border-border rounded-lg bg-background">
+                  <ScrollArea className="h-44 rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
                     {filteredStock.length === 0 ? (
-                      <div className="p-4 text-center text-muted-foreground">
+                      <div className="p-4 text-center text-[var(--dashboard-muted)]">
                         {personalStock.length === 0
                           ? 'Şahsi stokunuzda yedek parça bulunmuyor.'
                           : 'Sonuç bulunamadı.'}
@@ -1881,20 +1908,20 @@ export default function IslemFormuPage() {
                           <button
                             key={item.id}
                             onClick={() => setSelectedStockItem(item)}
-                            className={`w-full text-left p-3 rounded-lg transition-colors ${
+                            className={`w-full text-left p-3 rounded-xl transition-colors ${
                               selectedStockItem?.id === item.id
-                                ? 'bg-primary/10 border border-primary/40'
-                                : 'hover:bg-muted/60 border border-transparent'
+                                ? 'bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/40'
+                                : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'
                             }`}
                           >
                             <div className="flex justify-between items-start">
                               <div>
-                                <p className="font-medium">{item.stokAdi}</p>
-                                <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                                <p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p>
+                                <p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
                               </div>
                               <div className="text-right">
-                                <p className="text-xs font-mono">{item.serialNumber}</p>
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-xs font-mono text-[var(--dashboard-text)]">{item.serialNumber}</p>
+                                <p className="text-xs text-[var(--dashboard-muted)]">
                                   {item.source === 'depot' ? 'Depodan' : 'Cihazdan'}
                                 </p>
                               </div>
@@ -1904,15 +1931,13 @@ export default function IslemFormuPage() {
                       </div>
                     )}
                   </ScrollArea>
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                  <button
                     onClick={() => setShowManualEntry(true)}
-                    className="w-full text-xs"
+                    className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"
                   >
-                    <Plus className="h-4 w-4 mr-2" />
+                    <Plus className="h-4 w-4" />
                     Stokta yok, manuel ekle
-                  </Button>
+                  </button>
                 </>
               ) : (
                 <div className="space-y-3">
@@ -1945,21 +1970,19 @@ export default function IslemFormuPage() {
                       className="h-9"
                     />
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                  <button
                     onClick={() => setShowManualEntry(false)}
-                    className="text-xs"
+                    className="text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 font-medium transition-colors"
                   >
                     Stoktan seç
-                  </Button>
+                  </button>
                 </div>
               )}
             </div>
 
             {/* Section 2: Removed part info (from device) */}
-            <div className={`p-4 border rounded-lg space-y-3 ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'border-amber-200/70 bg-amber-50/70 dark:bg-amber-950/20 dark:border-amber-800/60' : 'border-border bg-background'}`}>
-              <Label className="font-semibold text-sm flex items-center gap-2">
+            <div className={`p-4 rounded-2xl space-y-3 ${(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? 'border border-amber-200/60 bg-amber-50/60' : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]'}`}>
+              <Label className="font-semibold text-sm flex items-center gap-2 text-[var(--dashboard-text)]">
                 2. Cihazdan Çıkan Parça Bilgisi
                 {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo)
                   ? <span className="text-xs font-normal text-muted-foreground">(zorunlu)</span>
@@ -1998,7 +2021,7 @@ export default function IslemFormuPage() {
                 <p className="text-xs text-muted-foreground">Takılan parçanın adından otomatik alınır.</p>
               </div>
               {/* Removed/used part image upload */}
-              <div className="space-y-3 pt-2 border-t border-amber-200 dark:border-amber-800">
+              <div className="space-y-3 pt-2 border-t border-amber-200/50">
                 <div className="space-y-2">
                   <Label className="text-xs flex items-center gap-1">
                     <Camera className="h-3 w-3" />
@@ -2018,11 +2041,9 @@ export default function IslemFormuPage() {
                         alt="Çıkan parça"
                         className="w-full h-32 object-cover rounded-md border"
                       />
-                      <Button
+                      <button
                         type="button"
-                        variant="destructive"
-                        size="icon"
-                        className="absolute top-1 right-1 h-6 w-6"
+                        className="absolute top-1 right-1 h-6 w-6 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
                         onClick={() => {
                           setRemovedPartImageFile(null);
                           setRemovedPartImagePreview(null);
@@ -2032,19 +2053,17 @@ export default function IslemFormuPage() {
                         }}
                       >
                         <X className="h-3 w-3" />
-                      </Button>
+                      </button>
                     </div>
                   ) : (
-                    <Button
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      className="w-full h-16 border border-dashed border-[var(--dashboard-stroke)] rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-[var(--dashboard-surface-2)] transition-colors"
                       onClick={() => removedPartImageInputRef.current?.click()}
                     >
-                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Çıkan parça fotoğrafı (Kamera/Galeri)</span>
-                    </Button>
+                      <ImageIcon className="h-5 w-5 text-[var(--dashboard-muted)]" />
+                      <span className="text-xs text-[var(--dashboard-muted)]">Çıkan parça fotoğrafı (Kamera/Galeri)</span>
+                    </button>
                   )}
                 </div>
 
@@ -2067,11 +2086,9 @@ export default function IslemFormuPage() {
                         alt="Takılan parça"
                         className="w-full h-32 object-cover rounded-md border"
                       />
-                      <Button
+                      <button
                         type="button"
-                        variant="destructive"
-                        size="icon"
-                        className="absolute top-1 right-1 h-6 w-6"
+                        className="absolute top-1 right-1 h-6 w-6 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
                         onClick={() => {
                           setUsedPartImageFile(null);
                           setUsedPartImagePreview(null);
@@ -2081,19 +2098,17 @@ export default function IslemFormuPage() {
                         }}
                       >
                         <X className="h-3 w-3" />
-                      </Button>
+                      </button>
                     </div>
                   ) : (
-                    <Button
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full h-16 border-dashed flex flex-col gap-1"
+                      className="w-full h-16 border border-dashed border-[var(--dashboard-stroke)] rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-[var(--dashboard-surface-2)] transition-colors"
                       onClick={() => usedPartImageInputRef.current?.click()}
                     >
-                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Takılan parça fotoğrafı (Kamera/Galeri)</span>
-                    </Button>
+                      <ImageIcon className="h-5 w-5 text-[var(--dashboard-muted)]" />
+                      <span className="text-xs text-[var(--dashboard-muted)]">Takılan parça fotoğrafı (Kamera/Galeri)</span>
+                    </button>
                   )}
                 </div>
               </div>
@@ -2101,28 +2116,28 @@ export default function IslemFormuPage() {
 
             {/* Selected item summary */}
             {(selectedStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
-              <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg text-sm">
-                <p className="font-medium text-green-800 dark:text-green-200">
+              <div className="p-3 bg-emerald-50/80 border border-emerald-200/60 rounded-xl text-sm">
+                <p className="font-medium text-emerald-800">
                   Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber})
                 </p>
-                <p className="text-green-700 dark:text-green-300">
+                <p className="text-emerald-700">
                   Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
                 </p>
               </div>
             )}
           </div>
-          <DialogFooter className="px-4 sm:px-6 py-3 sm:py-4 border-t bg-background grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
-            <Button className="w-full sm:w-auto" variant="outline" onClick={() => setIsPartModalOpen(false)}>İptal</Button>
-            <Button
-              className="w-full sm:w-auto"
+          <DialogFooter className="px-4 sm:px-6 py-3 sm:py-4 border-t border-[var(--dashboard-stroke)] grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
+            <button className="w-full sm:w-auto cihaz-tool-item px-4 py-2.5 text-sm font-medium" onClick={() => setIsPartModalOpen(false)}>İptal</button>
+            <button
+              className="w-full sm:w-auto cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               onClick={addSelectedPart}
               disabled={
                 (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
                 || isUploadingImage
               }
             >
-              {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Yükleniyor...</> : 'Ekle'}
-            </Button>
+              {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin" />Yükleniyor...</> : 'Ekle'}
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2142,8 +2157,8 @@ export default function IslemFormuPage() {
             <div className="space-y-6 py-4">
               {/* Cihaz Durumu */}
               <div className="space-y-3">
-                <Label className="text-base font-medium">
-                  Cihaz Durumu <span className="text-destructive">*</span>
+                <Label className="text-base font-medium text-[var(--dashboard-text)]">
+                  Cihaz Durumu <span className="text-red-500">*</span>
                 </Label>
                 <RadioGroup value={cihazDurumu} onValueChange={(v) => setCihazDurumu(v as CihazDurumu)}>
                   <div className="flex items-center space-x-2">
@@ -2175,9 +2190,9 @@ export default function IslemFormuPage() {
 
               {/* Eşlik Eden Personel */}
               <div className="space-y-3">
-                <Label className="text-base font-medium">
+                <Label className="text-base font-medium text-[var(--dashboard-text)]">
                   Kurum Ziyaretinde Eşlik Eden Personel
-                  <span className="text-muted-foreground text-sm font-normal ml-2">(Opsiyonel)</span>
+                  <span className="text-[var(--dashboard-muted)] text-sm font-normal ml-2">(Opsiyonel)</span>
                 </Label>
                 <div className="relative">
                   <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -2188,41 +2203,41 @@ export default function IslemFormuPage() {
                     className="pl-10"
                   />
                 </div>
-                <ScrollArea className="h-40 border rounded-md">
+                <ScrollArea className="h-40 rounded-xl border border-[var(--dashboard-stroke)]">
                   <div className="p-2 space-y-1">
                     {filteredUsers.map(user => (
                       <button
                         key={user.uid}
                         onClick={() => toggleEslikEdenPersonel(user)}
-                        className={`w-full text-left p-2 rounded-md transition-colors flex items-center justify-between ${
+                        className={`w-full text-left p-2 rounded-xl transition-colors flex items-center justify-between ${
                           eslikEdenPersonel.find(p => p.uid === user.uid)
-                            ? 'bg-primary/10 border-primary border'
-                            : 'hover:bg-muted'
+                            ? 'bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/40'
+                            : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'
                         }`}
                       >
                         <div>
-                          <p className="font-medium">{user.name || user.email}</p>
-                          <p className="text-xs text-muted-foreground capitalize">{user.role?.replace('_', ' ')}</p>
+                          <p className="font-medium text-[var(--dashboard-text)]">{user.name || user.email}</p>
+                          <p className="text-xs text-[var(--dashboard-muted)] capitalize">{user.role?.replace('_', ' ')}</p>
                         </div>
                         {eslikEdenPersonel.find(p => p.uid === user.uid) && (
-                          <span className="text-primary text-xs">Seçildi</span>
+                          <span className="text-[var(--dashboard-accent)] text-xs font-medium">Seçildi</span>
                         )}
                       </button>
                     ))}
                   </div>
                 </ScrollArea>
                 {eslikEdenPersonel.length > 0 && (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-[var(--dashboard-muted)]">
                     Seçilen: {eslikEdenPersonel.map(p => p.name).join(', ')}
                   </p>
                 )}
               </div>
 
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsSignatureModalOpen(false)}>İptal</Button>
-                <Button onClick={proceedToSignature}>
+              <DialogFooter className="gap-2">
+                <button onClick={() => setIsSignatureModalOpen(false)} className="cihaz-tool-item px-4 py-2.5 text-sm font-medium">İptal</button>
+                <button onClick={proceedToSignature} className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white">
                   İmzaya Geç
-                </Button>
+                </button>
               </DialogFooter>
             </div>
           )}
@@ -2230,13 +2245,13 @@ export default function IslemFormuPage() {
           {/* Personnel Signature */}
           {signatureStep === 'personnel' && (
             <div>
-              <p className="mb-2 text-sm text-muted-foreground">İşlemi Yapan Personel</p>
+              <p className="mb-2 text-sm text-[var(--dashboard-muted)]">İşlemi Yapan Personel</p>
               <SignaturePad ref={personnelSignatureRef} />
               <DialogFooter className="mt-4 gap-2">
-                <Button variant="outline" onClick={() => { personnelSignatureRef.current?.clear(); }}>Temizle</Button>
-                <Button variant="secondary" onClick={() => setSignatureStep('pre_questions')}>Geri</Button>
-                <Button onClick={() => handleSaveSignaturesAndFinish({})}>Atla</Button>
-                <Button onClick={() => {
+                <button onClick={() => { personnelSignatureRef.current?.clear(); }} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Temizle</button>
+                <button onClick={() => setSignatureStep('pre_questions')} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Geri</button>
+                <button onClick={() => handleSaveSignaturesAndFinish({})} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Atla</button>
+                <button onClick={() => {
                   const sig = personnelSignatureRef.current?.getSignature();
                   if (sig) {
                     setSignatures({ personnel: sig });
@@ -2244,9 +2259,9 @@ export default function IslemFormuPage() {
                   } else {
                     setSignatureStep('technician');
                   }
-                }}>
+                }} className="cihaz-tool-item px-3 py-2 text-sm font-medium bg-[var(--dashboard-accent)] text-white">
                   Devam Et
-                </Button>
+                </button>
               </DialogFooter>
             </div>
           )}
@@ -2255,7 +2270,7 @@ export default function IslemFormuPage() {
           {signatureStep === 'technician' && (
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium mb-2 block">Teknisyen Adı Soyadı</label>
+                <label className="text-sm font-medium mb-2 block text-[var(--dashboard-text)]">Teknisyen Adı Soyadı</label>
                 <Input
                   value={technicianName}
                   onChange={(e) => setTechnicianName(e.target.value)}
@@ -2264,19 +2279,19 @@ export default function IslemFormuPage() {
                 />
               </div>
               <div>
-                <p className="mb-2 text-sm text-muted-foreground">İmza</p>
+                <p className="mb-2 text-sm text-[var(--dashboard-muted)]">İmza</p>
                 <SignaturePad ref={technicianSignatureRef} />
               </div>
               <DialogFooter className="mt-4 gap-2">
-                <Button variant="outline" onClick={() => { technicianSignatureRef.current?.clear(); }}>Temizle</Button>
-                <Button onClick={() => handleSaveSignaturesAndFinish(signatures, technicianName)}>Bu Adımı Atla</Button>
-                <Button variant="secondary" onClick={() => setSignatureStep('personnel')}>Geri</Button>
-                <Button onClick={() => {
+                <button onClick={() => { technicianSignatureRef.current?.clear(); }} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Temizle</button>
+                <button onClick={() => handleSaveSignaturesAndFinish(signatures, technicianName)} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Bu Adımı Atla</button>
+                <button onClick={() => setSignatureStep('personnel')} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Geri</button>
+                <button onClick={() => {
                   const techSig = technicianSignatureRef.current?.getSignature();
                   handleSaveSignaturesAndFinish({ ...signatures, technician: techSig }, technicianName);
-                }}>
+                }} className="cihaz-tool-item px-3 py-2 text-sm font-medium bg-[var(--dashboard-accent)] text-white">
                   Tamamla ve Kaydet
-                </Button>
+                </button>
               </DialogFooter>
             </div>
           )}
@@ -2290,10 +2305,10 @@ export default function IslemFormuPage() {
             <DialogTitle>İlişkili Test Seç</DialogTitle>
           </DialogHeader>
           <div className="py-4">
-            <p className="text-sm text-muted-foreground mb-4">
+            <p className="text-sm text-[var(--dashboard-muted)] mb-4">
               Arızayla ilişkili testleri seçin. Bu bilgi arıza istatistiklerine yansıtılacaktır.
             </p>
-            <ScrollArea className="h-64 border rounded-md">
+            <ScrollArea className="h-64 rounded-xl border border-[var(--dashboard-stroke)]">
               <div className="p-2 space-y-1">
                 {availableTests.map(test => (
                   <button
@@ -2305,26 +2320,26 @@ export default function IslemFormuPage() {
                           : [...prev, test]
                       );
                     }}
-                    className={`w-full text-left p-2 rounded-md transition-colors flex items-center justify-between ${
+                    className={`w-full text-left p-2 rounded-xl transition-colors flex items-center justify-between ${
                       selectedTests.includes(test)
-                        ? 'bg-primary/10 border-primary border'
-                        : 'hover:bg-muted'
+                        ? 'bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/40'
+                        : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'
                     }`}
                   >
-                    <span className="font-medium">{test}</span>
+                    <span className="font-medium text-[var(--dashboard-text)]">{test}</span>
                     {selectedTests.includes(test) && (
-                      <span className="text-primary text-sm">Seçildi</span>
+                      <span className="text-[var(--dashboard-accent)] text-sm font-medium">Seçildi</span>
                     )}
                   </button>
                 ))}
               </div>
             </ScrollArea>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsTestModalOpen(false)}>Kapat</Button>
-            <Button onClick={() => setIsTestModalOpen(false)}>
+          <DialogFooter className="gap-2">
+            <button onClick={() => setIsTestModalOpen(false)} className="cihaz-tool-item px-4 py-2.5 text-sm font-medium">Kapat</button>
+            <button onClick={() => setIsTestModalOpen(false)} className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white">
               Tamam ({selectedTests.length} test)
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
