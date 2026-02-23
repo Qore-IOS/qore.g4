@@ -280,6 +280,14 @@ export default function CihazYonetimiHost() {
     { label: 'Arıza Tanımlamaları', icon: ShieldAlert, href: '/ariza-tanimlamalari' },
   ];
 
+  const quickActionTiles = [
+    ...(currentUserProfile?.role === 'aplikasyon'
+      ? [{ icon: FlaskConical, label: 'Aplikasyon', description: 'Aplikasyon paneli', href: '/aplikasyon-paneli' }]
+      : [{ icon: Wrench, label: 'Teknik Servis', description: 'Servis paneli', href: '/teknik-servis' }]),
+    { icon: ShieldAlert, label: 'Tüm Arızalar', description: 'Arıza yönetimi', href: '/ariza-yonetimi' },
+    { icon: CalendarClock, label: 'Nöbet Vardiyası', description: 'Vardiya takibi', href: '/nobet-yonetimi' },
+  ];
+
   const analysisTools = [
     { label: 'Arıza İstatistikleri', icon: BarChart3, href: '/ariza-yonetimi/istatistikler' },
     ...(isAdmin ? [{ label: 'Personel İzlem', icon: Users, href: '/personel-izlem' }] : []),
@@ -500,31 +508,16 @@ export default function CihazYonetimiHost() {
           </div>
 
           <section className="mb-6 sm:mb-8">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              <ActionTile
-                icon={Wrench}
-                label="Teknik Servis"
-                description="Servis paneli"
-                onClick={() => router.push('/teknik-servis')}
-              />
-              <ActionTile
-                icon={FlaskConical}
-                label="Aplikasyon"
-                description="Aplikasyon paneli"
-                onClick={() => router.push('/aplikasyon-paneli')}
-              />
-              <ActionTile
-                icon={ShieldAlert}
-                label="Tüm Arızalar"
-                description="Arıza yönetimi"
-                onClick={() => router.push('/ariza-yonetimi')}
-              />
-              <ActionTile
-                icon={CalendarClock}
-                label="Nöbet Vardiyası"
-                description="Vardiya takibi"
-                onClick={() => router.push('/nobet-yonetimi')}
-              />
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+              {quickActionTiles.map((action) => (
+                <ActionTile
+                  key={action.label}
+                  icon={action.icon}
+                  label={action.label}
+                  description={action.description}
+                  onClick={() => router.push(action.href)}
+                />
+              ))}
             </div>
           </section>
 
