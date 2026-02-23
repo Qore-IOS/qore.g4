@@ -37,12 +37,9 @@ import {
 } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useDepoStokByDepot, touchStockMetadata } from '@/hooks/useFirebaseQueries';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks } from 'lucide-react';
+import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
@@ -50,7 +47,6 @@ import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useLoading } from '@/contexts/loading-context';
 import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
@@ -75,7 +71,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tutanak-autoprint';
 import { emitFefoOverride } from '@/lib/notifications';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 
@@ -983,208 +978,325 @@ export default function DirektTransferPanel() {
     });
   };
 
+  // ── Computed: stepper state ──
+  const stepperState = useMemo(() => {
+    const hasSource = !!selectedDepotId;
+    const hasTarget = isBorcMode ? (!!selectedBorcDepotId && !!selectedCompany) : !!selectedLabId;
+    const hasItems = directTransferItems.length > 0;
+    const totalAdet = directTransferItems.reduce((sum, item) => sum + (item.adet ?? 1), 0);
+    const totalKalem = groupedTransferItems.length;
+    return { hasSource, hasTarget, hasItems, totalAdet, totalKalem };
+  }, [selectedDepotId, selectedLabId, isBorcMode, selectedBorcDepotId, selectedCompany, directTransferItems, groupedTransferItems]);
+
+  // ── Computed: availability map for inline warnings ──
+  const availabilityMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const group of groupedTransferItems) {
+      const key = group.lotNumarasi ? `${group.stokKodu}__${group.lotNumarasi}` : group.stokKodu;
+      const stockItems = group.lotNumarasi
+        ? (depotStockLookups.byLot.get(`${group.stokKodu}__${group.lotNumarasi}`) || [])
+        : (depotStockLookups.byCode.get(group.stokKodu) || []);
+      map.set(key, stockItems.length);
+    }
+    return map;
+  }, [groupedTransferItems, depotStockLookups]);
+
+  // ── Computed: transfer readiness ──
+  const isTransferReady = stepperState.hasSource && stepperState.hasTarget && stepperState.hasItems;
+
+  // ── More menu state ──
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+
   return (
     <>
       <div
-        className="p-3 sm:p-4 space-y-3 sm:space-y-4"
+        className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
         role="main"
         aria-label="Direkt transfer paneli"
       >
-        {/* Header Section - Mobile Responsive */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {/* ══════════════════════ HEADER ══════════════════════ */}
+        <div className="flex items-center gap-3">
           <BackButton fallback="/siparisler" aria-label="Geri dön" />
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Yedek Parça Transfer - only for admin, lojistik_sorumlusu, and teknik_lojistik */}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+              <Truck className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              Direkt Transfer
+            </h1>
+            <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+              {depotName ? `${depotName}` : 'Depo seçin'}{' '}
+              {selectedLabName ? `→ ${selectedLabName}` : isBorcMode && selectedCompany ? `→ ${selectedCompany} (Borç)` : ''}
+            </p>
+          </div>
+          {/* Secondary actions */}
+          <div className="flex items-center gap-1.5">
             {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
-              <Button
-                variant="default"
-                size="sm"
+              <button
                 onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
-                className="text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700"
+                className="cihaz-tool-item hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-emerald-700"
               >
-                <Package className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Yedek Parça Transfer</span>
-              </Button>
+                <Package className="h-3.5 w-3.5" />
+                Yedek Parça
+              </button>
             )}
-            <AlertDialog>
-                <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm" disabled={!selectedDepotId} className="text-xs sm:text-sm">
-                        <DatabaseZap className="h-4 w-4 sm:mr-2"/>
-                        <span className="hidden sm:inline">Tüm Stoğu Ekle</span>
-                    </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Bu işlem, "{depotName}" deposundaki sevk edilmemiş tüm ürünleri transfer listesine ekleyecektir.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>İptal</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleAddAllStock}>Evet, Tümünü Ekle</AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
-            <Button variant="outline" size="sm" onClick={() => router.push(`/transfer-gecmis?depotId=${selectedDepotId}`)} disabled={!selectedDepotId} className="text-xs sm:text-sm">
-                <History className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Transfer Geçmişi</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => router.push('/transfer-sablonlari')} className="text-xs sm:text-sm">
-                <FileText className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Transfer Şablonu</span>
-            </Button>
+            <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
+              <PopoverTrigger asChild>
+                <button className="cihaz-tool-item flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10">
+                  <MoreHorizontal className="h-4 w-4 text-[var(--dashboard-muted)]" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-1" align="end">
+                {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
+                  <button onClick={() => { router.push('/direkt-transfer/yedek-parca-transfer'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)] sm:hidden">
+                    <Package className="h-4 w-4 text-emerald-600" /> Yedek Parça Transfer
+                  </button>
+                )}
+                <button onClick={() => { router.push(`/transfer-gecmis?depotId=${selectedDepotId}`); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]" disabled={!selectedDepotId}>
+                  <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Transfer Geçmişi
+                </button>
+                <button onClick={() => { router.push('/transfer-sablonlari'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+                  <FileText className="h-4 w-4 text-[var(--dashboard-muted)]" /> Transfer Şablonları
+                </button>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
-      <Card>
-        <CardHeader className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 sm:gap-4">
-          <div>
-            <CardTitle className="flex items-center text-base sm:text-lg md:text-xl">
-              <Truck className="mr-2 h-5 w-5 sm:h-6 sm:w-6" />
-              Direkt Transfer
-            </CardTitle>
-            <CardDescription className="text-xs sm:text-sm">Depodan doğrudan ürünleri laboratuvara veya firmaya sevk edin.</CardDescription>
-          </div>
-          <Button
-            onClick={handleCompleteDirectTransfer}
-            disabled={directTransferItems.length === 0 || shipmentLoading}
-            className="w-full sm:w-auto text-xs sm:text-sm"
-            size="sm"
-          >
-            {shipmentLoading ? <Loader2 className="animate-spin mr-1.5 h-4 w-4" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
-            {directTransferItems.reduce((sum, item) => sum + (item.adet ?? 1), 0)} Ürünü Transfer Et
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3 sm:space-y-4">
-          {/* Form Grid - Mobile Responsive */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-end">
-            <div className="space-y-1">
-                <Label htmlFor="source-depot-select" className="text-xs sm:text-sm">Kaynak depo seçin</Label>
+
+        {/* ══════════════════════ STEPPER INDICATOR ══════════════════════ */}
+        <div className="flex items-center justify-center gap-0 px-2">
+          {[
+            { label: 'Bağlam', done: stepperState.hasSource && stepperState.hasTarget, num: 1 },
+            { label: 'Ürün Ekle', done: stepperState.hasItems, num: 2 },
+            { label: 'Transfer', done: false, num: 3 },
+          ].map((step, i) => (
+            <React.Fragment key={step.num}>
+              {i > 0 && (
+                <div className={cn(
+                  "flex-1 h-[2px] max-w-[60px] sm:max-w-[80px] transition-colors",
+                  step.done || (i === 1 && stepperState.hasSource && stepperState.hasTarget)
+                    ? "bg-[var(--dashboard-accent)]"
+                    : "bg-[var(--dashboard-stroke)]"
+                )} />
+              )}
+              <div className="flex flex-col items-center gap-1">
+                <div className={cn(
+                  "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all",
+                  step.done
+                    ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+                )}>
+                  {step.done ? <Check className="h-4 w-4" /> : step.num}
+                </div>
+                <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-muted)]">{step.label}</span>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* ══════════════════════ 2-COL LAYOUT ══════════════════════ */}
+        <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 sm:gap-5">
+          {/* ── LEFT COLUMN: Context + Add Methods ── */}
+          <div className="space-y-4">
+            {/* ─── Context Card ─── */}
+            <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
+              <p className="cihaz-section-label">Kaynak & Hedef</p>
+
+              {/* Source Depot */}
+              <div className="space-y-1">
+                <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Kaynak Depo</label>
                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={prereqsLoading}>
-                <SelectTrigger
-                  id="source-depot-select"
-                  className="w-full"
-                  aria-label="Kaynak depo seçimi"
-                  aria-describedby="source-depot-description"
-                >
-                  <SelectValue placeholder="Kaynak depo seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {depots.map(d => (
-                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                  ))}
-                </SelectContent>
+                  <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                    <SelectValue placeholder="Kaynak depo seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                  </SelectContent>
                 </Select>
-                <span id="source-depot-description" className="sr-only">Transfer edilecek ürünlerin bulunduğu depo</span>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="target-lab-select" className="text-xs sm:text-sm">Hedef Laboratuvar</Label>
-              <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    id="target-lab-select"
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={isLabPopoverOpen}
-                    aria-haspopup="listbox"
-                    aria-label={selectedLabName || "Laboratuvar seçin"}
-                    aria-describedby="target-lab-description"
-                    className="w-full justify-between font-normal text-xs sm:text-sm"
-                    disabled={isBorcMode || hospitals.length === 0}
-                  >
-                    {selectedLabName || "Laboratuvar seçin."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
-                  </Button>
-                </PopoverTrigger>
-                <span id="target-lab-description" className="sr-only">Ürünlerin transfer edileceği hedef laboratuvar</span>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                  <Command>
-                    <CommandInput placeholder="Laboratuvar ara..." />
-                    <CommandList>
-                      <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                      <CommandGroup>
-                        {hospitals.sort((a,b) => (a.name ?? '').localeCompare(b.name ?? '')).map((lab) => (
-                          <CommandItem
-                            key={lab.id}
-                            value={lab.name ?? ''}
-                            onSelect={() => {
-                              setSelectedLabId(lab.id);
-                              setIsLabPopoverOpen(false);
-                            }}
-                          >
-                            <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                            {lab.name ?? ''}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-            {/* Action Row - Switch and Buttons */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:pt-0 lg:pt-6">
-              <div className="flex items-center gap-2">
+              </div>
+
+              {/* Target */}
+              {!isBorcMode ? (
+                <div className="space-y-1">
+                  <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Hedef Laboratuvar</label>
+                  <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        className={cn(
+                          "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all",
+                          selectedLabId
+                            ? "bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
+                            : "bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
+                        )}
+                        disabled={hospitals.length === 0}
+                      >
+                        <span className="truncate">{selectedLabName || 'Laboratuvar seçin'}</span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                      <Command>
+                        <CommandInput placeholder="Laboratuvar ara..." />
+                        <CommandList>
+                          <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
+                          <CommandGroup>
+                            {hospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((lab) => (
+                              <CommandItem key={lab.id} value={lab.name ?? ''} onSelect={() => { setSelectedLabId(lab.id); setIsLabPopoverOpen(false); }}>
+                                <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
+                                {lab.name ?? ''}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              ) : null}
+
+              {/* Borç Mode Toggle */}
+              <div className="flex items-center justify-between pt-1">
+                <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Borç Modu</label>
                 <Switch checked={isBorcMode} onCheckedChange={setIsBorcMode} id="borc-mode" />
-                <Label htmlFor="borc-mode" className="font-semibold text-xs sm:text-sm whitespace-nowrap">Borç Modu</Label>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="icon" onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Tekli Tara" className="h-9 w-9 sm:h-10 sm:w-10"><Camera className="h-4 w-4" /></Button>
-                <Button variant="default" size="icon" onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Seri Tarama" className="h-9 w-9 sm:h-10 sm:w-10"><Camera className="h-4 w-4" /></Button>
-              </div>
-            </div>
-            {/* Manuel and Template Buttons */}
-            <div className="flex items-end gap-2">
-              <Button variant="outline" onClick={() => setShowManualInline(v => !v)} title="Manuel Ürün Ekle" size="sm" className="text-xs sm:text-sm">
-                <Plus className="mr-1.5 h-4 w-4" />
-                <span className="hidden sm:inline">Manuel Ürün</span>
-                <span className="sm:hidden">Manuel</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }}
-                title="Şablondan Seç"
-                size="sm"
-                className="text-xs sm:text-sm"
-              >
-                <ListChecks className="mr-1.5 h-4 w-4" />
-                <span className="hidden sm:inline">Şablondan Seç</span>
-                <span className="sm:hidden">Şablon</span>
-              </Button>
-            </div>
-          </div>
 
-          {/* Son Okutulan Ürün Bilgi Kartı */}
-          <div className="bg-muted/30 border rounded-lg p-4">
-            {lastScannedProduct ? (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-lg sm:text-xl font-bold truncate">{lastScannedProduct.stokAdi}</p>
-                  <p className="text-sm text-muted-foreground">
+              {/* Borç Fields */}
+              {isBorcMode && (
+                <div className="space-y-2 pt-1 border-t border-[var(--dashboard-stroke)]">
+                  <div className="space-y-1">
+                    <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Borç Depo <span className="text-red-500">*</span></label>
+                    <Select value={selectedBorcDepotId} onValueChange={setSelectedBorcDepotId}>
+                      <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                        <SelectValue placeholder="Depo seçin" />
+                      </SelectTrigger>
+                      <SelectContent>{borcDepots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Firma <span className="text-red-500">*</span></label>
+                    <Select value={selectedCompany} onValueChange={setSelectedCompany}>
+                      <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                        <SelectValue placeholder="Firma seçin" />
+                      </SelectTrigger>
+                      <SelectContent>{borcDepots.find(d => d.id === selectedBorcDepotId)?.companies?.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              {/* Barcode Format */}
+              <div className="pt-1 border-t border-[var(--dashboard-stroke)]">
+                <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Barkod Formatı</label>
+                <BarcodeFormatSelect
+                  value={selectedFormatId || '__auto__'}
+                  onChange={v => setSelectedFormatId(v)}
+                  disabled={formatsLoading}
+                />
+              </div>
+            </div>
+
+            {/* ─── Add Methods Card ─── */}
+            <div className="cihaz-card p-4 sm:p-5 space-y-3">
+              <p className="cihaz-section-label">Ürün Ekle</p>
+
+              {/* Scan buttons */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+                  disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                  className="cihaz-action-tile flex flex-col items-center gap-1.5 py-3 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
+                >
+                  <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
+                  <span className="text-xs font-semibold text-[var(--dashboard-text)]">Tekli Tara</span>
+                </button>
+                <button
+                  onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+                  disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                  className="cihaz-action-tile flex flex-col items-center gap-1.5 py-3 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
+                >
+                  <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
+                  <span className="text-xs font-semibold text-[var(--dashboard-text)]">Seri Tara</span>
+                </button>
+              </div>
+
+              {/* Secondary add methods */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setShowManualInline(v => !v)}
+                  className={cn(
+                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center",
+                    showManualInline && "shadow-[var(--dashboard-pressed)] bg-[var(--dashboard-surface-2)]"
+                  )}
+                >
+                  <Plus className="h-4 w-4 text-[var(--dashboard-muted)]" />
+                  <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Manuel</span>
+                </button>
+                <button
+                  onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }}
+                  className={cn(
+                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center",
+                    showTemplateSelector && "shadow-[var(--dashboard-pressed)] bg-[var(--dashboard-surface-2)]"
+                  )}
+                >
+                  <ListChecks className="h-4 w-4 text-[var(--dashboard-muted)]" />
+                  <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Şablon</span>
+                </button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <button
+                      disabled={!selectedDepotId}
+                      className="cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
+                    >
+                      <DatabaseZap className="h-4 w-4 text-[var(--dashboard-muted)]" />
+                      <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Tüm Stok</span>
+                    </button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Bu işlem, &quot;{depotName}&quot; deposundaki sevk edilmemiş tüm ürünleri transfer listesine ekleyecektir.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>İptal</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleAddAllStock}>Evet, Tümünü Ekle</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+
+              {/* Last scanned feedback */}
+              {lastScannedProduct && (
+                <div className="cihaz-pressed p-3 space-y-1">
+                  <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
+                  <p className="text-sm font-bold text-[var(--dashboard-text)] truncate">{lastScannedProduct.stokAdi}</p>
+                  <p className="text-[11px] text-[var(--dashboard-muted)]">
                     {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
-                    {lastScannedProduct.lotNumarasi && lastScannedProduct.miad && ' | '}
-                    {lastScannedProduct.miad && `Miad: ${lastScannedProduct.miad}`}
-                    {lastScannedProduct.seriNumarasi && ` | Seri: ${lastScannedProduct.seriNumarasi}`}
+                    {lastScannedProduct.miad && ` · Miad: ${lastScannedProduct.miad}`}
+                    {lastScannedProduct.seriNumarasi && ` · Seri: ${lastScannedProduct.seriNumarasi}`}
                   </p>
-                </div>
-                <div className="flex gap-4 sm:gap-6 text-center">
-                  <div>
-                    <p className="text-2xl sm:text-3xl font-bold text-primary">{lotCount}</p>
-                    <p className="text-xs text-muted-foreground">Bu Lottan</p>
+                  <div className="flex gap-4 pt-1">
+                    <div>
+                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
+                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Bu Lot</span>
+                    </div>
+                    <div>
+                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{totalCountForProduct}</span>
+                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Toplam</span>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-2xl sm:text-3xl font-bold text-primary">{totalCountForProduct}</p>
-                    <p className="text-xs text-muted-foreground">Ürün Toplamı</p>
-                  </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-center py-2">Henüz ürün okutulmadı</p>
-            )}
-          </div>
+              )}
+            </div>
 
-          {showManualInline &&
-             <div>
+            {/* ─── Manual Adder (collapsible drawer) ─── */}
+            {showManualInline && (
+              <div className="cihaz-card p-4 sm:p-5 relative">
+                <button
+                  onClick={() => setShowManualInline(false)}
+                  className="absolute top-3 right-3 w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                >
+                  <X className="h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
+                </button>
                 <ManualInlineAdder
                   visible={showManualInline}
                   onClose={() => setShowManualInline(false)}
@@ -1199,133 +1311,355 @@ export default function DirektTransferPanel() {
                     upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
                   }}
                 />
-             </div>
-          }
+              </div>
+            )}
 
-          {showTemplateSelector && (
-            <TemplateSelector
-              visible={showTemplateSelector}
-              onClose={() => setShowTemplateSelector(false)}
-              templates={templates}
-              templatesLoading={templatesLoading}
-              stockPool={depotStockData}
-              transferRows={directTransferItems}
-              onAddLot={({ code, name, lot, miad, qty }) => {
-                upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
-              }}
-              onAddQty={({ code, name, qty }) => {
-                upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
-              }}
-            />
-          )}
+            {/* ─── Template Selector (collapsible drawer) ─── */}
+            {showTemplateSelector && (
+              <div className="cihaz-card p-4 sm:p-5">
+                <TemplateSelector
+                  visible={showTemplateSelector}
+                  onClose={() => setShowTemplateSelector(false)}
+                  templates={templates}
+                  templatesLoading={templatesLoading}
+                  stockPool={depotStockData}
+                  transferRows={directTransferItems}
+                  onAddLot={({ code, name, lot, miad, qty }) => {
+                    upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
+                  }}
+                  onAddQty={({ code, name, qty }) => {
+                    upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
+                  }}
+                />
+              </div>
+            )}
+          </div>
 
-          {isBorcMode ? (
-            <div className="grid grid-cols-2 gap-2">
-              <div><Label>Borç Depo</Label><Select value={selectedBorcDepotId} onValueChange={setSelectedBorcDepotId}><SelectTrigger><SelectValue placeholder="Depo" /></SelectTrigger><SelectContent>{borcDepots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Firma</Label><Select value={selectedCompany} onValueChange={setSelectedCompany}><SelectTrigger><SelectValue placeholder="Firma" /></SelectTrigger><SelectContent>{borcDepots.find(d => d.id === selectedBorcDepotId)?.companies?.map(c =><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div>
+          {/* ── RIGHT COLUMN: Product List + Validate + Submit ── */}
+          <div className="cihaz-card-strong flex flex-col overflow-hidden">
+            {/* ── List toolbar ── */}
+            <div className="flex items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]">
+              <div className="flex-shrink-0">
+                <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
+                  Transfer Listesi
+                  <span className="ml-1.5 text-[var(--dashboard-muted)]">({stepperState.totalKalem})</span>
+                </h2>
+                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">
+                  {stepperState.totalAdet} adet ürün transfer edilecek
+                </p>
+              </div>
+              <div className="flex-1" />
+              {directTransferItems.length > 0 && (
+                <button
+                  onClick={() => setDirectTransferItems([])}
+                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Temizle</span>
+                </button>
+              )}
             </div>
-          ) : (
-            null
-          )}
-          
-          <hr />
 
-          <BarcodeFormatSelect
-            value={selectedFormatId || '__auto__'}
-            onChange={v => setSelectedFormatId(v)}
-            disabled={formatsLoading}
-          />
+            {/* ── Table header (desktop) ── */}
+            {directTransferItems.length > 0 && (
+              <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_60px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+                <span>Ürün</span>
+                <span>Lot / Miad</span>
+                <span>Depoda</span>
+                <span className="text-center">Adet</span>
+                <span></span>
+                <span></span>
+              </div>
+            )}
 
-          {directTransferItems.length > 0 && (
-            <div className="border rounded-md">
-              <VirtualizedList
-                items={groupedTransferItems}
-                height={256}
-                estimateSize={56}
-                overscan={5}
-                getItemKey={(item) => item.key}
-                className="p-2"
-                renderItem={(group) => (
-                  <div className="border-b last:border-b-0 py-1">
-                    <div className="flex items-center gap-2 p-2 hover:bg-muted/50">
-                      <div className="flex-1 min-w-0">
-                        <span className="font-medium truncate block">{group.stokAdi}</span>
-                        <span className="text-xs text-muted-foreground">{group.stokKodu}</span>
-                      </div>
-                      <div className="flex-1 text-sm hidden sm:block">Lot: {group.lotNumarasi || '-'}</div>
-                      <div className="flex-1 text-sm hidden sm:block">Miad: {group.miad || '-'}</div>
-                      <div className="font-bold flex items-center gap-2">
-                        {group.isGroup ? (
-                          <Input
-                            type="number"
-                            value={group.adet}
-                            onChange={(e) => handleGroupAdetChange(group.key, e.target.value)}
-                            className="w-20 h-7"
-                            min="1"
-                          />
-                        ) : (
-                          <span>{group.adet} Adet</span>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeTransferItem(group.key, true)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                    {group.serials.length > 0 && (
-                      <div className="px-4 py-2 bg-muted/50 max-h-24 overflow-y-auto">
-                        <div className="text-xs font-mono grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
-                          {group.serials.slice(0, 50).map(serial => (
-                            <span key={serial.id} className="truncate">{serial.seriNumarasi}</span>
-                          ))}
-                          {group.serials.length > 50 && (
-                            <span className="text-muted-foreground">+{group.serials.length - 50} daha...</span>
+            {/* ── Table body ── */}
+            <div className="flex-1 overflow-hidden">
+              {directTransferItems.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-[35vh] sm:h-[45vh] text-center px-4">
+                  <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                    <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
+                  </div>
+                  <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Henüz ürün eklenmedi</p>
+                  <p className="text-xs text-[var(--dashboard-muted)] mb-4">Barkod okutun veya sol panelden bir yöntem seçin</p>
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    <button
+                      onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+                      disabled={!stepperState.hasSource || !stepperState.hasTarget}
+                      className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
+                    >
+                      <Camera className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
+                      Seri Tarama Başlat
+                    </button>
+                    <button
+                      onClick={() => setShowManualInline(true)}
+                      className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                    >
+                      <Plus className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
+                      Manuel Ekle
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <VirtualizedList<typeof groupedTransferItems[number]>
+                  items={groupedTransferItems}
+                  height="calc(100vh - 380px)"
+                  estimateSize={72}
+                  overscan={5}
+                  getItemKey={(item: typeof groupedTransferItems[number]) => item.key}
+                  renderItem={(group: typeof groupedTransferItems[number]) => {
+                    const stockKey = group.lotNumarasi ? `${group.stokKodu}__${group.lotNumarasi}` : group.stokKodu;
+                    const available = availabilityMap.get(stockKey) ?? 0;
+                    const isOverStock = group.adet > available && available > 0;
+                    const noStock = available === 0;
+
+                    return (
+                      <div className={cn(
+                        "border-b border-[var(--dashboard-stroke)] last:border-b-0",
+                        isOverStock && "bg-red-50/50",
+                        noStock && "bg-amber-50/30"
+                      )}>
+                        {/* Desktop row */}
+                        <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_60px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
+                          {/* Product */}
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
+                            <p className="text-[11px] text-[var(--dashboard-muted)]">{group.stokKodu}</p>
+                          </div>
+                          {/* Lot / Miad chips */}
+                          <div className="flex flex-wrap gap-1">
+                            {group.lotNumarasi && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium text-[var(--dashboard-text)]">
+                                {group.lotNumarasi}
+                              </span>
+                            )}
+                            {group.miad && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium text-[var(--dashboard-muted)]">
+                                {group.miad}
+                              </span>
+                            )}
+                            {!group.lotNumarasi && !group.miad && (
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">-</span>
+                            )}
+                          </div>
+                          {/* Depot stock */}
+                          <div>
+                            <span className={cn(
+                              "text-xs font-semibold",
+                              noStock ? "text-amber-600" : isOverStock ? "text-red-600" : "text-[var(--dashboard-text)]"
+                            )}>
+                              {available > 0 ? available : '?'}
+                            </span>
+                            <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">adet</span>
+                          </div>
+                          {/* Quantity stepper */}
+                          <div className="flex items-center justify-center">
+                            {group.isGroup ? (
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  onClick={() => handleGroupAdetChange(group.key, String(Math.max(1, group.adet - 1)))}
+                                  className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                                >
+                                  <Minus className="h-3 w-3" />
+                                </button>
+                                <Input
+                                  type="number"
+                                  value={group.adet}
+                                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleGroupAdetChange(group.key, e.target.value)}
+                                  className="w-12 h-7 text-center text-xs font-bold border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                  min="1"
+                                />
+                                <button
+                                  onClick={() => handleGroupAdetChange(group.key, String(group.adet + 1))}
+                                  className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-sm font-bold text-[var(--dashboard-text)]">{group.adet}</span>
+                            )}
+                          </div>
+                          {/* Serials expand */}
+                          <div className="flex justify-center">
+                            {group.serials.length > 0 && (
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">{group.serials.length} seri</span>
+                            )}
+                          </div>
+                          {/* Delete */}
+                          <div className="flex justify-center">
+                            <button
+                              onClick={() => removeTransferItem(group.key, true)}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </button>
+                          </div>
+                        </div>
+                        {/* Mobile row */}
+                        <div className="sm:hidden px-3 py-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
+                              <p className="text-[11px] text-[var(--dashboard-muted)]">{group.stokKodu}</p>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {group.lotNumarasi && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium">{group.lotNumarasi}</span>
+                                )}
+                                {group.miad && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium text-[var(--dashboard-muted)]">{group.miad}</span>
+                                )}
+                                <span className={cn(
+                                  "inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium",
+                                  noStock ? "bg-amber-100 text-amber-700" : isOverStock ? "bg-red-100 text-red-700" : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]"
+                                )}>
+                                  Stok: {available > 0 ? available : '?'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {group.isGroup ? (
+                                <div className="flex items-center gap-0.5">
+                                  <button onClick={() => handleGroupAdetChange(group.key, String(Math.max(1, group.adet - 1)))} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                                    <Minus className="h-3 w-3" />
+                                  </button>
+                                  <span className="w-8 text-center text-sm font-bold">{group.adet}</span>
+                                  <button onClick={() => handleGroupAdetChange(group.key, String(group.adet + 1))} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                                    <Plus className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-sm font-bold mr-1">{group.adet}</span>
+                              )}
+                              <button onClick={() => removeTransferItem(group.key, true)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
+                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                              </button>
+                            </div>
+                          </div>
+                          {/* Inline warning */}
+                          {isOverStock && (
+                            <p className="text-[10px] text-red-600 mt-1 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" /> Maksimum: {available} (Depoda kalan)
+                            </p>
                           )}
                         </div>
+                        {/* Desktop inline warning */}
+                        {isOverStock && (
+                          <div className="hidden sm:flex items-center gap-1.5 px-5 pb-2 text-[10px] text-red-600">
+                            <AlertTriangle className="h-3 w-3" /> Maksimum: {available} adet (Depoda kalan stok)
+                          </div>
+                        )}
+                        {/* Serials sub-list */}
+                        {group.serials.length > 0 && (
+                          <div className="px-4 sm:px-5 py-1.5 bg-[var(--dashboard-surface-2)]/50">
+                            <div className="text-[10px] font-mono grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-0.5 text-[var(--dashboard-muted)]">
+                              {group.serials.slice(0, 50).map(serial => (
+                                <span key={serial.id} className="truncate">{serial.seriNumarasi}</span>
+                              ))}
+                              {group.serials.length > 50 && (
+                                <span>+{group.serials.length - 50} daha...</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-              />
+                    );
+                  }}
+                />
+              )}
             </div>
-          )}
 
-          <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
-            <DialogContent className="max-w-md p-0"><DialogHeader className="p-4"><DialogTitle>Kamera ile Tara</DialogTitle>{isBatchScanning && (<DialogDescription className="px-4">Seri tarama açık. Bitince pencereyi kapatın.</DialogDescription>)}</DialogHeader>{isCameraScannerOpen && <Suspense fallback={<div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /><p>Kamera...</p></div>}><CameraScanner onScanSuccess={handleCameraScan} onClose={() => setIsCameraScannerOpen(false)} /></Suspense>}</DialogContent>
-          </Dialog>
-        </CardContent>
-      </Card>
-    </div>
-    
+            {/* ── Sticky CTA bar ── */}
+            <div className="sticky bottom-0 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-4 sm:px-5 py-3 flex items-center gap-3">
+              {/* Mini summary */}
+              <div className="flex gap-3 sm:gap-4 text-xs">
+                <div>
+                  <span className="text-[var(--dashboard-muted)]">Kalem</span>
+                  <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalKalem}</span>
+                </div>
+                <div>
+                  <span className="text-[var(--dashboard-muted)]">Adet</span>
+                  <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
+                </div>
+              </div>
+              <div className="flex-1" />
+              {/* Transfer CTA */}
+              <button
+                onClick={handleCompleteDirectTransfer}
+                disabled={!isTransferReady || shipmentLoading}
+                className={cn(
+                  "flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all",
+                  isTransferReady && !shipmentLoading
+                    ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
+                    : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+                )}
+              >
+                {shipmentLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Truck className="h-4 w-4" />
+                )}
+                {stepperState.totalAdet > 0 ? `${stepperState.totalAdet} Ürünü Transfer Et` : 'Transfer Et'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════ MODALS ══════════════════════ */}
+
+      {/* Camera Scanner */}
+      <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
+        <DialogContent className="max-w-md p-0">
+          <DialogHeader className="p-4">
+            <DialogTitle>Kamera ile Tara</DialogTitle>
+            {isBatchScanning && (
+              <DialogDescription className="px-4">Seri tarama açık. Bitince pencereyi kapatın.</DialogDescription>
+            )}
+          </DialogHeader>
+          {isCameraScannerOpen && (
+            <Suspense fallback={
+              <div className="flex items-center justify-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+                <p className="ml-2 text-[var(--dashboard-muted)]">Kamera...</p>
+              </div>
+            }>
+              <CameraScanner onScanSuccess={handleCameraScan} onClose={() => setIsCameraScannerOpen(false)} />
+            </Suspense>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* FEFO Violation Dialog */}
       <AlertDialog open={fefoViolations.length > 0} onOpenChange={(open) => !open && setFefoViolations([])}>
         <AlertDialogContent>
-            <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2">
-                    <AlertTriangle className="text-amber-500"/>
-                    FEFO Uyarısı
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                    Transfer listesinde, depoda daha erken miadlı alternatifi olan ürünler var. Yine de devam etmek istiyor musunuz? Onaylarsanız bu durum kaydedilecektir.
-                </AlertDialogDescription>
-            </AlertDialogHeader>
-            <ScrollArea className="max-h-60 mt-4 border rounded-md p-2">
-                {fefoViolations.map((v, i) => (
-                    <div key={i} className="text-sm p-2 mb-2 bg-background rounded">
-                        <p><strong>{v.scannedItem.stokAdi}</strong></p>
-                        <p>Okutulan Lot: {v.scannedItem.lotNumarasi} (Miad: {v.scannedItem.miad ?? ''})</p>
-                        <p className="text-green-600">Önerilen Lot: {v.recommendedItem.lotNumarasi} (Miad: {v.recommendedItem.miad ?? ''})</p>
-                    </div>
-                ))}
-            </ScrollArea>
-            <AlertDialogFooter>
-                <AlertDialogCancel>İptal</AlertDialogCancel>
-                <AlertDialogAction onClick={() => processTransfer(fefoViolations)}>
-                    Yine de Transfer Et
-                </AlertDialogAction>
-            </AlertDialogFooter>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="text-amber-500" />
+              FEFO Uyarısı
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Transfer listesinde, depoda daha erken miadlı alternatifi olan ürünler var. Yine de devam etmek istiyor musunuz? Onaylarsanız bu durum kaydedilecektir.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ScrollArea className="max-h-60 mt-4 border rounded-md p-2">
+            {fefoViolations.map((v, i) => (
+              <div key={i} className="text-sm p-3 mb-2 bg-[var(--dashboard-surface-2)] rounded-xl">
+                <p className="font-semibold text-[var(--dashboard-text)]">{v.scannedItem.stokAdi}</p>
+                <p className="text-[var(--dashboard-muted)] text-xs mt-1">
+                  Okutulan: {v.scannedItem.lotNumarasi} (Miad: {v.scannedItem.miad ?? ''})
+                </p>
+                <p className="text-green-600 text-xs">
+                  Önerilen: {v.recommendedItem.lotNumarasi} (Miad: {v.recommendedItem.miad ?? ''})
+                </p>
+              </div>
+            ))}
+          </ScrollArea>
+          <AlertDialogFooter>
+            <AlertDialogCancel>İptal</AlertDialogCancel>
+            <AlertDialogAction onClick={() => processTransfer(fefoViolations)}>
+              Yine de Transfer Et
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>

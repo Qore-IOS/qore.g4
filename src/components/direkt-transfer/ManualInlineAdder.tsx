@@ -10,8 +10,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Label } from '../ui/label';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import ExpiryDateInput from '@/components/common/ExpiryDateInput';
 import type { ManualProductOption } from '@/lib/types';
@@ -221,72 +219,72 @@ export default function ManualInlineAdder({
   }, [chosenProduct, activeTab, isLotTracked, isQtyTracked, lot, miad, selectedLotKey, totalStockForQtyProduct]);
 
   return (
-    <div className="mt-2 rounded-xl border bg-background/40 p-3">
+    <div>
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="from_stock">Depo Stoğundan Seç</TabsTrigger>
-          <TabsTrigger value="manual">Manuel Takip</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-2 bg-[var(--dashboard-surface-2)] rounded-xl p-1 h-auto">
+          <TabsTrigger value="from_stock" className="rounded-lg text-xs sm:text-sm py-1.5 data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)] data-[state=active]:font-semibold">Depo Stoğundan</TabsTrigger>
+          <TabsTrigger value="manual" className="rounded-lg text-xs sm:text-sm py-1.5 data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)] data-[state=active]:font-semibold">Manuel Takip</TabsTrigger>
         </TabsList>
-        <div className="mt-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[340px]">
-                <Label className="text-xs text-muted-foreground mb-1 block">Ürün Seç</Label>
-                 <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={isProductPopoverOpen}
-                        className="w-full justify-between font-normal"
-                      >
-                        <span className="truncate">
-                          {selectedProductCode ? productsForCurrentTab.find(p => p.code === selectedProductCode)?.name : 'Ürün seçin...'}
-                        </span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                      <Command>
-                        <CommandInput placeholder="Ürün ara..." />
-                        <CommandList>
-                          <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                          <CommandGroup>
-                            {productsForCurrentTab.sort((a,b) => a.name.localeCompare(b.name)).map(p => (
-                              <CommandItem
-                                key={p.code}
-                                value={`${p.name} ${p.code}`}
-                                onSelect={() => {
-                                  setSelectedProductCode(p.code);
-                                  setIsProductPopoverOpen(false);
-                                  setSelectedLotKey(''); // Reset lot selection
-                                  setQuantity(1);
-                                }}
-                              >
-                                <Check className={cn("mr-2 h-4 w-4", selectedProductCode === p.code ? "opacity-100" : "opacity-0")} />
-                                <div className="flex flex-col">
-                                    <span>{p.name}</span>
-                                    <span className="text-xs text-muted-foreground">{p.code}</span>
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-              </div>
+        <div className="mt-3 space-y-3">
+            {/* Product selector */}
+            <div>
+              <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Ürün Seç</label>
+              <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    className={cn(
+                      "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
+                      selectedProductCode
+                        ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
+                        : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
+                    )}
+                  >
+                    <span className="truncate">
+                      {selectedProductCode ? productsForCurrentTab.find(p => p.code === selectedProductCode)?.name : 'Ürün seçin...'}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                  <Command>
+                    <CommandInput placeholder="Ürün ara..." />
+                    <CommandList>
+                      <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                      <CommandGroup>
+                        {productsForCurrentTab.sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                          <CommandItem
+                            key={p.code}
+                            value={`${p.name} ${p.code}`}
+                            onSelect={() => {
+                              setSelectedProductCode(p.code);
+                              setIsProductPopoverOpen(false);
+                              setSelectedLotKey('');
+                              setQuantity(1);
+                            }}
+                          >
+                            <Check className={cn("mr-2 h-4 w-4", selectedProductCode === p.code ? "opacity-100" : "opacity-0")} />
+                            <div className="flex flex-col">
+                              <span className="text-sm">{p.name}</span>
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">{p.code}</span>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
 
             {chosenProduct && (
-              <>
+              <div className="space-y-3">
                 {activeTab === 'from_stock' ? (
-                  // Stoktan seçme modu
                   isLotTracked ? (
-                    // Lot takipli ürünler: Lot seçimi + Adet
                     <>
-                      <div className="min-w-[200px]">
-                        <Label className="text-xs text-muted-foreground mb-1 block">Lot / Miad (Kalan Stok)</Label>
+                      <div>
+                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Lot / Miad (Kalan Stok)</label>
                         <Select value={selectedLotKey} onValueChange={setSelectedLotKey}>
-                          <SelectTrigger><SelectValue placeholder="Lot seçin..."/></SelectTrigger>
+                          <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10"><SelectValue placeholder="Lot seçin..." /></SelectTrigger>
                           <SelectContent>
                             {availableLotsForProduct.map(lot => (
                               <SelectItem key={lot.key} value={lot.key}>{lot.label} ({lot.remaining})</SelectItem>
@@ -295,69 +293,59 @@ export default function ManualInlineAdder({
                         </Select>
                       </div>
                       <div>
-                        <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          max={selectedLotInfo?.remaining || 1}
-                          value={quantity}
-                          onChange={e => setQuantity(e.target.value)}
-                          className="w-28"
-                        />
+                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
+                        <Input type="number" min="1" max={selectedLotInfo?.remaining || 1} value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10" />
                       </div>
                     </>
                   ) : (
-                    // Adet takipli ürünler: Toplam stok göster + Adet
                     <>
-                      <div className="flex items-center gap-2">
-                        <Label className="text-xs text-muted-foreground">Depo Stoğu:</Label>
-                        <span className="text-sm font-semibold text-primary">{totalStockForQtyProduct}</span>
+                      <div className="flex items-center gap-2 p-2 rounded-lg bg-[var(--dashboard-surface-2)]">
+                        <span className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Depo Stoğu:</span>
+                        <span className="text-sm font-bold text-[var(--dashboard-accent)]">{totalStockForQtyProduct}</span>
                       </div>
                       <div>
-                        <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          max={totalStockForQtyProduct}
-                          value={quantity}
-                          onChange={e => setQuantity(e.target.value)}
-                          className="w-28"
-                        />
+                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
+                        <Input type="number" min="1" max={totalStockForQtyProduct} value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10" />
                       </div>
                     </>
                   )
                 ) : (
-                  // Manuel takip modu
                   isLotTracked ? (
-                    // Lot takipli ürünler: Lot + Miad + Adet girişi
                     <>
                       <div>
-                        <Label className="text-xs text-muted-foreground mb-1 block">Lot</Label>
-                        <Input value={lot} onChange={e => setLot(e.target.value)} className="w-40" placeholder="Lot Numarası"/>
+                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Lot</label>
+                        <Input value={lot} onChange={e => setLot(e.target.value)} placeholder="Lot Numarası" className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10" />
                       </div>
                       <div>
-                        <Label className="text-xs text-muted-foreground mb-1 block">Miad</Label>
-                        <ExpiryDateInput value={miad} onChange={setMiad} className="w-44 h-9 rounded-md border px-3 bg-background" />
+                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Miad</label>
+                        <ExpiryDateInput value={miad} onChange={setMiad} className="w-full h-10 rounded-xl border border-[var(--dashboard-stroke)] px-3 bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]" />
                       </div>
                       <div>
-                        <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                        <Input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-28" />
+                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
+                        <Input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10" />
                       </div>
                     </>
                   ) : (
-                    // Adet takipli ürünler: Sadece Adet girişi
                     <div>
-                      <Label className="text-xs text-muted-foreground mb-1 block">Adet</Label>
-                      <Input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-28" />
+                      <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
+                      <Input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10" />
                     </div>
                   )
                 )}
-                <Button onClick={handleAdd} disabled={isAddDisabled}>Ekle</Button>
-              </>
+                <button
+                  onClick={handleAdd}
+                  disabled={isAddDisabled}
+                  className={cn(
+                    "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                    !isAddDisabled
+                      ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                  )}
+                >
+                  Listeye Ekle
+                </button>
+              </div>
             )}
-
-              <Button variant="ghost" onClick={onClose} className="ml-auto">Kapat</Button>
-           </div>
         </div>
       </Tabs>
     </div>
