@@ -61,6 +61,9 @@ type OperationType =
   | 'cv_calismasi'
   | 'diger';
 
+// İşlem Türü
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'ariza' | 'alis' | 'roche_bilgisayar_arizasi' | '';
+
 // Cihaz Durumu
 type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
 
@@ -80,8 +83,13 @@ type ActionFormRecord = {
     createdAt: { toDate: () => Date };
     createdByName: string;
     actions: ActionItem[];
+    islemTuru?: IslemTuru;
+    aciklama?: string;
     cihazDurumu?: CihazDurumu;
     cihazDurumuAciklama?: string;
+    selectedMaintenanceTasks?: { id: string; taskName: string }[];
+    selectedFaultName?: string;
+    selectedTests?: string[];
     eslikEdenPersonel?: { uid: string; name: string; role: string }[];
     personnelSignature?: string;
     technicianSignature?: string;
@@ -99,6 +107,15 @@ const OPERATION_LABELS: Record<OperationType, string> = {
   qc_yenileme: 'QC Yenileme',
   cv_calismasi: 'CV Çalışması',
   diger: 'Diğer',
+};
+
+const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
+  '': '-',
+  rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
+  periyodik_bakim: 'Periyodik Bakım',
+  ariza: 'Arıza',
+  alis: 'ALIS',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {
@@ -264,6 +281,91 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       });
 
       currentY = (doc as any).lastAutoTable.finalY + 15;
+
+      // --- ISLEM TURU SECTION ---
+      if (actionRecord.islemTuru) {
+        doc.setFont(FONT, 'bold');
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.line(padX, currentY, pageW - padX, currentY);
+        doc.text(txt('İşlem Türü', useTurkish), padX, currentY + 12);
+        currentY += 18;
+
+        autoTable(doc, {
+          body: [[txt('İşlem Türü:', useTurkish), txt(ISLEM_TURU_LABELS[actionRecord.islemTuru] || '-', useTurkish)]],
+          startY: currentY,
+          theme: 'plain',
+          styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
+          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
+
+      // --- ACIKLAMA SECTION ---
+      if (actionRecord.aciklama?.trim()) {
+        doc.setFont(FONT, 'bold');
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.line(padX, currentY, pageW - padX, currentY);
+        doc.text(txt('Açıklama', useTurkish), padX, currentY + 12);
+        currentY += 18;
+
+        autoTable(doc, {
+          body: [[txt(actionRecord.aciklama, useTurkish)]],
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
+
+      // --- ISLEM TURUNE OZEL DETAYLAR ---
+      const hasPeriyodikDetay = actionRecord.islemTuru === 'periyodik_bakim' && (actionRecord.selectedMaintenanceTasks?.length ?? 0) > 0;
+      const hasArizaDetay = actionRecord.islemTuru === 'ariza' && (Boolean(actionRecord.selectedFaultName) || (actionRecord.selectedTests?.length ?? 0) > 0);
+
+      if (hasPeriyodikDetay || hasArizaDetay) {
+        doc.setFont(FONT, 'bold');
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.line(padX, currentY, pageW - padX, currentY);
+        doc.text(txt('İşlem Türüne Özel Detaylar', useTurkish), padX, currentY + 12);
+        currentY += 18;
+
+        const detailRows: string[][] = [];
+
+        if (hasPeriyodikDetay) {
+          detailRows.push([
+            txt('Periyodik Bakım İşleri', useTurkish),
+            txt(actionRecord.selectedMaintenanceTasks!.map(task => task.taskName).join(', '), useTurkish),
+          ]);
+        }
+
+        if (hasArizaDetay) {
+          detailRows.push([
+            txt('Tespit Edilen Arıza', useTurkish),
+            txt(actionRecord.selectedFaultName || '-', useTurkish),
+          ]);
+
+          if ((actionRecord.selectedTests?.length ?? 0) > 0) {
+            detailRows.push([
+              txt('Arıza ile İlişkili Testler', useTurkish),
+              txt(actionRecord.selectedTests!.join(', '), useTurkish),
+            ]);
+          }
+        }
+
+        autoTable(doc, {
+          body: detailRows,
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 10, cellPadding: { top: 5, bottom: 5 } },
+          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
 
       // --- YAPILAN ISLEMLER SECTION ---
       const operations = actionRecord.actions.filter(a => a.type === 'operation');
