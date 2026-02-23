@@ -22,7 +22,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense, ChangeEvent } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, ChangeEvent, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type {
@@ -56,29 +56,19 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 import { generateId, parseBarcode, exportDataToExcel, readExcelData, playFeedback, sanitizeGS1 } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from '@/hooks/use-toast';
 import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { LiquidGlass } from './ui/LiquidGlass';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
-import { Loader2, PlusCircle, Trash2, Download, Upload, Check, FileSpreadsheet, Camera, History, Calculator, Info, ChevronsUpDown, AlertTriangle, Undo, ClipboardPlus } from 'lucide-react';
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
-import { Checkbox } from './ui/checkbox';
 import * as XLSX from 'xlsx';
 import { useRowFocus } from '@/hooks/useRowFocus';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { siparislerLogger } from '@/lib/logger';
 
 
@@ -447,169 +437,196 @@ export default function SiparislerPanel(): JSX.Element {
     }
   };
 
-  return (
-    <>
-      <div className="p-4 space-y-4" role="main" aria-label="Sipariş yönetimi paneli">
-        <Card role="region" aria-label="Depo seçimi ve hızlı işlemler">
-            <CardHeader className="p-4 flex flex-row items-center gap-4">
-                 <div className="flex-1">
-                    <Label htmlFor="depot-select" className="block text-sm font-medium mb-1">Çalışma Deposu</Label>
-                    <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
-                        <SelectTrigger id="depot-select" aria-label="Depo seçin">
-                          <SelectValue placeholder="Depo seçin..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                        {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                </div>
-                <nav className="flex items-end gap-2" aria-label="Hızlı işlemler">
-                    <Button
-                      onClick={() => router.push('/urun-talep')}
-                      variant="outline"
-                      aria-label="Ürün talep işlemlerine git"
-                    >
-                        <ClipboardPlus className="mr-2 h-4 w-4" aria-hidden="true"/> Ürün Talep
-                    </Button>
-                    <Button
-                      onClick={() => router.push(`/siparis-gecmis?depotId=${selectedDepotId}`)}
-                      variant="outline"
-                      disabled={!selectedDepotId}
-                      aria-label="Sipariş geçmişini görüntüle"
-                    >
-                        <History className="mr-2 h-4 w-4" aria-hidden="true"/> Geçmiş
-                    </Button>
-                    <Button
-                      onClick={() => router.push('/urun-iade')}
-                      variant="outline"
-                      aria-label="Ürün iade işlemlerine git"
-                    >
-                        <Undo className="mr-2 h-4 w-4" aria-hidden="true"/> Ürün İade
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => router.push('/merkez-siparis')}
-                      aria-label="Merkez sipariş paneline git"
-                    >
-                      Toplu Sipariş
-                    </Button>
-                </nav>
-            </CardHeader>
-        </Card>
-      
-      {showBulk && (
-        <LiquidGlass
-          className="p-4 mb-6"
-          id="bulk-order-section"
-          role="region"
-          aria-label="Toplu sipariş oluşturma"
-        >
-          <CardHeader>
-            <CardTitle id="bulk-order-title">Toplu Sipariş</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6" aria-labelledby="bulk-order-title">
-            <fieldset>
-              <legend className="text-lg font-medium mb-2">Depolar</legend>
-              <ScrollArea className="h-48 border rounded p-2" role="group" aria-label="Depo seçim listesi">
-                {depots.map(d => (
-                  <div key={d.id} className="flex items-center mb-1" role="listitem">
-                    <Checkbox
-                      checked={selectedBulkDepots.includes(d.id ?? '')}
-                      onCheckedChange={() => toggleSelect(d.id ?? '', selectedBulkDepots, setSelectedBulkDepots)}
-                      id={`depot-${d.id ?? ''}`}
-                      aria-describedby={`depot-label-${d.id}`}
-                    />
-                    <label id={`depot-label-${d.id}`} htmlFor={`depot-${d.id ?? ''}`} className="ml-2">{d.name}</label>
-                  </div>
-                ))}
-              </ScrollArea>
-            </fieldset>
-            <fieldset>
-              <legend className="text-lg font-medium mb-2">Laboratuvarlar</legend>
-              <ScrollArea className="h-48 border rounded p-2" role="group" aria-label="Laboratuvar seçim listesi">
-                {hospitals.map(h => (
-                  <div key={h.id} className="flex items-center mb-1" role="listitem">
-                    <Checkbox
-                      checked={selectedBulkLabs.includes(h.id ?? '')}
-                      onCheckedChange={() => toggleSelect(h.id ?? '', selectedBulkLabs, setSelectedBulkLabs)}
-                      id={`lab-${h.id ?? ''}`}
-                      aria-describedby={`lab-label-${h.id}`}
-                    />
-                    <label id={`lab-label-${h.id}`} htmlFor={`lab-${h.id ?? ''}`} className="ml-2">{h.name}</label>
-                  </div>
-                ))}
-              </ScrollArea>
-            </fieldset>
-          </CardContent>
-          <CardFooter className="pt-4">
-            <Button
-              onClick={generateBulkOrder}
-              className="w-full"
-              aria-label="Seçili depolar ve laboratuvarlar için Excel sipariş dosyası oluştur"
-            >
-              Toplu Sipariş Oluştur
-            </Button>
-          </CardFooter>
-        </LiquidGlass>
-      )}
+  // ── Computed state ──
+  const [activeTab, setActiveTab] = useState<'create' | 'pending'>('create');
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
 
-      <div className="flex flex-col md:flex-row gap-6">
-        <LiquidGlass className="w-full md:w-1/3 p-4" role="region" aria-labelledby="create-order-title">
-          <CardHeader className="p-2 flex flex-row justify-between items-center">
-            <CardTitle id="create-order-title">Sipariş Oluştur</CardTitle>
-            <Button
-              onClick={prepareOrder}
-              disabled={orderItems.length === 0 || isProcessing}
-              aria-label={`Siparişi oluştur (${orderItems.length} kalem)`}
-            >
-              Oluştur
-            </Button>
-          </CardHeader>
-          <CardContent className="p-2 space-y-4">
-            <div>
-                <Label htmlFor="lab-select" className="block text-sm font-medium mb-1">Laboratuvar</Label>
+  const selectedLabName = useMemo(
+    () => hospitals.find(h => h.id === selectedLabId)?.name ?? '',
+    [hospitals, selectedLabId]
+  );
+
+  const depotName = useMemo(
+    () => depots.find(d => d.id === selectedDepotId)?.name ?? '',
+    [depots, selectedDepotId]
+  );
+
+  const pendingOrders = useMemo(
+    () => allOrders.filter(o => o.status !== 'completed'),
+    [allOrders]
+  );
+
+  const totalDraftItems = orderItems.length;
+  const totalDraftAdet = orderItems.reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
+
+  const isCreateReady = !!selectedDepotId && !!selectedLabId && orderItems.length > 0;
+
+  // ── Stepper state ──
+  const stepperState = useMemo(() => ({
+    hasDepot: !!selectedDepotId,
+    hasLab: !!selectedLabId,
+    hasItems: orderItems.length > 0,
+  }), [selectedDepotId, selectedLabId, orderItems]);
+
+  return (
+    <div
+      className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
+      role="main"
+      aria-label="Sipariş yönetimi paneli"
+    >
+      {/* ══════════════════════ HEADER ══════════════════════ */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+            <ShoppingCart className="h-5 w-5 text-[var(--dashboard-accent)]" />
+            Siparişler
+          </h1>
+          <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+            {depotName || 'Depo seçin'}
+            {selectedLabName ? ` · ${selectedLabName}` : ''}
+          </p>
+        </div>
+        {/* Secondary actions - more menu */}
+        <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
+          <PopoverTrigger asChild>
+            <button className="cihaz-tool-item flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10">
+              <MoreHorizontal className="h-4 w-4 text-[var(--dashboard-muted)]" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-1" align="end">
+            <button onClick={() => { router.push('/urun-talep'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+              <ClipboardPlus className="h-4 w-4 text-[var(--dashboard-muted)]" /> Ürün Talep
+            </button>
+            <button onClick={() => { router.push(`/siparis-gecmis?depotId=${selectedDepotId}`); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]" disabled={!selectedDepotId}>
+              <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Sipariş Geçmişi
+            </button>
+            <button onClick={() => { router.push('/urun-iade'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+              <Undo className="h-4 w-4 text-[var(--dashboard-muted)]" /> Ürün İade
+            </button>
+            <button onClick={() => { router.push('/merkez-siparis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+              <FileSpreadsheet className="h-4 w-4 text-[var(--dashboard-muted)]" /> Toplu Sipariş
+            </button>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* ══════════════════════ DEPOT SELECTOR ══════════════════════ */}
+      <div className="cihaz-card p-3 sm:p-4">
+        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Çalışma Deposu</label>
+        <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
+          <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+            <SelectValue placeholder="Depo seçin..." />
+          </SelectTrigger>
+          <SelectContent>
+            {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* ══════════════════════ TAB SWITCHER ══════════════════════ */}
+      <div className="flex rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1 gap-1">
+        <button
+          onClick={() => setActiveTab('create')}
+          className={cn(
+            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+            activeTab === 'create'
+              ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+              : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+          )}
+        >
+          <PlusCircle className="h-4 w-4" />
+          Oluştur
+          {totalDraftItems > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[var(--dashboard-accent)] text-white text-[10px] font-bold">{totalDraftItems}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={cn(
+            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+            activeTab === 'pending'
+              ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+              : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+          )}
+        >
+          <Package className="h-4 w-4" />
+          Bekleyen
+          {pendingOrders.length > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold">{pendingOrders.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* ══════════════════════ CREATE TAB ══════════════════════ */}
+      {activeTab === 'create' && (
+        <div className="space-y-4">
+          {/* ── Stepper ── */}
+          <div className="flex items-center justify-center gap-0 px-2">
+            {[
+              { label: 'Lab Seç', done: stepperState.hasLab, num: 1 },
+              { label: 'Ürün Ekle', done: stepperState.hasItems, num: 2 },
+              { label: 'Oluştur', done: false, num: 3 },
+            ].map((step, i) => (
+              <React.Fragment key={step.num}>
+                {i > 0 && (
+                  <div className={cn(
+                    "flex-1 h-[2px] max-w-[60px] sm:max-w-[80px] transition-colors",
+                    step.done || (i === 1 && stepperState.hasLab)
+                      ? "bg-[var(--dashboard-accent)]"
+                      : "bg-[var(--dashboard-stroke)]"
+                  )} />
+                )}
+                <div className="flex flex-col items-center gap-1">
+                  <div className={cn(
+                    "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all",
+                    step.done
+                      ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+                  )}>
+                    {step.done ? <Check className="h-4 w-4" /> : step.num}
+                  </div>
+                  <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-muted)]">{step.label}</span>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* ── 2-Column Layout ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 sm:gap-5">
+            {/* ── LEFT: Config + Add ── */}
+            <div className="space-y-4">
+              {/* Lab selector */}
+              <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
+                <p className="cihaz-section-label">Hedef Laboratuvar</p>
                 <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
                   <PopoverTrigger asChild>
-                    <Button
-                      id="lab-select"
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={isLabPopoverOpen}
-                      aria-haspopup="listbox"
-                      aria-label="Laboratuvar seçin"
-                      className="w-full justify-between font-normal"
+                    <button
+                      className={cn(
+                        "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
+                        selectedLabId
+                          ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
+                          : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
+                      )}
                       disabled={!selectedDepotId || hospitals.length === 0}
                     >
-                      {selectedLabId
-                        ? hospitals.find((hospital) => hospital.id === selectedLabId)?.name
-                        : "Laboratuvar seçin..."}
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
-                    </Button>
+                      <span className="truncate">{selectedLabName || 'Laboratuvar seçin...'}</span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
                     <Command>
-                      <CommandInput placeholder="Laboratuvar ara..." aria-label="Laboratuvar ara" />
-                      <CommandList role="listbox" aria-label="Laboratuvar listesi">
+                      <CommandInput placeholder="Laboratuvar ara..." />
+                      <CommandList>
                         <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
                         <CommandGroup>
-                          {hospitals.sort((a,b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
+                          {hospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
                             <CommandItem
                               key={hospital.id}
                               value={hospital.name ?? ''}
-                              onSelect={() => {
-                                setSelectedLabId(hospital.id ?? '');
-                                setIsLabPopoverOpen(false);
-                              }}
-                              role="option"
-                              aria-selected={selectedLabId === hospital.id}
+                              onSelect={() => { setSelectedLabId(hospital.id ?? ''); setIsLabPopoverOpen(false); }}
                             >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4",
-                                  selectedLabId === hospital.id ? "opacity-100" : "opacity-0"
-                                )}
-                                aria-hidden="true"
-                              />
+                              <Check className={cn("mr-2 h-4 w-4", selectedLabId === hospital.id ? "opacity-100" : "opacity-0")} />
                               {hospital.name}
                             </CommandItem>
                           ))}
@@ -618,122 +635,367 @@ export default function SiparislerPanel(): JSX.Element {
                     </Command>
                   </PopoverContent>
                 </Popover>
-            </div>
-            <div className="space-y-2">
-                 <Button
-                   onClick={handleMinMaxOrder}
-                   disabled={!selectedLabId}
-                   className="w-full"
-                   aria-label="Min/Max kurallarına göre sipariş kalemlerini hesapla"
-                 >
-                    <Calculator className="mr-2 h-4 w-4" aria-hidden="true" />
-                    Min/Max'a Göre Hesapla
-                </Button>
-            </div>
-            <hr aria-hidden="true" />
-            <fieldset className="space-y-2">
-                <legend className="sr-only">Manuel ürün ekleme</legend>
-                <Select value={manualStockCode} onValueChange={setManualStockCode}>
-                    <SelectTrigger aria-label="Manuel eklenecek ürünü seçin">
-                      <SelectValue placeholder="Manuel ürün seçin..." />
-                    </SelectTrigger>
-                    <SelectContent>{productCodes.map(p => <SelectItem key={p.id ?? ''} value={p.stokKodu ?? ''}>{p.stokAdi}</SelectItem>)}</SelectContent>
-                </Select>
-                <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      min="1"
-                      value={manualQty}
-                      onChange={e => setManualQty(e.target.value)}
-                      placeholder="Adet"
-                      aria-label="Eklenecek adet"
-                    />
-                    <Button
-                      onClick={addManualItem}
-                      size="icon"
-                      aria-label="Ürünü siparişe ekle"
-                    >
-                      <PlusCircle className="h-4 w-4" aria-hidden="true" />
-                    </Button>
-                </div>
-            </fieldset>
-            <ScrollArea className="h-40 border rounded-md p-2" role="list" aria-label="Sipariş kalemleri">
-                {orderItems.map(i => (
-                    <div key={i.id} className="flex justify-between items-center p-1 rounded hover:bg-muted" role="listitem">
-                       <span className="text-sm truncate" title={i.stokAdi}>{i.stokAdi}</span>
-                       <span className="text-sm font-bold" aria-label={`${i.adet} adet`}>{i.adet}</span>
-                       <Button
-                         variant="ghost"
-                         size="icon"
-                         onClick={() => removeItem(i.id ?? '')}
-                         aria-label={`${i.stokAdi} ürününü kaldır`}
-                       >
-                         <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
-                       </Button>
-                    </div>
-                ))}
-            </ScrollArea>
-          </CardContent>
-        </LiquidGlass>
 
-        <LiquidGlass className="w-full md:w-2/3 p-4" role="region" aria-labelledby="pending-orders-title">
-          <CardHeader className="p-2">
-            <CardTitle id="pending-orders-title">Bekleyen Siparişler</CardTitle>
-          </CardHeader>
-          <CardContent className="p-2">
-            <ScrollArea className="h-[400px]" aria-label="Bekleyen siparişler listesi">
-              {allOrders.filter(o => o.status !== 'completed').length === 0 ? (
-                <p className="text-center text-muted-foreground py-20" role="status">Bekleyen sipariş yok.</p>
-              ) : (
-                <div className="space-y-3" role="list" aria-label="Aktif siparişler">
-                  {allOrders.filter(o => o.status !== 'completed').map(order => (
-                    <article key={order.id} data-row-id={order.id} className="border p-3 rounded-md bg-background/50" role="listitem" aria-label={`Sipariş: ${order.kurumAdi}`}>
-                      <div className="flex justify-between items-start">
-                        <div className="space-y-0.5">
-                          <p className="font-semibold">{order.kurumAdi}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Açan: {order.createdBy || '-'}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Oluşturma: {order.createdAt ? formatDate(order.createdAt as Date, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2" role="group" aria-label="Sipariş işlemleri">
-                          <Badge
-                            variant={order.status === 'toplaniyor' ? 'default' : 'secondary'}
-                            className="py-1 px-3"
-                            aria-label={`Toplam ${(order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0)} adet`}
-                          >
-                              {(order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0)} Adet
-                          </Badge>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleDeleteOrder(order.id ?? '')}
-                            disabled={isProcessing}
-                            aria-label={`${order.kurumAdi} siparişini sil`}
-                          >
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => startPickingProcess(order)}
-                            disabled={isProcessing}
-                            aria-label={`${order.kurumAdi} için toplama işlemini başlat`}
-                          >
-                            Toplama Başlat
-                          </Button>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
+                {/* Min/Max button */}
+                <button
+                  onClick={handleMinMaxOrder}
+                  disabled={!selectedLabId}
+                  className={cn(
+                    "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all",
+                    selectedLabId
+                      ? "cihaz-action-tile text-[var(--dashboard-text)]"
+                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                  )}
+                  title={!selectedLabId ? 'Min/Max hesaplamak için laboratuvar seçmelisiniz' : undefined}
+                >
+                  <Calculator className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                  Min/Max'a Göre Hesapla
+                </button>
+              </div>
+
+              {/* Manual product add */}
+              <div className="cihaz-card p-4 sm:p-5 space-y-3">
+                <p className="cihaz-section-label">Ürün Ekle</p>
+
+                {/* Product combobox */}
+                <div>
+                  <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Ürün Seç</label>
+                  <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        className={cn(
+                          "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
+                          manualStockCode
+                            ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
+                            : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
+                        )}
+                      >
+                        <span className="truncate">
+                          {manualStockCode ? productCodes.find(p => p.stokKodu === manualStockCode)?.stokAdi : 'Ürün seçin...'}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                      <Command>
+                        <CommandInput placeholder="Ürün ara..." />
+                        <CommandList>
+                          <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                          <CommandGroup>
+                            {productCodes
+                              .sort((a, b) => (a.stokAdi ?? '').localeCompare(b.stokAdi ?? ''))
+                              .map(p => (
+                                <CommandItem
+                                  key={p.id ?? p.stokKodu}
+                                  value={`${p.stokAdi ?? ''} ${p.stokKodu ?? ''}`}
+                                  onSelect={() => { setManualStockCode(p.stokKodu ?? ''); setIsProductPopoverOpen(false); }}
+                                >
+                                  <Check className={cn("mr-2 h-4 w-4", manualStockCode === p.stokKodu ? "opacity-100" : "opacity-0")} />
+                                  <div className="flex flex-col">
+                                    <span className="text-sm">{p.stokAdi}</span>
+                                    <span className="text-[10px] text-[var(--dashboard-muted)]">{p.stokKodu}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                {/* Qty + Add row */}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        onClick={() => setManualQty(Math.max(1, Number(manualQty) - 1))}
+                        className="w-8 h-10 rounded-l-xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={manualQty}
+                        onChange={e => setManualQty(e.target.value)}
+                        className="h-10 text-center text-sm font-bold border-y border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <button
+                        onClick={() => setManualQty(Number(manualQty) + 1)}
+                        className="w-8 h-10 rounded-r-xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    onClick={addManualItem}
+                    disabled={!manualStockCode || !(Number(manualQty) > 0)}
+                    className={cn(
+                      "h-10 px-4 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+                      manualStockCode && Number(manualQty) > 0
+                        ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                        : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                    )}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Ekle
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ── RIGHT: Draft List ── */}
+            <div className="cihaz-card-strong flex flex-col overflow-hidden">
+              {/* Toolbar */}
+              <div className="flex items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]">
+                <div className="flex-shrink-0">
+                  <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
+                    Sipariş Kalemleri
+                    <span className="ml-1.5 text-[var(--dashboard-muted)]">({totalDraftItems})</span>
+                  </h2>
+                  <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">
+                    {totalDraftAdet} adet ürün sipariş edilecek
+                  </p>
+                </div>
+                <div className="flex-1" />
+                {orderItems.length > 0 && (
+                  <button
+                    onClick={() => setOrderItems([])}
+                    className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Temizle</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Table header (desktop) */}
+              {orderItems.length > 0 && (
+                <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+                  <span>Ürün</span>
+                  <span>Stok Kodu</span>
+                  <span className="text-center">Adet</span>
+                  <span></span>
                 </div>
               )}
-            </ScrollArea>
-          </CardContent>
-        </LiquidGlass>
-      </div>
-      </div>
-    </>
+
+              {/* Table body */}
+              <div className="flex-1 overflow-auto max-h-[50vh]">
+                {orderItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-[35vh] sm:h-[40vh] text-center px-4">
+                    <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                      <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
+                    </div>
+                    <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Sipariş listesi boş</p>
+                    <p className="text-xs text-[var(--dashboard-muted)] mb-4">Başlamak için:</p>
+                    <div className="space-y-2 text-xs text-[var(--dashboard-muted)]">
+                      <div className="flex items-center gap-2">
+                        <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold", stepperState.hasLab ? "bg-[var(--dashboard-accent)] text-white" : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]")}>1</span>
+                        <span className={stepperState.hasLab ? "line-through" : ""}>Laboratuvar seçin</span>
+                        {stepperState.hasLab && <Check className="h-3 w-3 text-green-600" />}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold", stepperState.hasItems ? "bg-[var(--dashboard-accent)] text-white" : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]")}>2</span>
+                        <span>Ürün ekleyin veya Min/Max hesaplatın</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center text-[10px] font-bold">3</span>
+                        <span>Siparişi oluşturun</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  orderItems.map((item, idx) => (
+                    <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
+                      {/* Desktop row */}
+                      <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                        </div>
+                        <div>
+                          <span className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</span>
+                        </div>
+                        <div className="flex items-center justify-center">
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onClick={() => {
+                                const newQty = Math.max(1, (item.adet ?? 1) - 1);
+                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
+                              }}
+                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </button>
+                            <span className="w-8 text-center text-sm font-bold text-[var(--dashboard-text)]">{item.adet}</span>
+                            <button
+                              onClick={() => {
+                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
+                              }}
+                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex justify-center">
+                          <button
+                            onClick={() => removeItem(item.id ?? '')}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </button>
+                        </div>
+                      </div>
+                      {/* Mobile row */}
+                      <div className="sm:hidden px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                            <p className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                              <Minus className="h-3 w-3" />
+                            </button>
+                            <span className="w-8 text-center text-sm font-bold">{item.adet}</span>
+                            <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                              <Plus className="h-3 w-3" />
+                            </button>
+                            <button onClick={() => removeItem(item.id ?? '')} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Sticky CTA bar */}
+              <div className="sticky bottom-0 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-4 sm:px-5 py-3 flex items-center gap-3">
+                <div className="flex gap-3 sm:gap-4 text-xs">
+                  <div>
+                    <span className="text-[var(--dashboard-muted)]">Kalem</span>
+                    <span className="ml-1 font-bold text-[var(--dashboard-text)]">{totalDraftItems}</span>
+                  </div>
+                  <div>
+                    <span className="text-[var(--dashboard-muted)]">Adet</span>
+                    <span className="ml-1 font-bold text-[var(--dashboard-text)]">{totalDraftAdet}</span>
+                  </div>
+                </div>
+                <div className="flex-1" />
+                <button
+                  onClick={prepareOrder}
+                  disabled={!isCreateReady || isProcessing}
+                  className={cn(
+                    "flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all",
+                    isCreateReady && !isProcessing
+                      ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
+                      : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+                  )}
+                >
+                  {isProcessing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShoppingCart className="h-4 w-4" />
+                  )}
+                  {totalDraftItems > 0 ? `Siparişi Oluştur (${totalDraftItems})` : 'Siparişi Oluştur'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════ PENDING TAB ══════════════════════ */}
+      {activeTab === 'pending' && (
+        <div className="space-y-3">
+          {pendingOrders.length === 0 ? (
+            <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
+              <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                <Package className="h-6 w-6 text-[var(--dashboard-muted)]" />
+              </div>
+              <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Bekleyen sipariş yok</p>
+              <p className="text-xs text-[var(--dashboard-muted)]">Yeni sipariş oluşturmak için &quot;Oluştur&quot; sekmesine geçin.</p>
+            </div>
+          ) : (
+            pendingOrders.map(order => {
+              const totalAdet = (order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0);
+              const totalKalem = (order.items ?? []).length;
+              const isPicking = order.status === 'toplaniyor';
+
+              return (
+                <article
+                  key={order.id}
+                  data-row-id={order.id}
+                  className="cihaz-card-strong overflow-hidden"
+                >
+                  <div className="p-4 sm:p-5 space-y-3">
+                    {/* Header row */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm sm:text-base font-bold text-[var(--dashboard-text)] truncate">{order.kurumAdi}</h3>
+                        <p className="text-[11px] text-[var(--dashboard-muted)]">
+                          {order.createdBy || '-'} · {order.createdAt ? formatDate(order.createdAt as Date, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
+                        </p>
+                      </div>
+                      {/* Status badge */}
+                      <span className={cn(
+                        "shrink-0 inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-semibold",
+                        isPicking
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-amber-100 text-amber-700"
+                      )}>
+                        {isPicking ? 'Toplanıyor' : 'Bekliyor'}
+                      </span>
+                    </div>
+
+                    {/* KPI chips */}
+                    <div className="flex gap-3">
+                      <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
+                        <span className="text-[10px] text-[var(--dashboard-muted)] block">Kalem</span>
+                        <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalKalem}</span>
+                      </div>
+                      <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
+                        <span className="text-[10px] text-[var(--dashboard-muted)] block">Adet</span>
+                        <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalAdet}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={() => startPickingProcess(order)}
+                        disabled={isProcessing}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                          !isProcessing
+                            ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                            : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                        )}
+                      >
+                        {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                        {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteOrder(order.id ?? '')}
+                        disabled={isProcessing}
+                        className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-red-100 transition-colors cihaz-tool-item"
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
   );
 }
