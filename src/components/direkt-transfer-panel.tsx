@@ -42,7 +42,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks } from 'lucide-react';
+import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, MoreHorizontal, ScanLine } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
@@ -78,6 +78,12 @@ import { emitFefoOverride } from '@/lib/notifications';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -983,208 +989,259 @@ export default function DirektTransferPanel() {
     });
   };
 
+  const totalLineCount = groupedTransferItems.length;
+  const totalQuantity = directTransferItems.reduce((sum, item) => sum + (item.adet ?? 1), 0);
+  const totalProductKinds = new Set(directTransferItems.map(item => item.stokKodu)).size;
+
   return (
     <>
       <div
-        className="p-3 sm:p-4 space-y-3 sm:space-y-4"
+        className="p-3 sm:p-4 lg:p-6 space-y-4"
         role="main"
         aria-label="Direkt transfer paneli"
       >
-        {/* Header Section - Mobile Responsive */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <BackButton fallback="/siparisler" aria-label="Geri dön" />
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Yedek Parça Transfer - only for admin, lojistik_sorumlusu, and teknik_lojistik */}
-            {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
+        <div className="rounded-2xl border bg-card/95 p-3 sm:p-4 shadow-sm sticky top-2 z-20 backdrop-blur supports-[backdrop-filter]:bg-card/85">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3">
+              <BackButton fallback="/siparisler" aria-label="Geri dön" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <Truck className="h-5 w-5 text-primary" />
+                  <h1 className="text-lg sm:text-xl font-semibold">Direkt Transfer</h1>
+                </div>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                  Kaynak depoyu seç → hedefi seç → ürünleri hızlı ekle → sistem stok, miad ve kuralları doğrulasın → transferi güvenli tamamla.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+              <div className="hidden md:grid grid-cols-3 gap-2 rounded-xl border bg-muted/30 px-3 py-2 text-xs min-w-[260px]">
+                <div>
+                  <p className="text-muted-foreground">Satır</p>
+                  <p className="font-semibold text-foreground">{totalLineCount}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Toplam Adet</p>
+                  <p className="font-semibold text-foreground">{totalQuantity}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Kalem</p>
+                  <p className="font-semibold text-foreground">{totalProductKinds}</p>
+                </div>
+              </div>
               <Button
-                variant="default"
+                onClick={handleCompleteDirectTransfer}
+                disabled={directTransferItems.length === 0 || shipmentLoading}
+                className="w-full sm:w-auto min-w-[210px]"
                 size="sm"
-                onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
-                className="text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700"
               >
-                <Package className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Yedek Parça Transfer</span>
+                {shipmentLoading ? <Loader2 className="animate-spin mr-1.5 h-4 w-4" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
+                Transfer Et ({totalQuantity})
               </Button>
-            )}
-            <AlertDialog>
-                <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm" disabled={!selectedDepotId} className="text-xs sm:text-sm">
-                        <DatabaseZap className="h-4 w-4 sm:mr-2"/>
-                        <span className="hidden sm:inline">Tüm Stoğu Ekle</span>
-                    </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between">
+            <div className="hidden md:flex items-center gap-2 text-xs text-muted-foreground">
+              <span>İkincil işlemler</span>
+            </div>
+            <div className="w-full md:w-auto flex justify-end">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    <MoreHorizontal className="h-4 w-4" />
+                    Araçlar
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
+                    <DropdownMenuItem onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}>
+                      <Package className="mr-2 h-4 w-4" />
+                      Yedek Parça Transfer
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={() => router.push(`/transfer-gecmis?depotId=${selectedDepotId}`)} disabled={!selectedDepotId}>
+                    <History className="mr-2 h-4 w-4" />
+                    Transfer Geçmişi
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push('/transfer-sablonlari')}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    Transfer Şablonu
+                  </DropdownMenuItem>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button
+                        type="button"
+                        disabled={!selectedDepotId}
+                        className={cn(
+                          'flex w-full items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors',
+                          selectedDepotId ? 'hover:bg-accent hover:text-accent-foreground' : 'opacity-50 cursor-not-allowed'
+                        )}
+                      >
+                        <DatabaseZap className="mr-2 h-4 w-4" />
+                        Tüm Stoğu Ekle
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
                         <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Bu işlem, "{depotName}" deposundaki sevk edilmemiş tüm ürünleri transfer listesine ekleyecektir.
+                          Bu işlem, "{depotName}" deposundaki sevk edilmemiş tüm ürünleri transfer listesine ekleyecektir.
                         </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
                         <AlertDialogCancel>İptal</AlertDialogCancel>
                         <AlertDialogAction onClick={handleAddAllStock}>Evet, Tümünü Ekle</AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
-            <Button variant="outline" size="sm" onClick={() => router.push(`/transfer-gecmis?depotId=${selectedDepotId}`)} disabled={!selectedDepotId} className="text-xs sm:text-sm">
-                <History className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Transfer Geçmişi</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => router.push('/transfer-sablonlari')} className="text-xs sm:text-sm">
-                <FileText className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Transfer Şablonu</span>
-            </Button>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
-      <Card>
-        <CardHeader className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 sm:gap-4">
-          <div>
-            <CardTitle className="flex items-center text-base sm:text-lg md:text-xl">
-              <Truck className="mr-2 h-5 w-5 sm:h-6 sm:w-6" />
-              Direkt Transfer
-            </CardTitle>
-            <CardDescription className="text-xs sm:text-sm">Depodan doğrudan ürünleri laboratuvara veya firmaya sevk edin.</CardDescription>
-          </div>
-          <Button
-            onClick={handleCompleteDirectTransfer}
-            disabled={directTransferItems.length === 0 || shipmentLoading}
-            className="w-full sm:w-auto text-xs sm:text-sm"
-            size="sm"
-          >
-            {shipmentLoading ? <Loader2 className="animate-spin mr-1.5 h-4 w-4" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
-            {directTransferItems.reduce((sum, item) => sum + (item.adet ?? 1), 0)} Ürünü Transfer Et
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3 sm:space-y-4">
-          {/* Form Grid - Mobile Responsive */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-end">
-            <div className="space-y-1">
-                <Label htmlFor="source-depot-select" className="text-xs sm:text-sm">Kaynak depo seçin</Label>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-4">
+          <Card className="h-fit">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">A) Bağlam ve Kurulum</CardTitle>
+              <CardDescription>Kaynak, hedef ve transfer kurallarını tanımlayın.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="source-depot-select">Kaynak depo seçin *</Label>
                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={prereqsLoading}>
-                <SelectTrigger
-                  id="source-depot-select"
-                  className="w-full"
-                  aria-label="Kaynak depo seçimi"
-                  aria-describedby="source-depot-description"
-                >
-                  <SelectValue placeholder="Kaynak depo seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {depots.map(d => (
-                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                  ))}
-                </SelectContent>
+                  <SelectTrigger id="source-depot-select" className="w-full" aria-label="Kaynak depo seçimi" aria-describedby="source-depot-description">
+                    <SelectValue placeholder="Kaynak depo seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {depots.map(d => (
+                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
-                <span id="source-depot-description" className="sr-only">Transfer edilecek ürünlerin bulunduğu depo</span>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="target-lab-select" className="text-xs sm:text-sm">Hedef Laboratuvar</Label>
-              <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    id="target-lab-select"
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={isLabPopoverOpen}
-                    aria-haspopup="listbox"
-                    aria-label={selectedLabName || "Laboratuvar seçin"}
-                    aria-describedby="target-lab-description"
-                    className="w-full justify-between font-normal text-xs sm:text-sm"
-                    disabled={isBorcMode || hospitals.length === 0}
-                  >
-                    {selectedLabName || "Laboratuvar seçin."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
-                  </Button>
-                </PopoverTrigger>
-                <span id="target-lab-description" className="sr-only">Ürünlerin transfer edileceği hedef laboratuvar</span>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                  <Command>
-                    <CommandInput placeholder="Laboratuvar ara..." />
-                    <CommandList>
-                      <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                      <CommandGroup>
-                        {hospitals.sort((a,b) => (a.name ?? '').localeCompare(b.name ?? '')).map((lab) => (
-                          <CommandItem
-                            key={lab.id}
-                            value={lab.name ?? ''}
-                            onSelect={() => {
-                              setSelectedLabId(lab.id);
-                              setIsLabPopoverOpen(false);
-                            }}
-                          >
-                            <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                            {lab.name ?? ''}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-            {/* Action Row - Switch and Buttons */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:pt-0 lg:pt-6">
-              <div className="flex items-center gap-2">
-                <Switch checked={isBorcMode} onCheckedChange={setIsBorcMode} id="borc-mode" />
-                <Label htmlFor="borc-mode" className="font-semibold text-xs sm:text-sm whitespace-nowrap">Borç Modu</Label>
+                <span id="source-depot-description" className="sr-only">Transfer edilecek ürünlerin bulunduğu kaynak depo</span>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="icon" onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Tekli Tara" className="h-9 w-9 sm:h-10 sm:w-10"><Camera className="h-4 w-4" /></Button>
-                <Button variant="default" size="icon" onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Seri Tarama" className="h-9 w-9 sm:h-10 sm:w-10"><Camera className="h-4 w-4" /></Button>
-              </div>
-            </div>
-            {/* Manuel and Template Buttons */}
-            <div className="flex items-end gap-2">
-              <Button variant="outline" onClick={() => setShowManualInline(v => !v)} title="Manuel Ürün Ekle" size="sm" className="text-xs sm:text-sm">
-                <Plus className="mr-1.5 h-4 w-4" />
-                <span className="hidden sm:inline">Manuel Ürün</span>
-                <span className="sm:hidden">Manuel</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }}
-                title="Şablondan Seç"
-                size="sm"
-                className="text-xs sm:text-sm"
-              >
-                <ListChecks className="mr-1.5 h-4 w-4" />
-                <span className="hidden sm:inline">Şablondan Seç</span>
-                <span className="sm:hidden">Şablon</span>
-              </Button>
-            </div>
-          </div>
 
-          {/* Son Okutulan Ürün Bilgi Kartı */}
-          <div className="bg-muted/30 border rounded-lg p-4">
-            {lastScannedProduct ? (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-lg sm:text-xl font-bold truncate">{lastScannedProduct.stokAdi}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
-                    {lastScannedProduct.lotNumarasi && lastScannedProduct.miad && ' | '}
-                    {lastScannedProduct.miad && `Miad: ${lastScannedProduct.miad}`}
-                    {lastScannedProduct.seriNumarasi && ` | Seri: ${lastScannedProduct.seriNumarasi}`}
-                  </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="target-lab-select">Hedef Laboratuvar *</Label>
+                <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="target-lab-select"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={isLabPopoverOpen}
+                      aria-haspopup="listbox"
+                      aria-label={selectedLabName || 'Laboratuvar seçin'}
+                      aria-describedby="target-lab-description"
+                      className="w-full justify-between font-normal"
+                      disabled={isBorcMode || hospitals.length === 0}
+                    >
+                      {selectedLabName || 'Laboratuvar seçin.'}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
+                    </Button>
+                  </PopoverTrigger>
+                  <span id="target-lab-description" className="sr-only">Ürünlerin transfer edileceği hedef laboratuvar</span>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                    <Command>
+                      <CommandInput placeholder="Laboratuvar ara..." />
+                      <CommandList>
+                        <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
+                        <CommandGroup>
+                          {hospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((lab) => (
+                            <CommandItem
+                              key={lab.id}
+                              value={lab.name ?? ''}
+                              onSelect={() => {
+                                setSelectedLabId(lab.id);
+                                setIsLabPopoverOpen(false);
+                              }}
+                            >
+                              <Check className={cn('mr-2 h-4 w-4', selectedLabId === lab.id ? 'opacity-100' : 'opacity-0')} />
+                              {lab.name ?? ''}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="space-y-2 rounded-xl border p-3 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="borc-mode" className="font-semibold">Borç Modu</Label>
+                  <Switch checked={isBorcMode} onCheckedChange={setIsBorcMode} id="borc-mode" />
                 </div>
-                <div className="flex gap-4 sm:gap-6 text-center">
-                  <div>
-                    <p className="text-2xl sm:text-3xl font-bold text-primary">{lotCount}</p>
-                    <p className="text-xs text-muted-foreground">Bu Lottan</p>
+                {isBorcMode && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <Label>Borç Depo *</Label>
+                      <Select value={selectedBorcDepotId} onValueChange={setSelectedBorcDepotId}>
+                        <SelectTrigger><SelectValue placeholder="Depo" /></SelectTrigger>
+                        <SelectContent>{borcDepots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Firma *</Label>
+                      <Select value={selectedCompany} onValueChange={setSelectedCompany}>
+                        <SelectTrigger><SelectValue placeholder="Firma" /></SelectTrigger>
+                        <SelectContent>{borcDepots.find(d => d.id === selectedBorcDepotId)?.companies?.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-2xl sm:text-3xl font-bold text-primary">{totalCountForProduct}</p>
-                    <p className="text-xs text-muted-foreground">Ürün Toplamı</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Barkod Formatı</Label>
+                <BarcodeFormatSelect
+                  value={selectedFormatId || '__auto__'}
+                  onChange={v => setSelectedFormatId(v)}
+                  disabled={formatsLoading}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">B) Ürün Ekle • C) Liste & Doğrulama</CardTitle>
+              <CardDescription>Tarama odaklı ekleme, satır içi doğrulama ve transfer listesi.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-xl border bg-muted/15 p-3">
+                <div className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-3">
+                  <div className="flex-1 flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
+                    <ScanLine className="h-4 w-4 text-primary" />
+                    <p className="text-sm">
+                      {lastScannedProduct
+                        ? `Son okutulan: ${lastScannedProduct.stokAdi}${lastScannedProduct.lotNumarasi ? ` • Lot ${lastScannedProduct.lotNumarasi}` : ''}${lastScannedProduct.miad ? ` • Miad ${lastScannedProduct.miad}` : ''}`
+                        : 'Barkod okutun... odak tarama alanında kalır.'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={() => setShowManualInline(v => !v)} title="Manuel Ürün Ekle" size="sm">
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      Manuel
+                    </Button>
+                    <Button variant="outline" onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }} title="Şablondan Seç" size="sm">
+                      <ListChecks className="mr-1.5 h-4 w-4" />
+                      Şablon
+                    </Button>
+                    <Button variant="outline" size="icon" onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Tekli Tara">
+                      <Camera className="h-4 w-4" />
+                    </Button>
+                    <Button variant="default" size="icon" onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)} title="Seri Tarama">
+                      <Camera className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
               </div>
-            ) : (
-              <p className="text-muted-foreground text-center py-2">Henüz ürün okutulmadı</p>
-            )}
-          </div>
 
-          {showManualInline &&
-             <div>
+              {showManualInline && (
                 <ManualInlineAdder
                   visible={showManualInline}
                   onClose={() => setShowManualInline(false)}
@@ -1199,107 +1256,93 @@ export default function DirektTransferPanel() {
                     upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
                   }}
                 />
-             </div>
-          }
+              )}
 
-          {showTemplateSelector && (
-            <TemplateSelector
-              visible={showTemplateSelector}
-              onClose={() => setShowTemplateSelector(false)}
-              templates={templates}
-              templatesLoading={templatesLoading}
-              stockPool={depotStockData}
-              transferRows={directTransferItems}
-              onAddLot={({ code, name, lot, miad, qty }) => {
-                upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
-              }}
-              onAddQty={({ code, name, qty }) => {
-                upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
-              }}
-            />
-          )}
+              {showTemplateSelector && (
+                <TemplateSelector
+                  visible={showTemplateSelector}
+                  onClose={() => setShowTemplateSelector(false)}
+                  templates={templates}
+                  templatesLoading={templatesLoading}
+                  stockPool={depotStockData}
+                  transferRows={directTransferItems}
+                  onAddLot={({ code, name, lot, miad, qty }) => {
+                    upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
+                  }}
+                  onAddQty={({ code, name, qty }) => {
+                    upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
+                  }}
+                />
+              )}
 
-          {isBorcMode ? (
-            <div className="grid grid-cols-2 gap-2">
-              <div><Label>Borç Depo</Label><Select value={selectedBorcDepotId} onValueChange={setSelectedBorcDepotId}><SelectTrigger><SelectValue placeholder="Depo" /></SelectTrigger><SelectContent>{borcDepots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Firma</Label><Select value={selectedCompany} onValueChange={setSelectedCompany}><SelectTrigger><SelectValue placeholder="Firma" /></SelectTrigger><SelectContent>{borcDepots.find(d => d.id === selectedBorcDepotId)?.companies?.map(c =><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div>
-            </div>
-          ) : (
-            null
-          )}
-          
-          <hr />
-
-          <BarcodeFormatSelect
-            value={selectedFormatId || '__auto__'}
-            onChange={v => setSelectedFormatId(v)}
-            disabled={formatsLoading}
-          />
-
-          {directTransferItems.length > 0 && (
-            <div className="border rounded-md">
-              <VirtualizedList
-                items={groupedTransferItems}
-                height={256}
-                estimateSize={56}
-                overscan={5}
-                getItemKey={(item) => item.key}
-                className="p-2"
-                renderItem={(group) => (
-                  <div className="border-b last:border-b-0 py-1">
-                    <div className="flex items-center gap-2 p-2 hover:bg-muted/50">
-                      <div className="flex-1 min-w-0">
-                        <span className="font-medium truncate block">{group.stokAdi}</span>
-                        <span className="text-xs text-muted-foreground">{group.stokKodu}</span>
-                      </div>
-                      <div className="flex-1 text-sm hidden sm:block">Lot: {group.lotNumarasi || '-'}</div>
-                      <div className="flex-1 text-sm hidden sm:block">Miad: {group.miad || '-'}</div>
-                      <div className="font-bold flex items-center gap-2">
-                        {group.isGroup ? (
-                          <Input
-                            type="number"
-                            value={group.adet}
-                            onChange={(e) => handleGroupAdetChange(group.key, e.target.value)}
-                            className="w-20 h-7"
-                            min="1"
-                          />
-                        ) : (
-                          <span>{group.adet} Adet</span>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeTransferItem(group.key, true)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                    {group.serials.length > 0 && (
-                      <div className="px-4 py-2 bg-muted/50 max-h-24 overflow-y-auto">
-                        <div className="text-xs font-mono grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
-                          {group.serials.slice(0, 50).map(serial => (
-                            <span key={serial.id} className="truncate">{serial.seriNumarasi}</span>
-                          ))}
-                          {group.serials.length > 50 && (
-                            <span className="text-muted-foreground">+{group.serials.length - 50} daha...</span>
+              {directTransferItems.length > 0 ? (
+                <div className="border rounded-xl">
+                  <VirtualizedList
+                    items={groupedTransferItems}
+                    height={320}
+                    estimateSize={72}
+                    overscan={5}
+                    getItemKey={(item) => item.key}
+                    className="p-2"
+                    renderItem={(group) => {
+                      const availableNow = depotStockData.filter(
+                        item => !item.isShipped &&
+                        item.stokKodu === group.stokKodu &&
+                        (item.lotNumarasi || '') === (group.lotNumarasi || '') &&
+                        (item.miad || '') === (group.miad || '')
+                      ).length;
+                      const hasQtyError = group.adet > availableNow;
+                      return (
+                        <div className="border-b last:border-b-0 py-2">
+                          <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1.2fr_220px] gap-2 px-2">
+                            <div className="min-w-0">
+                              <p className="font-semibold truncate">{group.stokAdi}</p>
+                              <p className="text-xs text-muted-foreground truncate">{group.stokKodu}</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                              <span className="px-2 py-0.5 rounded-full border bg-muted">Lot: {group.lotNumarasi || '-'}</span>
+                              <span className="px-2 py-0.5 rounded-full border bg-muted">Miad: {group.miad || '-'}</span>
+                              <span className={cn('px-2 py-0.5 rounded-full border', hasQtyError ? 'border-destructive text-destructive bg-destructive/10' : 'bg-emerald-50 text-emerald-700 border-emerald-200')}>
+                                Depoda: {availableNow}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-start lg:justify-end gap-2">
+                              <Input
+                                type="number"
+                                value={group.adet}
+                                onChange={(e) => handleGroupAdetChange(group.key, e.target.value)}
+                                className={cn('w-24 h-8', hasQtyError && 'border-destructive focus-visible:ring-destructive')}
+                                min="1"
+                              />
+                              <Button variant="ghost" size="icon" onClick={() => removeTransferItem(group.key, true)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </div>
+                          {hasQtyError && (
+                            <div className="px-2 mt-1 text-xs text-destructive">
+                              Maksimum: {availableNow} (Depoda kalan: {availableNow}). Lütfen adedi azaltın.
+                            </div>
                           )}
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              />
-            </div>
-          )}
+                      );
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed p-6 text-center text-muted-foreground">
+                  Henüz ürün eklenmedi. Barkod okutun, şablon veya manual yöntemle devam edin.
+                </div>
+              )}
 
-          <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
-            <DialogContent className="max-w-md p-0"><DialogHeader className="p-4"><DialogTitle>Kamera ile Tara</DialogTitle>{isBatchScanning && (<DialogDescription className="px-4">Seri tarama açık. Bitince pencereyi kapatın.</DialogDescription>)}</DialogHeader>{isCameraScannerOpen && <Suspense fallback={<div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /><p>Kamera...</p></div>}><CameraScanner onScanSuccess={handleCameraScan} onClose={() => setIsCameraScannerOpen(false)} /></Suspense>}</DialogContent>
-          </Dialog>
-        </CardContent>
-      </Card>
-    </div>
-    
+              <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
+                <DialogContent className="max-w-md p-0"><DialogHeader className="p-4"><DialogTitle>Kamera ile Tara</DialogTitle>{isBatchScanning && (<DialogDescription className="px-4">Seri tarama açık. Bitince pencereyi kapatın.</DialogDescription>)}</DialogHeader>{isCameraScannerOpen && <Suspense fallback={<div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /><p>Kamera...</p></div>}><CameraScanner onScanSuccess={handleCameraScan} onClose={() => setIsCameraScannerOpen(false)} /></Suspense>}</DialogContent>
+              </Dialog>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
       <AlertDialog open={fefoViolations.length > 0} onOpenChange={(open) => !open && setFefoViolations([])}>
         <AlertDialogContent>
             <AlertDialogHeader>
@@ -1331,4 +1374,3 @@ export default function DirektTransferPanel() {
     </>
   );
 }
-
