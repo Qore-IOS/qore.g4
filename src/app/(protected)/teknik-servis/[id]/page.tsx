@@ -3,7 +3,6 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
@@ -38,7 +37,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -520,60 +518,73 @@ export default function TeknikServisDetayPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Yükleniyor...</p>
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor…</p>
+        </div>
       </div>
     );
   }
 
   if (!hospital) {
-    return <div className="text-center p-8">Hastane bulunamadı.</div>;
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <p className="text-[var(--dashboard-muted)]">Hastane bulunamadı.</p>
+      </div>
+    );
   }
 
   return (
     <>
-      <div className="device-module-page space-y-6 p-4 sm:p-6">
+      <div className="cihaz-shell px-4 py-6 sm:px-6 sm:py-8 space-y-6">
         <BackButton fallback="/teknik-servis" />
-        <CardHeader className="px-0 sm:px-6">
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-2xl font-headline text-primary">
-              {hospital.name} - Cihaz Durumları
-            </CardTitle>
+
+        {/* Header */}
+        <header className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                <Building2 className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">{hospital.name}</h1>
+                <p className="text-sm text-[var(--dashboard-muted)]">Cihaz Durumları</p>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant={showMaintenance ? "default" : "outline"}
-                size="sm"
+              <button
                 onClick={() => setShowMaintenance(prev => !prev)}
-                className="flex items-center gap-2"
+                className={cn(
+                  "cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium",
+                  showMaintenance && "bg-[var(--dashboard-accent)] text-white shadow-none"
+                )}
               >
                 {showMaintenance ? <RotateCcw className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}
-                <span className="hidden sm:inline">{showMaintenance ? 'Cihazlara Dön' : 'Bakım Periyotlarını Göster'}</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
+                <span className="hidden sm:inline">{showMaintenance ? 'Cihazlara Dön' : 'Bakım Periyotları'}</span>
+              </button>
+              <button
                 onClick={openDigerFirmaModal}
-                className="flex items-center gap-2"
+                className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium"
               >
                 <Building2 className="h-4 w-4" />
                 <span className="hidden sm:inline">Diğer Firma Arıza</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
+              </button>
+              <button
                 onClick={openPersonalStockModal}
-                className="flex items-center gap-2"
+                className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium"
               >
                 <Package className="h-4 w-4" />
                 <span className="hidden sm:inline">Şahsi Stoğum</span>
-              </Button>
+              </button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="px-0 sm:px-6">
+        </header>
+
+        {/* Device Grid */}
+        <div>
           {devicesByHospital.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">
+            <p className="text-[var(--dashboard-muted)] text-center py-8">
               Bu hastane için tanımlı cihaz bulunmuyor.
             </p>
           ) : (
@@ -590,141 +601,143 @@ export default function TeknikServisDetayPage() {
                     <div className={cn("device-flip-inner", showMaintenance && "flipped")}>
                       {/* FRONT - Device Image */}
                       <div className="device-flip-front">
-                        <button
-                          className="flex flex-col items-center group text-center cursor-pointer w-full"
-                          onClick={() => handleDeviceClick(device)}
-                        >
-                          <div className="mb-2">
-                            <p className="font-semibold text-sm truncate" title={device.cihazAdi || device.model}>
-                              {device.cihazAdi || device.model}
-                            </p>
-                            <p className="text-xs text-muted-foreground font-mono">
-                              {device.seriNumarasi || 'SN yok'}
-                            </p>
-                          </div>
-                          <div className="relative w-full aspect-square">
-                            {device.imageUrl ? (
-                              <Image
-                                src={`/${device.imageUrl}`}
-                                alt={device.cihazAdi || device.model || ''}
-                                width={1024}
-                                height={1024}
-                                className="object-contain"
-                                priority
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground rounded-md">
-                                Görsel Yok
-                              </div>
-                            )}
-                          </div>
-                          <div
-                              className={cn(
-                                  "w-full h-4 animate-pulse mt-1",
-                                  isTeknikServisFaulty ? 'bg-red-500/50' : isAplikasyonFaulty ? 'bg-amber-500/50' : 'bg-green-500/50'
-                              )}
-                              style={{ filter: 'blur(12px)' }}
-                          />
-                          <div className="mt-2 h-10">
-                            {isTeknikServisFaulty ? (
-                              <>
-                                <p className="text-xs text-red-500 font-semibold flex items-center justify-center">
-                                  <AlertTriangle className="h-3 w-3 mr-1" />
-                                  Arızalı (Teknik Servis)
-                                </p>
-                                {device.arizaAciklamasi && (
-                                  <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
-                                    {device.arizaAciklamasi}
-                                  </p>
-                                )}
-                              </>
-                            ) : isAplikasyonFaulty ? (
-                              <>
-                                <p className="text-xs text-amber-600 font-semibold flex items-center justify-center">
-                                  <FlaskConical className="h-3 w-3 mr-1" />
-                                  Arızalı (Aplikasyon)
-                                </p>
-                                {device.arizaAciklamasi && (
-                                  <p className="text-xs text-muted-foreground truncate" title={device.arizaAciklamasi}>
-                                    {device.arizaAciklamasi}
-                                  </p>
-                                )}
-                              </>
-                            ) : (
-                              <p className="text-xs text-green-600 font-semibold flex items-center justify-center">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Sağlıklı
+                        <div className="cihaz-card p-4">
+                          <button
+                            className="flex flex-col items-center group text-center cursor-pointer w-full"
+                            onClick={() => handleDeviceClick(device)}
+                          >
+                            <div className="mb-2">
+                              <p className="font-semibold text-sm truncate text-[var(--dashboard-text)]" title={device.cihazAdi || device.model}>
+                                {device.cihazAdi || device.model}
                               </p>
-                            )}
-                          </div>
-
-                          {/* Mini Fault History */}
-                          {deviceFaultHistory[device.id]?.length > 0 && (
-                            <div className="w-full mt-2 text-left" onClick={(e) => e.stopPropagation()}>
-                              <div className="border rounded-md p-2 bg-muted/30">
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                                  <History className="h-3 w-3" />
-                                  <span className="font-medium">Son Arızalar</span>
-                                </div>
-                                <div className="space-y-1">
-                                  {deviceFaultHistory[device.id]
-                                    .slice(0, expandedDevices.has(device.id) ? 10 : 3)
-                                    .map((fault, idx) => (
-                                      <div key={idx} className="text-xs border-l-2 border-primary/30 pl-2 py-0.5">
-                                        <p className="text-muted-foreground truncate" title={fault.description}>
-                                          {fault.description}
-                                        </p>
-                                        <p className="text-[10px] text-muted-foreground/70">
-                                          {format(fault.closedAt, 'dd.MM.yy', { locale: tr })}
-                                        </p>
-                                      </div>
-                                    ))}
-                                </div>
-                                {deviceFaultHistory[device.id].length > 3 && (
-                                  <button
-                                    onClick={(e) => toggleDeviceExpand(device.id, e)}
-                                    className="w-full mt-1 text-xs text-primary hover:text-primary/80 flex items-center justify-center gap-1 py-1"
-                                  >
-                                    {expandedDevices.has(device.id) ? (
-                                      <>
-                                        <ChevronUp className="h-3 w-3" />
-                                        Daha az göster
-                                      </>
-                                    ) : (
-                                      <>
-                                        <ChevronDown className="h-3 w-3" />
-                                        Daha fazla göster ({Math.min(deviceFaultHistory[device.id].length, 10) - 3})
-                                      </>
-                                    )}
-                                  </button>
-                                )}
-                              </div>
+                              <p className="text-xs text-[var(--dashboard-muted)] font-mono">
+                                {device.seriNumarasi || 'SN yok'}
+                              </p>
                             </div>
-                          )}
-                        </button>
+                            <div className="relative w-full aspect-square">
+                              {device.imageUrl ? (
+                                <Image
+                                  src={`/${device.imageUrl}`}
+                                  alt={device.cihazAdi || device.model || ''}
+                                  width={1024}
+                                  height={1024}
+                                  className="object-contain"
+                                  priority
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-[var(--dashboard-surface-2)] flex items-center justify-center text-xs text-[var(--dashboard-muted)] rounded-md">
+                                  Görsel Yok
+                                </div>
+                              )}
+                            </div>
+                            <div
+                                className={cn(
+                                    "w-full h-4 animate-pulse mt-1",
+                                    isTeknikServisFaulty ? 'bg-red-500/50' : isAplikasyonFaulty ? 'bg-amber-500/50' : 'bg-green-500/50'
+                                )}
+                                style={{ filter: 'blur(12px)' }}
+                            />
+                            <div className="mt-2 h-10">
+                              {isTeknikServisFaulty ? (
+                                <>
+                                  <p className="text-xs text-red-500 font-semibold flex items-center justify-center">
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    Arızalı (Teknik Servis)
+                                  </p>
+                                  {device.arizaAciklamasi && (
+                                    <p className="text-xs text-[var(--dashboard-muted)] truncate" title={device.arizaAciklamasi}>
+                                      {device.arizaAciklamasi}
+                                    </p>
+                                  )}
+                                </>
+                              ) : isAplikasyonFaulty ? (
+                                <>
+                                  <p className="text-xs text-amber-600 font-semibold flex items-center justify-center">
+                                    <FlaskConical className="h-3 w-3 mr-1" />
+                                    Arızalı (Aplikasyon)
+                                  </p>
+                                  {device.arizaAciklamasi && (
+                                    <p className="text-xs text-[var(--dashboard-muted)] truncate" title={device.arizaAciklamasi}>
+                                      {device.arizaAciklamasi}
+                                    </p>
+                                  )}
+                                </>
+                              ) : (
+                                <p className="text-xs text-green-600 font-semibold flex items-center justify-center">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Sağlıklı
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Mini Fault History */}
+                            {deviceFaultHistory[device.id]?.length > 0 && (
+                              <div className="w-full mt-2 text-left" onClick={(e) => e.stopPropagation()}>
+                                <div className="border border-[var(--dashboard-stroke)] rounded-md p-2 bg-[var(--dashboard-surface-2)]">
+                                  <div className="flex items-center gap-1 text-xs text-[var(--dashboard-muted)] mb-1">
+                                    <History className="h-3 w-3" />
+                                    <span className="font-medium">Son Arızalar</span>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {deviceFaultHistory[device.id]
+                                      .slice(0, expandedDevices.has(device.id) ? 10 : 3)
+                                      .map((fault, idx) => (
+                                        <div key={idx} className="text-xs border-l-2 border-[var(--dashboard-accent)]/30 pl-2 py-0.5">
+                                          <p className="text-[var(--dashboard-muted)] truncate" title={fault.description}>
+                                            {fault.description}
+                                          </p>
+                                          <p className="text-[10px] text-[var(--dashboard-muted)]/70">
+                                            {format(fault.closedAt, 'dd.MM.yy', { locale: tr })}
+                                          </p>
+                                        </div>
+                                      ))}
+                                  </div>
+                                  {deviceFaultHistory[device.id].length > 3 && (
+                                    <button
+                                      onClick={(e) => toggleDeviceExpand(device.id, e)}
+                                      className="w-full mt-1 text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-1 py-1"
+                                    >
+                                      {expandedDevices.has(device.id) ? (
+                                        <>
+                                          <ChevronUp className="h-3 w-3" />
+                                          Daha az göster
+                                        </>
+                                      ) : (
+                                        <>
+                                          <ChevronDown className="h-3 w-3" />
+                                          Daha fazla göster ({Math.min(deviceFaultHistory[device.id].length, 10) - 3})
+                                        </>
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </button>
+                        </div>
                       </div>
 
                       {/* BACK - Maintenance Info */}
                       <div className="device-flip-back">
                         <div className="maintenance-card-neumorphic p-4 h-full">
                           <div className="mb-3">
-                            <p className="font-semibold text-sm truncate" title={device.cihazAdi || device.model}>
+                            <p className="font-semibold text-sm truncate text-[var(--dashboard-text)]" title={device.cihazAdi || device.model}>
                               {device.cihazAdi || device.model}
                             </p>
-                            <p className="text-xs text-muted-foreground font-mono">
+                            <p className="text-xs text-[var(--dashboard-muted)] font-mono">
                               {device.seriNumarasi || 'SN yok'}
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 mb-3">
-                            <CalendarClock className="h-4 w-4 text-primary" />
-                            <span className="text-xs font-semibold text-primary">Bakım Periyotları</span>
+                            <CalendarClock className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                            <span className="text-xs font-semibold text-[var(--dashboard-accent)]">Bakım Periyotları</span>
                           </div>
                           {maintenanceLoading ? (
                             <div className="flex items-center justify-center py-6">
-                              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                              <Loader2 className="h-5 w-5 animate-spin text-[var(--dashboard-accent)]" />
                             </div>
                           ) : deviceMaintenanceItems.length === 0 ? (
-                            <p className="text-xs text-muted-foreground text-center py-4">
+                            <p className="text-xs text-[var(--dashboard-muted)] text-center py-4">
                               Tanımlı bakım periyodu yok
                             </p>
                           ) : (
@@ -735,10 +748,10 @@ export default function TeknikServisDetayPage() {
                                   className={cn(
                                     "flex items-start justify-between gap-2 p-2 rounded-lg text-xs",
                                     item.daysRemaining <= 0
-                                      ? "bg-red-100 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50"
+                                      ? "bg-red-100 border border-red-200"
                                       : item.daysRemaining <= 7
-                                      ? "bg-amber-100 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50"
-                                      : "bg-muted/50 dark:bg-white/5 border border-transparent"
+                                      ? "bg-amber-100 border border-amber-200"
+                                      : "bg-[var(--dashboard-surface-2)] border border-transparent"
                                   )}
                                 >
                                   <div className="flex-1 min-w-0">
@@ -757,10 +770,10 @@ export default function TeknikServisDetayPage() {
                                   <span className={cn(
                                     "font-bold whitespace-nowrap flex-shrink-0",
                                     item.daysRemaining <= 0
-                                      ? "text-red-600 dark:text-red-400"
+                                      ? "text-red-600"
                                       : item.daysRemaining <= 7
-                                      ? "text-amber-600 dark:text-amber-400"
-                                      : "text-muted-foreground"
+                                      ? "text-amber-600"
+                                      : "text-[var(--dashboard-muted)]"
                                   )}>
                                     {item.daysRemaining <= 0
                                       ? `${Math.abs(item.daysRemaining)} gün gecikti`
@@ -778,9 +791,10 @@ export default function TeknikServisDetayPage() {
               })}
             </div>
           )}
-        </CardContent>
+        </div>
       </div>
 
+      {/* Device Action Modal */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -798,34 +812,35 @@ export default function TeknikServisDetayPage() {
           <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2 pt-4">
               {selectedDeviceFaultType === 'teknik_servis' ? (
                 <>
-                  <Button
+                  <button
                     onClick={() => faultIdForSelectedDevice && navigateToAction(`/ariza-yonetimi/${faultIdForSelectedDevice}`)}
                     disabled={!faultIdForSelectedDevice}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Wrench className="mr-2 h-4 w-4" /> Arıza Kaydını Yönet
-                  </Button>
-                  <Button
-                    variant="outline"
+                    <Wrench className="h-4 w-4" /> Arıza Kaydını Yönet
+                  </button>
+                  <button
                     onClick={() => selectedDevice?.id && navigateToAction(`/teknik-servis/islem-formu/${selectedDevice.id}`)}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
                   >
-                    <FilePenLine className="mr-2 h-4 w-4" /> Yeni Servis İşlemi Oluştur
-                  </Button>
+                    <FilePenLine className="h-4 w-4" /> Yeni Servis İşlemi Oluştur
+                  </button>
                 </>
               ) : (
                 <>
-                  <Button
-                    variant="secondary"
+                  <button
                     onClick={() => faultIdForSelectedDevice && navigateToAction(`/ariza-yonetimi/${faultIdForSelectedDevice}`)}
                     disabled={!faultIdForSelectedDevice}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-surface-2)] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <FlaskConical className="mr-2 h-4 w-4" /> Arıza Kaydını Görüntüle (Salt Okunur)
-                  </Button>
-                  <Button
-                    variant="outline"
+                    <FlaskConical className="h-4 w-4" /> Arıza Kaydını Görüntüle (Salt Okunur)
+                  </button>
+                  <button
                     onClick={() => setIsModalOpen(false)}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center"
                   >
                     Kapat
-                  </Button>
+                  </button>
                 </>
               )}
           </DialogFooter>
@@ -847,10 +862,10 @@ export default function TeknikServisDetayPage() {
           <ScrollArea className="max-h-[60vh] pr-4">
             {personalStockLoading ? (
               <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <Loader2 className="h-6 w-6 animate-spin text-[var(--dashboard-accent)]" />
               </div>
             ) : personalStock.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="text-center py-8 text-[var(--dashboard-muted)]">
                 Stoğunuzda yedek parça bulunmuyor.
               </div>
             ) : (
@@ -861,8 +876,8 @@ export default function TeknikServisDetayPage() {
                     className={cn(
                       'p-3 border rounded-lg',
                       item.source === 'depot'
-                        ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800'
-                        : 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800'
+                        ? 'bg-blue-50/60 border-blue-200/60'
+                        : 'bg-amber-50/60 border-amber-200/60'
                     )}
                   >
                     <div className="flex justify-between items-start gap-4">
@@ -871,58 +886,54 @@ export default function TeknikServisDetayPage() {
                           <span className={cn(
                             'text-xs font-medium px-2 py-0.5 rounded',
                             item.source === 'depot'
-                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
+                              ? 'bg-blue-100/70 text-blue-700'
+                              : 'bg-amber-100/70 text-amber-700'
                           )}>
                             {item.source === 'depot' ? 'Depodan' : 'Cihazdan'}
                           </span>
                         </div>
-                        <p className="font-medium">{item.stokAdi}</p>
-                        <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
-                        <p className="text-sm mt-1">
+                        <p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p>
+                        <p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
+                        <p className="text-sm mt-1 text-[var(--dashboard-text)]">
                           Seri No: <span className="font-mono">{item.serialNumber}</span>
                         </p>
                         {item.source === 'device' && item.sourceDeviceName && (
-                          <p className="text-xs text-muted-foreground mt-1">
+                          <p className="text-xs text-[var(--dashboard-muted)] mt-1">
                             Kaynak: {item.sourceDeviceName}
                           </p>
                         )}
                       </div>
                       <div className="flex-shrink-0">
                         {item.source === 'depot' ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
+                          <button
                             onClick={() => handleReturnToDepot(item)}
                             disabled={processingItemId === item.id}
-                            className="whitespace-nowrap"
+                            className="cihaz-tool-item px-3 py-2 text-sm font-medium whitespace-nowrap flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {processingItemId === item.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <>
-                                <ArrowLeftRight className="h-4 w-4 mr-1" />
+                                <ArrowLeftRight className="h-4 w-4" />
                                 Depoya İade
                               </>
                             )}
-                          </Button>
+                          </button>
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
+                          <button
                             onClick={() => handleSubmitToDepot(item)}
                             disabled={processingItemId === item.id}
-                            className="whitespace-nowrap"
+                            className="cihaz-tool-item px-3 py-2 text-sm font-medium whitespace-nowrap flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {processingItemId === item.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <>
-                                <Warehouse className="h-4 w-4 mr-1" />
+                                <Warehouse className="h-4 w-4" />
                                 Depoya Teslim
                               </>
                             )}
-                          </Button>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -932,14 +943,17 @@ export default function TeknikServisDetayPage() {
             )}
           </ScrollArea>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPersonalStockModalOpen(false)}>
+            <button
+              onClick={() => setIsPersonalStockModalOpen(false)}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium"
+            >
               Kapat
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Diğer Firma Arıza Modal */}
+      {/* Diger Firma Ariza Modal */}
       <Dialog open={isDigerFirmaModalOpen} onOpenChange={setIsDigerFirmaModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -954,7 +968,7 @@ export default function TeknikServisDetayPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="digerFirmaAdi">
-                Diğer Firma Adı <span className="text-destructive">*</span>
+                Diğer Firma Adı <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="digerFirmaAdi"
@@ -965,7 +979,7 @@ export default function TeknikServisDetayPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="tespitEdilenAriza">
-                Tespit Edilen Arıza <span className="text-destructive">*</span>
+                Tespit Edilen Arıza <span className="text-red-500">*</span>
               </Label>
               <Textarea
                 id="tespitEdilenAriza"
@@ -977,7 +991,7 @@ export default function TeknikServisDetayPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="yapilanIslem">
-                Yapılan İşlem <span className="text-destructive">*</span>
+                Yapılan İşlem <span className="text-red-500">*</span>
               </Label>
               <Textarea
                 id="yapilanIslem"
@@ -988,19 +1002,23 @@ export default function TeknikServisDetayPage() {
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDigerFirmaModalOpen(false)}>
+          <DialogFooter className="gap-2">
+            <button
+              onClick={() => setIsDigerFirmaModalOpen(false)}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium"
+            >
               İptal
-            </Button>
-            <Button
+            </button>
+            <button
               onClick={handleDigerFirmaSubmit}
               disabled={isDigerFirmaSaving || !digerFirmaAdi.trim() || !tespitEdilenAriza.trim() || !yapilanIslem.trim()}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {isDigerFirmaSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : null}
               Kaydet
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
