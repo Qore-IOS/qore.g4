@@ -13,6 +13,32 @@ type SimilarFaultSummary = {
   closedAt?: string | null;
 };
 
+const FAULT_ANALYSIS_GUIDE = `
+Aşağıdaki kurumsal servis rehberi, model ve arıza başlığına göre öncelikli kontrol adımlarını içerir. Bunu mevcut prompta EK bilgi olarak kullan.
+
+TEKNİK SERVİS BAŞLIKLARI:
+- Photometer Lamp: C 501/C 702 için absorbans >1.4 ise lamba değişimi + Exchange Incubation Water + Cell Blank Measurement öner. Risk: >Abs, ADC.E, test durması/hatalı sonuç.
+- Vacuum Tank: C 501/C 702/E 801; sadece drain ile bırakma, filtre/kaçak valf/vakum basıncı kontrolü öner. Risk: rinse köpürme, taşma, MSB/Carriage Lifter kısa devre.
+- Rinse Station & Water Bath: tıkanıklık için 0.2mm tel, vakum kontrolü, C serisinde Clean Incubation Bath Manually öner. Risk: su taşması, Rack Transport arızası, >Cuvet.
+- Sample/Reagent Probe Up/Down: unclog sonrası probe seal ve Z-ekseni/sensör kontrolü öner. Risk: probe crash/kırılma ve test basımının durması.
+- Carriage Lifter/Rack Transport/Carry-In/Axis: sadece resetle geçiştirme; sıvı teması, sensör oksit, kayış aşınması ve Mechanism Check öner. Risk: motor yanması.
+- Reagent Bottle Shift & Cap Opener: disk encoder/sensör ayarı + Cap Opener Check öner. Risk: reagent probe kırılması.
+- Tip Cup Gripper: E411/E601/E801; pad aşınması/atık yolu tıkanıklığını değerlendir. Risk: sarf düşmesi ve E-Stop.
+- Voltage Error: UPS bakımını ve güç dalgalanmasını mutlaka sorgula. Risk: database corrupt, ADC.E yanması.
+- Reservoir: Air Purge ve Degasser su tuzağı kontrolünü öner. Risk: air bubble/hatalı pipetleme.
+
+APLİKASYON BAŞLIKLARI:
+- Data Alarm & QC Violation: Data Alarms menüsü, taze QC/kalibratör ve bubble kontrolü öner. Risk: QCErr/Cal.E ve masking.
+- Calibration Failed: Reagent Pack Changeover ve geçmiş Cal.I/Cal.E durumunu dikkate al; yeni reaktif + yeni kalibratörle baştan kalibrasyon öner.
+- Reagent Loading Error & Barcode Read Error: Barcode/RFID Reader Check ve optik cam temizliği öner; E801 için masked port kontrolü.
+- System Reagent Shortage (ProCell/CleanCell): warning seviyeleri ve köpük riskini değerlendir; Prime System Reagents Flow Paths öner.
+- Probe Clogging: preanalitik santrifüj/pıhtı süreci denetimi ve Sample Probe Wash öner.
+
+Cevap tonuna mutlaka iki vurgu ekle:
+1) "Kök neden" adımında geçmişte atlanmış olabilecek kritik kontrolü söyle.
+2) "Risk uyarısı" kısmında yüzeysel çözümün yol açabileceği olası klinik/teknik etkileri net belirt.
+`;
+
 function toIso(value: any): string | null {
   if (!value) return null;
   if (typeof value.toDate === 'function') return value.toDate().toISOString();
@@ -85,6 +111,9 @@ Kurallar:
 - Model/marka + açıklama + geçmiş benzer arıza + kapatma notlarını birlikte değerlendir.
 - Emin olmadığında bunu açıkça belirt.
 
+Ek kurumsal rapor/yönergeler:
+${FAULT_ANALYSIS_GUIDE}
+
 Bağlam:
 ${JSON.stringify(context)}`;
 
@@ -129,6 +158,8 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const reportId = searchParams.get('reportId');
+    const forceRefresh = searchParams.get('force') === '1';
+
     if (!reportId) {
       return NextResponse.json({ success: false, error: 'reportId gerekli' }, { status: 400 });
     }
@@ -140,6 +171,14 @@ export async function GET(request: NextRequest) {
     }
 
     const report = reportSnap.data() as any;
+    const cachedSuggestion = report?.aiSuggestion;
+    if (!forceRefresh && cachedSuggestion && typeof cachedSuggestion === 'object') {
+      return NextResponse.json({
+        success: true,
+        cached: true,
+        data: cachedSuggestion,
+      });
+    }
 
     const [sameModelSnap, sameTitleCategorySnap] = await Promise.all([
       report.model
@@ -232,18 +271,25 @@ export async function GET(request: NextRequest) {
     };
 
     const ai = await requestGeminiSuggestion(context);
+    const suggestionPayload = {
+      ...ai,
+      similarFaultStats: context.similarFaultStats,
+      resolutionStats,
+      generatedAt: new Date().toISOString(),
+    };
+
+    await reportRef.update({
+      aiSuggestion: suggestionPayload,
+      aiSuggestionUpdatedAt: new Date(),
+    });
 
     return NextResponse.json({
       success: true,
-      data: {
-        ...ai,
-        similarFaultStats: context.similarFaultStats,
-        resolutionStats,
-      },
+      cached: false,
+      data: suggestionPayload,
     });
   } catch (error: any) {
     console.error('AI öneri oluşturma hatası:', error);
     return NextResponse.json({ success: false, error: error.message || 'AI öneri alınamadı' }, { status: 500 });
   }
 }
-

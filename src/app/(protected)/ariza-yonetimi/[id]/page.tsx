@@ -768,13 +768,13 @@ export default function FaultDetailPage() {
   };
 
 
-  const fetchAiSuggestion = useCallback(async () => {
+  const fetchAiSuggestion = useCallback(async (forceRefresh = false) => {
     if (!fault?.id) return;
 
     setIsAiLoading(true);
     setAiError(null);
     try {
-      const res = await fetch(`/api/ariza-yonetimi/ai-oneri?reportId=${fault.id}`);
+      const res = await fetch(`/api/ariza-yonetimi/ai-oneri?reportId=${fault.id}${forceRefresh ? '&force=1' : ''}`);
       const payload = await res.json();
       if (!res.ok || !payload?.success) {
         throw new Error(payload?.error || 'AI önerisi alınamadı.');
@@ -1030,7 +1030,7 @@ export default function FaultDetailPage() {
                 <Sparkles className="h-4 w-4 text-violet-500" />
                 <p className="font-medium">AI Önerisi</p>
               </div>
-              <Button variant="outline" size="sm" onClick={fetchAiSuggestion} disabled={isAiLoading}>
+              <Button variant="outline" size="sm" onClick={() => fetchAiSuggestion(true)} disabled={isAiLoading}>
                 {isAiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yenile'}
               </Button>
             </div>
