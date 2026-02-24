@@ -25,7 +25,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { Order, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot } from '@/lib/types';
+import type { Order, OrderItem, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, limit, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -513,13 +513,16 @@ export default function ToplamaPage() {
         setIsProcessing(false);
         return;
     }
-  
-    const flatScannedSerials = Object.values(scannedSerials).flat();
+
+    const flatScannedSerials: string[] = Object.keys(scannedSerials).reduce<string[]>((acc, key) => {
+      acc.push(...scannedSerials[key]);
+      return acc;
+    }, []);
     if (flatScannedSerials.length === 0) {
       toast({ title: 'Uyarı', description: 'Transfer edilecek ürün okutulmadı.', variant: 'default' });
       return;
     }
-    
+
     if (!currentDepot) {
         toast({ title: 'Hata', description: 'Depo bilgisi yüklenemedi. Sayfayı yenileyiniz.', variant: 'destructive' });
         setIsProcessing(false);
@@ -529,34 +532,67 @@ export default function ToplamaPage() {
     setIsProcessing(true);
     let success = false;
     let itemsShippedCount = 0;
-  
+
     try {
       const batch = writeBatch(db);
-    
+
+      // Find target hospital early - needed for transfer record
+      const targetHospital = order.labId
+        ? hospitals.find(h => h.id === order.labId)
+        : hospitals.find(h => h.name === order.kurumAdi || h.ad === order.kurumAdi);
+      const effectiveLabId = order.labId || targetHospital?.id || null;
+      const targetName = order.kurumAdi;
+      const depotName = currentDepot.name || '';
+
+      // Create transfer record (like direkt-transfer-panel)
+      const transferRef = doc(collection(db, 'transfers'));
+
       const itemsToShip: DepoStokItem[] = [];
       for (const serialOrIdentifier of flatScannedSerials) {
-          let stockItem = depoStok.find(item => item.seriNumarasi === serialOrIdentifier && item.depotId === order.depotId);
+          // Step 1: Try to find by exact serial number match
+          let stockItem = depoStok.find(item =>
+            item.seriNumarasi === serialOrIdentifier &&
+            item.depotId === order.depotId &&
+            !item.isShipped
+          );
           if (!stockItem) {
-              const [lot, _] = serialOrIdentifier.split('-');
-              stockItem = depoStok.find(item => 
-                  item.lotNumarasi === lot &&
-                  item.depotId === order.depotId &&
-                  !itemsToShip.some(shipped => shipped.id === item.id)
-              );
+              // Step 2: Parse lot identifier - use lastIndexOf to handle lot numbers containing dashes
+              // Format is "${lotNumarasi}-${count}" e.g. "LOT-123-1", "ABC-DEF-2"
+              const lastDashIdx = serialOrIdentifier.lastIndexOf('-');
+              if (lastDashIdx > 0) {
+                const lot = serialOrIdentifier.substring(0, lastDashIdx);
+                stockItem = depoStok.find(item =>
+                    item.lotNumarasi === lot &&
+                    item.depotId === order.depotId &&
+                    !item.isShipped &&
+                    !itemsToShip.some(shipped => shipped.id === item.id)
+                );
+              }
           }
           if (stockItem) {
               itemsToShip.push(stockItem);
+          } else {
+              siparisToplamaLogger.warn('Okutulmuş ürün için stok kaydı bulunamadı', {
+                serialOrIdentifier,
+                orderId: order.id,
+              });
           }
       }
-      
+
+      if (itemsToShip.length === 0) {
+        toast({ title: 'Hata', description: 'Transfer edilecek geçerli stok kalemi bulunamadı.', variant: 'destructive' });
+        setIsProcessing(false);
+        return;
+      }
+
       const shipmentItems: ShipmentItem[] = [];
       const shippedQuantities: Record<string, number> = {};
-  
+
       itemsToShip.filter(item => item.stokKodu).forEach(item => {
           const key = item.stokKodu!;
           shippedQuantities[key] = (shippedQuantities[key] || 0) + 1;
       });
-  
+
       Object.keys(shippedQuantities).forEach(stokKodu => {
           const productInfo = itemsToShip.find(i => i.stokKodu === stokKodu);
           if (productInfo) {
@@ -570,30 +606,82 @@ export default function ToplamaPage() {
               });
           }
       });
-  
+
+      // Create shipment record (backward compatible)
       const shipmentDocRef = doc(collection(db, 'shipments'));
       const newShipment: Omit<Shipment, 'id'> = {
           orderId: order.id,
           depotId: order.depotId!,
-          depotName: currentDepot.name || '',
-          recipientHospital: order.kurumAdi,
+          depotName: depotName,
+          recipientHospital: targetName,
           userId: currentUser?.uid || 'unknown_user',
           userName: currentUserProfile?.name || currentUser?.email || 'Unknown User',
           timestamp: new Date(),
           items: shipmentItems,
       };
       batch.set(shipmentDocRef, { ...newShipment, timestamp: Timestamp.fromDate(newShipment.timestamp as Date) });
-    
+
+      // Create transfers record (like direkt-transfer-panel for consistency)
+      batch.set(transferRef, {
+        id: transferRef.id,
+        timestamp: serverTimestamp(),
+        sourceDepotId: order.depotId,
+        sourceDepotName: depotName,
+        targetName: targetName,
+        targetHospitalId: effectiveLabId,
+        mode: 'order_picking',
+        orderId: order.id,
+        itemCount: itemsToShip.length,
+        createdByUid: currentUser.uid ?? '',
+        createdByName: currentUserProfile.name ?? currentUser?.email ?? '',
+      });
+
+      // Update depoStok items: mark as shipped with full metadata (like direkt-transfer-panel)
       itemsToShip.filter(item => item.id).forEach(item => {
           const stokRef = doc(db, 'depoStok', item.id!);
           batch.update(stokRef, {
               isShipped: true,
-              hedefKurum: order.kurumAdi,
-              hedefKurumId: order.labId,
+              hedefKurum: targetName,
+              hedefKurumId: effectiveLabId,
               sevkTarihi: serverTimestamp(),
+              transferId: transferRef.id,
+              sourceDepotId: order.depotId,
+              sourceDepotName: depotName,
+          });
+
+          // Create serial history for serial-tracked items
+          if (item.seriNumarasi) {
+            const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
+            batch.set(histRef, {
+              type: 'transfer',
+              transferId: transferRef.id,
+              orderId: order.id,
+              details: {
+                sourceDepotId: order.depotId,
+                sourceDepotName: depotName,
+                targetName: targetName,
+                targetHospitalId: effectiveLabId,
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                lotNumarasi: item.lotNumarasi,
+                miad: item.miad,
+              },
+              timestamp: Timestamp.now(),
+            });
+          }
+
+          // Create transfer item record
+          const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id!);
+          batch.set(itemRef, {
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            lotNumarasi: item.lotNumarasi || '',
+            miad: item.miad || '',
+            seriNumarasi: item.seriNumarasi || '',
           });
       });
-    
+
+      // Calculate remaining order items
       const remainingItems = (order.items || []).map(item => {
           const shippedCount = item.stokKodu ? (shippedQuantities[item.stokKodu] || 0) : 0;
           return {
@@ -601,7 +689,15 @@ export default function ToplamaPage() {
               adet: (item.adet ?? 0) - shippedCount,
           };
       }).filter(item => item.adet > 0);
-  
+
+      siparisToplamaLogger.info('Sipariş kalan kalem hesaplaması', {
+        orderId: order.id,
+        originalItems: order.items?.map(i => ({ stokKodu: i.stokKodu, adet: i.adet })),
+        shippedQuantities,
+        remainingItems: remainingItems.map(i => ({ stokKodu: i.stokKodu, adet: i.adet })),
+        itemsToShipCount: itemsToShip.length,
+      });
+
       if (remainingItems.length === 0 && order.id) {
           batch.update(doc(db, 'orders', order.id), {
               status: 'completed',
@@ -618,17 +714,64 @@ export default function ToplamaPage() {
 
       await batch.commit();
       itemsShippedCount = itemsToShip.length;
-      success = true;
 
-      // Find target hospital - try by labId first, then by kurumAdi
-      const targetHospital = order.labId
-        ? hospitals.find(h => h.id === order.labId)
-        : hospitals.find(h => h.name === order.kurumAdi || h.ad === order.kurumAdi);
+      // ── 2-Step Verification ──
+      // Step 1: Verify source depot stock was properly deducted (isShipped = true)
+      const verificationErrors: string[] = [];
+      const verifySourcePromises = itemsToShip.filter(item => item.id).map(async (item) => {
+        const verifySnap = await getDoc(doc(db, 'depoStok', item.id!));
+        if (!verifySnap.exists()) {
+          verificationErrors.push(`Stok kaydı bulunamadı: ${item.stokKodu} (${item.seriNumarasi || item.lotNumarasi || item.id})`);
+          return;
+        }
+        const verifyData = verifySnap.data();
+        if (!verifyData.isShipped) {
+          verificationErrors.push(`Kaynak depodan düşülmedi: ${item.stokAdi} (${item.seriNumarasi || item.lotNumarasi || ''})`);
+        }
+        if (verifyData.hedefKurumId !== effectiveLabId) {
+          verificationErrors.push(`Hedef kurum eşleşmedi: ${item.stokAdi} - beklenen: ${effectiveLabId}, bulunan: ${verifyData.hedefKurumId}`);
+        }
+      });
+      await Promise.all(verifySourcePromises);
+
+      // Step 2: Verify order was properly updated
+      if (order.id) {
+        const orderVerifySnap = await getDoc(doc(db, 'orders', order.id));
+        if (orderVerifySnap.exists()) {
+          const orderVerifyData = orderVerifySnap.data();
+          if (remainingItems.length === 0 && orderVerifyData.status !== 'completed') {
+            verificationErrors.push(`Sipariş durumu 'completed' olarak güncellenemedi (mevcut: ${orderVerifyData.status})`);
+          } else if (remainingItems.length > 0) {
+            const updatedItems = orderVerifyData.items as OrderItem[] | undefined;
+            if (updatedItems) {
+              const totalRemainingInDb = updatedItems.reduce((sum: number, it: OrderItem) => sum + (it.adet ?? 0), 0);
+              const expectedRemaining = remainingItems.reduce((sum, it) => sum + (it.adet ?? 0), 0);
+              if (totalRemainingInDb !== expectedRemaining) {
+                verificationErrors.push(`Kalan adet uyuşmazlığı: beklenen ${expectedRemaining}, veritabanında ${totalRemainingInDb}`);
+              }
+            }
+          }
+        }
+      }
+
+      if (verificationErrors.length > 0) {
+        siparisToplamaLogger.error('Transfer doğrulama hataları', null, {
+          orderId: order.id,
+          transferId: transferRef.id,
+          errors: verificationErrors,
+        });
+        toast({
+          title: 'Transfer Doğrulama Uyarısı',
+          description: `Transfer kaydedildi ancak ${verificationErrors.length} doğrulama sorunu tespit edildi. Lütfen stok durumunu kontrol edin.`,
+          variant: 'destructive',
+        });
+      }
+
+      success = verificationErrors.length === 0;
 
       await maybeAutoPrintTutanak(db, targetHospital, shipmentDocRef.id, currentUserProfile?.name || currentUser?.email || '');
 
       // Update labTransferDates collection with last transfer dates (direct client-side write)
-      const effectiveLabId = order.labId || targetHospital?.id;
       if (effectiveLabId && order.depotId && shipmentItems.length > 0) {
         try {
           const labTransferDocId = `${effectiveLabId}_${order.depotId}`;
@@ -652,7 +795,7 @@ export default function ToplamaPage() {
             labId: effectiveLabId,
             depotId: order.depotId,
             labName: order.kurumAdi,
-            depotName: currentDepot?.name || '',
+            depotName: depotName,
             transfers: transfersUpdate,
             updatedAt: serverTimestamp(),
           }, { merge: true });
@@ -666,6 +809,15 @@ export default function ToplamaPage() {
         }
       }
 
+      siparisToplamaLogger.info('Sipariş toplama transferi tamamlandı', {
+        orderId: order.id,
+        transferId: transferRef.id,
+        shipmentId: shipmentDocRef.id,
+        itemsShipped: itemsShippedCount,
+        remainingItemsCount: remainingItems.length,
+        orderCompleted: remainingItems.length === 0,
+      });
+
     } catch (e) {
       siparisToplamaLogger.error('Transfer işlemi sırasında hata oluştu', e, {
         orderId: order?.id,
@@ -676,6 +828,9 @@ export default function ToplamaPage() {
       setIsProcessing(false);
       if (success) {
         toast({ title: 'Transfer Tamamlandı', description: `${itemsShippedCount} kalem sevk edildi. Sipariş güncellendi.` });
+        router.push('/siparisler');
+      } else if (itemsShippedCount > 0) {
+        // Transfer committed but verification had issues - still navigate back
         router.push('/siparisler');
       }
     }
