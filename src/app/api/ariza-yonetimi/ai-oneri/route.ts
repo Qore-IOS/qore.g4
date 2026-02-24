@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 type SimilarFaultSummary = {
   id: string;
   model?: string;
+  serial?: string;
   faultName?: string;
   faultType?: string;
   status?: string;
@@ -12,6 +13,8 @@ type SimilarFaultSummary = {
   openedAt?: string | null;
   closedAt?: string | null;
 };
+
+const AI_SUGGESTION_CACHE_VERSION = 2;
 
 const FAULT_ANALYSIS_GUIDE = `
 Aşağıdaki kurumsal servis rehberi, model ve arıza başlığına göre öncelikli kontrol adımlarını içerir. Bunu mevcut prompta EK bilgi olarak kullan.
@@ -102,13 +105,25 @@ Yalnızca JSON döndür:
   "suggestedActions": ["..."],
   "chronicInsight": "kronik sorun yorumu",
   "resolutionAssessment": "geçmiş kapatma notlarına göre kalıcı/geçici çözüm analizi",
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+  "evidenceBasedRecommendation": "ör: X cihazı bu arızayı şu tarihlerde yaşamış, temizlik geçici kalmış; Y parça kontrol/değişim öner",
+=======
+>>>>>>> main
   "confidence": 0-100
 }
 
 Kurallar:
 - Türkçe yaz.
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+- Sadece verilen bağlamı kullan. Bağlamda olmayan sayı/tarih/olgu uydurma.
+- "benzer arıza sayısı" söylerken sadece bağlamdaki sameFaultCount değerini esas al.
+- Öneriler cihazın TEKİL SERİ NUMARALI geçmişine dayanmalı.
+- Teknik servis/aplikasyon için uygulanabilir ve kısa maddeler üret.
+- Genel-geçer cümlelerden kaçın; mümkünse tarih ve geçmiş çözüm notundan kanıt ver.
+=======
 - Teknik servis/aplikasyon için uygulanabilir ve kısa maddeler üret.
 - Model/marka + açıklama + geçmiş benzer arıza + kapatma notlarını birlikte değerlendir.
+>>>>>>> main
 - Emin olmadığında bunu açıkça belirt.
 
 Ek kurumsal rapor/yönergeler:
@@ -124,7 +139,11 @@ ${JSON.stringify(context)}`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1100 },
+=======
         generationConfig: { temperature: 0.2, maxOutputTokens: 1000 },
+>>>>>>> main
       }),
     });
 
@@ -154,6 +173,34 @@ ${JSON.stringify(context)}`;
   return { debug: lastDebug };
 }
 
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+async function loadDeviceHistoryBySerial(serial: string, reportId: string) {
+  const snap = await adminDb.collection('deviceFaultReports').where('serial', '==', serial).orderBy('openedAt', 'desc').limit(120).get();
+
+  const allForDevice: SimilarFaultSummary[] = snap.docs.map((d) => {
+    const x = d.data() as any;
+    return {
+      id: d.id,
+      model: x.model,
+      serial: x.serial,
+      faultName: x.faultName,
+      faultType: x.faultType,
+      status: x.status,
+      description: x.description,
+      closeDescription: x.closeDescription,
+      openedAt: toIso(x.openedAt),
+      closedAt: toIso(x.closedAt),
+    };
+  });
+
+  return {
+    currentDeviceFaults: allForDevice,
+    otherFaultsOfSameDevice: allForDevice.filter((f) => f.id !== reportId),
+  };
+}
+
+=======
+>>>>>>> main
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -171,6 +218,24 @@ export async function GET(request: NextRequest) {
     }
 
     const report = reportSnap.data() as any;
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+    const serial = (report?.serial || '').trim();
+    if (!serial) {
+      return NextResponse.json({ success: false, error: 'Arıza kaydında seri numarası bulunamadı' }, { status: 400 });
+    }
+
+    const cachedSuggestion = report?.aiSuggestion;
+    const cacheVersionMatches = Number(cachedSuggestion?.cacheVersion || 0) === AI_SUGGESTION_CACHE_VERSION;
+    if (!forceRefresh && cachedSuggestion && typeof cachedSuggestion === 'object' && cacheVersionMatches) {
+      return NextResponse.json({ success: true, cached: true, data: cachedSuggestion });
+    }
+
+    const { otherFaultsOfSameDevice } = await loadDeviceHistoryBySerial(serial, reportId);
+
+    const sameFaultGroup = otherFaultsOfSameDevice.filter((f) => (f.faultName || null) === (report.faultName || null) && (f.faultType || null) === (report.faultType || null));
+
+    const closeNotes = await Promise.all(otherFaultsOfSameDevice.slice(0, 40).map(async (f) => {
+=======
     const cachedSuggestion = report?.aiSuggestion;
     if (!forceRefresh && cachedSuggestion && typeof cachedSuggestion === 'object') {
       return NextResponse.json({
@@ -220,6 +285,7 @@ export async function GET(request: NextRequest) {
     const similarFaults = Array.from(combined.values()).slice(0, 20);
 
     const closeNotes = await Promise.all(similarFaults.slice(0, 12).map(async (f) => {
+>>>>>>> main
       const historySnap = await adminDb.collection('deviceFaultReports').doc(f.id).collection('history').get();
       const closedEntry = historySnap.docs
         .map((d) => d.data() as any)
@@ -228,29 +294,76 @@ export async function GET(request: NextRequest) {
 
       return {
         id: f.id,
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+        openedAt: f.openedAt,
+        faultName: f.faultName,
+        faultType: f.faultType,
+        description: f.description || '',
         closeDescription: f.closeDescription || closedEntry?.description || '',
+        resolutionClass: classifyResolution(f.closeDescription || closedEntry?.description || ''),
+=======
+        closeDescription: f.closeDescription || closedEntry?.description || '',
+>>>>>>> main
       };
     }));
 
     const resolutionStats = closeNotes.reduce(
       (acc, note) => {
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+        acc[note.resolutionClass] += 1;
+=======
         const bucket = classifyResolution(note.closeDescription);
         acc[bucket] += 1;
+>>>>>>> main
         return acc;
       },
       { kalici: 0, gecici: 0, belirsiz: 0 }
     );
 
     const context = {
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+      constraints: {
+        deviceScopedBy: 'serial',
+        serial,
+        sameFaultCount: sameFaultGroup.length,
+        totalPastFaultsForThisDevice: otherFaultsOfSameDevice.length,
+      },
+      currentFault: {
+        id: reportId,
+        model: report.model || null,
+        serial,
+=======
       currentFault: {
         id: reportId,
         marka: report.brand || null,
         model: report.model || null,
         serial: report.serial || null,
+>>>>>>> main
         faultType: report.faultType || null,
         faultName: report.faultName || null,
         title: report.title || null,
         description: report.description || null,
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+        openedAt: toIso(report.openedAt),
+      },
+      sameFaultHistory: sameFaultGroup.slice(0, 20).map((f) => ({
+        id: f.id,
+        openedAt: f.openedAt,
+        closedAt: f.closedAt,
+        description: f.description,
+        closeDescription: f.closeDescription,
+      })),
+      otherFaultHistorySameDevice: otherFaultsOfSameDevice.slice(0, 25).map((f) => ({
+        id: f.id,
+        faultName: f.faultName,
+        faultType: f.faultType,
+        openedAt: f.openedAt,
+        description: f.description,
+        closeDescription: f.closeDescription,
+      })),
+      closeNotes,
+      resolutionStats,
+=======
       },
       similarFaultStats: {
         total: similarFaults.length,
@@ -268,14 +381,28 @@ export async function GET(request: NextRequest) {
         status: f.status,
       })),
       sampleCloseNotes: closeNotes.slice(0, 8),
+>>>>>>> main
     };
 
     const ai = await requestGeminiSuggestion(context);
     const suggestionPayload = {
       ...ai,
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+      similarFaultStats: {
+        total: otherFaultsOfSameDevice.length,
+        sameModelCount: otherFaultsOfSameDevice.filter((f) => (f.model || null) === (report.model || null)).length,
+        sameTitleCategoryCount: sameFaultGroup.length,
+        resolvedCount: otherFaultsOfSameDevice.filter((f) => ['cozuldu', 'closed'].includes(f.status || '')).length,
+      },
+      resolutionStats,
+      generatedAt: new Date().toISOString(),
+      cacheVersion: AI_SUGGESTION_CACHE_VERSION,
+      scopeSerial: serial,
+=======
       similarFaultStats: context.similarFaultStats,
       resolutionStats,
       generatedAt: new Date().toISOString(),
+>>>>>>> main
     };
 
     await reportRef.update({
@@ -283,11 +410,15 @@ export async function GET(request: NextRequest) {
       aiSuggestionUpdatedAt: new Date(),
     });
 
+<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
+    return NextResponse.json({ success: true, cached: false, data: suggestionPayload });
+=======
     return NextResponse.json({
       success: true,
       cached: false,
       data: suggestionPayload,
     });
+>>>>>>> main
   } catch (error: any) {
     console.error('AI öneri oluşturma hatası:', error);
     return NextResponse.json({ success: false, error: error.message || 'AI öneri alınamadı' }, { status: 500 });
