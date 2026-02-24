@@ -27,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import type { Order, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, updateDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, addDoc, limit, orderBy, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, limit, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -35,18 +35,12 @@ import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 
-import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Info, Truck, Trash2 } from 'lucide-react';
-import BackButton from '@/components/BackButton';
+import { Loader2, Truck, Trash2, ChevronLeft, CheckCircle2, AlertTriangle, Package, ScanBarcode, ChevronDown, ChevronUp, MoreHorizontal, XCircle } from 'lucide-react';
 import Image from 'next/image';
 import { cn, generateId, playFeedback } from '@/lib/utils';
-import { emitFefoOverride } from '@/lib/notifications';
 import { maybeAutoPrintTutanak } from '@/lib/tutanak-autoprint';
 import { formatMiad, toDateFromAny } from '@/lib/date';
-import { resolveEffectiveTrackingMode, TrackingMode } from '@/lib/tracking';
-import type { ParsedGeneric } from '@/lib/barcode';
+import { resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { siparisToplamaLogger } from '@/lib/logger';
@@ -150,6 +144,20 @@ export default function ToplamaPage() {
   
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Scan feed state
+  type ScanEvent = { id: string; ts: number; ok: boolean; message: string; stokKodu?: string };
+  const [scanFeed, setScanFeed] = useState<ScanEvent[]>([]);
+  const pushScanEvent = useCallback((ok: boolean, message: string, stokKodu?: string) => {
+    setScanFeed(prev => [{ id: generateId(), ts: Date.now(), ok, message, stokKodu }, ...prev].slice(0, 20));
+  }, []);
+
+  // Filter state for group cards
+  const [groupFilter, setGroupFilter] = useState<'all' | 'remaining' | 'done'>('all');
+  // Collapsed done groups
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // Confirm-delete state
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const targetHospital = useMemo(() => {
     return hospitals.find(h => h.id === order?.labId);
@@ -373,8 +381,10 @@ export default function ToplamaPage() {
     });
     playFeedback();
     const product = productCodes.find(p => p.stokKodu === orderItemStokKodu);
-    toast({ title: 'Okutuldu', description: `${product?.stokAdi || orderItemStokKodu}` });
-  }, [toast, productCodes]);
+    const totalNeeded = pickingList.filter(it => it.stokKodu === orderItemStokKodu).reduce((s, i) => s + (i.adetIstenen ?? 0), 0);
+    const currentCount = (scannedSerials[orderItemStokKodu] || []).length + 1;
+    pushScanEvent(true, `${product?.stokAdi || orderItemStokKodu} → +1 (${currentCount}/${totalNeeded})`, orderItemStokKodu);
+  }, [productCodes, pickingList, scannedSerials, pushScanEvent]);
 
   const handleScan = useCallback(async (code: string) => {
     // Scan lock to prevent race conditions from rapid sequential scans
@@ -391,12 +401,12 @@ export default function ToplamaPage() {
           if (stockItem) {
               const pickItem = pickingList.find(it => it.stokKodu === stockItem.stokKodu);
               if (!pickItem) {
-                   toast({ title: 'Hata', description: `Bu ürün (${stockItem.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
+                   pushScanEvent(false, `${stockItem.stokAdi || code} – listede değil`);
                    return;
               }
               addScannedSerial(stockItem.stokKodu || '', code);
           } else {
-              toast({ title: 'Hata', description: 'Barkod formatı geçersiz veya tanınmıyor.', variant: 'destructive' });
+              pushScanEvent(false, `Tanınmayan barkod: ${code.slice(0, 20)}…`);
           }
           return;
       }
@@ -405,13 +415,13 @@ export default function ToplamaPage() {
       const { product, stokKodu, seriNumarasi, lotNumarasi } = resolved;
 
       if (!product || !stokKodu) {
-          toast({ title: 'Hata', description: 'Barkod bir ürünle eşleşmedi.', variant: 'destructive' });
+          pushScanEvent(false, `Barkod eşleşmedi: ${code.slice(0, 20)}…`);
           return;
       }
 
       const pickItemForProduct = pickingList.find(it => it.stokKodu === stokKodu);
       if (!pickItemForProduct) {
-          toast({ title: 'Hata', description: `Bu ürün (${product.stokAdi}) toplama listesinde değil.`, variant: 'destructive' });
+          pushScanEvent(false, `${product.stokAdi} – listede değil`);
           return;
       }
 
@@ -423,29 +433,28 @@ export default function ToplamaPage() {
 
       if (mode === 'serial' || (mode as string) === 'serial_and_lot') {
         if (!seriNumarasi) {
-          toast({ title: 'Hata', description: 'Seri no takipli ürün için barkod seri no içermiyor.', variant: 'destructive' });
+          pushScanEvent(false, `${product.stokAdi} – seri no eksik`);
           return;
         }
         const stockEntry = depoStok.find(item =>
           item.seriNumarasi === seriNumarasi && item.depotId === order?.depotId && !item.isShipped
         );
         if (!stockEntry) {
-          toast({ title: 'Hata', description: `Seri ${seriNumarasi} stoğu bulunamadı veya sevk edilmiş.`, variant: 'destructive' });
+          pushScanEvent(false, `Seri ${seriNumarasi} – stokta yok veya sevk edilmiş`);
           return;
         }
         if (Object.values(scannedSerials).flat().includes(seriNumarasi)) {
-          toast({ title: 'Uyarı', description: 'Bu seri numarası zaten okutulmuş.', variant: 'default' });
+          pushScanEvent(false, `Seri ${seriNumarasi} – zaten okutulmuş`);
           return;
         }
         const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + (item.adetIstenen ?? 0), 0);
         const currentScannedForProduct = scannedSerials[stokKodu] || [];
         if (currentScannedForProduct.length >= totalNeededForProduct) {
-          toast({ title: 'Uyarı', description: `Bu ürün için istenen adete ulaşıldı.`, variant: 'default' });
+          pushScanEvent(false, `${product.stokAdi} – istenen adete ulaşıldı`);
           return;
         }
 
-        // FEFO check: show info toast but DO NOT block scanning.
-        // The suggested lot is just a recommendation - accept any lot/serial.
+        // FEFO check: show info in scan feed but DO NOT block scanning.
         const suggestion = pickingList.find(pl => pl.stokKodu === stokKodu);
         const expectedLot = suggestion?.lotNumarasi;
         if (expectedLot && stockEntry.lotNumarasi !== expectedLot) {
@@ -455,31 +464,23 @@ export default function ToplamaPage() {
             scannedLot: stockEntry.lotNumarasi,
             suggestedLot: expectedLot,
           });
-          toast({
-            title: 'FEFO Bilgi',
-            description: `Önerilen lot: ${expectedLot}, okutulan lot: ${stockEntry.lotNumarasi}. Ürün eklendi.`,
-            variant: 'default',
-          });
         }
         addScannedSerial(stokKodu, seriNumarasi);
       } else { // Lot/Quantity logic
-          // Accept any lot - first try to find a matching picking group,
-          // then fall back to any group for this product that still needs items
           const totalNeededForProduct = pickingList.filter(it => it.stokKodu === stokKodu).reduce((sum, item) => sum + (item.adetIstenen ?? 0), 0);
           const currentScannedForProduct = (scannedSerials[stokKodu] || []);
           if (currentScannedForProduct.length >= totalNeededForProduct) {
-            toast({ title: 'Uyarı', description: `Bu ürün için istenen adete ulaşıldı.`, variant: 'default' });
+            pushScanEvent(false, `${product.stokAdi} – istenen adete ulaşıldı`);
             return;
           }
 
-          // Find any group for this product that still has capacity
           const groupToIncrement = pickingList.find(pl =>
               pl.stokKodu === stokKodu &&
               currentScannedForProduct.filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < (pl.adetIstenen ?? 0)
           );
 
           if (!groupToIncrement) {
-              toast({ title: 'Hata', description: `Bu ürün (${stokKodu}) için uygun veya adeti eksik bir toplama grubu bulunamadı.`, variant: 'destructive' });
+              pushScanEvent(false, `${product.stokAdi} – uygun toplama grubu yok`);
               return;
           }
 
@@ -489,7 +490,7 @@ export default function ToplamaPage() {
     } finally {
       scanLockRef.current = false;
     }
-  }, [order, scannedSerials, toast, depoStok, pickingList, addScannedSerial, parseAnyBarcode, productCodes, resolveProductFromParsed, barcodeFormats]);
+  }, [order, scannedSerials, depoStok, pickingList, addScannedSerial, parseAnyBarcode, productCodes, resolveProductFromParsed, barcodeFormats, pushScanEvent]);
   
   useHidScanner({
     enabled: true,
@@ -680,108 +681,456 @@ export default function ToplamaPage() {
     }
   };
 
+  /* ───────── Derived / computed values ───────── */
+  const totalNeeded = useMemo(() => pickingList.reduce((s, i) => s + (i.adetIstenen ?? 0), 0), [pickingList]);
+  const totalScanned = useMemo(() => Object.values(scannedSerials).flat().length, [scannedSerials]);
+  const overallPct = totalNeeded > 0 ? Math.round((totalScanned / totalNeeded) * 100) : 0;
+
+  const enrichedList = useMemo(() => pickingList.map(item => {
+    const scannedForProduct = scannedSerials[item.stokKodu] || [];
+    const scannedCount = scannedForProduct.length;
+    const needed = item.adetIstenen ?? 0;
+    const isComplete = scannedCount >= needed;
+    const isOutOfStock = item.lotNumarasi === 'STOK YOK';
+    const availableInLot = depoStok.filter(s => s.depotId === order?.depotId && !s.isShipped && s.stokKodu === item.stokKodu && s.lotNumarasi === item.lotNumarasi).length;
+    const totalInDepot = depoStok.filter(s => s.depotId === order?.depotId && !s.isShipped && s.stokKodu === item.stokKodu).length;
+    const isInsufficient = !isOutOfStock && availableInLot < needed;
+    const status: 'done' | 'blocked' | 'active' | 'idle' = isComplete ? 'done' : isOutOfStock ? 'blocked' : scannedCount > 0 ? 'active' : 'idle';
+    const pct = needed > 0 ? Math.round((scannedCount / needed) * 100) : 0;
+    return { ...item, scannedCount, needed, isComplete, isOutOfStock, availableInLot, totalInDepot, isInsufficient, status, pct, cihazGrubu: (item as any).cihazGrubu, cihazGrubuImageUrl: (item as any).cihazGrubuImageUrl };
+  }), [pickingList, scannedSerials, depoStok, order?.depotId]);
+
+  const filteredList = useMemo(() => {
+    if (groupFilter === 'remaining') return enrichedList.filter(i => !i.isComplete);
+    if (groupFilter === 'done') return enrichedList.filter(i => i.isComplete);
+    return enrichedList;
+  }, [enrichedList, groupFilter]);
+
+  const doneCount = enrichedList.filter(i => i.isComplete).length;
+  const remainingCount = enrichedList.length - doneCount;
+
+  const orderDate = useMemo(() => {
+    const d = toDateFromAny(order?.createdAt) || toDateFromAny(order?.olusturmaTarihi);
+    return d ? format(d, 'd MMM yyyy', { locale: tr }) : null;
+  }, [order?.createdAt, order?.olusturmaTarihi]);
+
+  const isTransferReady = totalScanned > 0 && !isProcessing;
+
+  /* ───────── Loading state ───────── */
   if (isLoading || !order) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-        <span className="ml-2">Toplama listesi hazırlanıyor...</span>
+      <div className="cihaz-shell flex items-center justify-center" style={{ minHeight: '100dvh' }}>
+        <div className="cihaz-card-strong p-8 flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
+          <span style={{ color: 'var(--dashboard-text)' }} className="text-sm font-medium">Toplama listesi hazırlanıyor…</span>
+        </div>
       </div>
     );
   }
-  
+
+  /* ───────── Status badge helper ───────── */
+  const statusBadge = (status: 'done' | 'blocked' | 'active' | 'idle') => {
+    const map = {
+      done:    { label: 'Tamamlandı', bg: 'rgba(22,163,74,.12)', color: '#16A34A', icon: <CheckCircle2 className="w-3 h-3" /> },
+      blocked: { label: 'Stok Yok',   bg: 'rgba(185,28,28,.10)', color: '#B91C1C', icon: <XCircle className="w-3 h-3" /> },
+      active:  { label: 'Toplanıyor', bg: 'rgba(245,158,11,.12)', color: '#D97706', icon: <ScanBarcode className="w-3 h-3" /> },
+      idle:    { label: 'Bekliyor',   bg: 'rgba(107,114,128,.10)', color: '#6B7280', icon: <Package className="w-3 h-3" /> },
+    };
+    const s = map[status];
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: s.bg, color: s.color }}>
+        {s.icon} {s.label}
+      </span>
+    );
+  };
+
   return (
-    <div className="p-4 space-y-4">
-      <BackButton fallback="/siparisler" />
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-                <CardTitle className="font-headline text-2xl">Toplama İşlemi: {order?.kurumAdi}</CardTitle>
-                <CardDescription>Okutulan ürünler otomatik olarak aşağıdaki ilgili gruplara eklenecektir.</CardDescription>
+    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 pb-28 sm:pb-6" style={{ minHeight: '100dvh' }}>
+
+      {/* ── Back + Header ── */}
+      <button
+        onClick={() => router.push('/siparisler')}
+        className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium mb-4"
+        style={{ color: 'var(--dashboard-muted)' }}
+      >
+        <ChevronLeft className="w-3.5 h-3.5" /> Siparişler
+      </button>
+
+      <header className="cihaz-card-strong p-4 sm:p-5 mb-4 sm:mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold truncate" style={{ color: 'var(--dashboard-text)' }}>
+              Toplama: {order.kurumAdi}
+            </h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+              {order.depotName && (
+                <span className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+                  Depo: {order.depotName}
+                </span>
+              )}
+              {order.createdBy && (
+                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                  Açan: {order.createdBy}
+                </span>
+              )}
+              {orderDate && (
+                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                  {orderDate}
+                </span>
+              )}
+              <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                {pickingList.length} grup · {totalNeeded} adet
+              </span>
             </div>
-            <Button 
-                onClick={commitTransfer} 
-                disabled={isProcessing || pickingList.length === 0}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-                {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                <Truck className="mr-2 h-5 w-5" />
-                Transfer Et ve Siparişi Kapat
-            </Button>
           </div>
-        </CardHeader>
-        <CardContent>
-          <h3 className="font-semibold mb-2">Toplanacak Gruplar:</h3>
-          <p className="text-sm text-muted-foreground p-2 border rounded-md bg-accent/10 mb-3">
-              <Info className="inline h-4 w-4 mr-1 text-primary"/>
-              Barkod okuyucu aktif. Toplama listesindeki ürün gruplarına ait barkodları okutarak doğrulayın.
-          </p>
-          <ScrollArea className="h-[60vh] pr-4">
-            <div className="space-y-3">
-              {pickingList.length === 0 ? <p className="text-muted-foreground text-center p-4">Bu sipariş için toplanacak ürün bulunamadı veya hepsi toplandı.</p> :
-                pickingList.map(item => {
-                  const currentScannedForProduct = scannedSerials[(item as any).stokKodu] || [];
-                  const scannedCount = currentScannedForProduct.length;
-                  
-                  const neededForGroup = (item as any).adetIstenen;
-                  const isComplete = scannedCount >= neededForGroup;
-                  const isOutOfStock = (item as any).lotNumarasi === 'STOK YOK';
-                  
-                  const availableInLot = depoStok.filter(s => s.depotId === order.depotId && !s.isShipped && s.stokKodu === (item as any).stokKodu && s.lotNumarasi === (item as any).lotNumarasi).length;
-                  const totalInDepot = depoStok.filter(s => s.depotId === order.depotId && !s.isShipped && s.stokKodu === (item as any).stokKodu).length;
-                  const isInsufficient = !isOutOfStock && availableInLot < neededForGroup;
 
-                  return (
-                      <div key={(item as any).id} className={cn(
-                          "border rounded-lg p-3 transition-all",
-                          isComplete ? "bg-green-500/10 border-green-500/50" :
-                          isOutOfStock ? "bg-red-500/10 border-red-500/50 opacity-70" :
-                          isInsufficient ? "bg-orange-500/10 border-orange-500/50" : "bg-card"
-                      )}>
-                          <div className="flex justify-between items-center">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <h4 className="text-lg font-semibold">{(item as any).stokAdi}</h4>
-                                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => deletePickingItem((item as any).stokKodu, (item as any).lotNumarasi)}>
-                                      <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
-                                </div>
-                                  <p className="text-xs text-muted-foreground font-mono">{(item as any).stokKodu}</p>
-                                  <div className="mt-1">
-                                    <LastTransferLine
-                                      date={lastTransferDates[(item as any).stokKodu]}
-                                    />
-                                  </div>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                <div className="text-center p-2 border rounded-md min-w-[90px]">
-                                  <p className="text-xs text-muted-foreground">Toplanacak</p>
-                                  <p className="text-2xl font-bold">{neededForGroup}</p>
-                                  <p className="text-xs text-muted-foreground font-mono mt-1">Depo Toplam: {totalInDepot}</p>
-                                </div>
-                                <div className="text-center p-2 border rounded-md min-w-[90px]">
-                                    <p className="text-xs text-muted-foreground">Toplanan</p>
-                                    <p className="text-2xl font-bold text-primary">{scannedCount}</p>
-                                </div>
-                              </div>
-                              <div className="flex-shrink-0 w-24 h-24 relative mx-4">
-                                {(item as any).cihazGrubuImageUrl && (
-                                  <SimpleProductThumb src={(item as any).cihazGrubuImageUrl} alt={(item as any).cihazGrubu || ''} size={96} />
-                                )}
-                              </div>
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-2">
-                              Öneri: Lot <span className="font-mono">{(item as any).lotNumarasi}</span> | Miad <span className="font-mono">{formatMiad((item as any).miad)}</span> | Raf <span className="font-mono">{(item as any).rafAdresiOnerilen}</span>
-                              {isInsufficient && <span className="text-orange-500 font-semibold ml-2"> (Yetersiz Stok: {availableInLot})</span>}
-                          </div>
-                      </div>
-                  )
-                })}
+          {/* Desktop CTA (hidden on mobile — sticky bar handles it) */}
+          <button
+            onClick={commitTransfer}
+            disabled={!isTransferReady}
+            className="hidden sm:inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: isTransferReady ? '#16A34A' : '#9CA3AF', boxShadow: isTransferReady ? 'var(--dashboard-raised-soft)' : 'none' }}
+          >
+            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+            Transfer Et & Kapat
+          </button>
+        </div>
+
+        {/* Overall progress */}
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-xs font-medium mb-1">
+            <span style={{ color: 'var(--dashboard-muted)' }}>Genel İlerleme</span>
+            <span style={{ color: overallPct === 100 ? '#16A34A' : 'var(--dashboard-text)' }}>
+              {totalScanned}/{totalNeeded} ({overallPct}%)
+            </span>
+          </div>
+          <div className="cihaz-pressed h-2.5 overflow-hidden" style={{ borderRadius: 8 }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${overallPct}%`,
+                background: overallPct === 100 ? '#16A34A' : 'var(--dashboard-accent)',
+              }}
+            />
+          </div>
+        </div>
+      </header>
+
+      {/* ── 2-column desktop layout ── */}
+      <div className="flex flex-col lg:flex-row gap-4 sm:gap-5">
+
+        {/* LEFT COLUMN: Group list */}
+        <div className="flex-1 min-w-0 space-y-3">
+
+          {/* Scanner status + filter chips */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="cihaz-pressed inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium" style={{ borderRadius: 12, color: '#16A34A' }}>
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              Barkod okuyucu aktif
             </div>
-          </ScrollArea>
-        </CardContent>
-      </Card>
 
+            <div className="flex gap-1.5">
+              {(['all', 'remaining', 'done'] as const).map(f => {
+                const labels = { all: 'Tümü', remaining: 'Eksik', done: 'Tamamlanan' };
+                const counts = { all: enrichedList.length, remaining: remainingCount, done: doneCount };
+                const isActive = groupFilter === f;
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setGroupFilter(f)}
+                    className="px-3 py-1 rounded-full text-xs font-medium transition-all"
+                    style={{
+                      background: isActive ? 'var(--dashboard-surface)' : 'transparent',
+                      color: isActive ? 'var(--dashboard-text)' : 'var(--dashboard-muted)',
+                      boxShadow: isActive ? 'var(--dashboard-raised-soft)' : 'none',
+                    }}
+                  >
+                    {labels[f]} ({counts[f]})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Group section label */}
+          <p className="cihaz-section-label">Toplanacak Gruplar</p>
+
+          {/* Group cards */}
+          {filteredList.length === 0 ? (
+            <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}>
+              <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+              <p className="text-sm font-medium">
+                {groupFilter === 'done' ? 'Henüz tamamlanan grup yok.' : groupFilter === 'remaining' ? 'Tüm gruplar tamamlandı!' : 'Toplanacak ürün bulunamadı.'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {filteredList.map(item => {
+                const isCollapsed = item.isComplete && collapsedGroups.has(item.id);
+                const isLastScanned = scanFeed[0]?.stokKodu === item.stokKodu && Date.now() - (scanFeed[0]?.ts ?? 0) < 2000;
+
+                return (
+                  <article
+                    key={item.id}
+                    className={cn(
+                      'cihaz-card p-3 sm:p-4 transition-all duration-300 relative overflow-hidden',
+                      isLastScanned && 'ring-2 ring-offset-1',
+                    )}
+                    style={{
+                      borderLeft: item.status === 'blocked' ? '3px solid #B91C1C' : item.status === 'active' ? '3px solid var(--dashboard-accent)' : item.status === 'done' ? '3px solid #16A34A' : '3px solid transparent',
+                      opacity: item.isComplete ? 0.7 : 1,
+                      ...(isLastScanned ? { '--tw-ring-color': 'var(--dashboard-accent)' } as any : {}),
+                    }}
+                  >
+                    {/* Top row: name + status badge + actions */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-sm sm:text-base font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>
+                            {item.stokAdi}
+                          </h3>
+                          {statusBadge(item.status)}
+                        </div>
+                        <p className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                          {item.stokKodu}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {item.isComplete && (
+                          <button
+                            onClick={() => setCollapsedGroups(prev => {
+                              const next = new Set(prev);
+                              next.has(item.id) ? next.delete(item.id) : next.add(item.id);
+                              return next;
+                            })}
+                            className="p-1 rounded-lg hover:bg-black/5 transition"
+                          >
+                            {isCollapsed ? <ChevronDown className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} /> : <ChevronUp className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />}
+                          </button>
+                        )}
+                        {/* More menu with delete confirm */}
+                        <div className="relative">
+                          <button
+                            onClick={() => setConfirmDeleteId(confirmDeleteId === item.id ? null : item.id)}
+                            className="p-1 rounded-lg hover:bg-black/5 transition"
+                          >
+                            <MoreHorizontal className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+                          </button>
+                          {confirmDeleteId === item.id && (
+                            <div className="absolute right-0 top-8 z-20 cihaz-card-strong p-3 w-48 space-y-2" style={{ borderRadius: 14 }}>
+                              <p className="text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>Bu grubu kaldır?</p>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => { deletePickingItem(item.stokKodu, item.lotNumarasi); setConfirmDeleteId(null); }}
+                                  className="flex-1 px-2 py-1.5 rounded-xl text-xs font-semibold text-white"
+                                  style={{ background: '#B91C1C' }}
+                                >
+                                  <Trash2 className="w-3 h-3 inline mr-1" /> Kaldır
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="flex-1 px-2 py-1.5 rounded-xl text-xs font-medium cihaz-pressed"
+                                  style={{ color: 'var(--dashboard-muted)' }}
+                                >
+                                  İptal
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Collapsible content */}
+                    {!isCollapsed && (
+                      <>
+                        {/* Progress bar */}
+                        <div className="mt-2.5">
+                          <div className="flex items-center justify-between text-[11px] font-medium mb-1">
+                            <span style={{ color: 'var(--dashboard-muted)' }}>Toplanan / Gerekli</span>
+                            <span style={{ color: item.isComplete ? '#16A34A' : 'var(--dashboard-text)' }}>
+                              {item.scannedCount} / {item.needed}
+                            </span>
+                          </div>
+                          <div className="cihaz-pressed h-1.5 overflow-hidden" style={{ borderRadius: 6 }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${item.pct}%`,
+                                background: item.isComplete ? '#16A34A' : item.isInsufficient ? '#D97706' : 'var(--dashboard-accent)',
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Counters + image */}
+                        <div className="flex items-center gap-3 mt-2.5">
+                          <div className="flex gap-2 flex-1">
+                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
+                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Gerekli</p>
+                              <p className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>{item.needed}</p>
+                            </div>
+                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
+                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Toplanan</p>
+                              <p className="text-lg font-bold" style={{ color: item.scannedCount > 0 ? '#16A34A' : 'var(--dashboard-text)' }}>{item.scannedCount}</p>
+                            </div>
+                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
+                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Depoda</p>
+                              <p className="text-lg font-bold" style={{ color: item.totalInDepot === 0 ? '#B91C1C' : 'var(--dashboard-text)' }}>{item.totalInDepot}</p>
+                            </div>
+                          </div>
+                          {item.cihazGrubuImageUrl && (
+                            <div className="flex-shrink-0 hidden sm:block">
+                              <SimpleProductThumb src={item.cihazGrubuImageUrl} alt={item.cihazGrubu || ''} size={56} />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Recommendation chips */}
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                          {item.lotNumarasi && item.lotNumarasi !== 'STOK YOK' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>
+                              Lot: {item.lotNumarasi}
+                            </span>
+                          )}
+                          {item.miad && item.miad !== '-' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(37,99,235,.08)', color: '#2563EB' }}>
+                              Miad: {formatMiad(item.miad)}
+                            </span>
+                          )}
+                          {item.rafAdresiOnerilen && item.rafAdresiOnerilen !== '-' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(107,114,128,.08)', color: '#6B7280' }}>
+                              Raf: {item.rafAdresiOnerilen}
+                            </span>
+                          )}
+                          {item.isInsufficient && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold" style={{ background: 'rgba(185,28,28,.10)', color: '#B91C1C' }}>
+                              <AlertTriangle className="w-3 h-3" /> Yetersiz: {item.availableInLot}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Last transfer meta */}
+                        <div className="mt-1.5">
+                          <LastTransferLine date={lastTransferDates[item.stokKodu]} className="!text-[11px]" />
+                        </div>
+                      </>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT COLUMN: Scan feed (desktop only) */}
+        <aside className="hidden lg:block w-80 xl:w-96 flex-shrink-0 space-y-3">
+          <p className="cihaz-section-label">Son Okutmalar</p>
+          <div className="cihaz-card-strong p-4 space-y-2" style={{ maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto' }}>
+            {scanFeed.length === 0 ? (
+              <div className="text-center py-8" style={{ color: 'var(--dashboard-muted)' }}>
+                <ScanBarcode className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-xs">Henüz okutma yok</p>
+                <p className="text-[10px] mt-1">Barkod okuyucu ile taramaya başlayın</p>
+              </div>
+            ) : (
+              scanFeed.map(evt => (
+                <div
+                  key={evt.id}
+                  className="flex items-start gap-2 p-2 rounded-xl transition-all"
+                  style={{ background: evt.ok ? 'rgba(22,163,74,.06)' : 'rgba(185,28,28,.06)' }}
+                >
+                  {evt.ok ? (
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#16A34A' }} />
+                  ) : (
+                    <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#B91C1C' }} />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium truncate" style={{ color: evt.ok ? '#16A34A' : '#B91C1C' }}>
+                      {evt.message}
+                    </p>
+                    <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                      {new Date(evt.ts).toLocaleTimeString('tr-TR')}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Issues / exceptions summary */}
+          {enrichedList.some(i => i.isOutOfStock || i.isInsufficient) && (
+            <>
+              <p className="cihaz-section-label">Sorunlar</p>
+              <div className="cihaz-card p-3 space-y-2">
+                {enrichedList.filter(i => i.isOutOfStock).map(i => (
+                  <div key={`issue-${i.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(185,28,28,.06)' }}>
+                    <XCircle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#B91C1C' }} />
+                    <span className="text-xs font-medium truncate" style={{ color: '#B91C1C' }}>{i.stokAdi} – Stok yok</span>
+                  </div>
+                ))}
+                {enrichedList.filter(i => i.isInsufficient && !i.isOutOfStock).map(i => (
+                  <div key={`issue-${i.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(245,158,11,.08)' }}>
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#D97706' }} />
+                    <span className="text-xs font-medium truncate" style={{ color: '#D97706' }}>{i.stokAdi} – Yetersiz ({i.availableInLot}/{i.needed})</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </aside>
+      </div>
+
+      {/* ── Mobile scan feed (single last event, shown above sticky CTA) ── */}
+      {scanFeed.length > 0 && (
+        <div className="fixed bottom-[72px] left-3 right-3 z-30 lg:hidden">
+          <div
+            className="cihaz-card p-2.5 flex items-center gap-2 animate-in slide-in-from-bottom-2 duration-300"
+            style={{ borderRadius: 14 }}
+          >
+            {scanFeed[0].ok ? (
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: '#16A34A' }} />
+            ) : (
+              <XCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#B91C1C' }} />
+            )}
+            <p className="text-xs font-medium flex-1 truncate" style={{ color: scanFeed[0].ok ? '#16A34A' : '#B91C1C' }}>
+              {scanFeed[0].message}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mobile sticky bottom CTA ── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-40 sm:hidden"
+        style={{
+          background: 'var(--dashboard-surface)',
+          borderTop: '1px solid var(--dashboard-stroke)',
+          boxShadow: '0 -4px 20px rgba(0,0,0,.08)',
+          paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
+        }}
+      >
+        <div className="flex items-center justify-between px-4 py-3">
+          <div>
+            <p className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+              {remainingCount > 0 ? `${remainingCount} grup kaldı` : 'Tüm gruplar tamam'}
+            </p>
+            <p className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>
+              {totalScanned}/{totalNeeded} toplanan
+            </p>
+          </div>
+          <button
+            onClick={commitTransfer}
+            disabled={!isTransferReady}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: isTransferReady ? '#16A34A' : '#9CA3AF' }}
+          >
+            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+            Transfer Et
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
