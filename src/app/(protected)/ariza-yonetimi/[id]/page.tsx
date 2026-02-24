@@ -108,10 +108,7 @@ type AiSuggestion = {
   suggestedActions?: string[];
   chronicInsight?: string;
   resolutionAssessment?: string;
-<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
   evidenceBasedRecommendation?: string;
-=======
->>>>>>> main
   confidence?: number;
   debug?: string;
   similarFaultStats?: {
@@ -1071,10 +1068,7 @@ export default function FaultDetailPage() {
                 )}
                 {aiSuggestion.chronicInsight && <p><span className="font-medium">Kronik Sorun Analizi:</span> {aiSuggestion.chronicInsight}</p>}
                 {aiSuggestion.resolutionAssessment && <p><span className="font-medium">Kalıcı/Geçici Çözüm Yorumu:</span> {aiSuggestion.resolutionAssessment}</p>}
-<<<<<<< codex/add-ai-suggestion-area-to-fault-management-tiw2wy
                 {aiSuggestion.evidenceBasedRecommendation && <p><span className="font-medium">Cihaz Geçmişine Dayalı Özel Öneri:</span> {aiSuggestion.evidenceBasedRecommendation}</p>}
-=======
->>>>>>> main
                 {aiSuggestion.similarFaultStats && (
                   <p className="text-xs text-muted-foreground">
                     Benzer arıza: {aiSuggestion.similarFaultStats.total} • Aynı model: {aiSuggestion.similarFaultStats.sameModelCount} • Aynı başlık+kategori: {aiSuggestion.similarFaultStats.sameTitleCategoryCount} • Çözülen: {aiSuggestion.similarFaultStats.resolvedCount}
