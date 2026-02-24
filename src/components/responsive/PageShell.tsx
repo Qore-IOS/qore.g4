@@ -5,9 +5,9 @@ import { cn } from '@/lib/utils';
 export default function PageShell({ className, children }: React.PropsWithChildren<{ className?: string }>) {
   return (
     <div className={cn(
-      'page-shell mx-auto w-full max-w-screen-2xl',
+      'page-shell mx-auto w-full max-w-none',
       // Desktop padding
-      'md:px-6',
+      'md:px-3',
       // Mobile padding handled via CSS variables in MobileResponsiveFix
       // Bottom safe area for mobile dock
       'pb-[env(safe-area-inset-bottom)]',

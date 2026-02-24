@@ -1,8 +1,9 @@
 'use client';
 
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device } from '@/lib/types';
+import { isUnavailableAt, toDateValue, type PersonnelAvailabilityRecord } from '@/lib/personnel-availability';
 
 export interface PerformanceMetrics {
   // Raw metrics
@@ -83,7 +84,8 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     maintenancePlansSnap,
     maintenanceLogsSnap,
     periodicPartChangesSnap,
-    periodicPartChangeLogsSnap
+    periodicPartChangeLogsSnap,
+    availabilitySnap,
   ] = await Promise.all([
     getDocs(collection(db, 'users')),
     getDocs(collection(db, 'deviceFaultReports')),
@@ -94,6 +96,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     getDocs(collection(db, 'maintenanceLogs')),
     getDocs(collection(db, 'periodicPartChanges')),
     getDocs(collection(db, 'periodicPartChangeLogs')),
+    getDocs(collection(db, 'personnelAvailability')),
   ]);
 
   // Parse data
@@ -196,6 +199,28 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
   let allForms = [...teknikForms, ...aplikasyonForms];
 
+  const availabilityByUser = new Map<string, PersonnelAvailabilityRecord[]>();
+  availabilitySnap.docs.forEach((doc) => {
+    const data = doc.data();
+    const startAt = toDateValue(data.startAt);
+    const endAt = toDateValue(data.endAt);
+    if (!data.uid || !startAt || !endAt) return;
+
+    const type = data.type === 'training' ? 'training' : 'office';
+    const current = availabilityByUser.get(data.uid) || [];
+    current.push({
+      id: doc.id,
+      uid: data.uid,
+      type,
+      description: data.description || '',
+      startAt,
+      endAt,
+      createdAt: toDateValue(data.createdAt),
+      createdByUid: data.createdByUid || null,
+    });
+    availabilityByUser.set(data.uid, current);
+  });
+
   // Helper function to check if a date is within range
   const isWithinDateRange = (date: Date | null): boolean => {
     if (!hasDateFilter || !date) return true;
@@ -250,6 +275,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
   // Helper function to calculate expected faults for a user based on primary labs
   const calculateExpectedFaults = (
+    userUid: string,
     userPrimaryLabs: string[],
     userRole: string,
     faultsByType: typeof allFaults
@@ -260,10 +286,15 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
       ? aplikasyonPersonnelPerLab
       : teknikPersonnelPerLab;
 
+    const userAvailability = availabilityByUser.get(userUid) || [];
     let expectedTotal = 0;
 
     for (const labId of userPrimaryLabs) {
-      const faultsInLab = faultsByType.filter(f => f.hospitalId === labId).length;
+      const faultsInLab = faultsByType.filter((f) => {
+        if (f.hospitalId !== labId) return false;
+        if (!f.openedAt) return true;
+        return !isUnavailableAt(userAvailability, f.openedAt);
+      }).length;
       const personnelCount = personnelPerLabMap.get(labId) || 1;
       expectedTotal += faultsInLab / personnelCount;
     }
@@ -420,7 +451,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     //    Volume bonus (max 10): Handling more than average
     // =========================================================================
     const faultsByType = isAplikasyon ? aplikasyonFaults : teknikServisFaults;
-    const expectedFaults = calculateExpectedFaults(primaryLabs, user.role, faultsByType);
+    const expectedFaults = calculateExpectedFaults(user.uid, primaryLabs, user.role, faultsByType);
     const faultsAssigned = relevantFaults.filter(f => f.assignedToUid === user.uid).length;
     const totalFaultsForRole = relevantFaults.length;
 

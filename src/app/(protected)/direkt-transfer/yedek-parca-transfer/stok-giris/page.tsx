@@ -56,6 +56,8 @@ export default function YedekParcaStokGirisPage() {
 
   // New row state
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [manualStokKodu, setManualStokKodu] = useState('');
+  const [manualStokAdi, setManualStokAdi] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
   const [quantity, setQuantity] = useState<number>(1);
   const [productSearchOpen, setProductSearchOpen] = useState(false);
@@ -119,8 +121,11 @@ export default function YedekParcaStokGirisPage() {
   };
 
   const addRow = useCallback(() => {
-    if (!selectedProduct) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen bir ürün seçin.', variant: 'destructive' });
+    const manualCode = manualStokKodu.trim();
+    const manualName = manualStokAdi.trim();
+
+    if (!selectedProduct && (!manualCode || !manualName)) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen ürün seçin veya stok kodu ve stok adı girin.', variant: 'destructive' });
       return;
     }
 
@@ -133,12 +138,15 @@ export default function YedekParcaStokGirisPage() {
       return;
     }
 
+    const rowStokKodu = selectedProduct?.stokKodu || manualCode;
+    const rowStokAdi = selectedProduct?.stokAdi || manualName;
+
     const newRow: StokGirisRow = {
       id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      productCodeId: selectedProduct.id,
-      stokKodu: selectedProduct.stokKodu || '',
-      stokAdi: selectedProduct.stokAdi || '',
-      cihazGrubu: selectedProduct.cihazGrubu || '',
+      productCodeId: selectedProduct?.id || '',
+      stokKodu: rowStokKodu,
+      stokAdi: rowStokAdi,
+      cihazGrubu: selectedProduct?.cihazGrubu || '',
       serialNumber: sn,
       quantity: qty,
     };
@@ -146,13 +154,16 @@ export default function YedekParcaStokGirisPage() {
     setRows(prev => [...prev, newRow]);
     setSerialNumber('');
     setQuantity(1);
+    setManualStokKodu('');
+    setManualStokAdi('');
+    setSelectedProductId('');
     toast({
       title: 'Eklendi',
       description: sn
-        ? `${selectedProduct.stokAdi} (SN: ${sn}) listeye eklendi.`
-        : `${selectedProduct.stokAdi} x${qty} listeye eklendi.`,
+        ? `${rowStokAdi} (SN: ${sn}) listeye eklendi.`
+        : `${rowStokAdi} x${qty} listeye eklendi.`,
     });
-  }, [selectedProduct, serialNumber, quantity, rows, toast]);
+  }, [selectedProduct, serialNumber, quantity, rows, toast, manualStokKodu, manualStokAdi]);
 
   const removeRow = (rowId: string) => {
     setRows(prev => prev.filter(r => r.id !== rowId));
@@ -434,6 +445,9 @@ export default function YedekParcaStokGirisPage() {
       </div>
     );
   }
+
+  const canAddManualProduct = manualStokKodu.trim().length > 0 && manualStokAdi.trim().length > 0;
+  const canAddRow = !!selectedProductId || canAddManualProduct;
 
   if (!isAuthorized) {
     return (
