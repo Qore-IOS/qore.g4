@@ -387,6 +387,10 @@ export default function ArizaYonetimiPage() {
     }
   }, [fetchAiDocs, toast]);
 
+  useEffect(() => {
+    fetchAiDocs();
+  }, [fetchAiDocs]);
+
   const handleExportToPdf = async () => {
     if (reports.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
