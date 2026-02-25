@@ -231,6 +231,10 @@ export default function ArizaYonetimiPage() {
     fetchReports();
   }, [fetchReports]);
 
+  useEffect(() => {
+    fetchAiDocs();
+  }, [fetchAiDocs]);
+
   // Filtre değiştiğinde sayfa 1'e dön
   useEffect(() => {
     setCurrentPage(1);

@@ -15,7 +15,7 @@ export { chat, smartChat, chatStream, smartChatStream } from './chat';
 export type { ChatMessage, ChatResponse } from './chat';
 
 // Configuration
-export { anthropic, CLAUDE_MODEL, MAX_TOKENS, isApiKeyValid, ERROR_MESSAGES } from './config';
+export { CLAUDE_MODEL, GEMINI_MODEL, MAX_TOKENS, isApiKeyValid, ERROR_MESSAGES } from './config';
 
 // Query planning
 export { planQueries } from './queryPlanner';
