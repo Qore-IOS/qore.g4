@@ -37,6 +37,7 @@ import {
   Wrench,
   Building2,
   RefreshCw,
+  Upload,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes } from 'date-fns';
@@ -72,6 +73,16 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { FileText } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+
+type AiKnowledgeDoc = {
+  id: string;
+  name: string;
+  type: 'txt' | 'pdf' | string;
+  active: boolean;
+  charCount: number;
+  updatedAt: string | null;
+};
 
 // Status tab değerleri
 type StatusTab = 'all' | 'atama_bekliyor' | 'mudahale_bekliyor' | 'mudahale_ediliyor' | 'cozuldu';
@@ -156,6 +167,12 @@ export default function ArizaYonetimiPage() {
   const [uniqueDevices, setUniqueDevices] = useState<string[]>([]);
   const [uniqueOpeners, setUniqueOpeners] = useState<string[]>([]);
 
+  const [aiDocs, setAiDocs] = useState<AiKnowledgeDoc[]>([]);
+  const [aiDocFile, setAiDocFile] = useState<File | null>(null);
+  const [aiDocsLoading, setAiDocsLoading] = useState(false);
+  const [aiDocUploading, setAiDocUploading] = useState(false);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+
   // API'den veri çekme
   const fetchReports = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -213,6 +230,10 @@ export default function ArizaYonetimiPage() {
   useEffect(() => {
     fetchReports();
   }, [fetchReports]);
+
+  useEffect(() => {
+    fetchAiDocs();
+  }, [fetchAiDocs]);
 
   // Filtre değiştiğinde sayfa 1'e dön
   useEffect(() => {
@@ -301,6 +322,71 @@ export default function ArizaYonetimiPage() {
     setExportModalOpen(false);
   };
 
+
+  const fetchAiDocs = useCallback(async () => {
+    setAiDocsLoading(true);
+    try {
+      const res = await fetch('/api/ariza-yonetimi/ai-dokumanlar');
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || 'AI dokümanları alınamadı.');
+      }
+      setAiDocs(payload.data || []);
+    } catch (error: any) {
+      console.error(error);
+      toast({ title: 'Hata', description: error?.message || 'AI dokümanları alınamadı.', variant: 'destructive' });
+    } finally {
+      setAiDocsLoading(false);
+    }
+  }, [toast]);
+
+  const handleUploadAiDoc = useCallback(async () => {
+    if (!aiDocFile) {
+      toast({ title: 'Eksik Dosya', description: 'Lütfen .txt veya .pdf dosyası seçin.', variant: 'destructive' });
+      return;
+    }
+
+    setAiDocUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', aiDocFile);
+      const res = await fetch('/api/ariza-yonetimi/ai-dokumanlar', {
+        method: 'POST',
+        body: form,
+      });
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || 'Doküman yüklenemedi.');
+      }
+      toast({ title: 'Başarılı', description: 'AI dokümanı yüklendi.' });
+      setAiDocFile(null);
+      await fetchAiDocs();
+    } catch (error: any) {
+      toast({ title: 'Hata', description: error?.message || 'Doküman yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setAiDocUploading(false);
+    }
+  }, [aiDocFile, fetchAiDocs, toast]);
+
+  const handleDeleteAiDoc = useCallback(async (id: string) => {
+    setDeletingDocId(id);
+    try {
+      const res = await fetch(`/api/ariza-yonetimi/ai-dokumanlar?id=${id}`, {
+        method: 'DELETE',
+      });
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || 'Doküman silinemedi.');
+      }
+      toast({ title: 'Başarılı', description: 'Doküman silindi.' });
+      await fetchAiDocs();
+    } catch (error: any) {
+      toast({ title: 'Hata', description: error?.message || 'Doküman silinemedi.', variant: 'destructive' });
+    } finally {
+      setDeletingDocId(null);
+    }
+  }, [fetchAiDocs, toast]);
+
   const handleExportToPdf = async () => {
     if (reports.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
@@ -320,6 +406,54 @@ export default function ArizaYonetimiPage() {
     <PageShell>
       <div className="device-module-page space-y-4">
         <BackButton fallback="/cihaz-yonetimi-ana" />
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">AI Öneri Bilgi Dokümanları</CardTitle>
+            <CardDescription>
+              AI öneri motoru bu panelden yüklenen dokümanları global bağlam olarak kullanır. Arıza ID ekranında tekrar yükleme gerekmez.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                type="file"
+                accept=".txt,.pdf,text/plain,application/pdf"
+                onChange={(e) => setAiDocFile(e.target.files?.[0] || null)}
+              />
+              <Button onClick={handleUploadAiDoc} disabled={aiDocUploading || !aiDocFile}>
+                {aiDocUploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                Doküman Yükle
+              </Button>
+            </div>
+
+            {aiDocsLoading ? (
+              <div className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Dokümanlar yükleniyor...
+              </div>
+            ) : aiDocs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Henüz AI dokümanı yüklenmedi.</p>
+            ) : (
+              <div className="space-y-2">
+                {aiDocs.map((doc) => (
+                  <div key={doc.id} className="flex items-center justify-between rounded-md border p-2 text-sm">
+                    <div>
+                      <p className="font-medium">{doc.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {doc.type.toUpperCase()} • {doc.charCount.toLocaleString('tr-TR')} karakter
+                        {doc.updatedAt ? ` • ${format(new Date(doc.updatedAt), 'dd.MM.yyyy HH:mm', { locale: tr })}` : ''}
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => handleDeleteAiDoc(doc.id)} disabled={deletingDocId === doc.id}>
+                      {deletingDocId === doc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
