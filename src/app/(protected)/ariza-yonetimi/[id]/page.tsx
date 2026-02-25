@@ -16,6 +16,7 @@ import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, 
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
@@ -835,7 +836,7 @@ export default function FaultDetailPage() {
 
     if (device?.imageUrl) {
         try {
-            const response = await fetch(`/${device.imageUrl}`);
+            const response = await fetch(resolveImageSrc(device.imageUrl));
             const blob = await response.blob();
             const reader = new FileReader();
             reader.readAsDataURL(blob);
@@ -979,7 +980,7 @@ export default function FaultDetailPage() {
               {device?.imageUrl && (
                 <div className="w-24 h-24 flex-shrink-0 bg-muted rounded-lg p-1">
                   <Image
-                    src={`/${device.imageUrl}`}
+                    src={resolveImageSrc(device.imageUrl)}
                     alt={device.model || ''}
                     width={96}
                     height={96}

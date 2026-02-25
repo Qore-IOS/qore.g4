@@ -28,6 +28,7 @@ import { Package, ArrowLeftRight, Warehouse } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -617,7 +618,7 @@ export default function TeknikServisDetayPage() {
                             <div className="relative w-full aspect-square">
                               {device.imageUrl ? (
                                 <Image
-                                  src={`/${device.imageUrl}`}
+                                  src={resolveImageSrc(device.imageUrl)}
                                   alt={device.cihazAdi || device.model || ''}
                                   width={1024}
                                   height={1024}
