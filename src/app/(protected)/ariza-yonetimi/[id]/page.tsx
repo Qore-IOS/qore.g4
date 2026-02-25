@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Sparkles, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Sparkles } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -200,8 +200,6 @@ export default function FaultDetailPage() {
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [aiDocFile, setAiDocFile] = useState<File | null>(null);
-  const [isUploadingAiDoc, setIsUploadingAiDoc] = useState(false);
 
 
   useEffect(() => {
@@ -796,34 +794,7 @@ export default function FaultDetailPage() {
     fetchAiSuggestion();
   }, [fault?.id, fetchAiSuggestion]);
 
-  const handleUploadAiDoc = useCallback(async () => {
-    if (!aiDocFile) {
-      toast({ title: 'Eksik Dosya', description: 'Lütfen .txt veya .pdf dosyası seçin.', variant: 'destructive' });
-      return;
-    }
 
-    setIsUploadingAiDoc(true);
-    try {
-      const form = new FormData();
-      form.append('file', aiDocFile);
-      const res = await fetch('/api/ariza-yonetimi/ai-dokumanlar', {
-        method: 'POST',
-        body: form,
-      });
-      const payload = await res.json();
-      if (!res.ok || !payload?.success) {
-        throw new Error(payload?.error || 'Doküman yüklenemedi.');
-      }
-
-      toast({ title: 'Başarılı', description: 'AI dokümanı yüklendi. Öneri yeniden üretilecek.' });
-      setAiDocFile(null);
-      await fetchAiSuggestion(true);
-    } catch (e: any) {
-      toast({ title: 'Hata', description: e?.message || 'Doküman yüklenemedi.', variant: 'destructive' });
-    } finally {
-      setIsUploadingAiDoc(false);
-    }
-  }, [aiDocFile, fetchAiSuggestion, toast]);
 
   const handleShare = async () => {
     if (!fault) return;
@@ -1065,22 +1036,6 @@ export default function FaultDetailPage() {
               <Button variant="outline" size="sm" onClick={() => fetchAiSuggestion(true)} disabled={isAiLoading}>
                 {isAiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yenile'}
               </Button>
-            </div>
-
-            <div className="rounded-md border p-3 space-y-2">
-              <p className="text-xs text-muted-foreground">NotebookLM benzeri bilgi bağlamı için .txt/.pdf dokümanı yükleyebilirsiniz. Yüklenen doküman AI öneri promptuna dahil edilir.</p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Input
-                  type="file"
-                  accept=".txt,.pdf,text/plain,application/pdf"
-                  onChange={(e) => setAiDocFile(e.target.files?.[0] || null)}
-                  className="text-sm"
-                />
-                <Button variant="secondary" onClick={handleUploadAiDoc} disabled={isUploadingAiDoc || !aiDocFile}>
-                  {isUploadingAiDoc ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
-                  Dokümanı Yükle
-                </Button>
-              </div>
             </div>
 
             {isAiLoading && (
