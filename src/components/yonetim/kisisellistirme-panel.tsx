@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/auth-context';
 import BackButton from '@/components/BackButton';
 import { cn } from '@/lib/utils';
 import NextImage from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 
 const PUBLIC_IMAGES = [
   '234724.png', '235016.png', '236209.png', '236609.png',
@@ -212,7 +213,7 @@ export default function KisisellistirmePanel() {
                   )}
                 >
                   <NextImage
-                    src={`/${img}`}
+                    src={resolveImageSrc(img)}
                     alt={img}
                     fill
                     className="object-cover"
@@ -257,7 +258,7 @@ export default function KisisellistirmePanel() {
                   )}
                 >
                   <NextImage
-                    src={`/${img}`}
+                    src={resolveImageSrc(img)}
                     alt={img}
                     fill
                     className="object-cover"

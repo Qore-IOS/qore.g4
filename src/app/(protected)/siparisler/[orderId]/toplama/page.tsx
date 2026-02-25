@@ -37,6 +37,7 @@ import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 
 import { Loader2, Truck, Trash2, ChevronLeft, CheckCircle2, AlertTriangle, Package, ScanBarcode, ChevronDown, ChevronUp, MoreHorizontal, XCircle } from 'lucide-react';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { maybeAutoPrintTutanak } from '@/lib/tutanak-autoprint';
 import { formatMiad, toDateFromAny } from '@/lib/date';
@@ -97,7 +98,7 @@ const SimpleProductThumb: React.FC<{ src?: string | null; alt: string; size?: nu
   size = 40,
   className,
 }) => {
-  const safeSrc = src ? (src.startsWith('/') ? src : `/${src}`) : '/images/placeholders/product.png';
+  const safeSrc = resolveImageSrc(src, '/lab_diorama.png');
   return (
     <div className={cn('relative rounded-md overflow-hidden', className)} style={{ width: size, height: size }}>
       <Image

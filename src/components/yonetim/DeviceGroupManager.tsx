@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { getDeviceImages } from '@/actions/stokActions';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface DeviceGroup {
@@ -118,7 +119,7 @@ export default function DeviceGroupManager() {
                 items.map(item => (
                 <div key={item.id} className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
                     <div className="flex items-center gap-2">
-                        {item.imageUrl && <Image src={`/${item.imageUrl}`} alt={item.name} width={24} height={24} className="rounded-sm object-contain" />}
+                        {item.imageUrl && <Image src={resolveImageSrc(item.imageUrl)} alt={item.name} width={24} height={24} className="rounded-sm object-contain" />}
                         <span className="text-sm">{item.name}</span>
                     </div>
                     <div className="flex items-center">
@@ -159,7 +160,7 @@ export default function DeviceGroupManager() {
                   {availableImages.map(img => (
                     <SelectItem key={img} value={img}>
                       <div className="flex items-center gap-2">
-                        <Image src={`/${img}`} alt={img} width={20} height={20} className="object-contain" />
+                        <Image src={resolveImageSrc(img)} alt={img} width={20} height={20} className="object-contain" />
                         <span>{img}</span>
                       </div>
                     </SelectItem>
@@ -169,7 +170,7 @@ export default function DeviceGroupManager() {
             </div>
             {currentItem.imageUrl && (
               <div className="flex justify-center p-2 border rounded-md bg-muted">
-                <Image src={`/${currentItem.imageUrl}`} alt="Önizleme" width={100} height={100} className="object-contain"/>
+                <Image src={resolveImageSrc(currentItem.imageUrl)} alt="Önizleme" width={100} height={100} className="object-contain"/>
               </div>
             )}
           </div>
