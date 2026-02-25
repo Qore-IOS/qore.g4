@@ -1,4 +1,4 @@
-import { anthropic, CLAUDE_MODEL } from './config';
+import { generateWithGemini } from './geminiClient';
 
 // Data query types that can be requested
 export type QueryType =
@@ -60,27 +60,18 @@ SADECE aşağıdaki JSON formatında cevap ver, başka hiçbir açıklama ekleme
 
 export async function planQueries(userQuestion: string): Promise<QueryPlan> {
   try {
-    const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 1024,
-      temperature: 0, // Deterministik sonuç için
+    const response = await generateWithGemini({
+      temperature: 0,
+      maxOutputTokens: 1024,
       messages: [
         {
           role: 'user',
-          content: `${QUERY_PLANNER_PROMPT}
-
-Kullanıcı sorusu: "${userQuestion}"`,
+          content: `${QUERY_PLANNER_PROMPT}\n\nKullanıcı sorusu: "${userQuestion}"`,
         },
       ],
     });
 
-    // Extract text from response
-    const textContent = response.content.find((block) => block.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      throw new Error('No text response from Claude');
-    }
-
-    const text = textContent.text;
+    const text = response.text;
 
     // Parse JSON - Claude genellikle temiz JSON döner
     const jsonMatch = text.match(/\{[\s\S]*\}/);
