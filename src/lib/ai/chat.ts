@@ -125,15 +125,118 @@ ${smartResult.dataQuality.warnings.length > 0 ? `- Uyarilar: ${smartResult.dataQ
 Yukaridaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri KESINLIKLE uydurma.`;
 }
 
+function looksLikeFollowUp(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return [
+    'tüm laboratuvarlar',
+    'tum laboratuvarlar',
+    'hepsi',
+    'tamami',
+    'devam et',
+    'detay',
+    'hepsi için',
+    'hepsi icin',
+  ].includes(normalized) || normalized.length <= 20;
+}
+
+function withFollowUpContext(userMessage: string, conversationHistory: ChatMessage[]): string {
+  if (!looksLikeFollowUp(userMessage)) return userMessage;
+
+  const previousUser = [...conversationHistory]
+    .reverse()
+    .find((m) => m.role === 'user' && m.content.trim().length > 0);
+
+  if (!previousUser) return userMessage;
+  return `${previousUser.content}
+Takip cevabi: ${userMessage}`;
+}
+
+function extractRequestedLabLabel(query: string): string | null {
+  const match = query.match(/(?:line|lab|laboratuvar)\s*(\d{1,2})/i);
+  if (!match) return null;
+  return `LINE ${match[1]}`;
+}
+
+function buildDeterministicAnswer(userMessage: string, smartResult: SmartQueryResult): string | null {
+  const query = userMessage.toLowerCase();
+  const data = smartResult.data as Record<string, unknown>;
+
+  if ((query.includes('kac') || query.includes('kaç')) && query.includes('urun') && data.stock_by_hospital) {
+    const stockData = data.stock_by_hospital as { totalItems?: number; hospitalName?: string };
+    if (typeof stockData.totalItems === 'number') {
+      const requestedLab = extractRequestedLabLabel(userMessage);
+      const label = requestedLab || stockData.hospitalName || 'İlgili laboratuvar';
+      return `${label} için sistemde toplam **${stockData.totalItems} adet** ürün kaydı bulunuyor.`;
+    }
+  }
+
+  if ((query.includes('en cok ariza') || query.includes('en çok arıza') || query.includes('ariza veren cihaz')) && data.device_faults) {
+    const faultData = data.device_faults as { byModel?: Record<string, number>; faults?: Array<{ hospital?: string; brand?: string; model?: string; serial?: string; description?: string; closeDescription?: string }> };
+    const byModel = faultData.byModel || {};
+    const sorted = Object.entries(byModel).sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0) {
+      const [model, count] = sorted[0];
+      const related = (faultData.faults || []).filter((f) => (f.model || '-') === model).slice(0, 3);
+      const lines = [`En çok arıza kaydı bulunan cihaz modeli: **${model}** (**${count} kayıt**).`];
+      if (related.length > 0) {
+        lines.push('Örnek arıza detayları:');
+        for (const f of related) {
+          lines.push(`- ${f.hospital || '-'} | ${f.brand ? `${f.brand} / ` : ''}${f.model || '-'} (${f.serial || '-'})`);
+          lines.push(`  - Açılış: ${f.description || '-'}`);
+          if (f.closeDescription) lines.push(`  - Kapanış: ${f.closeDescription}`);
+        }
+      }
+      return lines.join('\n');
+    }
+  }
+
+  if ((query.includes('tsh') || query.includes('kit')) && (query.includes('hangi laboratuvar') || query.includes('hangi lab') || query.includes('en cok') || query.includes('en çok')) && data.all_hospitals_stock) {
+    const all = data.all_hospitals_stock as { hospitals?: Array<{ name: string; count: number; products: Record<string, number> }> };
+    const product = smartResult.queryPlan.intent.entities.products[0];
+    if (!product || !all.hospitals?.length) return null;
+
+    const ranking = all.hospitals
+      .map((h) => ({ name: h.name, amount: h.products?.[product.id] || 0 }))
+      .filter((h) => h.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10);
+
+    if (ranking.length === 0) {
+      return `Sistemde **${product.name}** için laboratuvar bazında stok kaydı bulunamadı.`;
+    }
+
+    const top = ranking[0];
+    return [
+      `En yüksek **${product.name}** stoğu: **${top.name}** (**${top.amount} adet**).`,
+      'İlk laboratuvarlar:',
+      ...ranking.slice(0, 5).map((r, i) => `${i + 1}. ${r.name}: ${r.amount} adet`),
+    ].join('\n');
+  }
+
+  return null;
+}
+
+
 export async function smartChat(
   userMessage: string,
   conversationHistory: ChatMessage[] = []
 ): Promise<ChatResponse> {
   try {
-    aiLogger.info('Processing smart chat', { message: userMessage.substring(0, 100) });
-    const smartResult = await executeSmartQuery(userMessage);
+    const effectiveMessage = withFollowUpContext(userMessage, conversationHistory);
+    aiLogger.info('Processing smart chat', { message: effectiveMessage.substring(0, 100) });
+    const smartResult = await executeSmartQuery(effectiveMessage);
 
-    const contextualPrompt = buildContextualPrompt(userMessage, smartResult);
+    const deterministic = buildDeterministicAnswer(effectiveMessage, smartResult);
+    if (deterministic) {
+      return {
+        message: deterministic,
+        queryPlan: smartResult.queryPlan,
+        fetchedData: { summary: smartResult.summary },
+        smartQueryResult: smartResult,
+      };
+    }
+
+    const contextualPrompt = buildContextualPrompt(effectiveMessage, smartResult);
     const messages: ChatMessage[] = [
       ...conversationHistory,
       { role: 'user', content: contextualPrompt },
