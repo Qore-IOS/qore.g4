@@ -9,7 +9,6 @@
  */
 
 import { adminDb } from '@/lib/firebase-admin';
-import { anthropic, CLAUDE_MODEL } from './config';
 import { resolveEntities, extractQueryIntent, type ExtractedQueryIntent } from './entityResolver';
 import { QueryType, type QueryPlan } from './queryPlanner';
 import { aiLogger } from '@/lib/logger';
