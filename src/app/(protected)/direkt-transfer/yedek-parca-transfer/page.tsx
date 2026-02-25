@@ -19,15 +19,7 @@ import {
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import {
   Loader2,
   Package,
@@ -37,7 +29,6 @@ import {
   Send,
   CheckCircle,
   Clock,
-  ArrowLeftRight,
   History,
   ImageIcon,
   HandCoins,
@@ -50,18 +41,16 @@ import {
   PackageOpen,
   ChevronDown,
   ChevronUp,
-  Info,
   Hash,
   List,
   ChevronLeft,
   Pencil,
   Menu,
+  X,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import BackButton from '@/components/BackButton';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -1229,798 +1218,415 @@ export default function YedekParcaTransferPage() {
     return transferLogs.filter((log) => log.action === historyActionFilter);
   }, [historyActionFilter, transferLogs]);
 
+  // Transfer panel tab state
+  const [transferTab, setTransferTab] = useState<'transfer' | 'borrowed' | 'pending' | 'history'>('transfer');
+
   // ========== RENDER: Transfer Panel (Right Side Default) ==========
   const renderTransferPanel = () => (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Send className="h-5 w-5" />
-          Yedek Parça Transfer Paneli
-        </CardTitle>
-        <CardDescription>
-          Yedek parçaları personel şahsi stoklarına transfer edin. Sadece depoda mevcut ürünler listelenir.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Tabs defaultValue="transfer">
-          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
-            <TabsTrigger value="transfer" className="text-xs sm:text-sm">
-              <Send className="h-4 w-4 mr-2" />
-              Transfer
-            </TabsTrigger>
-            <TabsTrigger value="borrowed" className="text-xs sm:text-sm">
-              <HandCoins className="h-4 w-4 mr-2" />
-              <span className="sm:hidden">Borç ({borrowedParts.length})</span>
-              <span className="hidden sm:inline">Borç Alınan ({borrowedParts.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="pending" className="text-xs sm:text-sm">
-              <Clock className="h-4 w-4 mr-2" />
-              <span className="sm:hidden">İade ({pendingReturns.length})</span>
-              <span className="hidden sm:inline">İade Bekleyen ({pendingReturns.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="history" className="text-xs sm:text-sm">
-              <History className="h-4 w-4 mr-2" />
-              Geçmiş
-            </TabsTrigger>
-          </TabsList>
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="cihaz-card-strong p-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,.12)' }}>
+            <Send className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>Transfer Paneli</h2>
+            <p className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>Depodaki ürünleri personele transfer edin.</p>
+          </div>
+        </div>
+      </div>
 
-          {/* Transfer Tab */}
-          <TabsContent value="transfer" className="space-y-4 mt-4">
-            {/* Add new transfer row */}
-            <div className="p-4 border rounded-lg bg-muted/30 space-y-4">
-              <Label className="font-semibold">Yeni Transfer Ekle</Label>
+      {/* Tab switcher */}
+      <div className="cihaz-pressed inline-flex p-1 gap-0.5 flex-wrap" style={{ borderRadius: 14 }}>
+        {([
+          { key: 'transfer' as const, label: 'Transfer', icon: <Send className="w-3 h-3" /> },
+          { key: 'borrowed' as const, label: `Borç (${borrowedParts.length})`, icon: <HandCoins className="w-3 h-3" /> },
+          { key: 'pending' as const, label: `İade (${pendingReturns.length})`, icon: <Clock className="w-3 h-3" /> },
+          { key: 'history' as const, label: 'Geçmiş', icon: <History className="w-3 h-3" /> },
+        ]).map(tab => {
+          const isActive = transferTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setTransferTab(tab.key)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all"
+              style={{
+                background: isActive ? 'var(--dashboard-surface)' : 'transparent',
+                color: isActive ? 'var(--dashboard-text)' : 'var(--dashboard-muted)',
+                boxShadow: isActive ? 'var(--dashboard-raised-soft)' : 'none',
+              }}
+            >
+              {tab.icon} {tab.label}
+            </button>
+          );
+        })}
+      </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Product selector - from depot stock */}
-                <div className="space-y-2">
-                  <Label>Yedek Parça (Depodaki Ürünler)</Label>
-                  <Popover open={productSearchOpen} onOpenChange={setProductSearchOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        className="w-full justify-between"
-                      >
-                        {selectedProduct
-                          ? `${selectedProduct.stokKodu} - ${selectedProduct.stokAdi?.substring(0, 15)}... (${selectedProduct.totalQuantity})`
-                          : 'Depodaki ürünlerden seçin...'}
-                        <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[450px] p-0">
-                      <Command>
-                        <CommandInput
-                          placeholder="Kod veya isim ile ara..."
-                          value={productSearchQuery}
-                          onValueChange={setProductSearchQuery}
-                        />
-                        <CommandList>
-                          <CommandEmpty>Depoda eşleşen ürün bulunamadı.</CommandEmpty>
-                          <CommandGroup>
-                            {filteredProducts.map((product) => (
-                              <CommandItem
-                                key={product.stokKodu}
-                                value={`${product.stokKodu} ${product.stokAdi}`}
-                                onSelect={() => {
-                                  setSelectedStokKodu(product.stokKodu);
-                                  setProductSearchOpen(false);
-                                  setSerialNumber('');
-                                  setTransferQuantity(1);
-                                }}
-                              >
-                                <div className="flex flex-col flex-1">
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-medium">{product.stokKodu}</span>
-                                    <Badge variant="secondary" className="text-xs ml-2">
-                                      {product.totalQuantity} adet
-                                    </Badge>
-                                  </div>
-                                  <span className="text-sm text-muted-foreground truncate">
-                                    {product.stokAdi}
-                                  </span>
-                                  {product.cihazGrubu && (
-                                    <span className="text-xs text-blue-500">
-                                      {product.cihazGrubu}
-                                    </span>
-                                  )}
-                                  {product.serialNumbers.length > 0 && (
-                                    <span className="text-xs text-muted-foreground">
-                                      {product.serialNumbers.length} adet seri numaralı
-                                    </span>
-                                  )}
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-
-                  {selectedProduct?.cihazGrubu && (
-                    <div className="flex items-center gap-1 text-xs text-blue-600">
-                      <Info className="h-3 w-3" />
-                      {selectedProduct.cihazGrubu}
-                    </div>
-                  )}
-                </div>
-
-                {/* User selector */}
-                <div className="space-y-2">
-                  <Label>Hedef Personel</Label>
-                  <Popover open={userSearchOpen} onOpenChange={setUserSearchOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        className="w-full justify-between"
-                      >
-                        {selectedUser ? selectedUser.name : 'Personel seçin...'}
-                        <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[300px] p-0">
-                      <Command>
-                        <CommandInput
-                          placeholder="İsim ile ara..."
-                          value={userSearchQuery}
-                          onValueChange={setUserSearchQuery}
-                        />
-                        <CommandList>
-                          <CommandEmpty>Personel bulunamadı.</CommandEmpty>
-                          <CommandGroup>
-                            {filteredUsers.map((user) => (
-                              <CommandItem
-                                key={user.uid}
-                                value={`${user.name} ${user.email}`}
-                                onSelect={() => {
-                                  setSelectedUserId(user.uid || '');
-                                  setUserSearchOpen(false);
-                                }}
-                              >
-                                <div className="flex flex-col">
-                                  <span className="font-medium">{user.name}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {user.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
-                                  </span>
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
+      {/* ── Transfer tab ── */}
+      {transferTab === 'transfer' && (
+        <div className="space-y-3">
+          {/* Add form */}
+          <div className="cihaz-card p-4 space-y-3">
+            <p className="cihaz-section-label">Yeni Transfer</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Product selector */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Yedek Parça *</label>
+                <Popover open={productSearchOpen} onOpenChange={setProductSearchOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="cihaz-pressed w-full flex items-center justify-between px-3 py-2.5 text-xs text-left" style={{ borderRadius: 12, color: selectedProduct ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>
+                      <span className="truncate">{selectedProduct ? `${selectedProduct.stokKodu} — ${selectedProduct.stokAdi?.substring(0, 20)} (${selectedProduct.totalQuantity})` : 'Depodaki ürünlerden seçin…'}</span>
+                      <Search className="w-3.5 h-3.5 flex-shrink-0 ml-2 opacity-50" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0">
+                    <Command>
+                      <CommandInput placeholder="Kod veya isim ile ara…" value={productSearchQuery} onValueChange={setProductSearchQuery} />
+                      <CommandList>
+                        <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                        <CommandGroup>
+                          {filteredProducts.map(product => (
+                            <CommandItem key={product.stokKodu} value={`${product.stokKodu} ${product.stokAdi}`} onSelect={() => { setSelectedStokKodu(product.stokKodu); setProductSearchOpen(false); setSerialNumber(''); setTransferQuantity(1); }}>
+                              <div className="flex flex-col flex-1">
+                                <div className="flex items-center justify-between"><span className="font-mono font-medium text-sm">{product.stokKodu}</span><span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'rgba(107,114,128,.10)', color: 'var(--dashboard-muted)' }}>{product.totalQuantity} ad</span></div>
+                                <span className="text-xs text-muted-foreground truncate">{product.stokAdi}</span>
+                                {product.cihazGrubu && <span className="text-[10px]" style={{ color: 'var(--dashboard-accent)' }}>{product.cihazGrubu}</span>}
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {selectedProduct?.cihazGrubu && <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-accent)' }}>{selectedProduct.cihazGrubu}</p>}
               </div>
 
-              {/* Serial Number / Quantity row */}
-              {selectedProduct && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Serial number input */}
-                  <div className="space-y-2">
-                    <Label>Seri Numarası (Opsiyonel)</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Seri numarası girin"
-                        value={serialNumber}
-                        onChange={(e) => handleTransferSerialChange(e.target.value)}
-                        className="flex-1"
-                      />
-                      {selectedProduct.serialNumbers.length > 0 && (
-                        <Popover open={serialSelectOpen} onOpenChange={setSerialSelectOpen}>
-                          <PopoverTrigger asChild>
-                            <Button variant="outline" size="sm" className="shrink-0">
-                              <List className="h-4 w-4 mr-1" />
-                              Depodan Seç ({selectedProduct.serialNumbers.length})
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[350px] p-0">
-                            <Command>
-                              <CommandInput placeholder="Seri numarası ara..." />
-                              <CommandList>
-                                <CommandEmpty>Seri numarası bulunamadı.</CommandEmpty>
-                                <CommandGroup heading={`${selectedProduct.stokKodu} Seri Numaraları`}>
-                                  {selectedProduct.serialNumbers
-                                    .filter(sn => !transferRows.some(r => r.serialNumber === sn.serialNumber))
-                                    .map((sn) => (
-                                      <CommandItem
-                                        key={sn.id}
-                                        value={sn.serialNumber}
-                                        onSelect={() => {
-                                          setSerialNumber(sn.serialNumber);
-                                          setTransferQuantity(1);
-                                          setSerialSelectOpen(false);
-                                        }}
-                                      >
-                                        <div className="flex flex-col">
-                                          <span className="font-mono font-medium">{sn.serialNumber}</span>
-                                          <span className="text-xs text-muted-foreground">
-                                            Eklenme: {format(sn.createdAt, 'dd.MM.yyyy', { locale: tr })}
-                                          </span>
-                                        </div>
-                                      </CommandItem>
-                                    ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Quantity input */}
-                  <div className="space-y-2">
-                    <Label>Adet</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={selectedProduct.totalQuantity}
-                      value={serialNumber.trim() ? 1 : transferQuantity}
-                      onChange={(e) => setTransferQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                      disabled={!!serialNumber.trim()}
-                    />
-                    {serialNumber.trim() && (
-                      <p className="text-xs text-muted-foreground">Seri numaralı transferde adet 1 olmalıdır.</p>
-                    )}
-                    {!serialNumber.trim() && (
-                      <p className="text-xs text-muted-foreground">Depoda mevcut: {selectedProduct.totalQuantity}</p>
-                    )}
-                  </div>
-
-                  {/* Add button */}
-                  <div className="flex items-end">
-                    <Button
-                      onClick={addTransferRow}
-                      disabled={!selectedStokKodu || !selectedUserId}
-                      className="w-full"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Satır Ekle
-                    </Button>
-                  </div>
-                </div>
-              )}
+              {/* User selector */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Hedef Personel *</label>
+                <Popover open={userSearchOpen} onOpenChange={setUserSearchOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="cihaz-pressed w-full flex items-center justify-between px-3 py-2.5 text-xs text-left" style={{ borderRadius: 12, color: selectedUser ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>
+                      <span className="truncate">{selectedUser ? selectedUser.name : 'Personel seçin…'}</span>
+                      <Search className="w-3.5 h-3.5 flex-shrink-0 ml-2 opacity-50" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[300px] p-0">
+                    <Command>
+                      <CommandInput placeholder="İsim ile ara…" value={userSearchQuery} onValueChange={setUserSearchQuery} />
+                      <CommandList>
+                        <CommandEmpty>Personel bulunamadı.</CommandEmpty>
+                        <CommandGroup>
+                          {filteredUsers.map(user => (
+                            <CommandItem key={user.uid} value={`${user.name} ${user.email}`} onSelect={() => { setSelectedUserId(user.uid || ''); setUserSearchOpen(false); }}>
+                              <div className="flex flex-col"><span className="font-medium text-sm">{user.name}</span><span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{user.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}</span></div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
 
-            {/* Transfer list */}
-            {transferRows.length > 0 && (
-              <div className="border rounded-lg">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ürün Kodu</TableHead>
-                      <TableHead>Ürün Adı</TableHead>
-                      <TableHead>Cihaz Grubu</TableHead>
-                      <TableHead>Seri No</TableHead>
-                      <TableHead>Adet</TableHead>
-                      <TableHead>Hedef Personel</TableHead>
-                      <TableHead className="w-12"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {transferRows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="font-mono">{row.stokKodu}</TableCell>
-                        <TableCell>{row.stokAdi}</TableCell>
-                        <TableCell>
-                          {row.cihazGrubu ? (
-                            <Badge variant="outline" className="text-xs">{row.cihazGrubu}</Badge>
-                          ) : '-'}
-                        </TableCell>
-                        <TableCell className="font-mono">{row.serialNumber || '-'}</TableCell>
-                        <TableCell className="font-mono">{row.quantity}</TableCell>
-                        <TableCell>{row.targetName}</TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeTransferRow(row.id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-
-                <div className="p-4 border-t flex justify-between items-center">
-                  <div className="text-sm text-muted-foreground">
-                    <span>{transferRows.length} satır, toplam <strong>{transferRows.reduce((s, r) => s + r.quantity, 0)}</strong> adet transfer edilecek</span>
-                  </div>
-                  <Button
-                    onClick={executeTransfer}
-                    disabled={isTransferring}
-                  >
-                    {isTransferring ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4 mr-2" />
+            {/* Serial + Qty + Add */}
+            {selectedProduct && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</label>
+                  <div className="flex gap-1.5">
+                    <Input placeholder="Seri numarası" value={serialNumber} onChange={(e) => handleTransferSerialChange(e.target.value)} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs flex-1" style={{ borderRadius: 10 }} />
+                    {selectedProduct.serialNumbers.length > 0 && (
+                      <Popover open={serialSelectOpen} onOpenChange={setSerialSelectOpen}>
+                        <PopoverTrigger asChild>
+                          <button className="cihaz-tool-item px-2 py-1 text-[10px] font-medium flex-shrink-0" style={{ color: 'var(--dashboard-text)' }}>
+                            <List className="w-3 h-3 inline mr-0.5" /> {selectedProduct.serialNumbers.length}
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[320px] p-0">
+                          <Command>
+                            <CommandInput placeholder="Seri no ara…" />
+                            <CommandList>
+                              <CommandEmpty>Bulunamadı.</CommandEmpty>
+                              <CommandGroup heading={`${selectedProduct.stokKodu}`}>
+                                {selectedProduct.serialNumbers.filter(sn => !transferRows.some(r => r.serialNumber === sn.serialNumber)).map(sn => (
+                                  <CommandItem key={sn.id} value={sn.serialNumber} onSelect={() => { setSerialNumber(sn.serialNumber); setTransferQuantity(1); setSerialSelectOpen(false); }}>
+                                    <div className="flex flex-col"><span className="font-mono font-medium text-xs">{sn.serialNumber}</span><span className="text-[10px] text-muted-foreground">{format(sn.createdAt, 'dd.MM.yyyy', { locale: tr })}</span></div>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
                     )}
-                    Transfer Et
-                  </Button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Adet</label>
+                  <Input type="number" min={1} max={selectedProduct.totalQuantity} value={serialNumber.trim() ? 1 : transferQuantity} onChange={(e) => setTransferQuantity(Math.max(1, parseInt(e.target.value) || 1))} disabled={!!serialNumber.trim()} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs" style={{ borderRadius: 10 }} />
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{serialNumber.trim() ? 'Seri no → adet 1' : `Depoda: ${selectedProduct.totalQuantity}`}</p>
+                </div>
+                <div className="flex items-end">
+                  <button onClick={addTransferRow} disabled={!selectedStokKodu || !selectedUserId} className="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all disabled:opacity-40" style={{ background: 'var(--dashboard-accent)' }}>
+                    <Plus className="w-3.5 h-3.5" /> Sepete Ekle
+                  </button>
                 </div>
               </div>
             )}
+          </div>
 
-            {transferRows.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                <ArrowLeftRight className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>Henüz transfer edilecek ürün eklenmedi.</p>
-                <p className="text-sm">Yukarıdaki formu kullanarak depodaki ürünlerden seçim yapın.</p>
+          {/* Transfer basket */}
+          {transferRows.length > 0 ? (
+            <div className="cihaz-card-strong overflow-hidden">
+              <div className="p-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+                <p className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>Transfer Sepeti</p>
+                <span className="cihaz-pressed px-2 py-0.5 text-[10px] font-semibold" style={{ borderRadius: 8, color: 'var(--dashboard-text)' }}>{transferRows.length} satır · {transferRows.reduce((s, r) => s + r.quantity, 0)} adet</span>
               </div>
-            )}
-          </TabsContent>
-
-          {/* Borrowed Parts Tab */}
-          <TabsContent value="borrowed" className="mt-4">
-            {borrowedParts.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <HandCoins className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>Onay bekleyen borç alınmış parça bulunmuyor.</p>
-              </div>
-            ) : (
-              <div className="border rounded-lg">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ürün</TableHead>
-                      <TableHead>Seri No</TableHead>
-                      <TableHead>Cihaz / Lab</TableHead>
-                      <TableHead>Kullanan</TableHead>
-                      <TableHead>Tarih</TableHead>
-                      <TableHead className="w-48"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {borrowedParts.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{item.stokAdi}</p>
-                            <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono">{item.serialNumber || '-'}</TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="text-sm">{item.deviceName}</p>
-                            <p className="text-xs text-muted-foreground">{item.labName}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="text-sm">{item.borrowedByName}</p>
-                            <Badge variant="outline" className="text-xs">
-                              {item.formType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
-                            </Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {format(item.borrowedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() => approveBorrowedPart(item)}
-                              className="bg-green-600 hover:bg-green-700"
-                            >
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              Onayla
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => rejectBorrowedPart(item)}
-                            >
-                              <XCircle className="h-4 w-4 mr-1" />
-                              Reddet
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </TabsContent>
-
-          {/* Pending Returns Tab */}
-          <TabsContent value="pending" className="mt-4">
-            {pendingReturns.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <CheckCircle className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>Bekleyen iade bulunmuyor.</p>
-              </div>
-            ) : (
-              <div className="border rounded-lg">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ürün</TableHead>
-                      <TableHead>Seri No</TableHead>
-                      <TableHead>Personel</TableHead>
-                      <TableHead>Tür</TableHead>
-                      <TableHead>Tarih</TableHead>
-                      <TableHead className="w-40"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pendingReturns.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{item.stokAdi}</p>
-                            <p className="text-xs text-muted-foreground">{item.stokKodu}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono">{item.serialNumber || '-'}</TableCell>
-                        <TableCell>{item.ownerName}</TableCell>
-                        <TableCell>
-                          <Badge variant={item.returnType === 'return_to_depot' ? 'secondary' : 'outline'}>
-                            {item.returnType === 'return_to_depot' ? 'İade (Yeni)' : 'Teslim (Çıkma)'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {item.imageUrl && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setPreviewImage(item.imageUrl!)}
-                              >
-                                <ImageIcon className="h-4 w-4" />
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              onClick={() => confirmPendingReturn(item)}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              Teslim Al
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </TabsContent>
-
-          {/* History Tab */}
-          <TabsContent value="history" className="mt-4">
-            {transferLogs.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <History className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>Henüz işlem geçmişi bulunmuyor.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="history-action-filter" className="text-sm">İşlem Türü</Label>
-                    <select
-                      id="history-action-filter"
-                      className="h-9 rounded-md border bg-background px-3 text-sm"
-                      value={historyActionFilter}
-                      onChange={(e) => setHistoryActionFilter(e.target.value)}
-                    >
-                      <option value="all">Tümü</option>
-                      <option value="transfer_to_personnel">Personele Transfer</option>
-                      <option value="transfer_between_personnel">Personelden Personele Devir</option>
-                      <option value="return_confirmed">İade Teslim Alındı</option>
-                      <option value="submit_confirmed">Teslim Alındı</option>
-                      <option value="use_on_device">Cihazda Kullanıldı</option>
-                      <option value="borrowed_part">Borç Parça Kullanıldı</option>
-                      <option value="borrowed_approved">Borç Onaylandı</option>
-                      <option value="borrowed_rejected">Borç Reddedildi</option>
-                      <option value="depo_stock_adjusted">Depo Stok Güncellendi</option>
-                      <option value="depo_serial_deleted">Depo Seri No Silindi</option>
-                    </select>
+              <div className="divide-y" style={{ borderColor: 'var(--dashboard-stroke)' }}>
+                {transferRows.map(row => (
+                  <div key={row.id} className="flex items-center gap-3 px-3 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>{row.stokAdi}</p>
+                      <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{row.stokKodu} {row.serialNumber ? `· SN: ${row.serialNumber}` : ''}</p>
+                    </div>
+                    <span className="text-xs font-bold" style={{ color: 'var(--dashboard-text)' }}>x{row.quantity}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>→ {row.targetName}</span>
+                    <button onClick={() => removeTransferRow(row.id)} className="p-1 rounded-lg hover:bg-black/5"><Trash2 className="w-3 h-3" style={{ color: '#B91C1C' }} /></button>
                   </div>
+                ))}
+              </div>
+              <div className="p-3 flex justify-end" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
+                <button onClick={executeTransfer} disabled={isTransferring} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: 'var(--dashboard-accent)', boxShadow: 'var(--dashboard-raised-soft)' }}>
+                  {isTransferring ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Transfer Et
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}>
+              <Send className="w-10 h-10 mx-auto mb-2 opacity-20" />
+              <p className="text-sm font-medium">Henüz transfer edilecek ürün eklenmedi.</p>
+              <p className="text-xs mt-1">Yukarıdan ürün + personel seçerek sepete ekleyin.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Borrowed tab ── */}
+      {transferTab === 'borrowed' && (
+        <div className="space-y-2">
+          {borrowedParts.length === 0 ? (
+            <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}><HandCoins className="w-10 h-10 mx-auto mb-2 opacity-20" /><p className="text-sm font-medium">Onay bekleyen borç yok.</p></div>
+          ) : borrowedParts.map(item => (
+            <article key={item.id} className="cihaz-card p-3 flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>{item.stokAdi}</p>
+                <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{item.stokKodu} {item.serialNumber ? `· SN: ${item.serialNumber}` : ''}</p>
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>{item.deviceName} · {item.labName} · {item.borrowedByName}</p>
+                <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.borrowedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
+              </div>
+              <div className="flex gap-1.5 flex-shrink-0">
+                <button onClick={() => approveBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Onayla</button>
+                <button onClick={() => rejectBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#B91C1C' }}><XCircle className="w-3 h-3" /> Reddet</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {/* ── Pending returns tab ── */}
+      {transferTab === 'pending' && (
+        <div className="space-y-2">
+          {pendingReturns.length === 0 ? (
+            <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}><CheckCircle className="w-10 h-10 mx-auto mb-2 opacity-20" /><p className="text-sm font-medium">Bekleyen iade yok.</p></div>
+          ) : pendingReturns.map(item => (
+            <article key={item.id} className="cihaz-card p-3 flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>{item.stokAdi}</p>
+                <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{item.stokKodu} {item.serialNumber ? `· SN: ${item.serialNumber}` : ''}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{item.ownerName}</span>
+                  <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: item.returnType === 'return_to_depot' ? 'rgba(22,163,74,.10)' : 'rgba(107,114,128,.10)', color: item.returnType === 'return_to_depot' ? '#16A34A' : 'var(--dashboard-muted)' }}>
+                    {item.returnType === 'return_to_depot' ? 'İade (Yeni)' : 'Teslim (Çıkma)'}
+                  </span>
+                  <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
                 </div>
-
-                <ScrollArea className="h-[360px]">
-                  <div className="border rounded-lg">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Tarih</TableHead>
-                        <TableHead>İşlem</TableHead>
-                        <TableHead>Ürün</TableHead>
-                        <TableHead>Seri No</TableHead>
-                        <TableHead>Adet</TableHead>
-                        <TableHead>Kişi</TableHead>
-                        <TableHead>İşlemi Yapan</TableHead>
-                        <TableHead className="text-right">Tutanak</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredHistoryLogs.map((log) => {
-                        const isTransferAction = log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel';
-
-                        return (
-                        <TableRow key={log.id}>
-                          <TableCell className="text-sm">
-                            {format(log.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr })}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline">{getActionLabel(log.action)}</Badge>
-                              {isTransferAction && (
-                                <SparePartTransferTutanakPDFButton log={log} className="h-7 px-2 text-xs" />
-                              )}
-                              {log.usageImageUrl && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs"
-                                  onClick={() => setPreviewImage(log.usageImageUrl)}
-                                >
-                                  <ImageIcon className="h-3.5 w-3.5 mr-1" />
-                                  Kullanım Fotoğrafını Göster
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium truncate max-w-[150px]">{log.stokAdi}</p>
-                              <p className="text-xs text-muted-foreground">{log.stokKodu}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm">{log.serialNumber || '-'}</TableCell>
-                          <TableCell className="font-mono text-sm">{log.quantity || 1}</TableCell>
-                          <TableCell>
-                            {log.toName || log.fromName || '-'}
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {log.createdByName}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {(log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel') ? (
-                              <SparePartTransferTutanakPDFButton log={log} />
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                  </div>
-                </ScrollArea>
               </div>
-            )}
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+              <div className="flex gap-1.5 flex-shrink-0">
+                {item.imageUrl && <button onClick={() => setPreviewImage(item.imageUrl!)} className="cihaz-tool-item p-1.5"><ImageIcon className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} /></button>}
+                <button onClick={() => confirmPendingReturn(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Teslim Al</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {/* ── History tab ── */}
+      {transferTab === 'history' && (
+        <div className="space-y-3">
+          {transferLogs.length === 0 ? (
+            <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}><History className="w-10 h-10 mx-auto mb-2 opacity-20" /><p className="text-sm font-medium">Henüz geçmiş yok.</p></div>
+          ) : (
+            <>
+              {/* Filter */}
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Filtre:</label>
+                <select
+                  className="cihaz-pressed px-3 py-1.5 text-xs font-medium !border-0 !ring-0"
+                  style={{ borderRadius: 10, color: 'var(--dashboard-text)', background: 'var(--dashboard-pressed, var(--dashboard-surface-2))' }}
+                  value={historyActionFilter}
+                  onChange={(e) => setHistoryActionFilter(e.target.value)}
+                >
+                  <option value="all">Tümü</option>
+                  <option value="transfer_to_personnel">Personele Transfer</option>
+                  <option value="transfer_between_personnel">Personelden Personele Devir</option>
+                  <option value="return_confirmed">İade Teslim Alındı</option>
+                  <option value="submit_confirmed">Teslim Alındı</option>
+                  <option value="use_on_device">Cihazda Kullanıldı</option>
+                  <option value="borrowed_part">Borç Parça</option>
+                  <option value="borrowed_approved">Borç Onaylandı</option>
+                  <option value="borrowed_rejected">Borç Reddedildi</option>
+                  <option value="depo_stock_adjusted">Depo Stok Güncellendi</option>
+                  <option value="depo_serial_deleted">Depo Seri No Silindi</option>
+                </select>
+              </div>
+
+              {/* Log list */}
+              <div className="cihaz-card overflow-hidden" style={{ maxHeight: 500, overflowY: 'auto' }}>
+                <div className="divide-y" style={{ borderColor: 'var(--dashboard-stroke)' }}>
+                  {filteredHistoryLogs.map(log => {
+                    const isTransferAction = log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel';
+                    return (
+                      <div key={log.id} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 px-3 py-2.5 hover:bg-black/[.02] transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: 'rgba(107,114,128,.10)', color: 'var(--dashboard-muted)' }}>{getActionLabel(log.action)}</span>
+                            <span className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>{log.stokAdi}</span>
+                          </div>
+                          <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>
+                            {log.stokKodu} {log.serialNumber ? `· SN: ${log.serialNumber}` : ''} · x{log.quantity || 1} · {log.toName || log.fromName || '—'} · {log.createdByName}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(log.timestamp, 'dd.MM.yy HH:mm', { locale: tr })}</span>
+                          {isTransferAction && <SparePartTransferTutanakPDFButton log={log} className="h-6 px-2 text-[10px]" />}
+                          {log.usageImageUrl && <button onClick={() => setPreviewImage(log.usageImageUrl)} className="cihaz-tool-item p-1"><ImageIcon className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} /></button>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 
   // ========== RENDER: Depo Stok View (Grouped) ==========
   const renderDepoStok = () => (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Warehouse className="h-5 w-5" />
-              Yedek Parça Depo Stok
-            </CardTitle>
-            <CardDescription>
-              Yedek parça deposundaki mevcut stok durumu.
-              Toplam: <strong>{depoStokProducts.reduce((s, g) => s + g.totalQuantity, 0)}</strong> adet, <strong>{depoStokProducts.length}</strong> farklı ürün.
-            </CardDescription>
-          </div>
-          <Button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')}>
-            <Plus className="h-4 w-4 mr-2" />
-            Stok Girişi
-          </Button>
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="cihaz-card-strong p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2"><Warehouse className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} /><h2 className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>Depo Stok</h2></div>
+          <p className="text-[11px] mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>{depoStokProducts.length} ürün · {depoStokProducts.reduce((s, g) => s + g.totalQuantity, 0)} adet</p>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Search input */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Stok kodu, ürün adı veya seri numarası ile ara..."
-            value={depoStokSearchQuery}
-            onChange={(e) => { setDepoStokSearchQuery(e.target.value); setDepoStokPage(0); }}
-            className="pl-9"
-          />
-        </div>
+        <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white" style={{ background: 'var(--dashboard-accent)' }}>
+          <Plus className="w-3.5 h-3.5" /> Stok Girişi
+        </button>
+      </div>
 
-        {depoStokLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin" />
-            <span className="ml-2">Yükleniyor...</span>
-          </div>
-        ) : depoStokProducts.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Warehouse className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p>Depoda yedek parça stoku bulunmuyor.</p>
-            <p className="text-sm">Stok girişi yaparak ürün ekleyin.</p>
-          </div>
-        ) : filteredDepoStok.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Search className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p>&quot;{depoStokSearchQuery}&quot; ile eşleşen ürün bulunamadı.</p>
-          </div>
-        ) : (
-          <div className="border rounded-lg">
-            {/* Filtered result info */}
-            {depoStokSearchQuery.trim() && (
-              <div className="px-4 py-2 bg-muted/30 border-b text-sm text-muted-foreground">
-                {filteredDepoStok.length} ürün bulundu
-              </div>
-            )}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Ürün Kodu</TableHead>
-                  <TableHead>Ürün Adı</TableHead>
-                  <TableHead>Cihaz Grubu</TableHead>
-                  <TableHead>Adet</TableHead>
-                  <TableHead>Eklenme Tarihi</TableHead>
-                  <TableHead className="w-12"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginatedDepoStok.map((group) => (
-                  <React.Fragment key={group.stokKodu}>
-                    <TableRow
-                      className={cn(
-                        'cursor-pointer hover:bg-muted/50 transition-colors',
-                        expandedStokKodu === group.stokKodu && 'bg-muted/30'
-                      )}
-                      onClick={() => setExpandedStokKodu(
-                        expandedStokKodu === group.stokKodu ? null : group.stokKodu
-                      )}
-                    >
-                      <TableCell className="font-mono">{group.stokKodu}</TableCell>
-                      <TableCell>{group.stokAdi}</TableCell>
-                      <TableCell>
-                        {group.cihazGrubu ? (
-                          <Badge variant="outline" className="text-xs">{group.cihazGrubu}</Badge>
-                        ) : '-'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">{group.totalQuantity}</Badge>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openDepoQuantityEditor(group);
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}
-                      </TableCell>
-                      <TableCell>
-                        {group.serialNumbers.length > 0 ? (
-                          expandedStokKodu === group.stokKodu ? (
-                            <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <Hash className="h-3 w-3 text-muted-foreground" />
-                              <span className="text-xs text-muted-foreground">{group.serialNumbers.length}</span>
-                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                            </div>
-                          )
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
+      {/* Search */}
+      <div className="cihaz-pressed flex items-center gap-2 px-3 py-2" style={{ borderRadius: 14 }}>
+        <Search className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--dashboard-muted)' }} />
+        <input
+          type="text"
+          placeholder="Stok kodu, ürün adı veya seri no ile ara…"
+          value={depoStokSearchQuery}
+          onChange={(e) => { setDepoStokSearchQuery(e.target.value); setDepoStokPage(0); }}
+          className="flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--dashboard-muted)]"
+          style={{ color: 'var(--dashboard-text)' }}
+        />
+        {depoStokSearchQuery && <span className="text-[10px] font-medium flex-shrink-0" style={{ color: 'var(--dashboard-muted)' }}>{filteredDepoStok.length} sonuç</span>}
+      </div>
 
-                    {/* Expanded serial numbers */}
-                    {expandedStokKodu === group.stokKodu && group.serialNumbers.length > 0 && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="p-0">
-                          <div className="bg-blue-50 dark:bg-blue-950/30 p-3 border-t">
-                            <p className="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">
-                              Seri Numaraları ({group.serialNumbers.length} / {group.totalQuantity} adet):
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              {group.serialNumbers.map((sn) => (
-                                <div key={sn.id} className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1">
-                                  <span className="font-mono text-xs">{sn.serialNumber}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    ({format(sn.createdAt, 'dd.MM.yy', { locale: tr })})
-                                  </span>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-5 w-5"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      deleteSerialFromDepot(group, sn);
-                                    }}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5 text-red-600" />
-                                  </Button>
-                                </div>
-                              ))}
-                            </div>
-                            {group.totalQuantity > group.serialNumbers.length && (
-                              <p className="text-xs text-muted-foreground mt-2">
-                                + {group.totalQuantity - group.serialNumbers.length} adet seri numarasız
-                              </p>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-
-                    {expandedStokKodu === group.stokKodu && group.serialNumbers.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="p-0">
-                          <div className="bg-muted/20 p-3 border-t">
-                            <p className="text-xs text-muted-foreground">
-                              Bu üründe seri numaralı kayıt bulunmuyor. Toplam {group.totalQuantity} adet seri numarasız stok.
-                            </p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </React.Fragment>
-                ))}
-              </TableBody>
-            </Table>
-
-            {/* Pagination */}
-            {totalDepoStokPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t">
-                <p className="text-sm text-muted-foreground">
-                  Sayfa {depoStokPage + 1} / {totalDepoStokPages}
-                  <span className="ml-2">({filteredDepoStok.length} ürün)</span>
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={depoStokPage === 0}
-                    onClick={() => setDepoStokPage(p => p - 1)}
+      {/* Content */}
+      {depoStokLoading ? (
+        <div className="cihaz-card p-8 flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--dashboard-accent)' }} /><span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Yükleniyor…</span></div>
+      ) : filteredDepoStok.length === 0 ? (
+        <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}><Warehouse className="w-10 h-10 mx-auto mb-2 opacity-20" /><p className="text-sm font-medium">{depoStokSearchQuery ? 'Eşleşen ürün yok.' : 'Depoda stok yok.'}</p></div>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            {paginatedDepoStok.map(group => {
+              const isExpanded = expandedStokKodu === group.stokKodu;
+              return (
+                <article key={group.stokKodu} className="cihaz-card overflow-hidden">
+                  <div
+                    className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-black/[.02] transition-colors"
+                    onClick={() => setExpandedStokKodu(isExpanded ? null : group.stokKodu)}
                   >
-                    <ChevronLeft className="h-4 w-4 mr-1" />
-                    Önceki
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={depoStokPage >= totalDepoStokPages - 1}
-                    onClick={() => setDepoStokPage(p => p + 1)}
-                  >
-                    Sonraki
-                    <ChevronRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </div>
-              </div>
-            )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>{group.stokAdi}</p>
+                        {group.cihazGrubu && <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium flex-shrink-0" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>{group.cihazGrubu}</span>}
+                      </div>
+                      <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{group.stokKodu} · {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="cihaz-pressed px-2 py-0.5 text-xs font-bold" style={{ borderRadius: 8, color: 'var(--dashboard-text)' }}>{group.totalQuantity}</span>
+                      <button onClick={(e) => { e.stopPropagation(); openDepoQuantityEditor(group); }} className="p-1 rounded-lg hover:bg-black/5 transition" title="Düzenle"><Pencil className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} /></button>
+                      {group.serialNumbers.length > 0 ? (
+                        isExpanded ? <ChevronUp className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} /> : <div className="flex items-center gap-0.5"><Hash className="w-2.5 h-2.5" style={{ color: 'var(--dashboard-muted)' }} /><span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{group.serialNumbers.length}</span><ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} /></div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* Expanded serials */}
+                  {isExpanded && (
+                    <div className="px-3 pb-3 pt-1" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
+                      {group.serialNumbers.length > 0 ? (
+                        <>
+                          <p className="text-[10px] font-semibold mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Seri Numaraları ({group.serialNumbers.length}/{group.totalQuantity})</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {group.serialNumbers.map(sn => (
+                              <span key={sn.id} className="cihaz-pressed inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono" style={{ borderRadius: 8 }}>
+                                {sn.serialNumber}
+                                <span style={{ color: 'var(--dashboard-muted)' }}>({format(sn.createdAt, 'dd.MM.yy', { locale: tr })})</span>
+                                <button onClick={(e) => { e.stopPropagation(); deleteSerialFromDepot(group, sn); }} className="ml-0.5 p-0.5 rounded hover:bg-black/5"><Trash2 className="w-2.5 h-2.5" style={{ color: '#B91C1C' }} /></button>
+                              </span>
+                            ))}
+                          </div>
+                          {group.totalQuantity > group.serialNumbers.length && <p className="text-[10px] mt-1.5" style={{ color: 'var(--dashboard-muted)' }}>+ {group.totalQuantity - group.serialNumbers.length} adet seri numarasız</p>}
+                        </>
+                      ) : (
+                        <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Seri numaralı kayıt yok. {group.totalQuantity} adet seri numarasız.</p>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
-        )}
-      </CardContent>
-    </Card>
+
+          {/* Pagination */}
+          {totalDepoStokPages > 1 && (
+            <div className="flex items-center justify-between">
+              <span className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>Sayfa {depoStokPage + 1}/{totalDepoStokPages} ({filteredDepoStok.length} ürün)</span>
+              <div className="flex gap-1.5">
+                <button disabled={depoStokPage === 0} onClick={() => setDepoStokPage(p => p - 1)} className="cihaz-tool-item px-3 py-1 text-[11px] font-medium disabled:opacity-30" style={{ color: 'var(--dashboard-text)' }}><ChevronLeft className="w-3 h-3 inline" /> Önceki</button>
+                <button disabled={depoStokPage >= totalDepoStokPages - 1} onClick={() => setDepoStokPage(p => p + 1)} className="cihaz-tool-item px-3 py-1 text-[11px] font-medium disabled:opacity-30" style={{ color: 'var(--dashboard-text)' }}>Sonraki <ChevronRight className="w-3 h-3 inline" /></button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 
   // ========== RENDER: Personnel Stock View ==========
@@ -2029,143 +1635,211 @@ export default function YedekParcaTransferPage() {
     const usedCount = personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return').length;
 
     return (
-      <Card>
-        <CardHeader>
+      <div className="space-y-4">
+        {/* Header card */}
+        <div className="cihaz-card-strong p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <UserIcon className="h-5 w-5" />
-              {menuSelection.personnelName} - Yedek Parça Stoku
-            </CardTitle>
-            <Button onClick={openManualStockModal} size="sm" className="w-full sm:w-auto">
-              <Plus className="h-4 w-4 mr-1" />
-              Manuel Stok Ekle
-            </Button>
-          </div>
-          <CardDescription className="flex items-center gap-4">
-            <span>
-              {menuSelection.personnelRole === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli stok durumu
-            </span>
-            <Badge variant="default" className="bg-green-600">{activeCount} Aktif</Badge>
-            <Badge variant="secondary">{usedCount} Kullanıldı</Badge>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {personnelStockLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin" />
-              <span className="ml-2">Yükleniyor...</span>
-            </div>
-          ) : personnelStock.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Package className="h-12 w-12 mx-auto mb-4 opacity-20" />
-              <p>Bu personelde yedek parça bulunmuyor.</p>
-            </div>
-          ) : (
-            <>
-              <div className="border rounded-lg">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ürün Kodu</TableHead>
-                      <TableHead>Ürün Adı</TableHead>
-                      <TableHead>Seri No</TableHead>
-                      <TableHead>Durum</TableHead>
-                      <TableHead>Transfer Tarihi</TableHead>
-                      <TableHead>Kullanım Tarihi</TableHead>
-                      <TableHead className="text-right">İşlem</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedPersonnelStock.map((item) => {
-                      const isUsed = item.status === 'used' || item.status === 'pending_return';
-                      const canTakeOver =
-                        item.status === 'in_stock' &&
-                        !!currentUserProfile?.uid &&
-                        currentUserProfile.uid !== item.ownerUid;
-
-                      return (
-                        <TableRow key={item.id} className={isUsed ? 'opacity-60' : ''}>
-                          <TableCell className={cn('font-mono', isUsed && 'line-through')}>
-                            {item.stokKodu}
-                          </TableCell>
-                          <TableCell className={cn(isUsed && 'line-through')}>
-                            {item.stokAdi}
-                          </TableCell>
-                          <TableCell className={cn('font-mono', isUsed && 'line-through')}>
-                            {item.serialNumber || '-'}
-                          </TableCell>
-                          <TableCell>
-                            {item.status === 'in_stock' && (
-                              <Badge variant="default" className="bg-green-600">Aktif</Badge>
-                            )}
-                            {item.status === 'used' && (
-                              <Badge variant="secondary">Kullanıldı</Badge>
-                            )}
-                            {item.status === 'pending_return' && (
-                              <Badge variant="outline">İade Bekliyor</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className={cn('text-sm text-muted-foreground', isUsed && 'line-through')}>
-                            {format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {item.usedAt
-                              ? format(item.usedAt, 'dd.MM.yyyy HH:mm', { locale: tr })
-                              : '-'
-                            }
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {canTakeOver ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={takingOverStockId === item.id}
-                                onClick={() => takeOverPersonnelStock(item)}
-                              >
-                                {takingOverStockId === item.id && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                Üzerime Al
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+            <div>
+              <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--dashboard-text)' }}>
+                <UserIcon className="h-5 w-5" />
+                {menuSelection.personnelName} - Yedek Parça Stoku
+              </h2>
+              <div className="flex items-center gap-3 mt-1.5">
+                <span className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
+                  {menuSelection.personnelRole === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli
+                </span>
+                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                  {activeCount} Aktif
+                </span>
+                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
+                  {usedCount} Kullanıldı
+                </span>
               </div>
+            </div>
+            <button
+              onClick={openManualStockModal}
+              className="cihaz-card flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl transition-all active:scale-95 w-full sm:w-auto"
+              style={{ color: 'var(--dashboard-accent)' }}
+            >
+              <Plus className="h-4 w-4" />
+              Manuel Stok Ekle
+            </button>
+          </div>
+        </div>
 
-              {/* Pagination */}
-              {totalPersonnelPages > 1 && (
-                <div className="flex items-center justify-between mt-4">
-                  <span className="text-sm text-muted-foreground">
-                    Toplam {personnelStock.length} kayıt, Sayfa {personnelStockPage + 1} / {totalPersonnelPages}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={personnelStockPage === 0}
-                      onClick={() => setPersonnelStockPage(p => p - 1)}
-                    >
-                      Önceki
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={personnelStockPage >= totalPersonnelPages - 1}
-                      onClick={() => setPersonnelStockPage(p => p + 1)}
-                    >
-                      Sonraki
-                    </Button>
-                  </div>
+        {/* Content */}
+        {personnelStockLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
+            <span className="ml-2 text-sm" style={{ color: 'var(--dashboard-muted)' }}>Yükleniyor...</span>
+          </div>
+        ) : personnelStock.length === 0 ? (
+          <div className="text-center py-12">
+            <Package className="h-12 w-12 mx-auto mb-4 opacity-20" />
+            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>Bu personelde yedek parça bulunmuyor.</p>
+          </div>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block cihaz-card-strong rounded-2xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Kodu</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedPersonnelStock.map((item) => {
+                    const isUsed = item.status === 'used' || item.status === 'pending_return';
+                    const canTakeOver =
+                      item.status === 'in_stock' &&
+                      !!currentUserProfile?.uid &&
+                      currentUserProfile.uid !== item.ownerUid;
+
+                    return (
+                      <tr
+                        key={item.id}
+                        className={cn('transition-colors', isUsed && 'opacity-50')}
+                        style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
+                      >
+                        <td className={cn('px-4 py-3 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-text)' }}>
+                          {item.stokKodu}
+                        </td>
+                        <td className={cn('px-4 py-3 text-sm', isUsed && 'line-through')} style={{ color: 'var(--dashboard-text)' }}>
+                          {item.stokAdi}
+                        </td>
+                        <td className={cn('px-4 py-3 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
+                          {item.serialNumber || '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.status === 'in_stock' && (
+                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>
+                          )}
+                          {item.status === 'used' && (
+                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Kullanıldı</span>
+                          )}
+                          {item.status === 'pending_return' && (
+                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">İade Bekliyor</span>
+                          )}
+                        </td>
+                        <td className={cn('px-4 py-3 text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
+                          {format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                        </td>
+                        <td className="px-4 py-3 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                          {item.usedAt
+                            ? format(item.usedAt, 'dd.MM.yyyy HH:mm', { locale: tr })
+                            : '—'
+                          }
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {canTakeOver ? (
+                            <button
+                              disabled={takingOverStockId === item.id}
+                              onClick={() => takeOverPersonnelStock(item)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50"
+                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                            >
+                              {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                              Üzerime Al
+                            </button>
+                          ) : (
+                            <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden space-y-2">
+              {paginatedPersonnelStock.map((item) => {
+                const isUsed = item.status === 'used' || item.status === 'pending_return';
+                const canTakeOver =
+                  item.status === 'in_stock' &&
+                  !!currentUserProfile?.uid &&
+                  currentUserProfile.uid !== item.ownerUid;
+
+                return (
+                  <article key={item.id} className={cn('cihaz-card p-3 rounded-xl', isUsed && 'opacity-50')}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className={cn('text-sm font-medium truncate', isUsed && 'line-through')} style={{ color: 'var(--dashboard-text)' }}>
+                          {item.stokAdi}
+                        </p>
+                        <p className={cn('text-xs font-mono mt-0.5', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
+                          {item.stokKodu} {item.serialNumber ? `• ${item.serialNumber}` : ''}
+                        </p>
+                      </div>
+                      {item.status === 'in_stock' && (
+                        <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">Aktif</span>
+                      )}
+                      {item.status === 'used' && (
+                        <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 shrink-0">Kullanıldı</span>
+                      )}
+                      {item.status === 'pending_return' && (
+                        <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">İade Bekliyor</span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
+                      <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                        {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
+                        {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
+                      </span>
+                      {canTakeOver && (
+                        <button
+                          disabled={takingOverStockId === item.id}
+                          onClick={() => takeOverPersonnelStock(item)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50"
+                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                        >
+                          {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                          Üzerime Al
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            {/* Pagination */}
+            {totalPersonnelPages > 1 && (
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                  {personnelStock.length} kayıt — Sayfa {personnelStockPage + 1} / {totalPersonnelPages}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    disabled={personnelStockPage === 0}
+                    onClick={() => setPersonnelStockPage(p => p - 1)}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 disabled:opacity-40"
+                    style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-text)' }}
+                  >
+                    Önceki
+                  </button>
+                  <button
+                    disabled={personnelStockPage >= totalPersonnelPages - 1}
+                    onClick={() => setPersonnelStockPage(p => p + 1)}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 disabled:opacity-40"
+                    style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-text)' }}
+                  >
+                    Sonraki
+                  </button>
                 </div>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     );
   };
 
@@ -2188,80 +1862,93 @@ export default function YedekParcaTransferPage() {
     personnelList.sort((a, b) => b.items.length - a.items.length);
 
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+      <div className="space-y-4">
+        {/* Header card */}
+        <div className="cihaz-card-strong p-4">
+          <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--dashboard-text)' }}>
             <PackageOpen className="h-5 w-5" />
             Personeldeki Toplam Stok
-          </CardTitle>
-          <CardDescription>
+          </h2>
+          <p className="text-sm mt-1" style={{ color: 'var(--dashboard-muted)' }}>
             Tüm personellerde bulunan henüz kullanılmamış yedek parçalar.
-            Toplam: <strong>{allPersonnelStock.length}</strong> adet aktif stok.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {allStockLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin" />
-              <span className="ml-2">Yükleniyor...</span>
-            </div>
-          ) : allPersonnelStock.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <PackageOpen className="h-12 w-12 mx-auto mb-4 opacity-20" />
-              <p>Personellerde aktif yedek parça stoku bulunmuyor.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {personnelList.map((personnel) => (
-                <div key={personnel.ownerUid} className="border rounded-lg">
-                  <div
-                    className="p-3 bg-muted/30 flex items-center justify-between cursor-pointer hover:bg-muted/50 transition-colors"
+            Toplam: <strong style={{ color: 'var(--dashboard-text)' }}>{allPersonnelStock.length}</strong> adet aktif stok.
+          </p>
+        </div>
+
+        {/* Content */}
+        {allStockLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
+            <span className="ml-2 text-sm" style={{ color: 'var(--dashboard-muted)' }}>Yükleniyor...</span>
+          </div>
+        ) : allPersonnelStock.length === 0 ? (
+          <div className="text-center py-12">
+            <PackageOpen className="h-12 w-12 mx-auto mb-4 opacity-20" />
+            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>Personellerde aktif yedek parça stoku bulunmuyor.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {personnelList.map((personnel) => {
+              const role = users.find(u => u.uid === personnel.ownerUid)?.role;
+              return (
+                <div key={personnel.ownerUid} className="cihaz-card rounded-xl overflow-hidden">
+                  {/* Personnel header - clickable */}
+                  <button
+                    className="w-full p-3 flex items-center justify-between transition-colors hover:opacity-80"
                     onClick={() => setMenuSelection({
                       section: 'personnel',
                       personnelUid: personnel.ownerUid,
                       personnelName: personnel.ownerName,
-                      personnelRole: users.find(u => u.uid === personnel.ownerUid)?.role,
+                      personnelRole: role,
                     })}
                   >
-                    <div className="flex items-center gap-2">
-                      <UserIcon className="h-4 w-4" />
-                      <span className="font-medium">{personnel.ownerName}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {users.find(u => u.uid === personnel.ownerUid)?.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
-                      </Badge>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'var(--dashboard-pressed)' }}>
+                        <UserIcon className="h-4 w-4" style={{ color: 'var(--dashboard-accent)' }} />
+                      </div>
+                      <div className="text-left min-w-0">
+                        <p className="text-sm font-medium truncate" style={{ color: 'var(--dashboard-text)' }}>{personnel.ownerName}</p>
+                        <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                          {role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="default" className="bg-green-600">{personnel.items.length} adet</Badge>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                        {personnel.items.length}
+                      </span>
+                      <ChevronRight className="h-4 w-4" style={{ color: 'var(--dashboard-muted)' }} />
                     </div>
+                  </button>
+
+                  {/* Preview items */}
+                  <div style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
+                    {personnel.items.slice(0, 5).map((item) => (
+                      <div
+                        key={item.id}
+                        className="px-3 py-2 flex items-center gap-3 text-xs"
+                        style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
+                      >
+                        <span className="font-mono shrink-0 w-24 truncate" style={{ color: 'var(--dashboard-muted)' }}>{item.stokKodu}</span>
+                        <span className="flex-1 truncate" style={{ color: 'var(--dashboard-text)' }}>{item.stokAdi}</span>
+                        <span className="font-mono shrink-0" style={{ color: 'var(--dashboard-muted)' }}>{item.serialNumber || '—'}</span>
+                        <span className="shrink-0" style={{ color: 'var(--dashboard-muted)' }}>
+                          {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
+                        </span>
+                      </div>
+                    ))}
+                    {personnel.items.length > 5 && (
+                      <div className="px-3 py-2 text-center text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                        … ve {personnel.items.length - 5} ürün daha
+                      </div>
+                    )}
                   </div>
-                  <Table>
-                    <TableBody>
-                      {personnel.items.slice(0, 5).map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-mono text-sm">{item.stokKodu}</TableCell>
-                          <TableCell className="text-sm">{item.stokAdi}</TableCell>
-                          <TableCell className="font-mono text-sm">{item.serialNumber || '-'}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {personnel.items.length > 5 && (
-                        <TableRow>
-                          <TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-2">
-                            ... ve {personnel.items.length - 5} ürün daha
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -2270,180 +1957,93 @@ export default function YedekParcaTransferPage() {
     closeMenu?.();
   }, []);
 
-  const renderManagementMenu = (closeMenu?: () => void) => (
-    <ScrollArea className="h-[calc(100vh-180px)] md:h-[calc(100vh-180px)]">
-      {/* Depo Stok */}
-      <div className="mb-1">
+  const renderManagementMenu = (closeMenu?: () => void) => {
+    const menuItem = (section: MenuSection, icon: React.ReactNode, label: string, sub: string, extra?: React.ReactNode) => {
+      const isActive = menuSelection.section === section;
+      return (
         <button
-          onClick={() => handleMenuSelect({ section: 'depo-stok' }, closeMenu)}
-          className={cn(
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-            menuSelection.section === 'depo-stok'
-              ? 'bg-primary text-primary-foreground'
-              : 'hover:bg-muted'
-          )}
+          key={section}
+          onClick={() => handleMenuSelect({ section }, closeMenu)}
+          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all"
+          style={{
+            background: isActive ? 'var(--dashboard-surface)' : 'transparent',
+            boxShadow: isActive ? 'var(--dashboard-raised-soft)' : 'none',
+          }}
         >
-          <Warehouse className="h-4 w-4 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm">Depo Stok</p>
-            <p className={cn(
-              'text-xs truncate',
-              menuSelection.section === 'depo-stok'
-                ? 'text-primary-foreground/70'
-                : 'text-muted-foreground'
-            )}>
-              Yedek parça deposu
-            </p>
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: isActive ? 'rgba(245,158,11,.15)' : 'rgba(107,114,128,.08)' }}>
+            {icon}
           </div>
-          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold" style={{ color: isActive ? 'var(--dashboard-text)' : 'var(--dashboard-text)' }}>{label}</p>
+            <p className="text-[10px] truncate" style={{ color: 'var(--dashboard-muted)' }}>{sub}</p>
+          </div>
+          {extra}
+          <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 opacity-40" style={{ color: 'var(--dashboard-muted)' }} />
         </button>
-      </div>
+      );
+    };
 
-      {/* Personeldeki Toplam Stok */}
-      <div className="mb-1">
+    const personItem = (user: User, role: string) => {
+      const isActive = menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid;
+      return (
         <button
-          onClick={() => handleMenuSelect({ section: 'toplam-stok' }, closeMenu)}
-          className={cn(
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-            menuSelection.section === 'toplam-stok'
-              ? 'bg-primary text-primary-foreground'
-              : 'hover:bg-muted'
-          )}
+          key={user.uid}
+          onClick={() => handleMenuSelect({ section: 'personnel', personnelUid: user.uid || '', personnelName: user.name || '', personnelRole: role }, closeMenu)}
+          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left transition-all"
+          style={{
+            background: isActive ? 'var(--dashboard-surface)' : 'transparent',
+            boxShadow: isActive ? 'var(--dashboard-raised-soft)' : 'none',
+          }}
         >
-          <PackageOpen className="h-4 w-4 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm">Personeldeki Toplam Stok</p>
-            <p className={cn(
-              'text-xs truncate',
-              menuSelection.section === 'toplam-stok'
-                ? 'text-primary-foreground/70'
-                : 'text-muted-foreground'
-            )}>
-              Kullanılmamış toplam stok
-            </p>
-          </div>
-          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
+          <UserIcon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: isActive ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }} />
+          <span className="text-xs truncate flex-1" style={{ color: 'var(--dashboard-text)' }}>{user.name}</span>
         </button>
-      </div>
+      );
+    };
 
-      {/* Transfer Paneli */}
-      <div className="mb-3">
-        <button
-          onClick={() => handleMenuSelect({ section: 'transfer' }, closeMenu)}
-          className={cn(
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors',
-            menuSelection.section === 'transfer'
-              ? 'bg-primary text-primary-foreground'
-              : 'hover:bg-muted'
-          )}
-        >
-          <Send className="h-4 w-4 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm">Transfer Paneli</p>
-            <p className={cn(
-              'text-xs truncate',
-              menuSelection.section === 'transfer'
-                ? 'text-primary-foreground/70'
-                : 'text-muted-foreground'
-            )}>
-              Transfer, borç, iade, geçmiş
-            </p>
-          </div>
-          <div className="flex gap-1 flex-shrink-0">
-            {borrowedParts.length > 0 && (
-              <Badge variant="destructive" className="text-xs px-1.5 py-0">
-                {borrowedParts.length}
-              </Badge>
-            )}
-            {pendingReturns.length > 0 && (
-              <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                {pendingReturns.length}
-              </Badge>
-            )}
-          </div>
-          <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />
-        </button>
-      </div>
+    return (
+      <>
+        {/* Module nav */}
+        {menuItem('depo-stok', <Warehouse className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Depo Stok', 'Yedek parça deposu')}
+        {menuItem('toplam-stok', <PackageOpen className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Personel Toplam Stok', 'Kullanılmamış stok')}
+        {menuItem('transfer', <Send className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Transfer Paneli', 'Transfer, borç, iade, geçmiş',
+          (borrowedParts.length > 0 || pendingReturns.length > 0) ? (
+            <div className="flex gap-1 flex-shrink-0">
+              {borrowedParts.length > 0 && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white" style={{ background: '#B91C1C' }}>{borrowedParts.length}</span>}
+              {pendingReturns.length > 0 && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: 'rgba(107,114,128,.15)', color: 'var(--dashboard-muted)' }}>{pendingReturns.length}</span>}
+            </div>
+          ) : undefined
+        )}
 
-      <Separator className="my-3" />
+        {/* Divider */}
+        <div className="my-2 mx-3" style={{ borderTop: '1px solid var(--dashboard-stroke)' }} />
 
-      {/* Teknik Servis Personel Listesi */}
-      <div className="mb-2">
-        <div className="flex items-center gap-2 px-3 py-1.5">
-          <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Teknik Servis
-          </span>
-          <Badge variant="outline" className="text-xs ml-auto">{teknikServisUsers.length}</Badge>
+        {/* Teknik Servis */}
+        <div className="px-3 py-1 flex items-center gap-1.5">
+          <Wrench className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} />
+          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Teknik Servis</span>
+          <span className="ml-auto text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>{teknikServisUsers.length}</span>
         </div>
         <div className="space-y-0.5">
-          {teknikServisUsers.map((user) => (
-            <button
-              key={user.uid}
-              onClick={() => handleMenuSelect({
-                section: 'personnel',
-                personnelUid: user.uid || '',
-                personnelName: user.name || '',
-                personnelRole: 'teknik_servis',
-              }, closeMenu)}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
-                menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-muted'
-              )}
-            >
-              <UserIcon className="h-4 w-4 flex-shrink-0" />
-              <span className="text-sm truncate flex-1">{user.name}</span>
-              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
-            </button>
-          ))}
-          {teknikServisUsers.length === 0 && (
-            <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
-          )}
+          {teknikServisUsers.map(u => personItem(u, 'teknik_servis'))}
+          {teknikServisUsers.length === 0 && <p className="text-[10px] px-3 py-1" style={{ color: 'var(--dashboard-muted)' }}>Personel yok</p>}
         </div>
-      </div>
 
-      <Separator className="my-3" />
+        <div className="my-2 mx-3" style={{ borderTop: '1px solid var(--dashboard-stroke)' }} />
 
-      {/* Aplikasyon Personel Listesi */}
-      <div className="mb-2">
-        <div className="flex items-center gap-2 px-3 py-1.5">
-          <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Aplikasyon
-          </span>
-          <Badge variant="outline" className="text-xs ml-auto">{aplikasyonUsers.length}</Badge>
+        {/* Aplikasyon */}
+        <div className="px-3 py-1 flex items-center gap-1.5">
+          <Cpu className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} />
+          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Aplikasyon</span>
+          <span className="ml-auto text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>{aplikasyonUsers.length}</span>
         </div>
         <div className="space-y-0.5">
-          {aplikasyonUsers.map((user) => (
-            <button
-              key={user.uid}
-              onClick={() => handleMenuSelect({
-                section: 'personnel',
-                personnelUid: user.uid || '',
-                personnelName: user.name || '',
-                personnelRole: 'aplikasyon',
-              }, closeMenu)}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
-                menuSelection.section === 'personnel' && menuSelection.personnelUid === user.uid
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-muted'
-              )}
-            >
-              <UserIcon className="h-4 w-4 flex-shrink-0" />
-              <span className="text-sm truncate flex-1">{user.name}</span>
-              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
-            </button>
-          ))}
-          {aplikasyonUsers.length === 0 && (
-            <p className="text-xs text-muted-foreground px-3 py-2">Personel bulunamadı</p>
-          )}
+          {aplikasyonUsers.map(u => personItem(u, 'aplikasyon'))}
+          {aplikasyonUsers.length === 0 && <p className="text-[10px] px-3 py-1" style={{ color: 'var(--dashboard-muted)' }}>Personel yok</p>}
         </div>
-      </div>
-    </ScrollArea>
-  );
+      </>
+    );
+  };
 
   // ========== RENDER: Right Panel Content ==========
   const renderRightPanel = () => {
@@ -2463,209 +2063,157 @@ export default function YedekParcaTransferPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full p-8">
-        <Loader2 className="h-8 w-8 animate-spin" />
-        <span className="ml-2">Yükleniyor...</span>
+      <div className="cihaz-shell flex items-center justify-center" style={{ minHeight: '100dvh' }}>
+        <div className="cihaz-card-strong p-8 flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
+          <span style={{ color: 'var(--dashboard-text)' }} className="text-sm font-medium">Yükleniyor…</span>
+        </div>
       </div>
     );
   }
 
   if (!isAuthorized) {
     return (
-      <div className="p-6 text-center">
-        <h2 className="text-xl font-bold text-destructive">Yetkisiz Erişim</h2>
-        <p className="text-muted-foreground mt-2">
-          Bu sayfaya erişim yetkiniz bulunmamaktadır.
-        </p>
-        <Button variant="outline" className="mt-4" onClick={() => router.back()}>
-          Geri Dön
-        </Button>
+      <div className="cihaz-shell flex items-center justify-center" style={{ minHeight: '100dvh' }}>
+        <div className="cihaz-card-strong p-8 text-center space-y-3">
+          <h2 className="text-lg font-bold" style={{ color: '#B91C1C' }}>Yetkisiz Erişim</h2>
+          <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>Bu sayfaya erişim yetkiniz bulunmamaktadır.</p>
+          <button onClick={() => router.back()} className="cihaz-tool-item px-4 py-2 text-sm font-medium" style={{ color: 'var(--dashboard-muted)' }}>Geri Dön</button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-2 sm:p-4 space-y-3 sm:space-y-4">
-      <BackButton fallback="/direkt-transfer" />
+    <div className="cihaz-shell px-2 py-3 sm:px-4 sm:py-5 space-y-3 sm:space-y-4" style={{ minHeight: '100dvh' }}>
 
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
-          <Package className="h-6 w-6" />
-          <h1 className="text-lg sm:text-xl font-bold">Yedek Parça Yönetim Paneli</h1>
+      {/* Header bar */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => router.push('/direkt-transfer')}
+            className="cihaz-tool-item p-1.5"
+            style={{ borderRadius: 10 }}
+          >
+            <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+          </button>
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,.12)' }}>
+            <Package className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} />
+          </div>
+          <h1 className="text-base sm:text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>Yedek Parça Yönetimi</h1>
         </div>
-        <Button variant="outline" size="sm" className="md:hidden" onClick={() => setMobileMenuOpen(true)}>
-          <Menu className="h-4 w-4 mr-2" /> Menü
-        </Button>
+        <button
+          className="md:hidden cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
+          onClick={() => setMobileMenuOpen(true)}
+          style={{ color: 'var(--dashboard-text)' }}
+        >
+          <Menu className="w-3.5 h-3.5" /> Menü
+        </button>
       </div>
 
       <div className="flex flex-col md:flex-row gap-3 md:gap-4">
-        {/* ===== LEFT PANEL (40%) - Management Menu ===== */}
-        <div className="hidden md:block w-[40%] min-w-[280px] space-y-2">
-          <Card>
-            <CardContent className="p-3">
-              {renderManagementMenu()}
-            </CardContent>
-          </Card>
+        {/* ===== LEFT PANEL - Sidebar Menu ===== */}
+        <div className="hidden md:block w-[280px] lg:w-[300px] flex-shrink-0">
+          <nav className="cihaz-card-strong p-2 space-y-1 sticky top-4" style={{ maxHeight: 'calc(100dvh - 100px)', overflowY: 'auto' }}>
+            {renderManagementMenu()}
+          </nav>
         </div>
 
-        {/* ===== RIGHT PANEL (60%) - Content Area ===== */}
-        <div className="w-full md:w-[60%] min-w-0">
+        {/* ===== RIGHT PANEL - Content Area ===== */}
+        <div className="flex-1 min-w-0">
           {renderRightPanel()}
         </div>
       </div>
 
-      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="left" className="w-[86vw] p-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle>Yedek Parça Yönetim Menüsü</SheetTitle>
-          </SheetHeader>
-          <div className="p-3">{renderManagementMenu(() => setMobileMenuOpen(false))}</div>
-        </SheetContent>
-      </Sheet>
+      {/* Mobile menu overlay */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setMobileMenuOpen(false)} />
+          <div className="absolute left-0 top-0 bottom-0 w-[85vw] max-w-[320px] cihaz-shell overflow-y-auto" style={{ boxShadow: '4px 0 20px rgba(0,0,0,.12)' }}>
+            <div className="flex items-center justify-between p-4" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+              <h2 className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>Yedek Parça Menü</h2>
+              <button onClick={() => setMobileMenuOpen(false)} className="p-1"><X className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} /></button>
+            </div>
+            <div className="p-2">{renderManagementMenu(() => setMobileMenuOpen(false))}</div>
+          </div>
+        </div>
+      )}
 
       {/* Image Preview Modal */}
       <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ImageIcon className="h-5 w-5" />
-              Parça Fotoğrafı
-            </DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><ImageIcon className="h-5 w-5" /> Parça Fotoğrafı</DialogTitle>
           </DialogHeader>
-          {previewImage && (
-            <div className="relative">
-              <img
-                src={previewImage}
-                alt="Parça fotoğrafı"
-                className="w-full h-auto max-h-[70vh] object-contain rounded-md"
-              />
-            </div>
-          )}
+          {previewImage && <img src={previewImage} alt="Parça fotoğrafı" className="w-full h-auto max-h-[70vh] object-contain rounded-xl" />}
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={!!editingDepoGroup}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditingDepoGroup(null);
-            setIsSavingDepoEdit(false);
-          }
-        }}
-      >
+      {/* Depo Quantity Edit Dialog */}
+      <Dialog open={!!editingDepoGroup} onOpenChange={(open) => { if (!open) { setEditingDepoGroup(null); setIsSavingDepoEdit(false); } }}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Depo Stok Adet Düzenle</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Depo Stok Adet Düzenle</DialogTitle></DialogHeader>
           {editingDepoGroup && (
             <div className="space-y-4">
-              <div className="text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">{editingDepoGroup.stokAdi}</p>
-                <p>{editingDepoGroup.stokKodu}</p>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>{editingDepoGroup.stokAdi}</p>
+                <p className="text-xs font-mono" style={{ color: 'var(--dashboard-muted)' }}>{editingDepoGroup.stokKodu}</p>
                 {editingDepoGroup.serialNumbers.length > 0 && (
-                  <p className="mt-1 text-amber-700 dark:text-amber-400">
-                    Bu ürün seri numaralı. Minimum adet: {editingDepoGroup.serialNumbers.length}
-                  </p>
+                  <p className="text-xs mt-1" style={{ color: '#D97706' }}>Seri numaralı. Min adet: {editingDepoGroup.serialNumbers.length}</p>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="depo-edit-qty">Yeni Adet</Label>
-                <Input
-                  id="depo-edit-qty"
-                  type="number"
-                  min={editingDepoGroup.serialNumbers.length}
-                  value={editingQuantity}
-                  onChange={(e) => setEditingQuantity(Number(e.target.value || 0))}
-                />
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Yeni Adet</label>
+                <Input type="number" min={editingDepoGroup.serialNumbers.length} value={editingQuantity} onChange={(e) => setEditingQuantity(Number(e.target.value || 0))} className="cihaz-pressed !border-0 !ring-0 h-10" style={{ borderRadius: 12 }} />
               </div>
-
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEditingDepoGroup(null)} disabled={isSavingDepoEdit}>
-                  İptal
-                </Button>
-                <Button onClick={saveDepoQuantityEdit} disabled={isSavingDepoEdit}>
-                  {isSavingDepoEdit && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Kaydet
-                </Button>
+                <button onClick={() => setEditingDepoGroup(null)} disabled={isSavingDepoEdit} className="cihaz-tool-item px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>İptal</button>
+                <button onClick={saveDepoQuantityEdit} disabled={isSavingDepoEdit} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-40" style={{ background: 'var(--dashboard-accent)' }}>
+                  {isSavingDepoEdit && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Kaydet
+                </button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
+      {/* Manual Personnel Stock Dialog */}
       <Dialog open={manualStockModalOpen} onOpenChange={setManualStockModalOpen}>
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{menuSelection.personnelName} için Manuel Stok Ekle</DialogTitle>
-          </DialogHeader>
-
+          <DialogHeader><DialogTitle>{menuSelection.personnelName} için Manuel Stok Ekle</DialogTitle></DialogHeader>
           <div className="space-y-3">
             {manualStockRows.map((row, index) => (
-              <div key={row.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 border rounded-lg p-3">
-                <div className="md:col-span-3">
-                  <Label>Stok Kodu</Label>
-                  <Input
-                    value={row.stokKodu}
-                    onChange={(e) => updateManualStockRow(row.id, 'stokKodu', e.target.value)}
-                    placeholder="Örn: 05521521001"
-                  />
+              <div key={row.id} className="cihaz-pressed p-3 grid grid-cols-1 md:grid-cols-12 gap-3" style={{ borderRadius: 14 }}>
+                <div className="md:col-span-3 space-y-1">
+                  <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Stok Kodu</label>
+                  <Input value={row.stokKodu} onChange={(e) => updateManualStockRow(row.id, 'stokKodu', e.target.value)} placeholder="05521521001" className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
                 </div>
-                <div className="md:col-span-4">
-                  <Label>Stok Adı</Label>
-                  <Input
-                    value={row.stokAdi}
-                    onChange={(e) => updateManualStockRow(row.id, 'stokAdi', e.target.value)}
-                    placeholder="Ürün adını girin"
-                  />
+                <div className="md:col-span-4 space-y-1">
+                  <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Stok Adı</label>
+                  <Input value={row.stokAdi} onChange={(e) => updateManualStockRow(row.id, 'stokAdi', e.target.value)} placeholder="Ürün adı" className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
                 </div>
-                <div className="md:col-span-3">
-                  <Label>Seri Numarası (Opsiyonel)</Label>
-                  <Input
-                    value={row.serialNumber}
-                    onChange={(e) => updateManualStockRow(row.id, 'serialNumber', e.target.value)}
-                    placeholder="Opsiyonel"
-                  />
+                <div className="md:col-span-3 space-y-1">
+                  <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Seri No</label>
+                  <Input value={row.serialNumber} onChange={(e) => updateManualStockRow(row.id, 'serialNumber', e.target.value)} placeholder="Opsiyonel" className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
                 </div>
-                <div className="md:col-span-1">
-                  <Label>Adet</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={row.quantity}
-                    onChange={(e) => updateManualStockRow(row.id, 'quantity', Number(e.target.value))}
-                    disabled={!!row.serialNumber.trim()}
-                  />
+                <div className="md:col-span-1 space-y-1">
+                  <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Adet</label>
+                  <Input type="number" min={1} value={row.quantity} onChange={(e) => updateManualStockRow(row.id, 'quantity', Number(e.target.value))} disabled={!!row.serialNumber.trim()} className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
                 </div>
                 <div className="md:col-span-1 flex items-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => removeManualStockRow(row.id)}
-                    disabled={manualStockRows.length === 1}
-                    title={`${index + 1}. satırı sil`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <button onClick={() => removeManualStockRow(row.id)} disabled={manualStockRows.length === 1} className="p-2 rounded-lg hover:bg-black/5 transition disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" style={{ color: '#B91C1C' }} /></button>
                 </div>
               </div>
             ))}
-
-            <Button type="button" variant="outline" onClick={addManualStockRow}>
-              <Plus className="h-4 w-4 mr-2" />
-              Satır Ekle
-            </Button>
+            <button onClick={addManualStockRow} className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+              <Plus className="w-3.5 h-3.5" /> Satır Ekle
+            </button>
           </div>
-
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setManualStockModalOpen(false)}>
-              Vazgeç
-            </Button>
-            <Button type="button" onClick={saveManualPersonnelStock} disabled={isSavingManualStock}>
-              {isSavingManualStock && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Kaydet
-            </Button>
+          <div className="flex justify-end gap-2 mt-2">
+            <button onClick={() => setManualStockModalOpen(false)} className="cihaz-tool-item px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>Vazgeç</button>
+            <button onClick={saveManualPersonnelStock} disabled={isSavingManualStock} className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-40" style={{ background: 'var(--dashboard-accent)' }}>
+              {isSavingManualStock && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Kaydet
+            </button>
           </div>
         </DialogContent>
       </Dialog>

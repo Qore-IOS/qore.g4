@@ -139,8 +139,6 @@ const LAB_PATTERNS = [
 ];
 
 function extractLabNumber(query: string): string | null {
-  const normalized = normalizeTurkish(query);
-
   for (const pattern of LAB_PATTERNS) {
     const match = query.match(pattern);
     if (match) {
@@ -149,6 +147,12 @@ function extractLabNumber(query: string): string | null {
   }
 
   return null;
+}
+
+function extractLabNumbersFromText(text: string): string[] {
+  const normalized = normalizeTurkish(text);
+  const matches = normalized.matchAll(/(?:line|lab|laboratuvar)\s*(\d{1,2})/g);
+  return [...new Set(Array.from(matches, (m) => m[1]))];
 }
 
 // ============================================
@@ -228,7 +232,7 @@ function findProductAliasMatch(query: string): string[] {
 // ============================================
 
 // Cache for database entities
-let hospitalCache: Array<{ id: string; name: string; kod?: string; aliases: string[] }> | null = null;
+let hospitalCache: Array<{ id: string; name: string; kod?: string; aliases: string[]; labNumbers: string[] }> | null = null;
 let productCache: Array<{ stokKodu: string; stokAdi: string; aliases: string[] }> | null = null;
 
 async function loadHospitalCache() {
@@ -243,17 +247,15 @@ async function loadHospitalCache() {
 
       // Generate aliases
       const aliases: string[] = [name, kod].filter(Boolean);
+      const labNumbers = extractLabNumbersFromText(`${name} ${kod}`);
 
       // Add variations
       if (name) {
-        // "Ankara Hastanesi" -> ["ankara", "hastanesi", "ankara hastanesi"]
-        const words = name.toLowerCase().split(/\s+/);
+        const words = name.toLowerCase().split(/\s+/).filter((w: string) => w.length > 1);
         aliases.push(...words);
 
-        // Lab number extraction
-        const labNum = extractLabNumber(name);
-        if (labNum) {
-          aliases.push(`line ${labNum}`, `l${labNum}`, `lab ${labNum}`);
+        for (const labNum of labNumbers) {
+          aliases.push(`line ${labNum}`, `l${labNum}`, `lab ${labNum}`, `laboratuvar ${labNum}`);
         }
       }
 
@@ -262,6 +264,7 @@ async function loadHospitalCache() {
         name,
         kod,
         aliases,
+        labNumbers,
       };
     });
 
@@ -349,14 +352,17 @@ export async function resolveEntities(query: string): Promise<EntityResolutionRe
   // Check for lab number pattern first
   const labNumber = extractLabNumber(query);
   if (labNumber) {
-    // Find hospital matching lab number
+    // Find hospital matching exact lab number aliases only
     for (const hospital of hospitals) {
-      if (hospital.aliases.some(a =>
-        a.includes(`line ${labNumber}`) ||
-        a.includes(`l${labNumber}`) ||
-        a.includes(`lab ${labNumber}`) ||
-        a.includes(labNumber)
-      )) {
+      const hasExactLabAlias = hospital.labNumbers?.includes(labNumber) || hospital.aliases.some(a => {
+        const normalizedAlias = normalizeTurkish(a);
+        return normalizedAlias === `line ${labNumber}`
+          || normalizedAlias === `l${labNumber}`
+          || normalizedAlias === `lab ${labNumber}`
+          || normalizedAlias === `laboratuvar ${labNumber}`;
+      });
+
+      if (hasExactLabAlias) {
         result.hospitals.push({
           type: 'hospital',
           id: hospital.id,
