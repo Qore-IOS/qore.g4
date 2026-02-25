@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile } from 'fs/promises';
 import { adminDb } from '@/lib/firebase-admin';
 
 type SimilarFaultSummary = {
@@ -94,48 +95,20 @@ function candidateGeminiModels(): string[] {
 }
 
 
-async function loadActiveKnowledgeDocs() {
-  const snap = await adminDb
-    .collection('aiSuggestionDocs')
-    .where('active', '==', true)
-    .orderBy('updatedAt', 'desc')
-    .limit(12)
-    .get();
+const MASTER_DOC_PATH = '/home/user/studio/public/teknik_doc.txt';
 
-  const docs = snap.docs.map((d) => {
-    const x = d.data() as any;
-    return {
-      id: d.id,
-      name: x.name || 'Doküman',
-      type: x.type || 'txt',
-      text: String(x.text || ''),
-      updatedAt: toIso(x.updatedAt),
-      charCount: Number(x.charCount || 0),
-    };
-  });
-
-  // Prompt boyutunu kontrol altında tut
-  const maxChars = 50_000;
-  let used = 0;
-  const clipped = docs
-    .map((d) => {
-      if (!d.text) return null;
-      const remaining = maxChars - used;
-      if (remaining <= 0) return null;
-      const piece = d.text.slice(0, Math.min(d.text.length, remaining));
-      used += piece.length;
-      return { ...d, text: piece };
-    })
-    .filter(Boolean) as Array<{ id: string; name: string; type: string; text: string; updatedAt: string | null; charCount: number }>;
-
-  return clipped;
+async function loadMasterKnowledgeDoc() {
+  const text = await readFile(MASTER_DOC_PATH, 'utf-8');
+  const normalized = text.replace(/\u0000/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    throw new Error(`Master teknik dokümanı boş: ${MASTER_DOC_PATH}`);
+  }
+  // Prompt boyutu için üst limit
+  return normalized.slice(0, 60_000);
 }
 
-function buildKnowledgeSignature(docs: Array<{ id: string; updatedAt: string | null; charCount: number }>): string {
-  return docs
-    .map((d) => `${d.id}:${d.updatedAt || '-'}:${d.charCount}`)
-    .sort()
-    .join('|');
+function buildKnowledgeSignature(masterDocText: string): string {
+  return `master_doc_v1:${masterDocText.length}`;
 }
 
 async function requestGeminiSuggestion(context: any) {
@@ -253,8 +226,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Arıza kaydında seri numarası bulunamadı' }, { status: 400 });
     }
 
-    const knowledgeDocs = await loadActiveKnowledgeDocs();
-    const knowledgeSignature = buildKnowledgeSignature(knowledgeDocs);
+    const masterDocText = await loadMasterKnowledgeDoc();
+    const knowledgeSignature = buildKnowledgeSignature(masterDocText);
 
     const cachedSuggestion = report?.aiSuggestion;
     const cacheVersionMatches = Number(cachedSuggestion?.cacheVersion || 0) === AI_SUGGESTION_CACHE_VERSION;
@@ -327,12 +300,12 @@ export async function GET(request: NextRequest) {
       })),
       closeNotes,
       resolutionStats,
-      knowledgeDocs: knowledgeDocs.map((d) => ({
-        name: d.name,
-        type: d.type,
-        updatedAt: d.updatedAt,
-        text: d.text,
-      })),
+      knowledgeDocs: [{
+        name: 'Master Teknik Doküman',
+        type: 'txt',
+        source: MASTER_DOC_PATH,
+        text: masterDocText,
+      }],
     };
 
     const ai = await requestGeminiSuggestion(context);
