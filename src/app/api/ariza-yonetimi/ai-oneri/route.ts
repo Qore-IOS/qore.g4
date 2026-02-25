@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFile } from 'fs/promises';
+import { access, readFile } from 'fs/promises';
+import path from 'path';
 import { adminDb } from '@/lib/firebase-admin';
 
 type SimilarFaultSummary = {
@@ -95,16 +96,43 @@ function candidateGeminiModels(): string[] {
 }
 
 
-const MASTER_DOC_PATH = '/home/user/studio/public/teknik_doc.txt';
+const MASTER_DOC_FILE = 'teknik_doc.txt';
+
+function candidateMasterDocPaths(): string[] {
+  const fromEnv = process.env.AI_MASTER_DOC_PATH?.trim();
+  const cwd = process.cwd();
+
+  return [
+    fromEnv,
+    path.join(cwd, 'public', MASTER_DOC_FILE),
+    '/home/user/studio/public/teknik_doc.txt',
+    '/workspace/qore.g4/public/teknik_doc.txt',
+  ].filter(Boolean) as string[];
+}
+
+async function resolveMasterDocPath(): Promise<string> {
+  const candidates = candidateMasterDocPaths();
+  for (const p of candidates) {
+    try {
+      await access(p);
+      return p;
+    } catch {
+      // continue
+    }
+  }
+
+  throw new Error(`Master teknik dokümanı bulunamadı. Denenen yollar: ${candidates.join(' | ')}`);
+}
 
 async function loadMasterKnowledgeDoc() {
-  const text = await readFile(MASTER_DOC_PATH, 'utf-8');
+  const sourcePath = await resolveMasterDocPath();
+  const text = await readFile(sourcePath, 'utf-8');
   const normalized = text.replace(/\u0000/g, ' ').replace(/\s+/g, ' ').trim();
   if (!normalized) {
-    throw new Error(`Master teknik dokümanı boş: ${MASTER_DOC_PATH}`);
+    throw new Error(`Master teknik dokümanı boş: ${sourcePath}`);
   }
   // Prompt boyutu için üst limit
-  return normalized.slice(0, 60_000);
+  return { text: normalized.slice(0, 60_000), sourcePath };
 }
 
 function buildKnowledgeSignature(masterDocText: string): string {
@@ -226,7 +254,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Arıza kaydında seri numarası bulunamadı' }, { status: 400 });
     }
 
-    const masterDocText = await loadMasterKnowledgeDoc();
+    const { text: masterDocText, sourcePath: masterDocPath } = await loadMasterKnowledgeDoc();
     const knowledgeSignature = buildKnowledgeSignature(masterDocText);
 
     const cachedSuggestion = report?.aiSuggestion;
@@ -303,7 +331,7 @@ export async function GET(request: NextRequest) {
       knowledgeDocs: [{
         name: 'Master Teknik Doküman',
         type: 'txt',
-        source: MASTER_DOC_PATH,
+        source: masterDocPath,
         text: masterDocText,
       }],
     };
