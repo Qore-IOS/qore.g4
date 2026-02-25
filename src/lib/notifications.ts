@@ -306,13 +306,18 @@ export async function emitFaultOpened(params: {
   if (params.hospitalId) {
     targets.push(`lab:${params.hospitalId}`);
   }
-  // Convert relative image path to full URL for push notifications
+  // Convert image path to full URL for push notifications.
+  // After migration, deviceImageUrl is already a full Storage URL.
   let fullDeviceImageUrl: string | null = null;
   if (params.deviceImageUrl) {
-    const imgPath = params.deviceImageUrl.startsWith("/")
-      ? params.deviceImageUrl
-      : `/${params.deviceImageUrl}`;
-    fullDeviceImageUrl = `https://qorengine.com${imgPath}`;
+    if (/^https?:\/\//i.test(params.deviceImageUrl)) {
+      fullDeviceImageUrl = params.deviceImageUrl;
+    } else {
+      const imgPath = params.deviceImageUrl.startsWith("/")
+        ? params.deviceImageUrl
+        : `/${params.deviceImageUrl}`;
+      fullDeviceImageUrl = `https://qorengine.com${imgPath}`;
+    }
   }
   await createNotification({
     type: "fault_opened",
