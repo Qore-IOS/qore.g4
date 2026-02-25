@@ -37,6 +37,7 @@ import {
   Wrench,
   Building2,
   RefreshCw,
+  Upload,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes } from 'date-fns';
@@ -72,6 +73,16 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { FileText } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+
+type AiKnowledgeDoc = {
+  id: string;
+  name: string;
+  type: 'txt' | 'pdf' | string;
+  active: boolean;
+  charCount: number;
+  updatedAt: string | null;
+};
 
 // Status tab değerleri
 type StatusTab = 'all' | 'atama_bekliyor' | 'mudahale_bekliyor' | 'mudahale_ediliyor' | 'cozuldu';

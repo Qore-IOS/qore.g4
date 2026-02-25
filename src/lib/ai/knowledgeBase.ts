@@ -12,7 +12,6 @@
  */
 
 import { adminDb } from '@/lib/firebase-admin';
-import { anthropic, CLAUDE_MODEL } from './config';
 
 // ============================================
 // TYPES
