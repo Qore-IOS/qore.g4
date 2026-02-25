@@ -156,6 +156,7 @@ export default function ArizaYonetimiPage() {
   const [uniqueDevices, setUniqueDevices] = useState<string[]>([]);
   const [uniqueOpeners, setUniqueOpeners] = useState<string[]>([]);
 
+
   // API'den veri çekme
   const fetchReports = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -301,6 +302,7 @@ export default function ArizaYonetimiPage() {
     setExportModalOpen(false);
   };
 
+
   const handleExportToPdf = async () => {
     if (reports.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
@@ -320,6 +322,7 @@ export default function ArizaYonetimiPage() {
     <PageShell>
       <div className="device-module-page space-y-4">
         <BackButton fallback="/cihaz-yonetimi-ana" />
+
         <Card>
           <CardHeader>
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
