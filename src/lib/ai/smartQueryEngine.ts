@@ -191,24 +191,6 @@ async function determineQueryPlan(
     }
   }
 
-  // Product-specific distribution questions: "hangi labda/hastanede en cok X var"
-  const normalizedQuery = intent.originalQuery.toLowerCase();
-  const asksForTopLocation =
-    (normalizedQuery.includes('hangi') || normalizedQuery.includes('nerede')) &&
-    (normalizedQuery.includes('en cok') || normalizedQuery.includes('en fazla')) &&
-    (normalizedQuery.includes('lab') || normalizedQuery.includes('laboratuvar') || normalizedQuery.includes('hastane'));
-
-  if (intent.entities.products.length > 0 && asksForTopLocation) {
-    queries.add('all_hospitals_stock');
-    reasoning += 'Urunun tum lab/hastane dagilimi icin all_hospitals_stock eklendi. ';
-  }
-
-  // Fault-heavy questions should always include device faults
-  if (/(en\s*cok\s*ariza|ariza\s*veren\s*cihaz|en\s*sorunlu\s*cihaz)/i.test(intent.originalQuery)) {
-    queries.add('device_faults');
-    reasoning += 'Ariza veren cihaz analizi icin device_faults eklendi. ';
-  }
-
   // Always add product_info if products are mentioned
   if (intent.entities.products.length > 0) {
     queries.add('product_info');
@@ -340,8 +322,8 @@ async function fetchHospitalStockEnhanced(params: FetchParams) {
   }
 
   const snapshot = await query.limit(1000).get();
+  const items: unknown[] = [];
   const groupedByProduct: Record<string, { stokKodu: string; stokAdi: string; miktar: number; lots: unknown[] }> = {};
-  let totalFilteredItems = 0;
 
   for (const doc of snapshot.docs) {
     const data = doc.data();
@@ -355,8 +337,6 @@ async function fetchHospitalStockEnhanced(params: FetchParams) {
     // Filter by product if specified
     if (params.stokKodu && data.stokKodu !== params.stokKodu) continue;
     if (params.stokAdi && !data.stokAdi?.toLowerCase().includes(params.stokAdi.toLowerCase())) continue;
-
-    totalFilteredItems += 1;
 
     const key = data.stokKodu;
     if (!groupedByProduct[key]) {
@@ -376,7 +356,7 @@ async function fetchHospitalStockEnhanced(params: FetchParams) {
 
   return {
     hospitalName: params.hospitalName || 'Tum Hastaneler',
-    totalItems: totalFilteredItems,
+    totalItems: snapshot.size,
     products: Object.values(groupedByProduct).sort((a, b) => b.miktar - a.miktar),
   };
 }
@@ -433,23 +413,15 @@ async function fetchDeviceFaultsEnhanced(params: FetchParams) {
     if (params.hospitalId && data.hospitalId !== params.hospitalId) continue;
     if (params.hospitalName && !data.labName?.toLowerCase().includes(params.hospitalName.toLowerCase())) continue;
 
-    const openedAt = data.openedAt?.toDate?.() || data.openedAt || null;
-    const openedAtMs = openedAt instanceof Date ? openedAt.getTime() : (typeof openedAt === 'number' ? openedAt : null);
-
     faults.push({
       id: doc.id,
-      hospital: data.labName || data.hospitalName || '-',
-      hospitalId: data.hospitalId || null,
-      brand: data.brand || data.marka || null,
-      model: data.model || data.deviceModel || '-',
-      serial: data.serial || data.serialNumber || '-',
-      title: data.title || null,
-      description: data.description || data.openDescription || '-',
-      closeDescription: data.closeDescription || null,
+      hospital: data.labName,
+      model: data.model,
+      description: data.description,
       status: data.status,
-      faultType: data.faultType === 'teknik_servis' ? 'Teknik Servis' : data.faultType === 'aplikasyon' ? 'Aplikasyon' : (data.faultType || '-'),
-      openedAt,
-      duration: openedAtMs ? Math.floor((Date.now() - openedAtMs) / (1000 * 60 * 60 * 24)) : null,
+      faultType: data.faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon',
+      openedAt: data.openedAt?.toDate?.() || data.openedAt,
+      duration: data.openedAt ? Math.floor((Date.now() - data.openedAt.toDate().getTime()) / (1000 * 60 * 60 * 24)) : null,
     });
   }
 
@@ -768,38 +740,20 @@ function formatDataAsContext(data: Record<string, unknown>, intent: ExtractedQue
   }
 
   if (data.device_faults) {
-    const faultData = data.device_faults as { total: number; faults: unknown[]; byFaultType: Record<string, number>; byModel?: Record<string, number>; avgDurationDays: number };
+    const faultData = data.device_faults as { total: number; faults: unknown[]; byFaultType: Record<string, number>; avgDurationDays: number };
     sections.push(`## Cihaz Arizalari`);
-    sections.push(`Toplam Ariza Kaydi: ${faultData.total}`);
+    sections.push(`Toplam Acik Ariza: ${faultData.total}`);
     sections.push(`Ortalama Cozum Suresi: ${faultData.avgDurationDays} gun\n`);
-
-    if (faultData.byModel && Object.keys(faultData.byModel).length > 0) {
-      sections.push('### Modele Gore Ariza Sayisi (Ilk 10)');
-      const topModels = Object.entries(faultData.byModel)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10);
-      for (const [model, count] of topModels) {
-        sections.push(`- ${model}: ${count} adet`);
-      }
-      sections.push('');
-    }
-
     sections.push('### Ariza Tiplerine Gore');
     for (const [type, count] of Object.entries(faultData.byFaultType)) {
       sections.push(`- ${type}: ${count} adet`);
     }
-
-    sections.push('\n### Son Ariza Detaylari');
-    for (const f of (faultData.faults as { hospital: string; brand?: string; model: string; serial?: string; description: string; closeDescription?: string; openedAt: Date }[]).slice(0, 8)) {
-      sections.push(`- **${f.hospital}** - ${f.brand ? `${f.brand} / ` : ''}${f.model} (${f.serial || '-'})`);
-      sections.push(`  - Acilis: ${f.description || '-'}`);
-      if (f.closeDescription) {
-        sections.push(`  - Kapanis: ${f.closeDescription}`);
-      }
+    sections.push('\n### Son Arizalar');
+    for (const f of (faultData.faults as { hospital: string; model: string; description: string; openedAt: Date }[]).slice(0, 5)) {
+      sections.push(`- **${f.hospital}** - ${f.model}: ${f.description}`);
     }
     sections.push('');
   }
-
 
   if (data.efficiency_data) {
     const effData = data.efficiency_data as { totalRecords: number; records: unknown[] };
