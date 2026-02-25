@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Sparkles, Upload } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -101,6 +101,29 @@ function normalizeStatus(status: string): DeviceFaultStatus {
 
 type FaultDoc = DeviceFaultReport;
 
+
+type AiSuggestion = {
+  summary?: string;
+  probableCauses?: string[];
+  suggestedActions?: string[];
+  chronicInsight?: string;
+  resolutionAssessment?: string;
+  evidenceBasedRecommendation?: string;
+  confidence?: number;
+  debug?: string;
+  similarFaultStats?: {
+    total: number;
+    sameModelCount: number;
+    sameTitleCategoryCount: number;
+    resolvedCount: number;
+  };
+  resolutionStats?: {
+    kalici: number;
+    gecici: number;
+    belirsiz: number;
+  };
+};
+
 type HistoryEvent = {
   id: string;
   type: 'opened' | 'note' | 'status_change' | 'closed';
@@ -173,6 +196,12 @@ export default function FaultDetailPage() {
   const usedPartImageInputRef = useRef<HTMLInputElement>(null);
   const [faultPartChanges, setFaultPartChanges] = useState<FaultPartChange[]>([]);
   const [isSavingPart, setIsSavingPart] = useState(false);
+
+  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiDocFile, setAiDocFile] = useState<File | null>(null);
+  const [isUploadingAiDoc, setIsUploadingAiDoc] = useState(false);
 
 
   useEffect(() => {
@@ -741,6 +770,61 @@ export default function FaultDetailPage() {
     }
   };
 
+
+  const fetchAiSuggestion = useCallback(async (forceRefresh = false) => {
+    if (!fault?.id) return;
+
+    setIsAiLoading(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`/api/ariza-yonetimi/ai-oneri?reportId=${fault.id}${forceRefresh ? '&force=1' : ''}`);
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || 'AI önerisi alınamadı.');
+      }
+      setAiSuggestion(payload.data || null);
+    } catch (e: any) {
+      setAiError(e?.message || 'AI önerisi alınamadı.');
+      setAiSuggestion(null);
+    } finally {
+      setIsAiLoading(false);
+    }
+  }, [fault?.id]);
+
+  useEffect(() => {
+    if (!fault?.id) return;
+    fetchAiSuggestion();
+  }, [fault?.id, fetchAiSuggestion]);
+
+  const handleUploadAiDoc = useCallback(async () => {
+    if (!aiDocFile) {
+      toast({ title: 'Eksik Dosya', description: 'Lütfen .txt veya .pdf dosyası seçin.', variant: 'destructive' });
+      return;
+    }
+
+    setIsUploadingAiDoc(true);
+    try {
+      const form = new FormData();
+      form.append('file', aiDocFile);
+      const res = await fetch('/api/ariza-yonetimi/ai-dokumanlar', {
+        method: 'POST',
+        body: form,
+      });
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || 'Doküman yüklenemedi.');
+      }
+
+      toast({ title: 'Başarılı', description: 'AI dokümanı yüklendi. Öneri yeniden üretilecek.' });
+      setAiDocFile(null);
+      await fetchAiSuggestion(true);
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e?.message || 'Doküman yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setIsUploadingAiDoc(false);
+    }
+  }, [aiDocFile, fetchAiSuggestion, toast]);
+
   const handleShare = async () => {
     if (!fault) return;
     const shareText = `Arıza Raporu: #${fault.id}\nLaboratuvar: ${fault.labName}\nCihaz: ${fault.model} (SN: ${fault.serial})\nAçan: ${fault.openedByName}\nAçılış: ${fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : 'Bilinmiyor'}`;
@@ -966,6 +1050,81 @@ export default function FaultDetailPage() {
             </div>
           )}
             
+
+          <div className="space-y-3 pt-4 border-t">
+            <p className="font-medium">Açıklama</p>
+            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
+          </div>
+
+          <div className="space-y-3 pt-4 border-t">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-violet-500" />
+                <p className="font-medium">AI Önerisi</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => fetchAiSuggestion(true)} disabled={isAiLoading}>
+                {isAiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yenile'}
+              </Button>
+            </div>
+
+            <div className="rounded-md border p-3 space-y-2">
+              <p className="text-xs text-muted-foreground">NotebookLM benzeri bilgi bağlamı için .txt/.pdf dokümanı yükleyebilirsiniz. Yüklenen doküman AI öneri promptuna dahil edilir.</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  type="file"
+                  accept=".txt,.pdf,text/plain,application/pdf"
+                  onChange={(e) => setAiDocFile(e.target.files?.[0] || null)}
+                  className="text-sm"
+                />
+                <Button variant="secondary" onClick={handleUploadAiDoc} disabled={isUploadingAiDoc || !aiDocFile}>
+                  {isUploadingAiDoc ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                  Dokümanı Yükle
+                </Button>
+              </div>
+            </div>
+
+            {isAiLoading && (
+              <div className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> AI önerisi hazırlanıyor...
+              </div>
+            )}
+
+            {aiError && <p className="text-sm text-red-600">{aiError}</p>}
+
+            {!isAiLoading && !aiError && aiSuggestion && (
+              <div className="rounded-lg border bg-violet-50/40 dark:bg-violet-950/20 p-3 space-y-3 text-sm">
+                {aiSuggestion.summary && <p><span className="font-medium">Özet:</span> {aiSuggestion.summary}</p>}
+                {typeof aiSuggestion.confidence === 'number' && (
+                  <p><span className="font-medium">Güven Skoru:</span> %{Math.max(0, Math.min(100, Math.round(aiSuggestion.confidence)))}</p>
+                )}
+                {!!aiSuggestion.probableCauses?.length && (
+                  <div>
+                    <p className="font-medium mb-1">Olası Nedenler</p>
+                    <ul className="list-disc pl-5 space-y-1">
+                      {aiSuggestion.probableCauses.map((item, idx) => <li key={`cause-${idx}`}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {!!aiSuggestion.suggestedActions?.length && (
+                  <div>
+                    <p className="font-medium mb-1">Önerilen Aksiyonlar</p>
+                    <ul className="list-disc pl-5 space-y-1">
+                      {aiSuggestion.suggestedActions.map((item, idx) => <li key={`action-${idx}`}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {aiSuggestion.chronicInsight && <p><span className="font-medium">Kronik Sorun Analizi:</span> {aiSuggestion.chronicInsight}</p>}
+                {aiSuggestion.resolutionAssessment && <p><span className="font-medium">Kalıcı/Geçici Çözüm Yorumu:</span> {aiSuggestion.resolutionAssessment}</p>}
+                {aiSuggestion.evidenceBasedRecommendation && <p><span className="font-medium">Cihaz Geçmişine Dayalı Özel Öneri:</span> {aiSuggestion.evidenceBasedRecommendation}</p>}
+                {aiSuggestion.similarFaultStats && (
+                  <p className="text-xs text-muted-foreground">
+                    Benzer arıza: {aiSuggestion.similarFaultStats.total} • Aynı model: {aiSuggestion.similarFaultStats.sameModelCount} • Aynı başlık+kategori: {aiSuggestion.similarFaultStats.sameTitleCategoryCount} • Çözülen: {aiSuggestion.similarFaultStats.resolvedCount}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Yeni Arıza Akış Sistemi */}
           {(() => {
             const normalized = normalizeStatus(fault.status);
