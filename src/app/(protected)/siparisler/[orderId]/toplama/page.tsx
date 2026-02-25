@@ -27,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import type { Order, OrderItem, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot, ConsumptionRecord } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, limit, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -575,6 +575,7 @@ export default function ToplamaPage() {
       const transferRef = doc(collection(db, 'transfers'));
 
       const itemsToShip: DepoStokItem[] = [];
+      const createdConsumptionDocIds: string[] = [];
       const usedStockIds = new Set<string>();
       const scannedMatrix = Object.entries(scannedSerials);
 
@@ -716,20 +717,33 @@ export default function ToplamaPage() {
           const stokRef = doc(db, 'depoStok', item.id!);
           if (trackingDisabled && effectiveLabId) {
             batch.delete(stokRef);
-            const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+            const consumptionRef = doc(collection(db, 'tuketimKayitlari'));
+            const consumptionRecord: Omit<ConsumptionRecord, 'id'> & {
+              transferId: string;
+              orderId: string;
+              sourceDepotId?: string;
+              sourceDepotName?: string;
+              stockDocId?: string;
+            } = {
               stokKodu: item.stokKodu,
               stokAdi: item.stokAdi,
-              lotNumarasi: item.lotNumarasi,
-              miad: item.miad,
-              seriNumarasi: item.seriNumarasi,
+              lotNumarasi: item.lotNumarasi || '',
+              miad: item.miad || '',
+              seriNumarasi: item.seriNumarasi || '',
               laboratoryId: effectiveLabId,
               laboratoryName: targetName,
               consumptionTimestamp: new Date(),
               consumptionType: 'normal_kullanim',
               userId: currentUser.uid ?? 'unknown',
               userName: currentUserProfile.name ?? currentUser?.email ?? 'Unknown User',
+              transferId: transferRef.id,
+              orderId: order.id,
+              sourceDepotId: order.depotId,
+              sourceDepotName: depotName,
+              stockDocId: item.id,
             };
-            batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+            batch.set(consumptionRef, consumptionRecord);
+            createdConsumptionDocIds.push(consumptionRef.id);
           } else {
             batch.update(stokRef, {
                 isShipped: true,
@@ -847,12 +861,20 @@ export default function ToplamaPage() {
           verificationErrors.push(`Hedef laboratuvar stoğuna yansıyan ürün sayısı uyuşmuyor: beklenen ${itemsToShip.length}, bulunan ${matchedTargetStockCount}`);
         }
       } else {
-        const consumptionSnap = await getDocs(query(
-          collection(db, 'tuketimKayitlari'),
-          where('laboratoryId', '==', effectiveLabId),
-          where('userId', '==', currentUser.uid),
-          limit(500)
-        ));
+        if (createdConsumptionDocIds.length !== itemsToShip.length) {
+          verificationErrors.push(`Tüketim kaydı oluşturma sayısı uyuşmuyor: beklenen ${itemsToShip.length}, oluşturulan ${createdConsumptionDocIds.length}`);
+        }
+
+        const consumptionDocs = await Promise.all(
+          createdConsumptionDocIds.map(async (id) => {
+            const snap = await getDoc(doc(db, 'tuketimKayitlari', id));
+            if (!snap.exists()) {
+              verificationErrors.push(`Tüketim kaydı bulunamadı: ${id}`);
+              return null;
+            }
+            return snap.data() as Partial<ConsumptionRecord> & { transferId?: string; orderId?: string };
+          })
+        );
 
         const expectedConsumptionKeyCounts = itemsToShip.reduce<Record<string, number>>((acc, item) => {
           const key = `${item.stokKodu}|${item.seriNumarasi || ''}|${item.lotNumarasi || ''}`;
@@ -860,8 +882,19 @@ export default function ToplamaPage() {
           return acc;
         }, {});
 
-        const actualConsumptionKeyCounts = consumptionSnap.docs.reduce<Record<string, number>>((acc, d) => {
-          const data = d.data() as Partial<ConsumptionRecord>;
+        const actualConsumptionKeyCounts = consumptionDocs.reduce<Record<string, number>>((acc, data) => {
+          if (!data) return acc;
+
+          if (data.transferId !== transferRef.id) {
+            verificationErrors.push(`Tüketim kaydı transferId uyuşmuyor: beklenen ${transferRef.id}, bulunan ${data.transferId || 'yok'}`);
+          }
+          if (data.orderId !== order.id) {
+            verificationErrors.push(`Tüketim kaydı orderId uyuşmuyor: beklenen ${order.id}, bulunan ${data.orderId || 'yok'}`);
+          }
+          if (data.laboratoryId !== effectiveLabId) {
+            verificationErrors.push(`Tüketim kaydı laboratoryId uyuşmuyor: beklenen ${effectiveLabId}, bulunan ${data.laboratoryId || 'yok'}`);
+          }
+
           const key = `${data.stokKodu || ''}|${data.seriNumarasi || ''}|${data.lotNumarasi || ''}`;
           if (expectedConsumptionKeyCounts[key]) {
             acc[key] = (acc[key] || 0) + 1;
