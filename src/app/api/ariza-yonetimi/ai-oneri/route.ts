@@ -93,6 +93,51 @@ function candidateGeminiModels(): string[] {
   return Array.from(new Set([...fromEnv, ...defaults]));
 }
 
+
+async function loadActiveKnowledgeDocs() {
+  const snap = await adminDb
+    .collection('aiSuggestionDocs')
+    .where('active', '==', true)
+    .orderBy('updatedAt', 'desc')
+    .limit(12)
+    .get();
+
+  const docs = snap.docs.map((d) => {
+    const x = d.data() as any;
+    return {
+      id: d.id,
+      name: x.name || 'Doküman',
+      type: x.type || 'txt',
+      text: String(x.text || ''),
+      updatedAt: toIso(x.updatedAt),
+      charCount: Number(x.charCount || 0),
+    };
+  });
+
+  // Prompt boyutunu kontrol altında tut
+  const maxChars = 50_000;
+  let used = 0;
+  const clipped = docs
+    .map((d) => {
+      if (!d.text) return null;
+      const remaining = maxChars - used;
+      if (remaining <= 0) return null;
+      const piece = d.text.slice(0, Math.min(d.text.length, remaining));
+      used += piece.length;
+      return { ...d, text: piece };
+    })
+    .filter(Boolean) as Array<{ id: string; name: string; type: string; text: string; updatedAt: string | null; charCount: number }>;
+
+  return clipped;
+}
+
+function buildKnowledgeSignature(docs: Array<{ id: string; updatedAt: string | null; charCount: number }>): string {
+  return docs
+    .map((d) => `${d.id}:${d.updatedAt || '-'}:${d.charCount}`)
+    .sort()
+    .join('|');
+}
+
 async function requestGeminiSuggestion(context: any) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) return null;
@@ -208,9 +253,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Arıza kaydında seri numarası bulunamadı' }, { status: 400 });
     }
 
+    const knowledgeDocs = await loadActiveKnowledgeDocs();
+    const knowledgeSignature = buildKnowledgeSignature(knowledgeDocs);
+
     const cachedSuggestion = report?.aiSuggestion;
     const cacheVersionMatches = Number(cachedSuggestion?.cacheVersion || 0) === AI_SUGGESTION_CACHE_VERSION;
-    if (!forceRefresh && cachedSuggestion && typeof cachedSuggestion === 'object' && cacheVersionMatches) {
+    const knowledgeMatches = (cachedSuggestion?.knowledgeSignature || '') === knowledgeSignature;
+    if (!forceRefresh && cachedSuggestion && typeof cachedSuggestion === 'object' && cacheVersionMatches && knowledgeMatches) {
       return NextResponse.json({ success: true, cached: true, data: cachedSuggestion });
     }
 
@@ -278,6 +327,12 @@ export async function GET(request: NextRequest) {
       })),
       closeNotes,
       resolutionStats,
+      knowledgeDocs: knowledgeDocs.map((d) => ({
+        name: d.name,
+        type: d.type,
+        updatedAt: d.updatedAt,
+        text: d.text,
+      })),
     };
 
     const ai = await requestGeminiSuggestion(context);
@@ -293,6 +348,7 @@ export async function GET(request: NextRequest) {
       generatedAt: new Date().toISOString(),
       cacheVersion: AI_SUGGESTION_CACHE_VERSION,
       scopeSerial: serial,
+      knowledgeSignature,
     };
 
     await reportRef.update({
