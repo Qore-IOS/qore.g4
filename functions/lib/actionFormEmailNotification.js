@@ -87,13 +87,12 @@ const CIHAZ_DURUMU_LABELS = {
 };
 // --- Nodemailer transporter ---
 function getTransporter() {
-    var _a, _b, _c, _d;
-    const smtpHost = (_a = functions.config().smtp) === null || _a === void 0 ? void 0 : _a.host;
-    const smtpPort = parseInt(((_b = functions.config().smtp) === null || _b === void 0 ? void 0 : _b.port) || '587', 10);
-    const smtpUser = (_c = functions.config().smtp) === null || _c === void 0 ? void 0 : _c.user;
-    const smtpPass = (_d = functions.config().smtp) === null || _d === void 0 ? void 0 : _d.pass;
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
     if (!smtpHost || !smtpUser || !smtpPass) {
-        firebase_functions_1.logger.warn('[actionFormEmail] SMTP config missing. Set via: firebase functions:config:set smtp.host=... smtp.port=... smtp.user=... smtp.pass=...');
+        firebase_functions_1.logger.warn('[actionFormEmail] SMTP config missing. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in functions/.env');
         return null;
     }
     return nodemailer.createTransport({
@@ -257,7 +256,6 @@ function formatDate(date) {
 }
 // --- Main handler for both collections ---
 async function handleActionFormCreated(snap, context, formType) {
-    var _a, _b;
     const data = snap.data();
     const formId = context.params.formId;
     firebase_functions_1.logger.info(`[actionFormEmail] Processing ${formType} form: ${formId}`);
@@ -293,7 +291,7 @@ async function handleActionFormCreated(snap, context, formType) {
     const formTypeLabel = formType === 'teknik_servis' ? 'teknik servis' : 'aplikasyon';
     const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
     const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
-    const senderEmail = ((_a = functions.config().smtp) === null || _a === void 0 ? void 0 : _a.from) || ((_b = functions.config().smtp) === null || _b === void 0 ? void 0 : _b.user);
+    const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
     const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
     try {
         await transporter.sendMail({
