@@ -20,6 +20,7 @@ export type NotificationType =
   | "stock_threshold"
   | "lab_count_completed"
   | "fault_opened"
+  | "fault_transferred"
   | "fault_closed"
   | "custom";
 
@@ -294,7 +295,6 @@ export async function emitFaultOpened(params: {
   faultType: "teknik_servis" | "aplikasyon";
   hospitalName?: string;
   hospitalId?: string;
-  faultReportId: string;
   description?: string;
   deviceImageUrl?: string;
 }) {
@@ -354,5 +354,40 @@ export async function emitFaultClosed(params: {
     resource: { type: "device" },
     actor: params.actor,
     targets: [`user:${params.openerId}`], // Notify only the user who opened the fault
+  });
+}
+
+export async function emitFaultTransferred(params: {
+  actor: Actor;
+  faultReportId: string;
+  assignedDeviceId?: string;
+  deviceName: string;
+  toFaultType: "teknik_servis" | "aplikasyon";
+  hospitalName?: string;
+  hospitalId?: string;
+}) {
+  const targetRole = `role:${params.toFaultType}`;
+  const targetUnitLabel = params.toFaultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+  const targets: string[] = [targetRole, 'role:admin'];
+
+  if (params.hospitalId) {
+    targets.push(`lab:${params.hospitalId}`);
+  }
+
+  await createNotification({
+    type: 'fault_transferred',
+    title: `Arıza Diğer Birime Aktarıldı: ${params.deviceName}`,
+    message: `${params.hospitalName || ''} - ${params.deviceName} cihaz arızası ${targetUnitLabel} birimine aktarıldı. (Aktaran: ${params.actor.name})`,
+    href: `/ariza-yonetimi/${params.faultReportId}`,
+    resource: { type: 'device', id: params.assignedDeviceId },
+    actor: params.actor,
+    targets,
+    meta: {
+      hospitalId: params.hospitalId,
+      deviceName: params.deviceName,
+      faultReportId: params.faultReportId,
+      toFaultType: params.toFaultType,
+      transferredByName: params.actor.name,
+    },
   });
 }
