@@ -41,6 +41,7 @@ interface StokGirisRow {
   cihazGrubu: string;
   serialNumber: string;
   quantity: number; // seri numarası varsa 1, yoksa kullanıcının girdiği adet
+  address: string;
 }
 
 export default function YedekParcaStokGirisPage() {
@@ -62,6 +63,7 @@ export default function YedekParcaStokGirisPage() {
   const [quantity, setQuantity] = useState<number>(1);
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [address, setAddress] = useState('');
 
   // Excel import state
   const [excelRows, setExcelRows] = useState<StokGirisRow[]>([]);
@@ -149,6 +151,7 @@ export default function YedekParcaStokGirisPage() {
       cihazGrubu: selectedProduct?.cihazGrubu || '',
       serialNumber: sn,
       quantity: qty,
+      address: address.trim(),
     };
 
     setRows(prev => [...prev, newRow]);
@@ -157,6 +160,7 @@ export default function YedekParcaStokGirisPage() {
     setManualStokKodu('');
     setManualStokAdi('');
     setSelectedProductId('');
+    setAddress('');
     toast({
       title: 'Eklendi',
       description: sn
@@ -174,12 +178,12 @@ export default function YedekParcaStokGirisPage() {
     try {
       const XLSX = await import('xlsx');
       const templateData = [
-        ['Stok Kodu', 'Seri Numarası', 'Adet'],
-        ['ORN-001', 'SN123456', 1],
-        ['ORN-002', '', 5],
+        ['Stok Kodu', 'Seri Numarası', 'Adet', 'Adres'],
+        ['ORN-001', 'SN123456', 1, 'A-01-01'],
+        ['ORN-002', '', 5, 'B-02-03'],
       ];
       const ws = XLSX.utils.aoa_to_sheet(templateData);
-      ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 10 }];
+      ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 20 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Stok Girişi');
       XLSX.writeFile(wb, 'yedek_parca_stok_giris_sablon.xlsx');
@@ -240,6 +244,7 @@ export default function YedekParcaStokGirisPage() {
         const rawStokKodu = String(row[0]).trim();
         const rawSeriNo = row[1] != null ? String(row[1]).trim() : '';
         const rawAdet = row[2] != null ? Number(row[2]) : undefined;
+        const rawAddress = row[3] != null ? String(row[3]).trim() : '';
 
         const stokKoduUpper = rawStokKodu.toUpperCase();
         const product = productMap.get(stokKoduUpper);
@@ -271,6 +276,7 @@ export default function YedekParcaStokGirisPage() {
             cihazGrubu: product.cihazGrubu || '',
             serialNumber: rawSeriNo,
             quantity: 1,
+            address: rawAddress,
           });
         } else {
           // Seri numarası yoksa adet zorunlu
@@ -283,6 +289,7 @@ export default function YedekParcaStokGirisPage() {
             cihazGrubu: product.cihazGrubu || '',
             serialNumber: '',
             quantity: adet,
+            address: rawAddress,
           });
         }
       }
@@ -364,6 +371,7 @@ export default function YedekParcaStokGirisPage() {
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: row.serialNumber,
             quantity: 1,
+            address: row.address || '',
             createdAt: Timestamp.fromDate(now),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
@@ -378,6 +386,7 @@ export default function YedekParcaStokGirisPage() {
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: '',
             quantity: row.quantity,
+            address: row.address || '',
             createdAt: Timestamp.fromDate(now),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
@@ -397,6 +406,7 @@ export default function YedekParcaStokGirisPage() {
           cihazGrubu: row.cihazGrubu || '',
           serialNumber: row.serialNumber || '',
           quantity: row.serialNumber ? 1 : row.quantity,
+          address: row.address || '',
           notes: row.serialNumber
             ? `Seri numaralı stok girişi: ${row.serialNumber}`
             : `${row.quantity} adet stok girişi`,
@@ -465,13 +475,22 @@ export default function YedekParcaStokGirisPage() {
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5" style={{ minHeight: '100dvh' }}>
 
       {/* Back */}
-      <button
-        onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
-        className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
-        style={{ color: 'var(--dashboard-muted)' }}
-      >
-        <ChevronLeft className="w-3.5 h-3.5" /> Yedek Parça Paneli
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
+          className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
+          style={{ color: 'var(--dashboard-muted)' }}
+        >
+          <ChevronLeft className="w-3.5 h-3.5" /> Yedek Parça Paneli
+        </button>
+        <button
+          onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris/stok-gecmis')}
+          className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
+          style={{ color: 'var(--dashboard-text)' }}
+        >
+          Stok Geçmiş
+        </button>
+      </div>
 
       {/* Header */}
       <header className="cihaz-card-strong p-4 sm:p-5">
@@ -514,7 +533,7 @@ export default function YedekParcaStokGirisPage() {
         <section className="cihaz-card p-4 sm:p-5 space-y-4">
           <p className="cihaz-section-label">Yeni Ürün Ekle</p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {/* Product selector */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Yedek Parça *</label>
@@ -572,6 +591,21 @@ export default function YedekParcaStokGirisPage() {
               />
             </div>
 
+
+
+            {/* Address */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Adresleme</label>
+              <Input
+                placeholder="Raf/Göz adresi"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                disabled={!selectedProductId}
+                className="cihaz-pressed !border-0 !ring-0 h-10"
+                style={{ borderRadius: 12 }}
+              />
+            </div>
+
             {/* Quantity */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Adet</label>
@@ -611,7 +645,7 @@ export default function YedekParcaStokGirisPage() {
           <div className="cihaz-pressed p-3 space-y-1.5" style={{ borderRadius: 14 }}>
             <p className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>Şablon formatı:</p>
             <div className="text-[11px] space-y-0.5" style={{ color: 'var(--dashboard-muted)' }}>
-              <p>Sütun A: <strong>Stok Kodu</strong> · Sütun B: <strong>Seri No</strong> (opsiyonel) · Sütun C: <strong>Adet</strong></p>
+              <p>Sütun A: <strong>Stok Kodu</strong> · Sütun B: <strong>Seri No</strong> (opsiyonel) · Sütun C: <strong>Adet</strong> · Sütun D: <strong>Adres</strong> (opsiyonel)</p>
               <p>Seri no varsa adet 1 · İlk satır başlık algılanır · Tanımsız kodlar atlanır</p>
             </div>
           </div>
@@ -682,6 +716,7 @@ export default function YedekParcaStokGirisPage() {
                       <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Kod</th>
                       <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Ürün</th>
                       <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
+                      <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adres</th>
                       <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adet</th>
                     </tr>
                   </thead>
@@ -691,11 +726,12 @@ export default function YedekParcaStokGirisPage() {
                         <td className="px-3 py-2 font-mono" style={{ color: 'var(--dashboard-text)' }}>{row.stokKodu}</td>
                         <td className="px-3 py-2" style={{ color: 'var(--dashboard-text)' }}>{row.stokAdi}</td>
                         <td className="px-3 py-2 font-mono" style={{ color: row.serialNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.serialNumber || '—'}</td>
+                        <td className="px-3 py-2" style={{ color: row.address ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.address || '—'}</td>
                         <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity}</td>
                       </tr>
                     ))}
                     {excelRows.length > 20 && (
-                      <tr><td colSpan={4} className="px-3 py-2 text-center" style={{ color: 'var(--dashboard-muted)' }}>… ve {excelRows.length - 20} satır daha</td></tr>
+                      <tr><td colSpan={5} className="px-3 py-2 text-center" style={{ color: 'var(--dashboard-muted)' }}>… ve {excelRows.length - 20} satır daha</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -726,6 +762,7 @@ export default function YedekParcaStokGirisPage() {
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                   <th className="px-3 py-2.5 text-left font-semibold hidden sm:table-cell" style={{ color: 'var(--dashboard-muted)' }}>Grup</th>
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
+                  <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adres</th>
                   <th className="px-3 py-2.5 text-right font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adet</th>
                   <th className="px-2 py-2.5 w-8"></th>
                 </tr>
@@ -741,6 +778,7 @@ export default function YedekParcaStokGirisPage() {
                       ) : <span style={{ color: 'var(--dashboard-muted)' }}>—</span>}
                     </td>
                     <td className="px-3 py-2.5 font-mono" style={{ color: row.serialNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.serialNumber || '—'}</td>
+                    <td className="px-3 py-2.5" style={{ color: row.address ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.address || '—'}</td>
                     <td className="px-3 py-2.5 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity}</td>
                     <td className="px-2 py-2.5">
                       <button onClick={() => removeRow(row.id)} className="p-1 rounded-lg hover:bg-black/5 transition" title="Kaldır">

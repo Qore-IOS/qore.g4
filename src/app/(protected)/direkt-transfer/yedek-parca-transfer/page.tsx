@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
@@ -47,6 +47,8 @@ import {
   Pencil,
   Menu,
   X,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -73,7 +75,7 @@ interface GroupedDepoStokItem {
   cihazGrubu: string;
   totalQuantity: number;
   earliestDate: Date;
-  serialNumbers: { serialNumber: string; createdAt: Date; id: string }[];
+  serialNumbers: { serialNumber: string; createdAt: Date; id: string; address?: string }[];
   entries: YedekParcaDepoStokItem[];
 }
 
@@ -89,6 +91,7 @@ export default function YedekParcaTransferPage() {
   const router = useRouter();
   const { currentUserProfile } = useAuth();
   const { toast } = useToast();
+  const depotExcelInputRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
@@ -276,6 +279,7 @@ export default function YedekParcaTransferPage() {
           serialNumber: item.serialNumber,
           createdAt: item.createdAt,
           id: item.id,
+          address: item.address || '',
         });
       }
 
@@ -310,6 +314,125 @@ export default function YedekParcaTransferPage() {
       setDepoStokLoading(false);
     }
   }, [toast]);
+
+
+  const downloadDepotStockExcel = useCallback(async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const exportRows = depoStok
+        .map(item => ({
+          'İşlem ID': item.id,
+          'Stok Kodu': item.stokKodu,
+          'Ürün Adı': item.stokAdi,
+          'Seri No': item.serialNumber || '',
+          'Adres': item.address || '',
+          'Adet': item.quantity,
+          'Giriş Tarihi': format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr }),
+        }))
+        .sort((a, b) => a['Stok Kodu'].localeCompare(b['Stok Kodu']));
+
+      const ws = XLSX.utils.json_to_sheet(exportRows);
+      ws['!cols'] = [{ wch: 24 }, { wch: 18 }, { wch: 32 }, { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 18 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Depo Stok');
+      XLSX.writeFile(wb, `yedek_parca_depo_stok_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
+
+      toast({ title: 'Excel indirildi', description: `${exportRows.length} satır dışa aktarıldı.` });
+    } catch (err) {
+      console.error('Error exporting depot stock:', err);
+      toast({ title: 'Hata', description: 'Depo stok excel dosyası oluşturulamadı.', variant: 'destructive' });
+    }
+  }, [depoStok, toast]);
+
+  const handleDepotStockExcelUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const ws = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
+
+      if (!rows.length) {
+        toast({ title: 'Uyarı', description: 'Excel dosyasında güncellenecek satır bulunamadı.', variant: 'default' });
+        return;
+      }
+
+      const mapById = new Map(depoStok.map(item => [item.id, item]));
+      const batch = writeBatch(db);
+      const now = new Date();
+      let updatedCount = 0;
+
+      for (const row of rows) {
+        const id = String(row['İşlem ID'] || row['Islem ID'] || row['id'] || '').trim();
+        if (!id) continue;
+
+        const existing = mapById.get(id);
+        if (!existing) continue;
+
+        const nextAddress = String(row['Adres'] || '').trim();
+        const parsedQty = Number(row['Adet']);
+        const nextQuantity = Number.isFinite(parsedQty) && parsedQty > 0 ? Math.floor(parsedQty) : existing.quantity;
+
+        const hasAddressChange = (existing.address || '') !== nextAddress;
+        const hasQtyChange = existing.quantity !== nextQuantity;
+        if (!hasAddressChange && !hasQtyChange) continue;
+
+        batch.update(doc(db, 'yedekParcaDepoStok', existing.id), {
+          quantity: nextQuantity,
+          address: nextAddress,
+        });
+
+        const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+        batch.set(depoLogRef, {
+          action: 'stok_duzeltme',
+          productCodeId: existing.productCodeId,
+          stokKodu: existing.stokKodu,
+          stokAdi: existing.stokAdi,
+          address: nextAddress,
+          cihazGrubu: existing.cihazGrubu || '',
+          serialNumber: existing.serialNumber || '',
+          quantity: Math.abs(nextQuantity - existing.quantity),
+          notes: `Excel stok güncelleme: adet ${existing.quantity} -> ${nextQuantity}, adres "${existing.address || '-'}" -> "${nextAddress || '-'}"`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+
+        const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(transferLogRef, {
+          action: 'depo_stock_adjusted',
+          productCodeId: existing.productCodeId,
+          stokKodu: existing.stokKodu,
+          stokAdi: existing.stokAdi,
+          serialNumber: existing.serialNumber || '',
+          quantity: Math.abs(nextQuantity - existing.quantity),
+          notes: `Excel ile güncellendi · adres: ${nextAddress || '-'}`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+
+        updatedCount += 1;
+      }
+
+      if (updatedCount === 0) {
+        toast({ title: 'Bilgi', description: 'Excel dosyasında değişiklik gerektiren satır bulunamadı.' });
+      } else {
+        await batch.commit();
+        await fetchDepoStok();
+        await loadRecentTransferLogs();
+        toast({ title: 'Stok güncellendi', description: `${updatedCount} satır excel ile güncellendi.` });
+      }
+    } catch (err) {
+      console.error('Error uploading depot stock excel:', err);
+      toast({ title: 'Hata', description: 'Excel yükleme sırasında hata oluştu.', variant: 'destructive' });
+    } finally {
+      if (depotExcelInputRef.current) depotExcelInputRef.current.value = '';
+    }
+  }, [depoStok, currentUserProfile?.name, currentUserProfile?.uid, fetchDepoStok, loadRecentTransferLogs, toast]);
 
   // Fetch personnel stock when personnel selected
   const fetchPersonnelStock = useCallback(async (uid: string) => {
@@ -870,6 +993,7 @@ export default function YedekParcaTransferPage() {
           stokAdi: editingDepoGroup.stokAdi,
           serialNumber: '',
           quantity: nextNonSerialTotal,
+          address: '',
           cihazGrubu: editingDepoGroup.cihazGrubu || '',
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
@@ -887,6 +1011,7 @@ export default function YedekParcaTransferPage() {
         stokAdi: editingDepoGroup.stokAdi,
         cihazGrubu: editingDepoGroup.cihazGrubu || '',
         serialNumber: '',
+        address: editingDepoGroup.entries.find(e => (e.address || '').trim())?.address || '',
         quantity: Math.abs(delta),
         notes: `Depo stok adedi düzenlendi: ${oldTotal} -> ${nextTotal}`,
         createdAt: Timestamp.fromDate(now),
@@ -901,6 +1026,7 @@ export default function YedekParcaTransferPage() {
         stokKodu: editingDepoGroup.stokKodu,
         stokAdi: editingDepoGroup.stokAdi,
         serialNumber: '',
+        address: editingDepoGroup.entries.find(e => (e.address || '').trim())?.address || '',
         quantity: Math.abs(delta),
         notes: `Depo stok adedi düzenlendi: ${oldTotal} -> ${nextTotal}`,
         createdAt: Timestamp.fromDate(now),
@@ -1001,6 +1127,7 @@ export default function YedekParcaTransferPage() {
           stokAdi: pendingReturn.stokAdi,
           cihazGrubu: pc?.cihazGrubu || '',
           serialNumber: pendingReturn.serialNumber || '',
+          address: '',
           quantity: 1,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
@@ -1015,6 +1142,7 @@ export default function YedekParcaTransferPage() {
           stokAdi: pendingReturn.stokAdi,
           cihazGrubu: pc?.cihazGrubu || '',
           serialNumber: pendingReturn.serialNumber || '',
+          address: '',
           quantity: 1,
           relatedPersonnelUid: pendingReturn.ownerUid,
           relatedPersonnelName: pendingReturn.ownerName,
@@ -1536,9 +1664,18 @@ export default function YedekParcaTransferPage() {
           <div className="flex items-center gap-2"><Warehouse className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} /><h2 className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>Depo Stok</h2></div>
           <p className="text-[11px] mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>{depoStokProducts.length} ürün · {depoStokProducts.reduce((s, g) => s + g.totalQuantity, 0)} adet</p>
         </div>
-        <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white" style={{ background: 'var(--dashboard-accent)' }}>
-          <Plus className="w-3.5 h-3.5" /> Stok Girişi
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={downloadDepotStockExcel} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+            <Download className="w-3.5 h-3.5" /> Stok Güncelle (Excel)
+          </button>
+          <input ref={depotExcelInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleDepotStockExcelUpload} className="hidden" />
+          <button onClick={() => depotExcelInputRef.current?.click()} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+            <Upload className="w-3.5 h-3.5" /> Excel Yükle
+          </button>
+          <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white" style={{ background: 'var(--dashboard-accent)' }}>
+            <Plus className="w-3.5 h-3.5" /> Stok Girişi
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -1577,6 +1714,7 @@ export default function YedekParcaTransferPage() {
                         {group.cihazGrubu && <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium flex-shrink-0" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>{group.cihazGrubu}</span>}
                       </div>
                       <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{group.stokKodu} · {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Adres: {group.entries.find(e => (e.address || '').trim())?.address || '—'}</p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="cihaz-pressed px-2 py-0.5 text-xs font-bold" style={{ borderRadius: 8, color: 'var(--dashboard-text)' }}>{group.totalQuantity}</span>
@@ -1598,6 +1736,7 @@ export default function YedekParcaTransferPage() {
                               <span key={sn.id} className="cihaz-pressed inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono" style={{ borderRadius: 8 }}>
                                 {sn.serialNumber}
                                 <span style={{ color: 'var(--dashboard-muted)' }}>({format(sn.createdAt, 'dd.MM.yy', { locale: tr })})</span>
+                                {sn.address ? <span style={{ color: 'var(--dashboard-muted)' }}>[{sn.address}]</span> : null}
                                 <button onClick={(e) => { e.stopPropagation(); deleteSerialFromDepot(group, sn); }} className="ml-0.5 p-0.5 rounded hover:bg-black/5"><Trash2 className="w-2.5 h-2.5" style={{ color: '#B91C1C' }} /></button>
                               </span>
                             ))}
