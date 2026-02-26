@@ -23,18 +23,12 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-var _a, _b;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.sendFaultReportEmail = exports.onNotificationCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.onNotificationCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
 const functions = __importStar(require("firebase-functions"));
-const node_fetch_1 = __importDefault(require("node-fetch"));
-const nodemailer = __importStar(require("nodemailer"));
 if (!admin.apps.length)
     admin.initializeApp();
 const db = admin.firestore();
@@ -46,15 +40,6 @@ var presence_1 = require("./presence");
 Object.defineProperty(exports, "mirrorPresenceToFirestore", { enumerable: true, get: function () { return presence_1.mirrorPresenceToFirestore; } });
 var nfc_login_1 = require("./nfc-login");
 Object.defineProperty(exports, "nfcLoginWithSerial", { enumerable: true, get: function () { return nfc_login_1.nfcLoginWithSerial; } });
-const transporter = nodemailer.createTransport({
-    host: "smtp.hostinger.com",
-    port: 465,
-    secure: true,
-    auth: {
-        user: ((_a = functions.config().smtp) === null || _a === void 0 ? void 0 : _a.email) || "batuhan@qorengine.com",
-        pass: (_b = functions.config().smtp) === null || _b === void 0 ? void 0 : _b.password,
-    },
-});
 function chunk(arr, size = 500) {
     const out = [];
     for (let i = 0; i < arr.length; i += size)
@@ -94,6 +79,7 @@ exports.onNotificationCreated = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .firestore.document('notifications/{id}')
     .onCreate(async (snap, context) => {
+    var _a, _b, _c, _d, _e, _f;
     const notificationId = context.params.id;
     const data = snap.data();
     // Prepare log entry
@@ -141,22 +127,28 @@ exports.onNotificationCreated = functions
             for (const tokenDoc of tokensSnap.docs) {
                 const td = tokenDoc.data();
                 if (td.token && !tokenMap.has(td.token)) {
-                    tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+                    tokenMap.set(td.token, { token: td.token, uid: td.uid || null, membershipKeys: td.membershipKeys || [] });
                 }
             }
         }
         // Source B: Users who have this notification type in their notificationPreferences
         // This ensures non-admin users with the right preferences also receive notifications
+        // BUT we must respect the target audience (e.g. only teknik_servis for teknik_servis faults)
         if (notificationType && notificationType !== 'custom') {
+            // First collect target UIDs to filter Source B
+            const targetUids = await collectTargetUidsFromTargets(data.targets, (_a = data.actor) === null || _a === void 0 ? void 0 : _a.uid);
             const prefsSnap = await db
                 .collection('users')
                 .where('notificationsEnabled', '==', true)
                 .where('notificationPreferences', 'array-contains', notificationType)
                 .get();
-            // Collect UIDs of users who opted into this notification type
+            // Collect UIDs of users who opted into this notification type AND match target audience
             const optedInUids = [];
             for (const userDoc of prefsSnap.docs) {
-                optedInUids.push(userDoc.id);
+                // Only include if user is in target audience (role/lab/depot match)
+                if (targetUids.has(userDoc.id)) {
+                    optedInUids.push(userDoc.id);
+                }
             }
             // Fetch their push tokens
             if (optedInUids.length > 0) {
@@ -170,11 +162,32 @@ exports.onNotificationCreated = functions
                     for (const tokenDoc of userTokensSnap.docs) {
                         const td = tokenDoc.data();
                         if (td.token && !tokenMap.has(td.token)) {
-                            tokenMap.set(td.token, { token: td.token, uid: td.uid || null });
+                            tokenMap.set(td.token, { token: td.token, uid: td.uid || null, membershipKeys: td.membershipKeys || [] });
                         }
                     }
                 }
             }
+        }
+        // --- Intersection filter for fault notifications ---
+        // For fault_opened, a non-admin user must have BOTH the correct role AND be assigned to the lab
+        if (data.type === 'fault_opened' && ((_b = data.meta) === null || _b === void 0 ? void 0 : _b.faultType) && ((_c = data.meta) === null || _c === void 0 ? void 0 : _c.hospitalId)) {
+            const requiredRole = `role:${data.meta.faultType}`;
+            const requiredLab = `lab:${data.meta.hospitalId}`;
+            let removedByIntersection = 0;
+            for (const [key, tokenData] of tokenMap.entries()) {
+                const keys = tokenData.membershipKeys || [];
+                const isAdmin = keys.includes('role:admin');
+                // Non-admin users must match BOTH role and lab
+                if (!isAdmin) {
+                    const hasCorrectRole = keys.includes(requiredRole);
+                    const hasCorrectLab = keys.includes(requiredLab);
+                    if (!hasCorrectRole || !hasCorrectLab) {
+                        tokenMap.delete(key);
+                        removedByIntersection++;
+                    }
+                }
+            }
+            firebase_functions_1.logger.info(`[fanOut] Fault intersection filter: removed ${removedByIntersection} tokens (require ${requiredRole} AND ${requiredLab})`);
         }
         const tokens = Array.from(tokenMap.values());
         logEntry.tokensMatched = tokens.length;
@@ -199,7 +212,9 @@ exports.onNotificationCreated = functions
                     const ud = userDoc.data();
                     userPrefsMap.set(userDoc.id, {
                         enabled: ud.notificationsEnabled !== false,
-                        prefs: ud.notificationPreferences || [], // empty = all allowed
+                        prefs: ud.notificationPreferences || [],
+                        name: ud.displayName || ud.name || ud.email || userDoc.id,
+                        role: ud.role || 'unknown',
                     });
                 }
             }
@@ -230,24 +245,57 @@ exports.onNotificationCreated = functions
             firebase_functions_1.logger.info(`[fanOut] All ${tokens.length} tokens filtered by preferences for ${notificationId}`);
             return;
         }
-        firebase_functions_1.logger.info(`[fanOut] ${filteredTokens.length}/${tokens.length} tokens after preference filtering for ${notificationId}`);
+        // Build recipient list for logging
+        const recipients = filteredTokens.map(t => {
+            const userInfo = t.uid ? userPrefsMap.get(t.uid) : null;
+            return {
+                uid: t.uid || 'anonymous',
+                name: (userInfo === null || userInfo === void 0 ? void 0 : userInfo.name) || 'unknown',
+                role: (userInfo === null || userInfo === void 0 ? void 0 : userInfo.role) || 'unknown',
+                tokenPrefix: t.token.slice(0, 8),
+            };
+        });
+        logEntry.recipients = recipients;
+        firebase_functions_1.logger.info(`[fanOut] ${notificationId}: ${filteredTokens.length}/${tokens.length} tokens. Recipients: ${recipients.map(r => `${r.name} (${r.role})`).join(', ')}`);
         // --- 3. Build FCM message ---
         // Use data-only message to prevent duplicate notifications.
         // With a 'notification' field, FCM auto-displays one notification AND
         // the service worker's onBackgroundMessage shows another = 2 notifications.
         // Data-only messages let the service worker handle display exclusively.
         const baseUrl = 'https://qorengine.com';
+        const isFaultOpened = data.type === 'fault_opened';
+        const deviceImageUrl = ((_d = data.meta) === null || _d === void 0 ? void 0 : _d.deviceImageUrl) || null;
+        const faultReportId = ((_e = data.meta) === null || _e === void 0 ? void 0 : _e.faultReportId) || null;
+        // Build webpush notification options
+        const webpushNotification = {
+            icon: deviceImageUrl || '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+            badge: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+            tag: notificationId,
+            requireInteraction: isFaultOpened, // Keep fault notifications visible until interaction
+        };
+        // Add image (large image in notification) for fault notifications with device image
+        if (isFaultOpened && deviceImageUrl) {
+            webpushNotification.image = deviceImageUrl;
+        }
+        // Add action buttons for fault notifications
+        if (isFaultOpened && faultReportId) {
+            webpushNotification.actions = [
+                {
+                    action: 'assign_fault',
+                    title: 'Arızayı Üzerime Al',
+                },
+                {
+                    action: 'view_fault',
+                    title: 'Görüntüle',
+                },
+            ];
+        }
         const fcmMessage = {
             tokens: filteredTokens.map(t => t.token),
-            data: {
-                notificationId,
-                title: data.title || '',
-                body: data.message || '',
-                type: data.type || '',
-                href: data.href || '/',
-                link: data.href ? `${baseUrl}${data.href}` : baseUrl,
-            },
+            notification: Object.assign({ title: data.title, body: data.message }, (isFaultOpened && deviceImageUrl ? { imageUrl: deviceImageUrl } : {})),
+            data: Object.assign(Object.assign({ notificationId, title: data.title || '', body: data.message || '', type: data.type || '', href: data.href || '/', link: data.href ? `${baseUrl}${data.href}` : baseUrl }, (faultReportId ? { faultReportId } : {})), (((_f = data.meta) === null || _f === void 0 ? void 0 : _f.faultType) ? { faultType: data.meta.faultType } : {})),
             webpush: {
+                notification: webpushNotification,
                 fcmOptions: {
                     link: data.href ? `${baseUrl}${data.href}` : baseUrl,
                 },
@@ -314,112 +362,6 @@ exports.onNotificationCreated = functions
     }
     catch (logError) {
         firebase_functions_1.logger.error(`[fanOut] Failed to write log for ${notificationId}:`, logError);
-    }
-});
-// --- GUNCEL ARIZA MAİL FONKSİYONU ---
-exports.sendFaultReportEmail = functions
-    .region('europe-west1')
-    .firestore.document('deviceFaultReports/{reportId}')
-    .onCreate(async (snap, context) => {
-    const faultData = snap.data();
-    const docId = context.params.reportId;
-    if (!faultData)
-        return;
-    const { labName, model, title, description, faultType, openedByName } = faultData;
-    // 1. Webhook
-    const webhookUrl = 'https://btbsr.app.n8n.cloud/webhook/6d024c9f-12f1-4801-8456-4a99a18d69b3';
-    try {
-        await (0, node_fetch_1.default)(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(faultData),
-        });
-    }
-    catch (e) {
-        firebase_functions_1.logger.warn('Webhook error', e);
-    }
-    // 2. ALICI LİSTELERİ (YENİ)
-    let recipients = [];
-    const teknikServisListesi = [
-        'ysahan@nukleus.com.tr',
-        'dkilic@nukleus.com.tr',
-        'bbasar@nukleus.com.tr',
-        'aturhan@nukleus.com.tr',
-        'bkahraman@nukleus.com.tr'
-    ];
-    const aplikasyonListesi = [
-        'iertugrul@nukleus.com.tr',
-        'ehoscanli@nukleus.com.tr',
-        'helkoca@nukleus.com.tr',
-        'bbasar@nukleus.com.tr',
-        'aturhan@nukleus.com.tr'
-    ];
-    // Kucuk harf kontrolu ile eslestirme yapalim
-    const type = (faultType || '').toLowerCase();
-    if (type.includes('teknik') || type === 'teknik_servis') {
-        recipients = teknikServisListesi;
-    }
-    else if (type.includes('aplikasyon')) {
-        recipients = aplikasyonListesi;
-    }
-    else {
-        // Eger tip tanimsizsa veya baska bir seyse Adminlere gonder
-        recipients = ['bbasar@nukleus.com.tr',
-            'aturhan@nukleus.com.tr', 'btubasar@gmail.com'];
-    }
-    // 3. İÇERİK VE LİNK (YENİ)
-    const reportLink = `https://qorengine.com/ariza-yonetimi/${docId}`;
-    const htmlContent = `
-          <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; color: #333; max-width: 600px;">
-            <h2 style="color: #d32f2f; margin-top: 0;">🔧 Yeni Arıza Kaydı (#${docId.substring(0, 5)})</h2>
-            
-            <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
-                <tr style="background-color: #f9f9f9;">
-                    <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #eee; width: 30%;">Cihaz:</td>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee;">${model || title || 'Belirtilmemiş'}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #eee;">Laboratuvar:</td>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee;">${labName || 'Belirtilmemiş'}</td>
-                </tr>
-                <tr style="background-color: #f9f9f9;">
-                    <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #eee;">Arıza Tipi:</td>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee;">${faultType || 'Belirtilmemiş'}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #eee;">Açan Kişi:</td>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee;">${openedByName || 'Belirtilmemiş'}</td>
-                </tr>
-            </table>
-
-            <div style="margin-top: 20px; background-color: #fff3e0; padding: 15px; border-radius: 5px; border-left: 4px solid #ff9800;">
-                <p style="font-weight: bold; margin: 0 0 5px 0; color: #e65100;">Açıklama:</p>
-                <p style="margin: 0;">${description || 'Açıklama girilmedi.'}</p>
-            </div>
-
-            <div style="margin-top: 30px; text-align: center;">
-                <a href="${reportLink}" style="background-color: #d32f2f; color: white; padding: 14px 28px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; font-size: 16px;">
-                    Arızayı Görüntüle
-                </a>
-                <p style="margin-top: 15px; font-size: 12px; color: #888;">
-                    Linke tıklayamıyorsanız: <br>
-                    <a href="${reportLink}" style="color: #d32f2f;">${reportLink}</a>
-                </p>
-            </div>
-          </div>
-        `;
-    const mailOptions = {
-        from: '"Qore Arıza Sistemi" <batuhan@qorengine.com>',
-        to: recipients.join(', '),
-        subject: `Yeni Arıza: ${title || model} (${labName})`,
-        html: htmlContent,
-    };
-    try {
-        await transporter.sendMail(mailOptions);
-        firebase_functions_1.logger.info(`Mail successfully sent to [${recipients.length}] people. ID: ${docId}`);
-    }
-    catch (error) {
-        firebase_functions_1.logger.error('Mail sending failed', error);
     }
 });
 // --- İRSALİYE DOSYA TEMİZLEME (1 hafta sonra otomatik silme) ---
