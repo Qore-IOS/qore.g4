@@ -168,26 +168,26 @@ exports.onNotificationCreated = functions
                 }
             }
         }
-        // --- Intersection filter for fault notifications ---
-        // For fault_opened, a non-admin user must have BOTH the correct role AND be assigned to the lab
-        if (data.type === 'fault_opened' && ((_b = data.meta) === null || _b === void 0 ? void 0 : _b.faultType) && ((_c = data.meta) === null || _c === void 0 ? void 0 : _c.hospitalId)) {
+        // --- Strict filter for fault notifications ---
+        // For fault_opened, a non-admin user must always match the fault role.
+        // If hospitalId is provided, non-admin users must ALSO match the lab.
+        if (data.type === 'fault_opened' && ((_b = data.meta) === null || _b === void 0 ? void 0 : _b.faultType)) {
             const requiredRole = `role:${data.meta.faultType}`;
-            const requiredLab = `lab:${data.meta.hospitalId}`;
-            let removedByIntersection = 0;
+            const requiredLab = ((_c = data.meta) === null || _c === void 0 ? void 0 : _c.hospitalId) ? `lab:${data.meta.hospitalId}` : null;
+            let removedByStrictFilter = 0;
             for (const [key, tokenData] of tokenMap.entries()) {
                 const keys = tokenData.membershipKeys || [];
                 const isAdmin = keys.includes('role:admin');
-                // Non-admin users must match BOTH role and lab
                 if (!isAdmin) {
                     const hasCorrectRole = keys.includes(requiredRole);
-                    const hasCorrectLab = keys.includes(requiredLab);
+                    const hasCorrectLab = requiredLab ? keys.includes(requiredLab) : true;
                     if (!hasCorrectRole || !hasCorrectLab) {
                         tokenMap.delete(key);
-                        removedByIntersection++;
+                        removedByStrictFilter++;
                     }
                 }
             }
-            firebase_functions_1.logger.info(`[fanOut] Fault intersection filter: removed ${removedByIntersection} tokens (require ${requiredRole} AND ${requiredLab})`);
+            firebase_functions_1.logger.info(`[fanOut] Fault strict filter: removed ${removedByStrictFilter} tokens (require ${requiredRole}${requiredLab ? ` AND ${requiredLab}` : ''})`);
         }
         const tokens = Array.from(tokenMap.values());
         logEntry.tokensMatched = tokens.length;
