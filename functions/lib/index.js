@@ -24,7 +24,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.onNotificationCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.onNotificationCreated = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
@@ -40,6 +40,9 @@ var presence_1 = require("./presence");
 Object.defineProperty(exports, "mirrorPresenceToFirestore", { enumerable: true, get: function () { return presence_1.mirrorPresenceToFirestore; } });
 var nfc_login_1 = require("./nfc-login");
 Object.defineProperty(exports, "nfcLoginWithSerial", { enumerable: true, get: function () { return nfc_login_1.nfcLoginWithSerial; } });
+var actionFormEmailNotification_1 = require("./actionFormEmailNotification");
+Object.defineProperty(exports, "onTeknikServisFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onTeknikServisFormCreated; } });
+Object.defineProperty(exports, "onAplikasyonFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onAplikasyonFormCreated; } });
 function chunk(arr, size = 500) {
     const out = [];
     for (let i = 0; i < arr.length; i += size)
