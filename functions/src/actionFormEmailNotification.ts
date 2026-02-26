@@ -66,13 +66,13 @@ const CIHAZ_DURUMU_LABELS: Record<string, string> = {
 
 // --- Nodemailer transporter ---
 function getTransporter() {
-  const smtpHost = functions.config().smtp?.host;
-  const smtpPort = parseInt(functions.config().smtp?.port || '587', 10);
-  const smtpUser = functions.config().smtp?.user;
-  const smtpPass = functions.config().smtp?.pass;
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
 
   if (!smtpHost || !smtpUser || !smtpPass) {
-    logger.warn('[actionFormEmail] SMTP config missing. Set via: firebase functions:config:set smtp.host=... smtp.port=... smtp.user=... smtp.pass=...');
+    logger.warn('[actionFormEmail] SMTP config missing. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in functions/.env');
     return null;
   }
 
@@ -308,7 +308,7 @@ async function handleActionFormCreated(
   const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
   const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
 
-  const senderEmail = functions.config().smtp?.from || functions.config().smtp?.user;
+  const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
   const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
 
   try {
