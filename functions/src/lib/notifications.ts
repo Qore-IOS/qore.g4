@@ -279,7 +279,7 @@ export async function emitFaultOpened(params: {
     href: `/ariza-yonetimi/${params.faultReportId}`,
     resource: { type: 'device', id: params.assignedDeviceId },
     actor: params.actor,
-    targets: [targetRole, 'role:admin'], // Target specific role and admins
+    targets: [targetRole], // Target only the related fault unit
     meta: {
       hospitalId: params.hospitalId,
       deviceName: params.deviceName,

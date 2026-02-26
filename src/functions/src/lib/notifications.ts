@@ -273,7 +273,7 @@ export async function emitFaultOpened(params: {
     message: `${params.hospitalName || ''} hastanesindeki ${params.deviceName} cihazı için ${params.faultType.replace('_', ' ')} arızası açıldı.`,
     resource: { type: 'device', id: params.assignedDeviceId },
     actor: params.actor,
-    targets: [targetRole, 'role:admin'], // Target specific role and admins
+    targets: [targetRole], // Target only the related fault unit
     meta: { hospitalId: params.hospitalId, deviceName: params.deviceName },
   });
 }

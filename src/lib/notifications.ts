@@ -300,9 +300,9 @@ export async function emitFaultOpened(params: {
 }) {
   const targetRole = `role:${params.faultType}`;
   const faultTypeLabel = params.faultType === "teknik_servis" ? "Teknik Servis" : "Aplikasyon";
-  // Build targets: role-specific + lab-specific + admins
-  // Cloud Function will compute intersection of role AND lab for non-admin users
-  const targets: string[] = [targetRole, "role:admin"];
+  // Build targets: role-specific + lab-specific
+  // Cloud Function will compute intersection of role AND lab
+  const targets: string[] = [targetRole];
   if (params.hospitalId) {
     targets.push(`lab:${params.hospitalId}`);
   }
