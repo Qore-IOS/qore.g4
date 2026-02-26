@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card,
@@ -7,14 +7,13 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  CardFooter,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, Trash2, History, ListChecks, Check, Search, Plus, PackagePlus, AlertTriangle, Pencil } from 'lucide-react';
+import { Loader2, History, ListChecks, Check, Search, Plus, PackagePlus, AlertTriangle, Pencil, Eye, CircleCheck, CircleAlert, ArrowUpCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, writeBatch, doc, addDoc, serverTimestamp, setDoc, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Depot, ProductCode, DepoStokItem, ConsumptionRecord, DepotStockCountSession } from '@/lib/types';
 import type { MalKabulHeader, MalKabulLine } from '@/lib/mal-kabul/types';
@@ -26,7 +25,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
+
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -78,6 +77,7 @@ export default function DepoSayimPage() {
     const [brandCountItems, setBrandCountItems] = useState<CountGroup[]>([]);
     const [isCounting, setIsCounting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showOnlyOpen, setShowOnlyOpen] = useState(true);
 
     // Yeni ürün ekleme dialog state'leri
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -695,14 +695,56 @@ export default function DepoSayimPage() {
     };
     
     const filteredBrandCountItems = useMemo(() => {
-        if (!searchTerm) return brandCountItems;
+        let items = brandCountItems;
+
+        if (showOnlyOpen) {
+            items = items.filter((group) => {
+                if (group.isNewFound) return true;
+                const scanned = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
+                return scanned !== group.expectedAdet;
+            });
+        }
+
+        if (!searchTerm) return items;
         const lowerSearch = searchTerm.toLowerCase();
-        return brandCountItems.filter(item => 
+        return items.filter(item => 
             item.stokAdi.toLowerCase().includes(lowerSearch) ||
             item.stokKodu.toLowerCase().includes(lowerSearch) ||
             item.lotNumarasi.toLowerCase().includes(lowerSearch)
         );
-    }, [brandCountItems, searchTerm]);
+    }, [brandCountItems, searchTerm, showOnlyOpen]);
+
+    const countSummary = useMemo(() => {
+        return brandCountItems.reduce((acc, group) => {
+            const scanned = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
+            acc.total += 1;
+
+            if (group.isNewFound) {
+                acc.extra += 1;
+                acc.open += 1;
+                return acc;
+            }
+
+            if (scanned === group.expectedAdet) {
+                acc.completed += 1;
+            } else if (scanned > group.expectedAdet) {
+                acc.extra += 1;
+                acc.open += 1;
+            } else {
+                acc.missing += 1;
+                acc.open += 1;
+            }
+            return acc;
+        }, { total: 0, completed: 0, open: 0, missing: 0, extra: 0 });
+    }, [brandCountItems]);
+
+    const getGroupStatus = (group: CountGroup, scannedCount: number) => {
+        if (group.isNewFound) return { label: 'Fazla', style: 'text-amber-700 bg-amber-50 border-amber-200', Icon: ArrowUpCircle };
+        if (scannedCount === group.expectedAdet) return { label: 'Tam', style: 'text-emerald-700 bg-emerald-50 border-emerald-200', Icon: CircleCheck };
+        if (scannedCount > group.expectedAdet) return { label: 'Fazla', style: 'text-amber-700 bg-amber-50 border-amber-200', Icon: ArrowUpCircle };
+        return { label: 'Eksik', style: 'text-rose-700 bg-rose-50 border-rose-200', Icon: CircleAlert };
+    };
+
 
 
     if (isLoading && depots.length === 0) {
@@ -733,7 +775,7 @@ export default function DepoSayimPage() {
                         Belirli bir markaya ve opsiyonel olarak ürün kategorisine (Kit/Sarf) ait ürünlerin depo sayımını yapmak için depo, marka ve kategori seçin.
                     </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <Label>Depo</Label>
@@ -766,75 +808,108 @@ export default function DepoSayimPage() {
                             </Select>
                         </div>
                     </div>
-                </CardContent>
-                <CardFooter>
-                    {isCounting ? (
-                        <div className="flex gap-2">
-                            <Button onClick={finishBrandCount} variant="destructive">Sayımı Bitir ve Farkları Kaydet</Button>
-                            <Button onClick={() => { setIsCounting(false); setBrandCountItems([]); }} variant="ghost">Sayımdan Çık</Button>
+                    {isCounting && (
+                        <div className="flex flex-wrap gap-2 text-sm">
+                            <Badge variant="secondary">Toplam ürün: {countSummary.total}</Badge>
+                            <Badge variant="secondary">Açık ürün: {countSummary.open}</Badge>
+                            <Badge variant="secondary">Tamamlanan: {countSummary.completed}</Badge>
                         </div>
-                    ) : (
-                        <Button onClick={startBrandCount} disabled={!selectedDepotId || !brandForCount}>Sayımı Başlat</Button>
                     )}
-                </CardFooter>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+                        <Button onClick={startBrandCount} disabled={isCounting || !selectedDepotId || !brandForCount}>Sayımı Başlat</Button>
+                        {isCounting && (
+                            <div className="flex flex-wrap gap-2">
+                                <Button onClick={finishBrandCount} variant="destructive">Bitir & Farkları Kaydet</Button>
+                                <Button onClick={() => { setIsCounting(false); setBrandCountItems([]); }} variant="outline">Sayımı Askıya Al / Çık</Button>
+                            </div>
+                        )}
+                    </div>
+                </CardContent>
             </Card>
 
             {isCounting && (
                  <Card className="shadow-lg">
                   <CardHeader>
                     <CardTitle>Sayım: {brandForCount}{categoryForCount ? ` - ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'}` : ''}</CardTitle>
-                    <CardDescription>Okutulan ürünler yeşil, kalanlar kırmızı ile gösterilir. Tümünü doğrulamak için satır yanındaki tik butonunu kullanın.</CardDescription>
+                    <CardDescription>Sayım odak ekranı: açık ürünleri filtreleyin, barkod okutup durumu doğrulayın, satır bazlı düzeltme ve onay verin.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
-                        placeholder="Ürün adı, kodu veya lot ile ara..."
+                        placeholder="Ürün adı / stok kodu / lot / seri ara..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="pl-9"
                       />
                     </div>
+                    <div className="mb-3 flex items-center justify-between">
+                      <Button variant={showOnlyOpen ? 'default' : 'outline'} size="sm" onClick={() => setShowOnlyOpen(prev => !prev)}>
+                        {showOnlyOpen ? 'Sadece Açıklar' : 'Tüm Satırlar'}
+                      </Button>
+                      <p className="text-xs text-muted-foreground">Açık: {countSummary.open} • Tam: {countSummary.completed}</p>
+                    </div>
                     <ScrollArea className="h-[60vh]">
                       <Accordion type="multiple" defaultValue={filteredBrandCountItems.map(g => g.id)}>
                         {filteredBrandCountItems.map((group) => {
                           const scannedCount = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
-                          const isComplete = scannedCount >= group.expectedAdet;
                           const isNewFound = group.isNewFound;
+                          const status = getGroupStatus(group, scannedCount);
+                          const progress = group.expectedAdet > 0 ? Math.min(100, Math.round((scannedCount / group.expectedAdet) * 100)) : 100;
                           return (
                             <AccordionItem key={group.id} value={group.id} className={cn(
-                              "border-b",
-                              isNewFound && 'bg-blue-500/10 border-blue-300',
-                              !isNewFound && isComplete && 'bg-green-500/10'
+                              "border-b border-l-4",
+                              status.label === 'Tam' && 'border-l-emerald-400',
+                              status.label === 'Eksik' && 'border-l-rose-400',
+                              status.label === 'Fazla' && 'border-l-amber-400'
                             )}>
-                              <AccordionTrigger>
-                                <div className="flex-1 text-left flex items-center gap-2">
-                                  {group.stokAdi} ({group.stokKodu}) - Lot: {group.lotNumarasi}
-                                  {isNewFound && (
-                                    <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
-                                      <PackagePlus className="h-3 w-3 mr-1" />
-                                      YENİ
+                              <AccordionTrigger className="hover:no-underline">
+                                <div className="flex-1 text-left space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{group.stokAdi} ({group.stokKodu}) - Lot: {group.lotNumarasi || '-'}</span>
+                                    <Badge variant="outline" className={cn('text-xs', status.style)}>
+                                      <status.Icon className="h-3.5 w-3.5 mr-1" />
+                                      {status.label}
                                     </Badge>
+                                    {group.trackingMode === 'serial' ? (
+                                      <Badge variant="secondary" className="text-xs">Seri Takipli</Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-xs">Adet Takipli</Badge>
+                                    )}
+                                    {isNewFound && (
+                                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
+                                        <PackagePlus className="h-3 w-3 mr-1" />
+                                        YENİ
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {!isNewFound && (
+                                    <div className="space-y-1 pr-6">
+                                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                        <div className={cn('h-full rounded-full', status.label === 'Tam' ? 'bg-emerald-500' : status.label === 'Eksik' ? 'bg-rose-500' : 'bg-amber-500')} style={{ width: `${progress}%` }} />
+                                      </div>
+                                      <p className="text-xs text-muted-foreground">Okutulan {scannedCount} / Beklenen {group.expectedAdet}</p>
+                                    </div>
                                   )}
                                 </div>
-                                <div className="text-right font-bold pr-4">
-                                  {isNewFound ? `+${scannedCount}` : `${scannedCount} / ${group.expectedAdet}`}
-                                </div>
-                                {/* Manuel düzenleme butonu */}
-                                <Button
+                                <div className="ml-2 flex items-center gap-2">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Detay">
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                  <Button
                                     variant="ghost"
                                     size="icon"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       openManualEdit(group);
                                     }}
-                                    className="h-8 w-8 ml-2 hover:bg-blue-500/20"
-                                    title="Manuel düzenle"
-                                >
+                                    className="h-8 w-8 hover:bg-blue-500/20"
+                                    title="Düzelt"
+                                  >
                                     <Pencil className="h-4 w-4 text-blue-600" />
-                                </Button>
-                                {!isNewFound && (
-                                  <Button
+                                  </Button>
+                                  {!isNewFound && (
+                                    <Button
                                       variant="ghost"
                                       size="icon"
                                       onClick={(e) => {
@@ -842,11 +917,12 @@ export default function DepoSayimPage() {
                                         handleManualVerifyGroup(group.id);
                                       }}
                                       className="h-8 w-8 hover:bg-green-500/20"
-                                      title="Tümünü doğrula"
-                                  >
+                                      title="Onayla"
+                                    >
                                       <Check className="h-5 w-5 text-green-600" />
-                                  </Button>
-                                )}
+                                    </Button>
+                                  )}
+                                </div>
                               </AccordionTrigger>
                               <AccordionContent>
                                 {isNewFound ? (
@@ -866,15 +942,18 @@ export default function DepoSayimPage() {
                                     )}
                                   </div>
                                 ) : group.trackingMode === 'serial' ? (
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-2">
-                                    {group.expectedSerials.map((serial: any) => (
-                                        <div key={serial} className={cn("p-1 text-xs rounded font-mono", group.scannedSerials.has(serial) ? 'bg-green-200' : 'bg-red-200')}>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
+                                    {group.expectedSerials.map((serial: string, index: number) => (
+                                        <div key={`${serial}-${index}`} className={cn("p-1.5 text-xs rounded font-mono border", group.scannedSerials.has(serial) ? 'border-emerald-300 text-emerald-700' : 'border-rose-300 text-rose-700')}>
                                         {serial}
                                         </div>
                                     ))}
                                     </div>
                                 ) : (
-                                    <p className="text-sm text-muted-foreground p-2">Bu ürün adet ile takip ediliyor.</p>
+                                    <div className="p-2 text-sm text-muted-foreground space-y-2">
+                                      <p>Bu ürün adet ile takip ediliyor.</p>
+                                      <p className="text-xs">Hızlı düzeltme için düzenle butonundan okutulan adedi +1 / -1 mantığında güncelleyebilirsiniz.</p>
+                                    </div>
                                 )}
                               </AccordionContent>
                             </AccordionItem>
