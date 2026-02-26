@@ -87,6 +87,11 @@ interface ManualPersonnelStockRow {
   quantity: number;
 }
 
+interface PersonnelStockViewItem extends PersonalStockItem {
+  usageLabName?: string;
+  usageDeviceName?: string;
+}
+
 export default function YedekParcaTransferPage() {
   const router = useRouter();
   const { currentUserProfile } = useAuth();
@@ -137,9 +142,10 @@ export default function YedekParcaTransferPage() {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
   // Personnel stock data
-  const [personnelStock, setPersonnelStock] = useState<PersonalStockItem[]>([]);
+  const [personnelStock, setPersonnelStock] = useState<PersonnelStockViewItem[]>([]);
   const [personnelStockLoading, setPersonnelStockLoading] = useState(false);
   const [personnelStockPage, setPersonnelStockPage] = useState(0);
+  const [personnelStockFilter, setPersonnelStockFilter] = useState<'all' | 'used' | 'unused'>('all');
   const ITEMS_PER_PAGE = 20;
 
   // All personnel stock for toplam stok view
@@ -438,6 +444,7 @@ export default function YedekParcaTransferPage() {
   const fetchPersonnelStock = useCallback(async (uid: string) => {
     setPersonnelStockLoading(true);
     setPersonnelStockPage(0);
+    setPersonnelStockFilter('all');
     try {
       const stockQuery = query(
         collection(db, 'personalStock'),
@@ -453,8 +460,38 @@ export default function YedekParcaTransferPage() {
           usedAt: data.usedAt?.toDate ? data.usedAt.toDate() : undefined,
         } as PersonalStockItem;
       });
-      stockItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setPersonnelStock(stockItems);
+
+      const usageLogQuery = query(
+        collection(db, 'sparePartTransferLogs'),
+        where('action', '==', 'use_on_device')
+      );
+      const usageSnap = await getDocs(usageLogQuery);
+      const usageByPersonalStockId = new Map<string, { labName: string; deviceName: string }>();
+
+      usageSnap.docs.forEach(d => {
+        const data = d.data();
+        const personalStockId = String(data.personalStockId || '').trim();
+        if (!personalStockId) return;
+        if (usageByPersonalStockId.has(personalStockId)) return;
+
+        usageByPersonalStockId.set(personalStockId, {
+          labName: String(data.labName || data.laboratoryName || '').trim(),
+          deviceName: String(data.deviceName || '').trim(),
+        });
+      });
+
+      const enrichedStockItems: PersonnelStockViewItem[] = stockItems
+        .map(item => {
+          const usage = usageByPersonalStockId.get(item.id);
+          return {
+            ...item,
+            usageLabName: usage?.labName || '',
+            usageDeviceName: usage?.deviceName || item.usedOnDeviceName || '',
+          };
+        })
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      setPersonnelStock(enrichedStockItems);
     } catch (err) {
       console.error('Error fetching personnel stock:', err);
       toast({ title: 'Hata', description: 'Personel stok verileri yüklenemedi.', variant: 'destructive' });
@@ -536,13 +573,23 @@ export default function YedekParcaTransferPage() {
   const teknikServisUsers = useMemo(() => users.filter(u => u.role === 'teknik_servis'), [users]);
   const aplikasyonUsers = useMemo(() => users.filter(u => u.role === 'aplikasyon'), [users]);
 
+  const filteredPersonnelStock = useMemo(() => {
+    if (personnelStockFilter === 'used') {
+      return personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return');
+    }
+    if (personnelStockFilter === 'unused') {
+      return personnelStock.filter(s => s.status === 'in_stock');
+    }
+    return personnelStock;
+  }, [personnelStock, personnelStockFilter]);
+
   // Paginated personnel stock
   const paginatedPersonnelStock = useMemo(() => {
     const start = personnelStockPage * ITEMS_PER_PAGE;
-    return personnelStock.slice(start, start + ITEMS_PER_PAGE);
-  }, [personnelStock, personnelStockPage]);
+    return filteredPersonnelStock.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredPersonnelStock, personnelStockPage]);
 
-  const totalPersonnelPages = Math.ceil(personnelStock.length / ITEMS_PER_PAGE);
+  const totalPersonnelPages = Math.ceil(filteredPersonnelStock.length / ITEMS_PER_PAGE);
 
   // Filtered depo stok for the depo stok view (search by stok kodu, stok adı, seri numarası)
   const filteredDepoStok = useMemo(() => {
@@ -1794,6 +1841,28 @@ export default function YedekParcaTransferPage() {
                   {usedCount} Kullanıldı
                 </span>
               </div>
+              <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
+                {([
+                  { key: 'all', label: 'Tamamını Göster' },
+                  { key: 'used', label: 'Kullanılanları Göster' },
+                  { key: 'unused', label: 'Kullanılmayanları Göster' },
+                ] as const).map(option => {
+                  const active = personnelStockFilter === option.key;
+                  return (
+                    <button
+                      key={option.key}
+                      onClick={() => { setPersonnelStockFilter(option.key); setPersonnelStockPage(0); }}
+                      className="px-2.5 py-1 text-[11px] rounded-lg font-medium transition-all"
+                      style={{
+                        background: active ? 'var(--dashboard-surface)' : 'transparent',
+                        color: active ? 'var(--dashboard-text)' : 'var(--dashboard-muted)',
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <button
               onClick={openManualStockModal}
@@ -1812,10 +1881,10 @@ export default function YedekParcaTransferPage() {
             <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
             <span className="ml-2 text-sm" style={{ color: 'var(--dashboard-muted)' }}>Yükleniyor...</span>
           </div>
-        ) : personnelStock.length === 0 ? (
+        ) : filteredPersonnelStock.length === 0 ? (
           <div className="text-center py-12">
             <Package className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>Bu personelde yedek parça bulunmuyor.</p>
+            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>{personnelStock.length === 0 ? 'Bu personelde yedek parça bulunmuyor.' : 'Seçilen filtre için kayıt bulunamadı.'}</p>
           </div>
         ) : (
           <>
@@ -1887,6 +1956,10 @@ export default function YedekParcaTransferPage() {
                               {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
                               Üzerime Al
                             </button>
+                          ) : isUsed ? (
+                            <span className="text-[11px] text-left inline-block max-w-[220px]" style={{ color: 'var(--dashboard-muted)' }}>
+                              {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
+                            </span>
                           ) : (
                             <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
                           )}
@@ -1933,7 +2006,7 @@ export default function YedekParcaTransferPage() {
                         {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
                         {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
                       </span>
-                      {canTakeOver && (
+                      {canTakeOver ? (
                         <button
                           disabled={takingOverStockId === item.id}
                           onClick={() => takeOverPersonnelStock(item)}
@@ -1943,7 +2016,11 @@ export default function YedekParcaTransferPage() {
                           {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
                           Üzerime Al
                         </button>
-                      )}
+                      ) : isUsed ? (
+                        <span className="text-[10px] text-right max-w-[52%]" style={{ color: 'var(--dashboard-muted)' }}>
+                          {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
+                        </span>
+                      ) : null}
                     </div>
                   </article>
                 );
@@ -1954,7 +2031,7 @@ export default function YedekParcaTransferPage() {
             {totalPersonnelPages > 1 && (
               <div className="flex items-center justify-between pt-2">
                 <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                  {personnelStock.length} kayıt — Sayfa {personnelStockPage + 1} / {totalPersonnelPages}
+                  {filteredPersonnelStock.length} kayıt — Sayfa {personnelStockPage + 1} / {totalPersonnelPages}
                 </span>
                 <div className="flex gap-2">
                   <button

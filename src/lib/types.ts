@@ -678,6 +678,7 @@ export interface SparePartTransferLog {
   toName?: string;
   deviceId?: string;           // İlgili cihaz
   deviceName?: string;
+  labName?: string;
   formId?: string;             // İlgili form
   formType?: 'teknik_servis' | 'aplikasyon';
   createdAt: Date;
