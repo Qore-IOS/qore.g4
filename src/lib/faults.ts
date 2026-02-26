@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import {
   addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch
 } from 'firebase/firestore';
-import { emitFaultOpened } from '@/lib/notifications';
+import { emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
 
 export type DeviceFaultEventType = 'opened' | 'note' | 'status_change' | 'closed' | 'assigned' | 'intervention_started' | 'location_verified';
@@ -89,7 +89,6 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     faultType: faultType,
     hospitalId: hospitalId,
     hospitalName: labName,
-    faultReportId: reportRef.id,
     description: openDescription ?? undefined,
     deviceImageUrl: input.deviceImageUrl,
   });
@@ -193,6 +192,62 @@ export async function closeDeviceFaultReport(
  * Arızayı personele ata (üzerime al)
  * Status: atama_bekliyor → mudahale_bekliyor
  */
+
+
+export async function transferFaultToOtherUnit(
+  reportId: string,
+  actor: { uid: string; name: string }
+): Promise<void> {
+  const reportRef = doc(db, 'deviceFaultReports', reportId);
+  const reportSnap = await getDoc(reportRef);
+
+  if (!reportSnap.exists()) {
+    throw new Error('Arıza raporu bulunamadı.');
+  }
+
+  const reportData = reportSnap.data();
+
+  if (reportData.status !== 'atama_bekliyor' && reportData.status !== 'open') {
+    throw new Error('Sadece atama bekleyen arızalar başka birime aktarılabilir.');
+  }
+
+  const currentFaultType = reportData.faultType as 'teknik_servis' | 'aplikasyon';
+  const targetFaultType: 'teknik_servis' | 'aplikasyon' =
+    currentFaultType === 'teknik_servis' ? 'aplikasyon' : 'teknik_servis';
+
+  const batch = writeBatch(db);
+
+  batch.update(reportRef, {
+    faultType: targetFaultType,
+    assignedAt: null,
+    assignedToUid: null,
+    assignedToName: null,
+    atamaBekmeSuresi: null,
+  });
+
+  const historyRef = doc(collection(db, 'deviceFaultReports', reportId, 'history'));
+  const targetLabel = targetFaultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+
+  batch.set(historyRef, {
+    type: 'status_change' as DeviceFaultEventType,
+    actorUid: actor.uid,
+    actorName: actor.name,
+    description: `Arıza ${actor.name} tarafından ${targetLabel} birimine aktarıldı.`,
+    timestamp: serverTimestamp(),
+  });
+
+  await batch.commit();
+
+  await emitFaultTransferred({
+    actor,
+    faultReportId: reportId,
+    assignedDeviceId: reportData?.deviceId,
+    deviceName: reportData?.model || reportData?.title || 'Cihaz',
+    toFaultType: targetFaultType,
+    hospitalId: reportData?.hospitalId,
+    hospitalName: reportData?.labName || reportData?.hospitalName,
+  });
+}
 export async function assignFaultToSelf(
   reportId: string,
   actor: { uid: string; name: string }
@@ -481,7 +536,6 @@ export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput)
     faultType: 'aplikasyon',
     hospitalId: hospitalId,
     hospitalName: labName,
-    faultReportId: reportRef.id,
     description: `Cihazdan çıkan kit: ${stokAdi} (${stokKodu}) - ${testCount} test. ${openDescription}`,
     deviceImageUrl: input.deviceImageUrl,
   });

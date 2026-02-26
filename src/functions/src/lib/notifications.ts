@@ -11,6 +11,7 @@ type NotificationType =
   | 'depot_count_completed'
   | 'lab_count_completed'
   | 'fault_opened'
+  | 'fault_transferred'
   | 'fault_closed'
   | 'custom';
 
