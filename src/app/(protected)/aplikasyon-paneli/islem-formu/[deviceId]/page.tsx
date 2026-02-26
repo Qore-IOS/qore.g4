@@ -1167,6 +1167,7 @@ export default function AplikasyonIslemFormuPage() {
               serialNumber: partChange.serialNumber,
               deviceId,
               deviceName: device?.cihazAdi || device?.model || '',
+              labName: hospital?.name || '',
               formId: formRef.id,
               formType: 'aplikasyon',
               createdAt: Timestamp.fromDate(now),

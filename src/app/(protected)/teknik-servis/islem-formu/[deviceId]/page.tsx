@@ -1167,6 +1167,7 @@ export default function IslemFormuPage() {
               serialNumber: partChange.serialNumber,
               deviceId,
               deviceName: device?.cihazAdi || device?.model || '',
+              labName: hospital?.name || '',
               formId: formRef.id,
               formType: 'teknik_servis',
               createdAt: Timestamp.fromDate(now),

@@ -678,6 +678,7 @@ export interface SparePartTransferLog {
   toName?: string;
   deviceId?: string;           // İlgili cihaz
   deviceName?: string;
+  labName?: string;
   formId?: string;             // İlgili form
   formType?: 'teknik_servis' | 'aplikasyon';
   createdAt: Date;
@@ -730,6 +731,7 @@ export interface YedekParcaDepoStokItem {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  address?: string;              // Depo adresleme bilgisi (raf, göz vb.)
   serialNumber?: string;         // Opsiyonel seri numarası
   quantity: number;              // Seri numarasız ürünler için adet
   cihazGrubu?: string;          // Cihaz ana grubu (kutu, adet, şişe vs.)
@@ -752,6 +754,7 @@ export interface YedekParcaDepoLog {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  address?: string;
   cihazGrubu?: string;
   serialNumber?: string;
   quantity: number;              // İşlemdeki adet
