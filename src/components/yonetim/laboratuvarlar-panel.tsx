@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -151,6 +151,7 @@ export default function LaboratuvarPanel() {
         manualDeductionEnabled: currentHospital.manualDeductionEnabled ?? false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
+        sorumluEmail: ((currentHospital as any).sorumluEmail || '').trim(),
         updatedAt: new Date(),
       };
 
@@ -387,7 +388,17 @@ export default function LaboratuvarPanel() {
               <Input placeholder="Laboratuvar Adı" value={currentHospital.name || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, name: e.target.value })} />
               <Input placeholder="Laboratuvar Kodu (Max 3 Karakter)" value={currentHospital.kod || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, kod: e.target.value.toUpperCase() })} maxLength={3} />
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
-              
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="email"
+                  placeholder="Sorumlu İletişim E-postası"
+                  value={(currentHospital as any).sorumluEmail || ''}
+                  onChange={(e) => setCurrentHospital({ ...currentHospital, sorumluEmail: e.target.value })}
+                  className="pl-9"
+                />
+              </div>
+
               <div className="space-y-4">
                 <div className="flex items-center space-x-2 rounded-md border p-3">
                     <Switch
