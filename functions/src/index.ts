@@ -12,6 +12,7 @@ export { revokeUserSessions } from './revokeUserSessions';
 export { createCustomTokenForNfcUser } from './createCustomTokenForNfcUser';
 export { mirrorPresenceToFirestore } from './presence';
 export { nfcLoginWithSerial } from './nfc-login';
+export { onTeknikServisFormCreated, onAplikasyonFormCreated } from './actionFormEmailNotification';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];
