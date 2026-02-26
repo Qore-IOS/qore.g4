@@ -943,8 +943,8 @@ export default function DepoSayimPage() {
                                   </div>
                                 ) : group.trackingMode === 'serial' ? (
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
-                                    {group.expectedSerials.map((serial: any) => (
-                                        <div key={serial} className={cn("p-1.5 text-xs rounded font-mono border", group.scannedSerials.has(serial) ? 'border-emerald-300 text-emerald-700' : 'border-rose-300 text-rose-700')}>
+                                    {group.expectedSerials.map((serial: string, index: number) => (
+                                        <div key={`${serial}-${index}`} className={cn("p-1.5 text-xs rounded font-mono border", group.scannedSerials.has(serial) ? 'border-emerald-300 text-emerald-700' : 'border-rose-300 text-rose-700')}>
                                         {serial}
                                         </div>
                                     ))}
