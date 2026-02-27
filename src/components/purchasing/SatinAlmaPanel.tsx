@@ -542,7 +542,7 @@ function parseNaturalTaskInputForPlanning(
 // ==========================================
 
 export default function SatinAlmaPanel() {
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, isAdmin } = useAuth();
   const userName = currentUserProfile?.name || 'Kullanıcı';
 
   // State
@@ -554,7 +554,7 @@ export default function SatinAlmaPanel() {
   const [editingTask, setEditingTask] = useState<PurchasingTask | null>(null);
   const [detailTask, setDetailTask] = useState<PurchasingTask | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
-  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'timeline' | 'heatmap' | 'myday' | 'workflow'>('daily');
+  const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'workflow'>('daily');
   const [timelineScope, setTimelineScope] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [tasksLoading, setTasksLoading] = useState(true);
   const [taskDefinitions, setTaskDefinitions] = useState<PurchasingTaskDefinition[]>([]);
@@ -786,12 +786,25 @@ export default function SatinAlmaPanel() {
 
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
 
+  // Role-based task filtering:
+  // Admin sees all tasks; satın alma sees only their own tasks.
+  const myTasks = useMemo(() => {
+    if (isAdmin) return tasks;
+    if (!currentUserProfile?.uid) return [];
+    const uid = currentUserProfile.uid;
+    return tasks.filter((t) =>
+      t.createdByUid === uid ||
+      t.assignedPersonnel?.some((p) => p.uid === uid) ||
+      t.accompanyingPersonnel?.some((p) => p.uid === uid)
+    );
+  }, [tasks, isAdmin, currentUserProfile?.uid]);
+
   const normalizedSearchQuery = useMemo(() => globalSearchQuery.trim().toLocaleLowerCase('tr-TR'), [globalSearchQuery]);
 
   const globalSearchResults = useMemo(() => {
     if (!normalizedSearchQuery) return [] as PurchasingTask[];
 
-    return tasks
+    return myTasks
       .filter((task) => {
         const attachmentNames = (task.attachments || []).map((a) => a.name || '').join(' ');
         const assignedNames = (task.assignedPersonnel || []).map((p) => p.name || '').join(' ');
@@ -816,7 +829,7 @@ export default function SatinAlmaPanel() {
         if (a.date !== b.date) return a.date > b.date ? 1 : -1;
         return parseTime(a.startTime) - parseTime(b.startTime);
       });
-  }, [normalizedSearchQuery, tasks]);
+  }, [normalizedSearchQuery, myTasks]);
 
   const groupedSearchResults = useMemo(() => {
     const grouped = new Map<string, PurchasingTask[]>();
@@ -838,14 +851,22 @@ export default function SatinAlmaPanel() {
   const mobileMonthModalTasks = useMemo(() => {
     if (!mobileMonthModalDate) return [];
     const dayStr = format(mobileMonthModalDate, 'yyyy-MM-dd');
-    return tasks
+    return myTasks
       .filter((t) => t.date === dayStr)
       .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
-  }, [mobileMonthModalDate, tasks]);
+  }, [mobileMonthModalDate, myTasks]);
 
-  // NOTE: keep an explicit alias to avoid runtime regressions from stale refs (`myTasks`)
-  // in dependency arrays after merges/cherry-picks.
-  const myTasks = tasks;
+  // Permission check: admin can operate on all tasks, satın alma only on own tasks
+  const canOperateOnTask = useCallback((task: PurchasingTask): boolean => {
+    if (isAdmin) return true;
+    if (!currentUserProfile?.uid) return false;
+    const uid = currentUserProfile.uid;
+    return (
+      task.createdByUid === uid ||
+      !!task.assignedPersonnel?.some((p) => p.uid === uid) ||
+      !!task.accompanyingPersonnel?.some((p) => p.uid === uid)
+    );
+  }, [isAdmin, currentUserProfile?.uid]);
 
   // Day tasks sorted by sortOrder then startTime
   const dayTasks = useMemo(() => {
@@ -862,6 +883,10 @@ export default function SatinAlmaPanel() {
   const completeTask = useCallback(async (task: PurchasingTask) => {
     if (!currentUserProfile) return;
     if (task.completed) return;
+    if (!canOperateOnTask(task)) {
+      toast.error('Bu görevi tamamlama yetkiniz yok');
+      return;
+    }
     const log = createActivityLog(
       'completed',
       `Görev tamamlandı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
@@ -898,11 +923,15 @@ export default function SatinAlmaPanel() {
         toast.error('Görev güncellenemedi');
       }
     }
-  }, [currentUserProfile]);
+  }, [currentUserProfile, canOperateOnTask]);
 
   const reopenTask = useCallback(async (task: PurchasingTask) => {
     if (!currentUserProfile) return;
     if (!task.completed) return;
+    if (!canOperateOnTask(task)) {
+      toast.error('Bu görevi yeniden açma yetkiniz yok');
+      return;
+    }
     const log = createActivityLog(
       'reopened',
       `Görev yeniden açıldı (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
@@ -921,7 +950,7 @@ export default function SatinAlmaPanel() {
       console.error('Error reopening task', err);
       toast.error('Görev güncellenemedi');
     }
-  }, [currentUserProfile]);
+  }, [currentUserProfile, canOperateOnTask]);
 
   const requestTaskCompletion = useCallback((task: PurchasingTask) => {
     if (task.completed) {
@@ -938,6 +967,10 @@ export default function SatinAlmaPanel() {
 
 
   const postponeTaskToTomorrow = useCallback(async (task: PurchasingTask) => {
+    if (!canOperateOnTask(task)) {
+      toast.error('Bu görevi erteleme yetkiniz yok');
+      return;
+    }
     const tomorrow = format(addDays(parseISO(task.date), 1), 'yyyy-MM-dd');
     const prevDate = task.date;
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, date: tomorrow } : t)));
@@ -956,9 +989,13 @@ export default function SatinAlmaPanel() {
       console.error('Error postponing task', err);
       toast.error('Görev ertelenemedi');
     }
-  }, [currentUserProfile]);
+  }, [currentUserProfile, canOperateOnTask]);
 
   const moveTaskTimeInTimeline = useCallback(async (task: PurchasingTask, date: string, startHour: number) => {
+    if (!canOperateOnTask(task)) {
+      toast.error('Bu görevi taşıma yetkiniz yok');
+      return;
+    }
     const duration = parseTime(task.endTime) - parseTime(task.startTime);
     const startMin = Math.max(WORK_START_HOUR * 60, startHour * 60);
     const endMin = Math.min(WORK_END_HOUR * 60, startMin + duration);
@@ -980,7 +1017,7 @@ export default function SatinAlmaPanel() {
       console.error('Error moving task in timeline', err);
       toast.error('Görev zamanı güncellenemedi');
     }
-  }, []);
+  }, [canOperateOnTask]);
 
   // Toggle subtask
   const toggleSubtask = useCallback(async (task: PurchasingTask, subtaskId: string) => {
@@ -1055,6 +1092,10 @@ export default function SatinAlmaPanel() {
 
   // Delete task
   const deleteTask = useCallback(async (task: PurchasingTask) => {
+    if (!canOperateOnTask(task)) {
+      toast.error('Bu görevi silme yetkiniz yok');
+      return;
+    }
     const ok = typeof window !== 'undefined' ? window.confirm('Bu görevi silmek istediğinize emin misiniz?') : true;
     if (!ok) return;
 
@@ -1082,7 +1123,7 @@ export default function SatinAlmaPanel() {
       console.error('Error deleting task', err);
       toast.error('Görev silinemedi');
     }
-  }, [editingTask, tasks, enqueueMutation]);
+  }, [editingTask, tasks, enqueueMutation, canOperateOnTask]);
 
   // Add task
   const handleAddTask = useCallback(
@@ -1235,6 +1276,10 @@ export default function SatinAlmaPanel() {
   const handleEditTask = useCallback(
     async (data: TaskFormData) => {
       if (!editingTask || !currentUserProfile) return;
+      if (!canOperateOnTask(editingTask)) {
+        toast.error('Bu görevi düzenleme yetkiniz yok');
+        return;
+      }
       try {
         const conflicts = hasTimeConflict(
           tasks,
@@ -1325,7 +1370,7 @@ export default function SatinAlmaPanel() {
         toast.error('Görev güncellenemedi');
       }
     },
-    [editingTask, currentUserProfile, tasks, enqueueMutation]
+    [editingTask, currentUserProfile, tasks, enqueueMutation, canOperateOnTask]
   );
 
   // Drag & drop reorder (native HTML5 DnD)
@@ -1657,66 +1702,6 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
-      <div className="px-4 md:px-8 mt-4">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Link href="/ariza-yonetimi" className="group">
-            <div className="dashboard-kpi-surface rounded-2xl border border-border p-4 transition-all hover:-translate-y-0.5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Wrench className="w-4 h-4" /> Cihaz Arıza KPI
-                </h3>
-                <span className="text-[11px] text-muted-foreground">Detaya Git</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">Atama Bekleyen</p>
-                  <p className="text-xl font-bold mt-0.5">{faultKpi.pendingAssignment}</p>
-                </div>
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">Müdahale Bekleyen</p>
-                  <p className="text-xl font-bold mt-0.5">{faultKpi.pendingIntervention}</p>
-                </div>
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">Müdahale Edilen</p>
-                  <p className="text-xl font-bold mt-0.5">{faultKpi.inIntervention}</p>
-                </div>
-              </div>
-            </div>
-          </Link>
-
-          <Link href="/satin-alma/analiz-planlama" className="group">
-            <div className="dashboard-kpi-surface rounded-2xl border border-border p-4 transition-all hover:-translate-y-0.5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <CalendarClock className="w-4 h-4" /> Takvim KPI
-                </h3>
-                <span className="text-[11px] text-muted-foreground">Planlama Paneli</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">1 Haftalık</p>
-                  <p className="text-xl font-bold mt-0.5">{personalCalendarKpi.weekCount}</p>
-                </div>
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">1 Aylık</p>
-                  <p className="text-xl font-bold mt-0.5">{personalCalendarKpi.monthCount}</p>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                {personalCalendarKpi.nextTasks.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground">Yaklaşan görev bulunmuyor.</p>
-                ) : (
-                  personalCalendarKpi.nextTasks.map((task) => (
-                    <p key={task.id} className="text-[11px] truncate text-muted-foreground">
-                      {task.date} • {task.startTime} • <span className="text-foreground">{task.title}</span>
-                    </p>
-                  ))
-                )}
-              </div>
-            </div>
-          </Link>
-        </div>
-      </div>
 
       {/* Date Slider */}
       <div className="mt-4 px-1 md:px-4">
@@ -1737,8 +1722,8 @@ export default function SatinAlmaPanel() {
               const dateStr = format(date, 'yyyy-MM-dd');
               const isSelected = isSameDay(date, selectedDate);
               const today = isToday(date);
-              const occupancy = getOccupancyForDay(tasks, dateStr);
-              const dayTaskCount = tasks.filter((t) => t.date === dateStr).length;
+              const occupancy = getOccupancyForDay(myTasks, dateStr);
+              const dayTaskCount = myTasks.filter((t) => t.date === dateStr).length;
               const specialDay = getSpecialDay(dateStr);
 
               return (
@@ -1833,8 +1818,8 @@ export default function SatinAlmaPanel() {
                 const isSelected = isSameDay(day, selectedDate);
                 const today = isToday(day);
                 const inMonth = isSameMonth(day, calendarMonth);
-                const occupancy = getOccupancyForDay(tasks, dayStr);
-                const hasTasks = tasks.some((t) => t.date === dayStr);
+                const occupancy = getOccupancyForDay(myTasks, dayStr);
+                const hasTasks = myTasks.some((t) => t.date === dayStr);
                 const specialDay = getSpecialDay(dayStr);
                 return (
                   <button
@@ -1886,27 +1871,6 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
-      {/* Natural Language Quick Add */}
-      <div className="px-4 md:px-8 mt-5">
-        <div className="rounded-2xl border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground mb-2">Doğal dil ile hızlı görev girişi</p>
-          <div className="flex gap-2">
-            <input
-              value={naturalInput}
-              onChange={(e) => setNaturalInput(e.target.value)}
-              placeholder="Örn: 'Yarın saat 14:00'da Merkez Lab ziyareti #acil"
-              className="flex-1 px-3 py-2 bg-secondary border border-border rounded-xl text-sm outline-none"
-            />
-            <button
-              onClick={handleNaturalQuickAdd}
-              disabled={!naturalInput.trim() || naturalSubmitting}
-              className={cn('px-3 py-2 rounded-xl text-sm font-medium', naturalInput.trim() && !naturalSubmitting ? `${ACCENT_BG} text-zinc-900` : 'bg-secondary text-muted-foreground')}
-            >
-              {naturalSubmitting ? 'Ekleniyor...' : 'Ekle'}
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* Task Views */}
       <div className="px-4 md:px-8 mt-6">
@@ -1919,16 +1883,13 @@ export default function SatinAlmaPanel() {
         <>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-semibold text-muted-foreground">
-            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : viewMode === 'monthly' ? 'Aylık Görev Görünümü' : viewMode === 'timeline' ? 'Timeline / Gantt' : viewMode === 'heatmap' ? 'Personel Aktivite Haritası' : viewMode === 'workflow' ? 'Workflow Kanvası' : 'Bugünüm'}
+            {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : viewMode === 'monthly' ? 'Aylık Görev Görünümü' : 'Workflow Kanvası'}
           </h3>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
             {([
               ['daily', 'Günlük'],
               ['weekly', 'Haftalık'],
               ['monthly', 'Aylık'],
-              ['timeline', 'Timeline'],
-              ['heatmap', 'Heatmap'],
-              ['myday', 'Bugünüm'],
               ['workflow', 'Workflow'],
             ] as const).map(([mode, label]) => (
               <button
@@ -1942,56 +1903,6 @@ export default function SatinAlmaPanel() {
           </div>
         </div>
 
-        {viewMode === 'myday' && (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-border bg-card p-3">
-              <h4 className="text-sm font-semibold mb-2">Bugünüm</h4>
-              {myDayTasks.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Bugün için henüz görev seçmediniz.</p>
-              ) : (
-                <div className="space-y-2">
-                  {myDayTasks.map((task) => (
-                    <div key={task.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/50 border border-border">
-                      <div className="min-w-0">
-                        <p className="text-sm truncate">{task.title}</p>
-                        <p className="text-[11px] text-muted-foreground">{task.date} • {task.startTime}-{task.endTime}</p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => setEditingTask(task)} className="text-[11px] px-2 py-1 rounded bg-secondary border border-border">Aç</button>
-                        <button onClick={() => removeFromMyDay(task.id)} className="text-[11px] px-2 py-1 rounded bg-secondary border border-border text-muted-foreground">Çıkar</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-border bg-card p-3">
-              <h4 className="text-sm font-semibold mb-2">Akıllı Öneriler</h4>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {myDaySuggestions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Önerilecek görev bulunamadı.</p>
-                ) : (
-                  myDaySuggestions.map((task) => (
-                    <div key={task.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/40 border border-border">
-                      <div className="min-w-0">
-                        <p className="text-sm truncate">{task.title}</p>
-                        <p className="text-[11px] text-muted-foreground">{task.date} • {task.startTime}-{task.endTime}{task.recurring ? ' • Tekrarlı' : ''}</p>
-                      </div>
-                      <button
-                        onClick={() => addToMyDay(task.id)}
-                        disabled={myDayTaskIds.includes(task.id)}
-                        className={cn('text-[11px] px-2 py-1 rounded border', myDayTaskIds.includes(task.id) ? 'bg-secondary text-muted-foreground border-border' : `${ACCENT_BG_SUBTLE} ${ACCENT} ${ACCENT_BORDER}`)}
-                      >
-                        {myDayTaskIds.includes(task.id) ? 'Eklendi' : 'Bugüne ekle'}
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {viewMode === 'daily' && (
           dayTasks.length === 0 ? (
@@ -2033,7 +1944,7 @@ export default function SatinAlmaPanel() {
           <div className="grid grid-cols-1 md:grid-cols-7 gap-2"> 
             {weekDays.map((day) => {
               const dayStr = format(day, 'yyyy-MM-dd');
-              const dayTasksForWeek = tasks
+              const dayTasksForWeek = myTasks
                 .filter((t) => t.date === dayStr)
                 .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
               const layout = buildTimelineLayout(dayTasksForWeek);
@@ -2101,100 +2012,10 @@ export default function SatinAlmaPanel() {
           </div>
         )}
 
-        {viewMode === 'timeline' && (
-          <div className="rounded-2xl border border-border bg-card p-3">
-            <div className="flex items-center justify-between mb-3 gap-2">
-              <h4 className="text-xs font-semibold text-muted-foreground">Zaman Çizelgesi (Gantt)</h4>
-              <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
-                {(['daily', 'weekly', 'monthly'] as const).map((scope) => (
-                  <button
-                    key={scope}
-                    onClick={() => setTimelineScope(scope)}
-                    className={cn('px-2 py-1 text-[10px] rounded-lg', timelineScope === scope ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground')}
-                  >
-                    {scope === 'daily' ? 'Günlük' : scope === 'weekly' ? 'Haftalık' : 'Aylık'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <div className="grid gap-2" style={{ gridTemplateColumns: `80px repeat(${timelineDays.length}, minmax(120px, 1fr))` }}>
-                <div />
-                {timelineDays.map((day) => (
-                  <div key={day.toISOString()} className="text-[10px] text-center text-muted-foreground">{format(day, 'd MMM', { locale: tr })}</div>
-                ))}
-
-                {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
-                  const hour = WORK_START_HOUR + idx;
-                  return (
-                    <React.Fragment key={`r-${hour}`}>
-                      <div className="text-[10px] text-muted-foreground pr-2">{`${hour.toString().padStart(2, '0')}:00`}</div>
-                      {timelineDays.map((day) => {
-                        const dayStr = format(day, 'yyyy-MM-dd');
-                        const cnt = tasks.filter((t) => {
-                          if (t.date !== dayStr) return false;
-                          const s = parseTime(t.startTime);
-                          const e = parseTime(t.endTime);
-                          const ss = hour * 60;
-                          const ee = (hour + 1) * 60;
-                          return ss < e && ee > s;
-                        }).length;
-                        return <div key={`${dayStr}-${hour}`} className={cn('h-8 border rounded', cnt > 0 ? 'bg-[#d4ec00]/20 border-[#d4ec00]/30' : 'bg-secondary/30 border-border')} />;
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-2">Çakışan görevler aynı satırda birden fazla blok olarak gösterilir; haftalık görünümde blokları sürükleyip saat/gün değiştirin.</p>
-          </div>
-        )}
-
-        {viewMode === 'heatmap' && (
-          <div className="rounded-2xl border border-border bg-card p-3">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-semibold text-muted-foreground">Personel Aktivite Haritası</h4>
-              <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
-                {(['weekly', 'monthly'] as const).map((scope) => (
-                  <button
-                    key={scope}
-                    onClick={() => setTimelineScope(scope)}
-                    className={cn('px-2 py-1 text-[10px] rounded-lg', timelineScope === scope ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground')}
-                  >
-                    {scope === 'weekly' ? 'Haftalık' : 'Aylık'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <div className="grid gap-1" style={{ gridTemplateColumns: `60px repeat(${heatmapData.days.length}, minmax(18px, 1fr))` }}>
-                <div />
-                {heatmapData.days.map((d) => (
-                  <div key={d.toISOString()} className="text-[9px] text-center text-muted-foreground">{timelineScope === 'weekly' ? format(d, 'EEE', { locale: tr }) : format(d, 'd')}</div>
-                ))}
-                {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
-                  const hour = WORK_START_HOUR + idx;
-                  return (
-                    <React.Fragment key={`h-${hour}`}>
-                      <div className="text-[9px] text-muted-foreground">{hour}:00</div>
-                      {heatmapData.days.map((_, di) => {
-                        const val = heatmapData.matrix[di]?.[idx] || 0;
-                        return <div key={`${di}-${idx}`} className={cn('h-5 border rounded-sm', getHeatColor(val, heatmapData.max))} title={`${val} görev`} />;
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-2">Boş zaman blokları yeşil, yoğun bloklar kırmızıya yakın tonlarda gösterilir.</p>
-          </div>
-        )}
-
         {viewMode === 'workflow' && (
           <div className="rounded-2xl border border-border bg-card p-3">
             <WorkflowCanvasPanel
-              tasks={tasks}
+              tasks={myTasks}
               workflows={workflows}
               userUid={currentUserProfile?.uid}
               userName={currentUserProfile?.name}
@@ -2224,7 +2045,7 @@ export default function SatinAlmaPanel() {
             <div className="grid grid-cols-7 gap-1">
               {monthDays.map((day) => {
                 const dayStr = format(day, 'yyyy-MM-dd');
-                const cellTasks = tasks.filter((t) => t.date === dayStr).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+                const cellTasks = myTasks.filter((t) => t.date === dayStr).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
                 const inMonth = isSameMonth(day, selectedDate);
                 const selected = isSameDay(day, selectedDate);
                 const specialDay = getSpecialDay(dayStr);
