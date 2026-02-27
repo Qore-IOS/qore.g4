@@ -34,6 +34,12 @@ service firebase.storage {
       allow write: if request.auth != null;
     }
 
+    // User request images - authenticated users can upload, all authenticated can read
+    match /user-requests/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
     // Deny access to all other paths
     match /{allPaths=**} {
       allow read, write: if false;
