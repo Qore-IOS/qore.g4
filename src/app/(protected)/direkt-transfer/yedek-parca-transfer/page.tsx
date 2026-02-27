@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase';
 import {
   collection,
   getDocs,
+  getDoc,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -16,7 +17,7 @@ import {
   writeBatch,
   increment,
 } from 'firebase/firestore';
-import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem } from '@/lib/types';
+import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -58,6 +59,8 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTransferTutanakPDFButton';
+import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
+import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 
 // Menu selection types
 type MenuSection = 'transfer' | 'depo-stok' | 'toplam-stok' | 'personnel';
@@ -86,6 +89,77 @@ interface ManualPersonnelStockRow {
   stokAdi: string;
   serialNumber: string;
   quantity: number;
+}
+
+// Wrapper component for on-demand form PDF download
+function SparePartFormPDFButton({ formId, formType, deviceId }: { formId: string; formType: 'teknik_servis' | 'aplikasyon'; deviceId: string }) {
+  const [loading, setLoading] = React.useState(false);
+  const [data, setData] = React.useState<{ device: Device; hospital: Hospital | null; actionRecord: any } | null>(null);
+  const [autoExport, setAutoExport] = React.useState(false);
+
+  const wrapperRef = React.useCallback((node: HTMLDivElement | null) => {
+    if (node && autoExport) {
+      const btn = node.querySelector('button');
+      if (btn) {
+        btn.click();
+        setAutoExport(false);
+      }
+    }
+  }, [autoExport]);
+
+  const handleClick = async () => {
+    if (data) { setAutoExport(true); return; }
+    setLoading(true);
+    try {
+      const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
+      if (!deviceSnap.exists()) return;
+      const deviceData = { id: deviceSnap.id, ...deviceSnap.data() } as Device;
+
+      let hospitalData: Hospital | null = null;
+      if (deviceData.hospitalId) {
+        const hospitalSnap = await getDoc(doc(db, 'hospitals', deviceData.hospitalId));
+        if (hospitalSnap.exists()) {
+          hospitalData = { id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital;
+        }
+      }
+
+      const formSnap = await getDoc(doc(db, 'deviceActionForms', formId));
+      if (!formSnap.exists()) return;
+      const actionRecord = { id: formSnap.id, ...formSnap.data() };
+
+      setData({ device: deviceData, hospital: hospitalData, actionRecord });
+      setAutoExport(true);
+    } catch (err) {
+      console.error('Error fetching form data for PDF:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (data) {
+    return (
+      <div ref={wrapperRef} className="inline-flex">
+        {formType === 'teknik_servis' ? (
+          <TeknikServisTutanakPDFButton device={data.device} hospital={data.hospital} actionRecord={data.actionRecord} />
+        ) : (
+          <AplikasyonTutanakPDFButton device={data.device} hospital={data.hospital} actionRecord={data.actionRecord} />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all hover:opacity-80 active:scale-95 disabled:opacity-50"
+      style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+      title={formType === 'teknik_servis' ? 'Teknik Servis Tutanağı İndir' : 'Aplikasyon Tutanağı İndir'}
+    >
+      {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+      {formType === 'teknik_servis' ? 'T.Servis' : 'Aplikasyon'}
+    </button>
+  );
 }
 
 interface PersonnelStockViewItem extends PersonalStockItem {
@@ -1968,21 +2042,7 @@ export default function YedekParcaTransferPage() {
                         </td>
                         <td className="px-4 py-3 text-center">
                           {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId ? (
-                            <a
-                              href={
-                                item.usedOnFormType === 'teknik_servis'
-                                  ? `/teknik-servis/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
-                                  : `/aplikasyon-paneli/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all hover:opacity-80 active:scale-95"
-                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                              title={item.usedOnFormType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu'}
-                            >
-                              <FileText className="h-3 w-3" />
-                              {item.usedOnFormType === 'teknik_servis' ? 'T.Servis' : 'Aplikasyon'}
-                            </a>
+                            <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType} deviceId={item.usedOnDeviceId} />
                           ) : (
                             <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
                           )}
@@ -2047,20 +2107,7 @@ export default function YedekParcaTransferPage() {
                     </div>
                     {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId && (
                       <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
-                        <a
-                          href={
-                            item.usedOnFormType === 'teknik_servis'
-                              ? `/teknik-servis/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
-                              : `/aplikasyon-paneli/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all hover:opacity-80 active:scale-95"
-                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                        >
-                          <FileText className="h-3 w-3" />
-                          {item.usedOnFormType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu'}
-                        </a>
+                        <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType} deviceId={item.usedOnDeviceId} />
                       </div>
                     )}
                   </article>
