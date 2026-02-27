@@ -970,7 +970,9 @@ export default function IslemFormuPage() {
         const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
         // Create form document
+        console.log('[TeknikServis] Form kaydediliyor. deviceId:', deviceId, 'hospitalId:', device?.hospitalId, 'labName:', hospital?.name, 'cihazAdi:', device?.cihazAdi || device?.model);
         const formRef = doc(collection(db, 'teknikServisActionForms'));
+        console.log('[TeknikServis] Form ref ID:', formRef.id);
         batch.set(formRef, {
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
@@ -1340,6 +1342,7 @@ export default function IslemFormuPage() {
         }
 
         await batch.commit();
+        console.log('[TeknikServis] Batch commit başarılı. Form ID:', formRef.id, 'hospitalId:', device?.hospitalId);
 
         toast({title: 'Başarılı', description: `İşlem formu #${formRef.id.substring(0,6)}... kaydedildi.`});
         setActions([]);

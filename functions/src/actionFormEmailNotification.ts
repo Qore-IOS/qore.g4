@@ -267,29 +267,37 @@ async function handleActionFormCreated(
   const data = snap.data();
   const formId = context.params.formId;
 
+  logger.info(`[actionFormEmail] ========== START ==========`);
   logger.info(`[actionFormEmail] Processing ${formType} form: ${formId}`);
+  logger.info(`[actionFormEmail] Form data keys: ${Object.keys(data).join(', ')}`);
+  logger.info(`[actionFormEmail] Form hospitalId: "${data.hospitalId}", labName: "${data.labName}", deviceId: "${data.deviceId}"`);
 
   // 1. Get hospital's sorumluEmail
   const hospitalId = data.hospitalId;
   if (!hospitalId) {
-    logger.info(`[actionFormEmail] No hospitalId on form ${formId}, skipping email.`);
+    logger.warn(`[actionFormEmail] No hospitalId on form ${formId}, skipping email. Full data: ${JSON.stringify({ hospitalId: data.hospitalId, labName: data.labName, deviceId: data.deviceId })}`);
     return;
   }
 
+  logger.info(`[actionFormEmail] Fetching hospital document: hospitals/${hospitalId}`);
   const hospitalDoc = await db.collection('hospitals').doc(hospitalId).get();
   if (!hospitalDoc.exists) {
-    logger.info(`[actionFormEmail] Hospital ${hospitalId} not found, skipping email.`);
+    logger.warn(`[actionFormEmail] Hospital ${hospitalId} not found in Firestore, skipping email.`);
     return;
   }
 
   const hospitalData = hospitalDoc.data()!;
   const sorumluEmail = hospitalData.sorumluEmail;
+  logger.info(`[actionFormEmail] Hospital "${hospitalData.name}" found. sorumluEmail field value: "${sorumluEmail}" (type: ${typeof sorumluEmail})`);
+  logger.info(`[actionFormEmail] Hospital data keys: ${Object.keys(hospitalData).join(', ')}`);
+
   if (!sorumluEmail || !sorumluEmail.trim()) {
-    logger.info(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId}, skipping email.`);
+    logger.warn(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId} ("${hospitalData.name}"), skipping email.`);
     return;
   }
 
   // 2. Get transporter
+  logger.info(`[actionFormEmail] SMTP config check - HOST: ${process.env.SMTP_HOST ? 'SET' : 'MISSING'}, PORT: ${process.env.SMTP_PORT || 'default(587)'}, USER: ${process.env.SMTP_USER ? 'SET' : 'MISSING'}, PASS: ${process.env.SMTP_PASS ? 'SET' : 'MISSING'}, FROM: ${process.env.SMTP_FROM || 'not set (will use SMTP_USER)'}`);
   const transporter = getTransporter();
   if (!transporter) {
     logger.error(`[actionFormEmail] SMTP not configured, cannot send email for form ${formId}.`);
@@ -311,8 +319,10 @@ async function handleActionFormCreated(
   const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
   const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
 
+  logger.info(`[actionFormEmail] Sending email: from="${senderEmail}", to="${sorumluEmail.trim()}", subject="${subject}", pdfFileName="${pdfFileName}", pdfSize=${pdfBuffer.length} bytes`);
+
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: senderEmail,
       to: sorumluEmail.trim(),
       subject,
@@ -326,9 +336,12 @@ async function handleActionFormCreated(
       ],
     });
 
-    logger.info(`[actionFormEmail] Email sent to ${sorumluEmail} for form ${formId}`);
+    logger.info(`[actionFormEmail] Email sent successfully to ${sorumluEmail} for form ${formId}. MessageId: ${info.messageId}, response: ${info.response}`);
+    logger.info(`[actionFormEmail] ========== END (SUCCESS) ==========`);
   } catch (error: any) {
-    logger.error(`[actionFormEmail] Failed to send email for form ${formId}:`, error?.message || error);
+    logger.error(`[actionFormEmail] Failed to send email for form ${formId}. To: ${sorumluEmail}, Error: ${error?.message || error}`);
+    logger.error(`[actionFormEmail] Full error:`, JSON.stringify(error, Object.getOwnPropertyNames(error || {})));
+    logger.info(`[actionFormEmail] ========== END (FAILED) ==========`);
   }
 }
 
