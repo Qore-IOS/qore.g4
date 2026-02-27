@@ -115,6 +115,10 @@ export default function KullaniciPanel() {
       toast({ title: 'Hata', description: 'E-posta boş olamaz.', variant: 'destructive' });
       return;
     }
+    if (currentUser.role === 'admin_developer' && users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid)) {
+      toast({ title: 'Hata', description: 'Sistemde sadece 1 adet Admin-Geliştirici olabilir.', variant: 'destructive' });
+      return;
+    }
     // Primary laboratories should be a subset of assigned laboratories
     const validPrimaryLabs = (currentUser.primaryLaboratories || []).filter(
       labId => currentUser.assignedLaboratories?.includes(labId)
@@ -261,9 +265,13 @@ export default function KullaniciPanel() {
                 <Select value={currentUser.role || 'user'} onValueChange={(value) => setCurrentUser({ ...currentUser, role: value as any })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="admin_developer" disabled={users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid)}>
+                        Admin-Geliştirici {users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid) ? '(Mevcut)' : ''}
+                      </SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
                       <SelectItem value="lojistik_sorumlusu">Lojistik Sorumlusu</SelectItem>
                       <SelectItem value="teknik_lojistik">Teknik Lojistik</SelectItem>
+                      <SelectItem value="satin_alma">Satın Alma</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                       <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
