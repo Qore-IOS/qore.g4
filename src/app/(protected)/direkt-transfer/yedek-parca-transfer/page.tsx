@@ -49,6 +49,7 @@ import {
   X,
   Download,
   Upload,
+  FileText,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -1900,6 +1901,7 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Form</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1964,6 +1966,27 @@ export default function YedekParcaTransferPage() {
                             <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
                           )}
                         </td>
+                        <td className="px-4 py-3 text-center">
+                          {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId ? (
+                            <a
+                              href={
+                                item.usedOnFormType === 'teknik_servis'
+                                  ? `/teknik-servis/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
+                                  : `/aplikasyon-paneli/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all hover:opacity-80 active:scale-95"
+                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                              title={item.usedOnFormType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu'}
+                            >
+                              <FileText className="h-3 w-3" />
+                              {item.usedOnFormType === 'teknik_servis' ? 'T.Servis' : 'Aplikasyon'}
+                            </a>
+                          ) : (
+                            <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -2022,6 +2045,24 @@ export default function YedekParcaTransferPage() {
                         </span>
                       ) : null}
                     </div>
+                    {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId && (
+                      <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
+                        <a
+                          href={
+                            item.usedOnFormType === 'teknik_servis'
+                              ? `/teknik-servis/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
+                              : `/aplikasyon-paneli/islem-formu/${item.usedOnDeviceId}?focus=${item.usedOnFormId}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all hover:opacity-80 active:scale-95"
+                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                        >
+                          <FileText className="h-3 w-3" />
+                          {item.usedOnFormType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu'}
+                        </a>
+                      </div>
+                    )}
                   </article>
                 );
               })}
