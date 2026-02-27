@@ -253,6 +253,7 @@ export default function KullaniciPanel() {
                 <Select value={currentUser.role || 'user'} onValueChange={(value) => setCurrentUser({ ...currentUser, role: value as any })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="admin_developer">Admin-Geliştirici</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
                       <SelectItem value="lojistik_sorumlusu">Lojistik Sorumlusu</SelectItem>
                       <SelectItem value="user">User</SelectItem>

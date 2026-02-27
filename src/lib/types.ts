@@ -125,7 +125,7 @@ export interface MinMaxRule {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
+  role: 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
   name?: string;
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
@@ -513,6 +513,7 @@ export type AppView =
   | 'numune-arsivi'
   | 'nobet-yonetimi'
   | 'satin-alma'
+  | 'kullanici-talepleri'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
@@ -1271,4 +1272,31 @@ export interface PurchasingTaskDefinition {
   requiresLaboratory?: boolean;
   active?: boolean;
   createdAt?: TimestampLike;
+}
+
+// ============================================
+// KULLANICI TALEP SİSTEMİ
+// ============================================
+
+export type UserRequestCategory = 'bug' | 'improvement' | 'feature' | 'design';
+export type UserRequestPriority = 'low' | 'normal' | 'urgent';
+export type UserRequestStatus = 'open' | 'done';
+
+export interface UserRequest {
+  id: string;
+  title: string;
+  description: string;
+  images: string[]; // Storage URLs
+  category: UserRequestCategory;
+  priority: UserRequestPriority;
+  status: UserRequestStatus;
+  createdBy: string; // uid
+  createdByName: string;
+  createdAt: TimestampLike;
+  updatedAt: TimestampLike;
+  resolvedAt?: TimestampLike;
+  resolvedBy?: string; // uid
+  resolvedByName?: string;
+  adminNote?: string;
+  unreadByUser: boolean;
 }
