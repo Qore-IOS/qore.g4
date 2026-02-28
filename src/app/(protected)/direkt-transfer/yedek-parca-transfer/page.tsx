@@ -16,6 +16,7 @@ import {
   Timestamp,
   writeBatch,
   increment,
+  setDoc,
 } from 'firebase/firestore';
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -52,12 +53,13 @@ import {
   Upload,
   FileText,
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTransferTutanakPDFButton';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
@@ -231,6 +233,11 @@ export default function YedekParcaTransferPage() {
   const [manualStockModalOpen, setManualStockModalOpen] = useState(false);
   const [manualStockRows, setManualStockRows] = useState<ManualPersonnelStockRow[]>([]);
   const [isSavingManualStock, setIsSavingManualStock] = useState(false);
+  const [brandOptions, setBrandOptions] = useState<string[]>([]);
+  const [stockCardSyncDialogOpen, setStockCardSyncDialogOpen] = useState(false);
+  const [stockCardSyncLoading, setStockCardSyncLoading] = useState(false);
+  const [stockCardSyncMissing, setStockCardSyncMissing] = useState<Array<{ stokKodu: string; stokAdi: string }>>([]);
+  const [stockCardSyncBrand, setStockCardSyncBrand] = useState<string>('');
 
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
@@ -256,13 +263,17 @@ export default function YedekParcaTransferPage() {
     const fetchData = async () => {
       try {
         // Fetch product codes for cihazGrubu reference
-        const productsQuery = query(
-          collection(db, 'productCodes'),
-          where('urunGrubu', '==', 'yedek_parca')
-        );
-        const productsSnap = await getDocs(productsQuery);
+        const [productsSnap, brandsSnap] = await Promise.all([
+          getDocs(query(collection(db, 'productCodes'), where('urunGrubu', '==', 'yedek_parca'))),
+          getDocs(collection(db, 'def_brands')),
+        ]);
         const sparePartProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const brands = brandsSnap.docs
+          .map(d => String(d.data().name || '').trim())
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, 'tr'));
         setProductCodes(sparePartProducts);
+        setBrandOptions(brands);
 
         // Fetch depot stock - only products in the depot
         const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
@@ -1777,6 +1788,67 @@ export default function YedekParcaTransferPage() {
     </div>
   );
 
+
+  const handleOpenStockCardSync = useCallback(() => {
+    const existingCodes = new Set(productCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
+    const missingMap = new Map<string, { stokKodu: string; stokAdi: string }>();
+
+    for (const item of depoStokProducts) {
+      const code = (item.stokKodu || '').trim().toUpperCase();
+      if (!code || existingCodes.has(code)) continue;
+      if (!missingMap.has(code)) {
+        missingMap.set(code, { stokKodu: code, stokAdi: item.stokAdi || code });
+      }
+    }
+
+    const missing = Array.from(missingMap.values());
+    if (missing.length === 0) {
+      toast({ title: 'Kontrol Tamam', description: 'Depodaki tüm ürünlerin stok kartı zaten mevcut.' });
+      return;
+    }
+
+    setStockCardSyncMissing(missing);
+    setStockCardSyncBrand(brandOptions[0] || '');
+    setStockCardSyncDialogOpen(true);
+  }, [brandOptions, depoStokProducts, productCodes, toast]);
+
+  const handleSyncMissingStockCards = useCallback(async () => {
+    if (!stockCardSyncBrand) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen marka seçin.', variant: 'destructive' });
+      return;
+    }
+
+    setStockCardSyncLoading(true);
+    try {
+      const now = Timestamp.fromDate(new Date());
+      for (const item of stockCardSyncMissing) {
+        const docId = `auto-${item.stokKodu.toLowerCase().replace(/[^a-z0-9-]/gi, '-')}`;
+        await setDoc(doc(db, 'productCodes', docId), {
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          urunGrubu: 'yedek_parca',
+          marka: stockCardSyncBrand,
+          createdAt: now,
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+          autoCreatedFromDepotFlow: true,
+        }, { merge: true });
+      }
+
+      const refreshedProducts = await getDocs(query(collection(db, 'productCodes'), where('urunGrubu', '==', 'yedek_parca')));
+      setProductCodes(refreshedProducts.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode));
+
+      toast({ title: 'Başarılı', description: `${stockCardSyncMissing.length} ürün için stok kartı açıldı.` });
+      setStockCardSyncDialogOpen(false);
+      setStockCardSyncMissing([]);
+    } catch (err) {
+      console.error('Error syncing stock cards:', err);
+      toast({ title: 'Hata', description: 'Stok kartları oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setStockCardSyncLoading(false);
+    }
+  }, [currentUserProfile?.name, currentUserProfile?.uid, stockCardSyncBrand, stockCardSyncMissing, toast]);
+
   // ========== RENDER: Depo Stok View (Grouped) ==========
   const renderDepoStok = () => (
     <div className="space-y-4">
@@ -1793,6 +1865,9 @@ export default function YedekParcaTransferPage() {
           <input ref={depotExcelInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleDepotStockExcelUpload} className="hidden" />
           <button onClick={() => depotExcelInputRef.current?.click()} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
             <Upload className="w-3.5 h-3.5" /> Excel Yükle
+          </button>
+          <button onClick={handleOpenStockCardSync} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+            <CheckCircle className="w-3.5 h-3.5" /> Stok Kart Kontrol
           </button>
           <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white" style={{ background: 'var(--dashboard-accent)' }}>
             <Plus className="w-3.5 h-3.5" /> Stok Girişi
@@ -2442,6 +2517,46 @@ export default function YedekParcaTransferPage() {
           </div>
         </div>
       )}
+
+      <Dialog open={stockCardSyncDialogOpen} onOpenChange={(open) => { if (!stockCardSyncLoading) setStockCardSyncDialogOpen(open); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Eksik Yedek Parça Stok Kartları</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Depodaki bazı ürünler ürün kodu yönetiminde tanımlı değil. Seçtiğiniz marka ile bu ürünlerin yedek parça stok kartları açılsın mı?
+          </p>
+          <div className="max-h-44 overflow-y-auto border rounded-md p-2 space-y-2">
+            {stockCardSyncMissing.map(item => (
+              <div key={item.stokKodu} className="text-xs">
+                <p className="font-mono font-semibold">{item.stokKodu}</p>
+                <p className="text-muted-foreground">{item.stokAdi}</p>
+              </div>
+            ))}
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium">Marka</label>
+            <Select value={stockCardSyncBrand} onValueChange={setStockCardSyncBrand}>
+              <SelectTrigger>
+                <SelectValue placeholder="Marka seçin" />
+              </SelectTrigger>
+              <SelectContent>
+                {brandOptions.map(brand => (
+                  <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <button className="cihaz-tool-item px-4 py-2 text-sm" disabled={stockCardSyncLoading} onClick={() => setStockCardSyncDialogOpen(false)}>
+              İptal
+            </button>
+            <button className="cihaz-action-tile px-4 py-2 text-sm text-white" disabled={stockCardSyncLoading || !stockCardSyncBrand} onClick={handleSyncMissingStockCards}>
+              {stockCardSyncLoading ? 'Oluşturuluyor...' : 'Stok Kartlarını Aç'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Image Preview Modal */}
       <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>

@@ -54,6 +54,7 @@ type NewPeriodicPartRow = {
   stokKodu: string;
   stokAdi: string;
   nextDueDate: string; // YYYY-MM-DD format
+  periodDays: string; // Gün bazlı periyot (string input)
   responsibilityType: PeriodicPartResponsibility;
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
@@ -68,6 +69,7 @@ type BulkPeriodicPartRow = {
   stokKodu: string;
   stokAdi: string;
   nextDueDate: string; // YYYY-MM-DD format
+  periodDays: string; // Gün bazlı periyot (string input)
   responsibilityType: PeriodicPartResponsibility;
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
@@ -270,6 +272,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       stokKodu: '',
       stokAdi: '',
       nextDueDate: '',
+      periodDays: '',
       responsibilityType: 'teknik_servis',
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
@@ -356,6 +359,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       stokKodu: '',
       stokAdi: '',
       nextDueDate: '',
+      periodDays: '',
       responsibilityType: 'teknik_servis',
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
@@ -394,9 +398,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       return;
     }
 
-    const invalidPartRow = bulkPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate);
+    const invalidPartRow = bulkPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate || !r.periodDays || Number(r.periodDays) <= 0);
     if (invalidPartRow) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün ve tarih seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün, tarih ve geçerli gün periyodu girin.', variant: 'destructive' });
       return;
     }
 
@@ -473,6 +477,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             stokAdi: row.stokAdi,
             periodValue: 1,
             periodUnit: 'ay',
+            periodDays: Number(row.periodDays),
             nextDueDate: row.nextDueDate ? Timestamp.fromDate(new Date(row.nextDueDate + 'T00:00:00')) : null,
             responsibilityType: row.responsibilityType,
             requiresOutgoingPartInfo: row.requiresOutgoingPartInfo,
@@ -553,9 +558,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
 
     // Validate periodic part change rows
-    const invalidPartRow = newPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate);
+    const invalidPartRow = newPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate || !r.periodDays || Number(r.periodDays) <= 0);
     if (invalidPartRow) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün ve tarih seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün, tarih ve geçerli gün periyodu girin.', variant: 'destructive' });
       return;
     }
 
@@ -590,6 +595,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           stokAdi: row.stokAdi,
           periodValue: 1,
           periodUnit: 'ay',
+          periodDays: Number(row.periodDays),
           nextDueDate: row.nextDueDate ? Timestamp.fromDate(new Date(row.nextDueDate + 'T00:00:00')) : null,
           responsibilityType: row.responsibilityType,
           requiresOutgoingPartInfo: row.requiresOutgoingPartInfo,
@@ -653,7 +659,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           periodicParts: deviceParts.map(p => ({
             partName: p.stokAdi,
             partCode: p.stokKodu,
-            period: p.nextDueDate?.toDate ? `Her ayın ${new Date(p.nextDueDate.toDate()).getDate()}'i` : `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
+            period: p.periodDays ? `${p.periodDays} gün` : (p.nextDueDate?.toDate ? new Date(p.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`),
             responsibility: RESPONSIBILITY_LABELS[p.responsibilityType],
           })),
         };
@@ -1039,7 +1045,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                           <p className="text-xs text-muted-foreground font-mono">{part.stokKodu}</p>
                           <div className="flex gap-2 mt-1">
                             <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                              {part.nextDueDate?.toDate ? new Date(part.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${part.periodValue} ${PERIOD_UNIT_LABELS[part.periodUnit]}`}
+                              {part.periodDays ? `${part.periodDays} gün` : (part.nextDueDate?.toDate ? new Date(part.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${part.periodValue} ${PERIOD_UNIT_LABELS[part.periodUnit]}`)}
                             </span>
                             <span className="text-xs bg-secondary px-1.5 py-0.5 rounded">
                               {RESPONSIBILITY_LABELS[part.responsibilityType]}
@@ -1127,6 +1133,18 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                             className="w-40"
                             placeholder="Tarih seçin"
                           />
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={row.periodDays}
+                              onChange={(e) => updatePeriodicPartRow(row.id, 'periodDays', e.target.value.replace(/[^0-9]/g, ''))}
+                              className="w-24"
+                              placeholder="Gün"
+                            />
+                            <span className="text-xs text-muted-foreground">gün</span>
+                          </div>
                           <Button variant="ghost" size="icon" onClick={() => removePeriodicPartRow(row.id)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
@@ -1402,11 +1420,23 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                           onChange={(e) => updateBulkPeriodicPartRow(row.id, 'nextDueDate', e.target.value)}
                           className="w-40"
                         />
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={row.periodDays}
+                            onChange={(e) => updateBulkPeriodicPartRow(row.id, 'periodDays', e.target.value.replace(/[^0-9]/g, ''))}
+                            className="w-24"
+                            placeholder="Gün"
+                          />
+                          <span className="text-xs text-muted-foreground">gün</span>
+                        </div>
                       </div>
 
                       {row.nextDueDate && (
                         <p className="text-xs text-muted-foreground italic">
-                          Her ayın {new Date(row.nextDueDate + 'T00:00:00').getDate()}'inde değişmeli
+                          {new Date(row.nextDueDate + 'T00:00:00').toLocaleDateString('tr-TR')} tarihinden itibaren her {row.periodDays || '?'} günde bir değişmeli
                         </p>
                       )}
 

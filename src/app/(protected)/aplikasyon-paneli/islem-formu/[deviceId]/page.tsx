@@ -201,6 +201,9 @@ export default function AplikasyonIslemFormuPage() {
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
   const [pendingPeriodicPartChangeId, setPendingPeriodicPartChangeId] = useState<string | null>(null);
+  const [isAutoStockConfirmOpen, setIsAutoStockConfirmOpen] = useState(false);
+  const [autoStockPendingPartId, setAutoStockPendingPartId] = useState<string | null>(null);
+  const [isAutoStockCreating, setIsAutoStockCreating] = useState(false);
 
   // Fault definitions for arıza işlem türü
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
@@ -563,14 +566,9 @@ export default function AplikasyonIslemFormuPage() {
         isOverdue = daysRemaining < 0;
       }
 
-      // Show date-based label if nextDueDate exists, otherwise legacy period label
-      let periodLabel: string;
-      if (nextDueDate) {
-        const day = nextDueDate.getDate();
-        periodLabel = `Her ayın ${day}'${day === 1 ? 'i' : day === 3 || day === 4 || day === 13 || day === 14 || day === 23 || day === 24 ? 'ü' : day === 6 || day === 16 || day === 26 ? 'sı' : day === 9 || day === 19 || day === 29 ? 'u' : day === 10 || day === 30 ? 'u' : day === 7 || day === 17 || day === 27 ? 'si' : day === 8 || day === 18 || day === 28 ? 'i' : 'i'}`;
-      } else {
-        periodLabel = `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
-      }
+      const periodLabel = partChange.periodDays
+        ? `${partChange.periodDays} gün`
+        : `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
 
       return {
         partChange,
@@ -590,67 +588,157 @@ export default function AplikasyonIslemFormuPage() {
     );
   };
 
-  // Toggle periodic part selection and add to actions
-  const togglePeriodicPart = (partChangeId: string) => {
-    const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
 
-    if (isCurrentlySelected) {
-      // Deselecting
-      setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
-      setActions(prev => prev.filter(a => a.periodicPartChangeId !== partChangeId));
-      return;
-    }
+  const createAutoStockForPeriodicPart = async (partChange: PeriodicPartChange): Promise<PersonalStockItem | null> => {
+  if (!currentUserProfile?.uid) {
+    toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
+    return null;
+  }
 
-    // Selecting
-    const partChange = periodicPartChanges.find(p => p.id === partChangeId);
-    if (!partChange) return;
+  try {
+    const now = new Date();
+    const batch = writeBatch(db);
 
-    const alreadyInActions = actions.some(a =>
-      a.periodicPartChangeId === partChangeId ||
-      (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
-    );
+    const depotStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+    batch.set(depotStockRef, {
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      address: '',
+      cihazGrubu: '',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
 
-    // Always add to selected
-    setSelectedPeriodicParts(prev => [...prev, partChangeId]);
-    if (alreadyInActions) return;
+    const depoInLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoInLogRef, {
+      action: 'stok_giris',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      notes: `Periyodik parça değişimine istinaden otomatik stok girişi (${device?.cihazAdi || device?.model || ''})`,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
 
-    const matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+    batch.delete(depotStockRef);
 
-    // If no serial tracking and no outgoing part tracking needed, auto-save
+    const personalStockRef = doc(collection(db, 'personalStock'));
+    batch.set(personalStockRef, {
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: Timestamp.fromDate(now),
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    });
+
+    const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+    batch.set(transferLogRef, {
+      action: 'transfer_to_personnel',
+      personalStockId: personalStockRef.id,
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      toUid: currentUserProfile.uid,
+      toName: currentUserProfile.name || '',
+      quantity: 1,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+      notes: `Periyodik parça değişimine istinaden otomatik transfer (${device?.cihazAdi || device?.model || ''})`,
+    });
+
+    const depoOutLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoOutLogRef, {
+      action: 'transfer_cikis',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      relatedPersonnelUid: currentUserProfile.uid,
+      relatedPersonnelName: currentUserProfile.name || '',
+      notes: 'Periyodik parça değişimine istinaden otomatik transfer',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    await batch.commit();
+
+    const createdStock: PersonalStockItem = {
+      id: personalStockRef.id,
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: now,
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    };
+
+    setPersonalStock(prev => [createdStock, ...prev]);
+    return createdStock;
+  } catch (err) {
+    console.error('Error creating automatic stock for periodic part:', err);
+    toast({ title: 'Hata', description: 'Otomatik stok girişi/transfer işlemi başarısız oldu.', variant: 'destructive' });
+    return null;
+  }
+  };
+
+  const findMatchingPersonalStockForPeriodicPart = (partChange: PeriodicPartChange): PersonalStockItem | undefined => {
+    const normalize = (value?: string) => (value || '').trim().toLowerCase();
+    const partCode = normalize(partChange.stokKodu);
+    const partName = normalize(partChange.stokAdi);
+
+    return personalStock.find(item => {
+      if (item.status !== 'in_stock') return false;
+      if (partChange.productCodeId && item.productCodeId && partChange.productCodeId === item.productCodeId) return true;
+      if (normalize(item.stokKodu) === partCode) return true;
+      return !!partName && normalize(item.stokAdi) === partName;
+    });
+  };
+
+  const applyPeriodicPartSelectionWithStock = (
+    partChangeId: string,
+    partChange: PeriodicPartChange,
+    matchingStockItem: PersonalStockItem
+  ) => {
     if (!partChange.requiresSerialTracking && !partChange.requiresOutgoingPartInfo) {
-      if (matchingStockItem) {
-        const newItem: ActionItem = {
-          id: crypto.randomUUID(),
-          type: 'part_change',
-          action: matchingStockItem.productCodeId,
-          stokKodu: matchingStockItem.stokKodu,
-          stokAdi: matchingStockItem.stokAdi,
-          serialNumber: matchingStockItem.serialNumber,
-          personalStockId: matchingStockItem.id,
-          quantity: 1,
-          periodicPartChangeId: partChangeId,
-          isPeriodicPartChange: true,
-        };
-        setActions(prev => [newItem, ...prev]);
-        toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
-      } else {
-        const newItem: ActionItem = {
-          id: crypto.randomUUID(),
-          type: 'part_change',
-          action: 'periodic_auto',
-          stokKodu: partChange.stokKodu,
-          stokAdi: partChange.stokAdi,
-          quantity: 1,
-          periodicPartChangeId: partChangeId,
-          isPeriodicPartChange: true,
-        };
-        setActions(prev => [newItem, ...prev]);
-        toast({ title: 'Periyodik Değişim Kaydedildi', description: `${partChange.stokAdi} periyodik değişimi kaydedildi.` });
-      }
+      const newItem: ActionItem = {
+        id: crypto.randomUUID(),
+        type: 'part_change',
+        action: matchingStockItem.productCodeId,
+        stokKodu: matchingStockItem.stokKodu,
+        stokAdi: matchingStockItem.stokAdi,
+        serialNumber: matchingStockItem.serialNumber,
+        personalStockId: matchingStockItem.id,
+        quantity: 1,
+        periodicPartChangeId: partChangeId,
+        isPeriodicPartChange: true,
+      };
+      setActions(prev => [newItem, ...prev]);
+      toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
       return;
     }
 
-    // Tracking needed - open part modal with pre-fill
     setPendingPeriodicPartChangeId(partChangeId);
     setPartSearchQuery('');
     setManualPartCode('');
@@ -664,19 +752,76 @@ export default function AplikasyonIslemFormuPage() {
     setRemovedPartImagePreview(null);
     setUsedPartImageFile(null);
     setUsedPartImagePreview(null);
+    setSelectedStockItem(matchingStockItem);
+    setShowManualEntry(false);
+    setPartSearchQuery(matchingStockItem.stokAdi);
+    setIsPartModalOpen(true);
+  };
 
-    if (matchingStockItem) {
-      setSelectedStockItem(matchingStockItem);
-      setShowManualEntry(false);
-      setPartSearchQuery(matchingStockItem.stokAdi);
-    } else {
-      setSelectedStockItem(null);
-      setShowManualEntry(true);
-      setManualPartCode(partChange.stokKodu);
-      setManualPartName(partChange.stokAdi);
+  const handleAutoStockConfirm = async (confirmCreate: boolean) => {
+    const pendingPartId = autoStockPendingPartId;
+    const pendingPart = pendingPartId ? periodicPartChanges.find(p => p.id === pendingPartId) : null;
+    if (!pendingPartId || !pendingPart) {
+      setIsAutoStockConfirmOpen(false);
+      setAutoStockPendingPartId(null);
+      return;
     }
 
-    setIsPartModalOpen(true);
+    if (!confirmCreate) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== pendingPartId));
+      setIsAutoStockConfirmOpen(false);
+      setAutoStockPendingPartId(null);
+      toast({ title: 'İptal Edildi', description: 'Periyodik parça değişimi için stok oluşturma iptal edildi.' });
+      return;
+    }
+
+    setIsAutoStockCreating(true);
+    const autoCreatedStock = await createAutoStockForPeriodicPart(pendingPart);
+    setIsAutoStockCreating(false);
+    setIsAutoStockConfirmOpen(false);
+    setAutoStockPendingPartId(null);
+
+    if (!autoCreatedStock) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== pendingPartId));
+      return;
+    }
+
+    toast({
+      title: 'Stok Otomatik Eklendi',
+      description: `${pendingPart.stokAdi} için depo giriş ve personel transfer kaydı otomatik oluşturuldu.`,
+    });
+    applyPeriodicPartSelectionWithStock(pendingPartId, pendingPart, autoCreatedStock);
+  };
+
+  // Toggle periodic part selection and add to actions
+  const togglePeriodicPart = async (partChangeId: string) => {
+    const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
+
+    if (isCurrentlySelected) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+      setActions(prev => prev.filter(a => a.periodicPartChangeId !== partChangeId));
+      return;
+    }
+
+    const partChange = periodicPartChanges.find(p => p.id === partChangeId);
+    if (!partChange) return;
+
+    const alreadyInActions = actions.some(a =>
+      a.periodicPartChangeId === partChangeId ||
+      (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
+    );
+
+    setSelectedPeriodicParts(prev => [...prev, partChangeId]);
+    if (alreadyInActions) return;
+
+    const matchingStockItem = findMatchingPersonalStockForPeriodicPart(partChange);
+    if (matchingStockItem) {
+      applyPeriodicPartSelectionWithStock(partChangeId, partChange, matchingStockItem);
+      return;
+    }
+
+    setAutoStockPendingPartId(partChangeId);
+    setIsAutoStockConfirmOpen(true);
   };
 
   const openPartModal = () => {
@@ -1418,28 +1563,25 @@ export default function AplikasyonIslemFormuPage() {
         for (const periodicId of periodicPartChangeIds) {
           const periodic = periodicPartChanges.find(p => p.id === periodicId);
           if (periodic) {
-            // Calculate next due date: use nextDueDate-based monthly recurrence if available
-            let nextDueDate: Date;
-            if (periodic.nextDueDate) {
-              const initialDue = periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : new Date(periodic.nextDueDate);
-              const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
-              const baseDue = latestPeriodicLog?.nextDueDate ? (latestPeriodicLog.nextDueDate instanceof Date ? latestPeriodicLog.nextDueDate : latestPeriodicLog.nextDueDate.toDate()) : initialDue;
-              nextDueDate = new Date(baseDue);
-              nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-            } else {
-              nextDueDate = new Date(now);
-              switch (periodic.periodUnit) {
-                case 'hafta':
-                  nextDueDate.setDate(nextDueDate.getDate() + (periodic.periodValue * 7));
-                  break;
-                case 'ay':
-                  nextDueDate.setMonth(nextDueDate.getMonth() + periodic.periodValue);
-                  break;
-                case 'yil':
-                  nextDueDate.setFullYear(nextDueDate.getFullYear() + periodic.periodValue);
-                  break;
-              }
-            }
+            const periodicDays = periodic.periodDays && periodic.periodDays > 0 ? periodic.periodDays : null;
+            const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
+            const lastCompletedAt = latestPeriodicLog?.completedAt
+              ? (latestPeriodicLog.completedAt instanceof Date ? latestPeriodicLog.completedAt : latestPeriodicLog.completedAt.toDate())
+              : (periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : (periodic.nextDueDate ? new Date(periodic.nextDueDate) : now));
+
+            const effectivePeriodDays = periodicDays ?? Math.max(
+              1,
+              Math.round((periodic.periodUnit === 'hafta' ? periodic.periodValue * 7 : periodic.periodUnit === 'ay' ? periodic.periodValue * 30 : periodic.periodUnit === 'yil' ? periodic.periodValue * 365 : periodic.periodValue))
+            );
+
+            const actualDays = Math.max(
+              1,
+              Math.round((now.getTime() - lastCompletedAt.getTime()) / (1000 * 60 * 60 * 24))
+            );
+            const nextPeriodDays = actualDays < effectivePeriodDays ? actualDays : effectivePeriodDays;
+
+            const nextDueDate = new Date(now);
+            nextDueDate.setDate(nextDueDate.getDate() + nextPeriodDays);
 
             // Find the matching part change in actions
             const matchingPartChange = partChanges.find(p =>
@@ -1462,6 +1604,11 @@ export default function AplikasyonIslemFormuPage() {
               installedPartFromStock: !!matchingPartChange?.personalStockId,
               removedPartSerialNumber: matchingPartChange?.removedPartSerialNumber || null,
               removedPartImageUrl: matchingPartChange?.removedPartImageUrl || null,
+              periodDaysUsed: nextPeriodDays,
+            });
+
+            await updateDoc(doc(db, 'periodicPartChanges', periodic.id), {
+              periodDays: nextPeriodDays,
             });
           }
         }
@@ -1963,6 +2110,41 @@ export default function AplikasyonIslemFormuPage() {
             </div>
         </div>
       </div>
+
+
+      <Dialog open={isAutoStockConfirmOpen} onOpenChange={(open) => {
+        setIsAutoStockConfirmOpen(open);
+        if (!open && !isAutoStockCreating) {
+          setAutoStockPendingPartId(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Periyodik Parça İçin Otomatik Stok Oluştur</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Seçilen periyodik parça şahsi stoğunuzda bulunamadı. Bu parça için otomatik depo stok girişi,
+            personel transfer kaydı ve şahsi stok kaydı oluşturulsun mu?
+          </p>
+          <DialogFooter className="gap-2">
+            <button
+              onClick={() => handleAutoStockConfirm(false)}
+              disabled={isAutoStockCreating}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium"
+            >
+              İptal
+            </button>
+            <button
+              onClick={() => handleAutoStockConfirm(true)}
+              disabled={isAutoStockCreating}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50"
+            >
+              {isAutoStockCreating ? 'Oluşturuluyor...' : 'Otomatik Oluştur'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       {/* Operation Selection Modal */}
       <Dialog open={isOperationModalOpen} onOpenChange={setIsOperationModalOpen}>
