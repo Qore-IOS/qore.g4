@@ -563,14 +563,9 @@ export default function AplikasyonIslemFormuPage() {
         isOverdue = daysRemaining < 0;
       }
 
-      // Show date-based label if nextDueDate exists, otherwise legacy period label
-      let periodLabel: string;
-      if (nextDueDate) {
-        const day = nextDueDate.getDate();
-        periodLabel = `Her ayın ${day}'${day === 1 ? 'i' : day === 3 || day === 4 || day === 13 || day === 14 || day === 23 || day === 24 ? 'ü' : day === 6 || day === 16 || day === 26 ? 'sı' : day === 9 || day === 19 || day === 29 ? 'u' : day === 10 || day === 30 ? 'u' : day === 7 || day === 17 || day === 27 ? 'si' : day === 8 || day === 18 || day === 28 ? 'i' : 'i'}`;
-      } else {
-        periodLabel = `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
-      }
+      const periodLabel = partChange.periodDays
+        ? `${partChange.periodDays} gün`
+        : `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
 
       return {
         partChange,
@@ -1418,28 +1413,25 @@ export default function AplikasyonIslemFormuPage() {
         for (const periodicId of periodicPartChangeIds) {
           const periodic = periodicPartChanges.find(p => p.id === periodicId);
           if (periodic) {
-            // Calculate next due date: use nextDueDate-based monthly recurrence if available
-            let nextDueDate: Date;
-            if (periodic.nextDueDate) {
-              const initialDue = periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : new Date(periodic.nextDueDate);
-              const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
-              const baseDue = latestPeriodicLog?.nextDueDate ? (latestPeriodicLog.nextDueDate instanceof Date ? latestPeriodicLog.nextDueDate : latestPeriodicLog.nextDueDate.toDate()) : initialDue;
-              nextDueDate = new Date(baseDue);
-              nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-            } else {
-              nextDueDate = new Date(now);
-              switch (periodic.periodUnit) {
-                case 'hafta':
-                  nextDueDate.setDate(nextDueDate.getDate() + (periodic.periodValue * 7));
-                  break;
-                case 'ay':
-                  nextDueDate.setMonth(nextDueDate.getMonth() + periodic.periodValue);
-                  break;
-                case 'yil':
-                  nextDueDate.setFullYear(nextDueDate.getFullYear() + periodic.periodValue);
-                  break;
-              }
-            }
+            const periodicDays = periodic.periodDays && periodic.periodDays > 0 ? periodic.periodDays : null;
+            const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
+            const lastCompletedAt = latestPeriodicLog?.completedAt
+              ? (latestPeriodicLog.completedAt instanceof Date ? latestPeriodicLog.completedAt : latestPeriodicLog.completedAt.toDate())
+              : (periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : (periodic.nextDueDate ? new Date(periodic.nextDueDate) : now));
+
+            const effectivePeriodDays = periodicDays ?? Math.max(
+              1,
+              Math.round((periodic.periodUnit === 'hafta' ? periodic.periodValue * 7 : periodic.periodUnit === 'ay' ? periodic.periodValue * 30 : periodic.periodUnit === 'yil' ? periodic.periodValue * 365 : periodic.periodValue))
+            );
+
+            const actualDays = Math.max(
+              1,
+              Math.round((now.getTime() - lastCompletedAt.getTime()) / (1000 * 60 * 60 * 24))
+            );
+            const nextPeriodDays = actualDays < effectivePeriodDays ? actualDays : effectivePeriodDays;
+
+            const nextDueDate = new Date(now);
+            nextDueDate.setDate(nextDueDate.getDate() + nextPeriodDays);
 
             // Find the matching part change in actions
             const matchingPartChange = partChanges.find(p =>
@@ -1462,6 +1454,11 @@ export default function AplikasyonIslemFormuPage() {
               installedPartFromStock: !!matchingPartChange?.personalStockId,
               removedPartSerialNumber: matchingPartChange?.removedPartSerialNumber || null,
               removedPartImageUrl: matchingPartChange?.removedPartImageUrl || null,
+              periodDaysUsed: nextPeriodDays,
+            });
+
+            await updateDoc(doc(db, 'periodicPartChanges', periodic.id), {
+              periodDays: nextPeriodDays,
             });
           }
         }
