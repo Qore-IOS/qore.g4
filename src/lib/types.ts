@@ -581,6 +581,7 @@ export interface PeriodicPartChange {
   periodValue: number;           // Periyot değeri (legacy, varsayılan 1)
   periodUnit: MaintenancePeriodUnit; // Periyot birimi (legacy, varsayılan 'ay')
   nextDueDate?: any;             // İlk beklenen değişim tarihi (açık tarih - Firestore Timestamp)
+  periodDays?: number;           // Gün bazlı periyot (örn: 35)
   responsibilityType: PeriodicPartResponsibility; // Sorumluluk tipi
   requiresOutgoingPartInfo: boolean; // Cihazdan çıkan parça bilgisi gerekli mi
   requiresSerialTracking: boolean;   // Seri no takibi yapılacak mı
