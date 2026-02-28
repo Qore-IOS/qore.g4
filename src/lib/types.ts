@@ -802,6 +802,50 @@ export interface SummaryRow {
 };
 
 
+// ============================================
+// ARA KAYIT (DRAFT FORM) SİSTEMİ
+// ============================================
+
+export interface DraftActionForm {
+  id: string;
+  deviceId: string;
+  hospitalId: string;
+  formType: 'teknik_servis' | 'aplikasyon';
+  // Form state data
+  actions: any[];
+  islemTipi?: string;
+  islemTuru?: string;
+  aciklama?: string;
+  baslangicSaati?: string;
+  bitisSaati?: string;
+  baslangicTarihi?: string;
+  bitisTarihi?: string;
+  selectedMaintenanceTasks?: string[];
+  selectedPeriodicParts?: string[];
+  selectedOperations?: string[];
+  selectedFaultId?: string;
+  customFaultName?: string;
+  selectedTests?: string[];
+  // Log entries from previous personnel
+  actionLogs?: DraftActionLog[];
+  // Draft metadata
+  createdAt: Date;
+  createdByUid: string;
+  createdByName: string;
+  updatedAt?: Date;
+  updatedByUid?: string;
+  updatedByName?: string;
+}
+
+export interface DraftActionLog {
+  personnelUid: string;
+  personnelName: string;
+  timestamp: Date;
+  logType: 'action_added' | 'action_removed' | 'field_changed' | 'draft_created' | 'draft_continued';
+  description: string;
+  details?: any;
+}
+
 export type ParseTarget = 'reference' | 'barcodeNumber';
 export type ExpiryPattern = 'YYMMDD' | 'YYYYMMDD' | 'DDMMYYYY' | 'MMYY' | 'MMYYYY' | 'text';
 export type PositionDef = { start: number; length: number };
