@@ -585,8 +585,123 @@ export default function AplikasyonIslemFormuPage() {
     );
   };
 
+
+  const createAutoStockForPeriodicPart = async (partChange: PeriodicPartChange): Promise<PersonalStockItem | null> => {
+  if (!currentUserProfile?.uid) {
+    toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
+    return null;
+  }
+
+  try {
+    const now = new Date();
+    const batch = writeBatch(db);
+
+    const depotStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+    batch.set(depotStockRef, {
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      address: '',
+      cihazGrubu: '',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    const depoInLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoInLogRef, {
+      action: 'stok_giris',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      notes: `Periyodik parça değişimine istinaden otomatik stok girişi (${device?.cihazAdi || device?.model || ''})`,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    batch.delete(depotStockRef);
+
+    const personalStockRef = doc(collection(db, 'personalStock'));
+    batch.set(personalStockRef, {
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: Timestamp.fromDate(now),
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    });
+
+    const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+    batch.set(transferLogRef, {
+      action: 'transfer_to_personnel',
+      personalStockId: personalStockRef.id,
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      toUid: currentUserProfile.uid,
+      toName: currentUserProfile.name || '',
+      quantity: 1,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+      notes: `Periyodik parça değişimine istinaden otomatik transfer (${device?.cihazAdi || device?.model || ''})`,
+    });
+
+    const depoOutLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoOutLogRef, {
+      action: 'transfer_cikis',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      relatedPersonnelUid: currentUserProfile.uid,
+      relatedPersonnelName: currentUserProfile.name || '',
+      notes: 'Periyodik parça değişimine istinaden otomatik transfer',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    await batch.commit();
+
+    const createdStock: PersonalStockItem = {
+      id: personalStockRef.id,
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: now,
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    };
+
+    setPersonalStock(prev => [createdStock, ...prev]);
+    return createdStock;
+  } catch (err) {
+    console.error('Error creating automatic stock for periodic part:', err);
+    toast({ title: 'Hata', description: 'Otomatik stok girişi/transfer işlemi başarısız oldu.', variant: 'destructive' });
+    return null;
+  }
+  };
+
   // Toggle periodic part selection and add to actions
-  const togglePeriodicPart = (partChangeId: string) => {
+  const togglePeriodicPart = async (partChangeId: string) => {
     const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
 
     if (isCurrentlySelected) {
@@ -609,7 +724,32 @@ export default function AplikasyonIslemFormuPage() {
     setSelectedPeriodicParts(prev => [...prev, partChangeId]);
     if (alreadyInActions) return;
 
-    const matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+    let matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+
+    if (!matchingStockItem) {
+      const shouldAutoCreateStock = confirm(
+        `${partChange.stokAdi} (${partChange.stokKodu}) ürünü şahsi stoğunuzda bulunamadı. ` +
+        'Periyodik parça değişimine istinaden otomatik depo stok girişi ve personel transfer kaydı oluşturulsun mu?'
+      );
+
+      if (!shouldAutoCreateStock) {
+        setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+        toast({ title: 'İptal Edildi', description: 'Periyodik parça değişimi için stok oluşturma iptal edildi.' });
+        return;
+      }
+
+      const autoCreatedStock = await createAutoStockForPeriodicPart(partChange);
+      if (!autoCreatedStock) {
+        setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+        return;
+      }
+
+      matchingStockItem = autoCreatedStock;
+      toast({
+        title: 'Stok Otomatik Eklendi',
+        description: `${partChange.stokAdi} için depo giriş ve personel transfer kaydı otomatik oluşturuldu.`,
+      });
+    }
 
     // If no serial tracking and no outgoing part tracking needed, auto-save
     if (!partChange.requiresSerialTracking && !partChange.requiresOutgoingPartInfo) {
@@ -628,19 +768,6 @@ export default function AplikasyonIslemFormuPage() {
         };
         setActions(prev => [newItem, ...prev]);
         toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
-      } else {
-        const newItem: ActionItem = {
-          id: crypto.randomUUID(),
-          type: 'part_change',
-          action: 'periodic_auto',
-          stokKodu: partChange.stokKodu,
-          stokAdi: partChange.stokAdi,
-          quantity: 1,
-          periodicPartChangeId: partChangeId,
-          isPeriodicPartChange: true,
-        };
-        setActions(prev => [newItem, ...prev]);
-        toast({ title: 'Periyodik Değişim Kaydedildi', description: `${partChange.stokAdi} periyodik değişimi kaydedildi.` });
       }
       return;
     }
