@@ -569,14 +569,9 @@ export default function IslemFormuPage() {
         isOverdue = daysRemaining < 0;
       }
 
-      // Show date-based label if nextDueDate exists, otherwise legacy period label
-      let periodLabel: string;
-      if (nextDueDate) {
-        const day = nextDueDate.getDate();
-        periodLabel = `Her ayın ${day}'${day === 1 ? 'i' : day === 3 || day === 4 || day === 13 || day === 14 || day === 23 || day === 24 ? 'ü' : day === 6 || day === 16 || day === 26 ? 'sı' : day === 9 || day === 19 || day === 29 ? 'u' : day === 10 || day === 30 ? 'u' : day === 7 || day === 17 || day === 27 ? 'si' : day === 8 || day === 18 || day === 28 ? 'i' : 'i'}`;
-      } else {
-        periodLabel = `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
-      }
+      const periodLabel = partChange.periodDays
+        ? `${partChange.periodDays} gün`
+        : `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
 
       return {
         partChange,
@@ -596,8 +591,123 @@ export default function IslemFormuPage() {
     );
   };
 
+
+  const createAutoStockForPeriodicPart = async (partChange: PeriodicPartChange): Promise<PersonalStockItem | null> => {
+  if (!currentUserProfile?.uid) {
+    toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
+    return null;
+  }
+
+  try {
+    const now = new Date();
+    const batch = writeBatch(db);
+
+    const depotStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+    batch.set(depotStockRef, {
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      address: '',
+      cihazGrubu: '',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    const depoInLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoInLogRef, {
+      action: 'stok_giris',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      notes: `Periyodik parça değişimine istinaden otomatik stok girişi (${device?.cihazAdi || device?.model || ''})`,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    batch.delete(depotStockRef);
+
+    const personalStockRef = doc(collection(db, 'personalStock'));
+    batch.set(personalStockRef, {
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: Timestamp.fromDate(now),
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    });
+
+    const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+    batch.set(transferLogRef, {
+      action: 'transfer_to_personnel',
+      personalStockId: personalStockRef.id,
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      toUid: currentUserProfile.uid,
+      toName: currentUserProfile.name || '',
+      quantity: 1,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+      notes: `Periyodik parça değişimine istinaden otomatik transfer (${device?.cihazAdi || device?.model || ''})`,
+    });
+
+    const depoOutLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoOutLogRef, {
+      action: 'transfer_cikis',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      relatedPersonnelUid: currentUserProfile.uid,
+      relatedPersonnelName: currentUserProfile.name || '',
+      notes: 'Periyodik parça değişimine istinaden otomatik transfer',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    await batch.commit();
+
+    const createdStock: PersonalStockItem = {
+      id: personalStockRef.id,
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: now,
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    };
+
+    setPersonalStock(prev => [createdStock, ...prev]);
+    return createdStock;
+  } catch (err) {
+    console.error('Error creating automatic stock for periodic part:', err);
+    toast({ title: 'Hata', description: 'Otomatik stok girişi/transfer işlemi başarısız oldu.', variant: 'destructive' });
+    return null;
+  }
+  };
+
   // Toggle periodic part selection and add to actions
-  const togglePeriodicPart = (partChangeId: string) => {
+  const togglePeriodicPart = async (partChangeId: string) => {
     const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
 
     if (isCurrentlySelected) {
@@ -620,7 +730,32 @@ export default function IslemFormuPage() {
     setSelectedPeriodicParts(prev => [...prev, partChangeId]);
     if (alreadyInActions) return;
 
-    const matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+    let matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+
+    if (!matchingStockItem) {
+      const shouldAutoCreateStock = confirm(
+        `${partChange.stokAdi} (${partChange.stokKodu}) ürünü şahsi stoğunuzda bulunamadı. ` +
+        'Periyodik parça değişimine istinaden otomatik depo stok girişi ve personel transfer kaydı oluşturulsun mu?'
+      );
+
+      if (!shouldAutoCreateStock) {
+        setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+        toast({ title: 'İptal Edildi', description: 'Periyodik parça değişimi için stok oluşturma iptal edildi.' });
+        return;
+      }
+
+      const autoCreatedStock = await createAutoStockForPeriodicPart(partChange);
+      if (!autoCreatedStock) {
+        setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+        return;
+      }
+
+      matchingStockItem = autoCreatedStock;
+      toast({
+        title: 'Stok Otomatik Eklendi',
+        description: `${partChange.stokAdi} için depo giriş ve personel transfer kaydı otomatik oluşturuldu.`,
+      });
+    }
 
     // If no serial tracking and no outgoing part tracking needed, auto-save
     if (!partChange.requiresSerialTracking && !partChange.requiresOutgoingPartInfo) {
@@ -639,19 +774,6 @@ export default function IslemFormuPage() {
         };
         setActions(prev => [newItem, ...prev]);
         toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
-      } else {
-        const newItem: ActionItem = {
-          id: crypto.randomUUID(),
-          type: 'part_change',
-          action: 'periodic_auto',
-          stokKodu: partChange.stokKodu,
-          stokAdi: partChange.stokAdi,
-          quantity: 1,
-          periodicPartChangeId: partChangeId,
-          isPeriodicPartChange: true,
-        };
-        setActions(prev => [newItem, ...prev]);
-        toast({ title: 'Periyodik Değişim Kaydedildi', description: `${partChange.stokAdi} periyodik değişimi kaydedildi.` });
       }
       return;
     }
@@ -1425,31 +1547,25 @@ export default function IslemFormuPage() {
         for (const periodicId of periodicPartChangeIds) {
           const periodic = periodicPartChanges.find(p => p.id === periodicId);
           if (periodic) {
-            // Calculate next due date: use nextDueDate-based monthly recurrence if available
-            let nextDueDate: Date;
-            if (periodic.nextDueDate) {
-              // Get the initial scheduled date from part change definition
-              const initialDue = periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : new Date(periodic.nextDueDate);
-              // Find latest log for this periodic part to get current scheduled date
-              const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
-              const baseDue = latestPeriodicLog?.nextDueDate ? (latestPeriodicLog.nextDueDate instanceof Date ? latestPeriodicLog.nextDueDate : latestPeriodicLog.nextDueDate.toDate()) : initialDue;
-              // Advance by 1 month from the current scheduled date (same day-of-month)
-              nextDueDate = new Date(baseDue);
-              nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-            } else {
-              nextDueDate = new Date(now);
-              switch (periodic.periodUnit) {
-                case 'hafta':
-                  nextDueDate.setDate(nextDueDate.getDate() + (periodic.periodValue * 7));
-                  break;
-                case 'ay':
-                  nextDueDate.setMonth(nextDueDate.getMonth() + periodic.periodValue);
-                  break;
-                case 'yil':
-                  nextDueDate.setFullYear(nextDueDate.getFullYear() + periodic.periodValue);
-                  break;
-              }
-            }
+            const periodicDays = periodic.periodDays && periodic.periodDays > 0 ? periodic.periodDays : null;
+            const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
+            const lastCompletedAt = latestPeriodicLog?.completedAt
+              ? (latestPeriodicLog.completedAt instanceof Date ? latestPeriodicLog.completedAt : latestPeriodicLog.completedAt.toDate())
+              : (periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : (periodic.nextDueDate ? new Date(periodic.nextDueDate) : now));
+
+            const effectivePeriodDays = periodicDays ?? Math.max(
+              1,
+              Math.round((periodic.periodUnit === 'hafta' ? periodic.periodValue * 7 : periodic.periodUnit === 'ay' ? periodic.periodValue * 30 : periodic.periodValue * 365))
+            );
+
+            const actualDays = Math.max(
+              1,
+              Math.round((now.getTime() - lastCompletedAt.getTime()) / (1000 * 60 * 60 * 24))
+            );
+            const nextPeriodDays = actualDays < effectivePeriodDays ? actualDays : effectivePeriodDays;
+
+            const nextDueDate = new Date(now);
+            nextDueDate.setDate(nextDueDate.getDate() + nextPeriodDays);
 
             // Find the matching part change in actions
             const matchingPartChange = partChanges.find(p =>
@@ -1472,6 +1588,11 @@ export default function IslemFormuPage() {
               installedPartFromStock: !!matchingPartChange?.personalStockId,
               removedPartSerialNumber: matchingPartChange?.removedPartSerialNumber || null,
               removedPartImageUrl: matchingPartChange?.removedPartImageUrl || null,
+              periodDaysUsed: nextPeriodDays,
+            });
+
+            await updateDoc(doc(db, 'periodicPartChanges', periodic.id), {
+              periodDays: nextPeriodDays,
             });
           }
         }
