@@ -32,9 +32,8 @@ import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
-// Accent color
-const ACCENT = 'text-[#7a8a00] dark:text-[#d4ec00]';
-const ACCENT_BG = 'bg-[#d4ec00]';
+// Accent color (neumorphic)
+const ACCENT_COLOR = 'var(--dashboard-accent)';
 
 const PAGE_SIZE = 20;
 

@@ -158,16 +158,16 @@ function getOccupancyForDay(tasks: PurchasingTask[], dateStr: string): number {
 
 function getOccupancyColor(pct: number): string {
   if (pct >= 80) return 'bg-red-500';
-  if (pct >= 50) return 'bg-yellow-500';
-  if (pct > 0) return 'bg-emerald-400';
-  return 'bg-zinc-300 dark:bg-zinc-700';
+  if (pct >= 50) return 'bg-amber-500';
+  if (pct > 0) return 'bg-emerald-500';
+  return 'bg-[#B5B3AF]';
 }
 
 function getOccupancyRingColor(pct: number): string {
   if (pct >= 80) return 'text-red-500';
-  if (pct >= 50) return 'text-yellow-500';
-  if (pct > 0) return 'text-emerald-500 dark:text-emerald-400';
-  return 'text-zinc-400 dark:text-zinc-600';
+  if (pct >= 50) return 'text-amber-500';
+  if (pct > 0) return 'text-emerald-600';
+  return 'text-[#9A9895]';
 }
 
 function getHeatColor(value: number, max: number): string {
@@ -178,12 +178,12 @@ function getHeatColor(value: number, max: number): string {
   return 'bg-red-500/45 border-red-500/50';
 }
 
-// Accent color helpers
-const ACCENT = 'text-[#7a8a00] dark:text-[#d4ec00]';
-const ACCENT_BG = 'bg-[#d4ec00]';
-const ACCENT_BG_SUBTLE = 'bg-[#d4ec00]/10 dark:bg-[#d4ec00]/10';
-const ACCENT_BORDER = 'border-[#d4ec00]/40';
-const ACCENT_RING = 'ring-[#d4ec00]/30';
+// Accent color helpers — neumorphic design uses dashboard-accent (#F2994A) as primary
+const ACCENT = 'text-[#C77B35]';
+const ACCENT_BG = 'bg-[#F2994A]';
+const ACCENT_BG_SUBTLE = 'bg-[#F2994A]/10';
+const ACCENT_BORDER = 'border-[#F2994A]/40';
+const ACCENT_RING = 'ring-[#F2994A]/30';
 
 
 interface CalendarSpecialDay {
@@ -1548,167 +1548,421 @@ export default function SatinAlmaPanel() {
     }
   }, [selectedDate]);
 
+  // Today hero data
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayTasks = useMemo(() => tasks.filter((t) => t.date === todayStr).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime)), [tasks, todayStr]);
+  const todayOccupancy = getOccupancyForDay(tasks, todayStr);
+  const todayUrgentCount = todayTasks.filter((t) => t.priority === 'urgent' && !t.completed).length;
+  const todayIncompleteTasks = useMemo(() => todayTasks.filter((t) => !t.completed), [todayTasks]);
+  const todayCompletedTasks = useMemo(() => todayTasks.filter((t) => t.completed), [todayTasks]);
+  const nextUpcomingTask = useMemo(() => {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    return todayTasks.find((t) => !t.completed && parseTime(t.startTime) >= nowMin);
+  }, [todayTasks]);
+  // Now indicator for weekly timeline
+  const nowHour = new Date().getHours();
+  const nowMinute = new Date().getMinutes();
+  const nowTotalMin = nowHour * 60 + nowMinute;
+  const nowLinePct = Math.max(0, Math.min(100, ((nowTotalMin - WORK_START_HOUR * 60) / TOTAL_WORK_MINUTES) * 100));
+  const showNowLine = nowTotalMin >= WORK_START_HOUR * 60 && nowTotalMin <= WORK_END_HOUR * 60;
+  // Inline feedback state
+  const [justAddedTaskId, setJustAddedTaskId] = useState<string | null>(null);
+
   return (
-    <div className="min-h-screen bg-background text-foreground pb-24">
-      {/* Header */}
-      <div className="px-4 pt-6 pb-2 md:px-8 md:pt-8">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-muted-foreground text-sm">Planlama Birimi</p>
-            <h1 className="text-2xl md:text-3xl font-bold mt-1">
-              Merhaba, <span className={ACCENT}>{userName}</span>
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            {(isOffline || pendingMutations > 0 || syncInProgress) && (
-              <div className="text-[11px] px-2 py-1 rounded-lg border border-border bg-secondary text-muted-foreground">
-                {isOffline
-                  ? `Offline • ${pendingMutations} bekleyen işlem`
-                  : syncInProgress
-                    ? 'Senkronize ediliyor...'
-                    : `${pendingMutations} işlem senkronize edilmeyi bekliyor`}
-              </div>
-            )}
-            <button
-              onClick={() => setShowTaskDefinitionModal(true)}
-              className="shrink-0 mt-1 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-all"
-              title="Görev tanımları"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </button>
-            <Link
-              href="/satin-alma/analiz-planlama"
-              className={cn(
-                'shrink-0 mt-1 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-all',
-                'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'
+    <div className="cihaz-shell min-h-screen pb-24">
+      {/* ===== STICKY HEADER — 3 rows: title+nav / search / date-strip ===== */}
+      <div className="sticky top-0 z-30" style={{ backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', background: 'rgba(233,231,227,.82)' }}>
+        {/* Row 1: Title + nav links */}
+        <div className="px-4 pt-4 pb-1 md:px-8 md:pt-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Planlama Birimi</p>
+              <h1 className="text-lg md:text-xl font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>
+                Merhaba, <span style={{ color: 'var(--dashboard-accent)' }}>{userName}</span>
+              </h1>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {(isOffline || pendingMutations > 0 || syncInProgress) && (
+                <div className="text-[10px] px-2 py-1 rounded-lg cihaz-pressed" style={{ color: 'var(--dashboard-muted)' }}>
+                  {isOffline
+                    ? `Offline • ${pendingMutations} bekleyen`
+                    : syncInProgress
+                      ? 'Senkronize ediliyor...'
+                      : `${pendingMutations} bekleyen`}
+                </div>
               )}
-            >
-              <CalendarClock className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Analiz Planlama</span>
-            </Link>
-            <Link
-              href="/satin-alma/tum-islemler"
-              className={cn(
-                'shrink-0 mt-1 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-all',
-                'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'
-              )}
-            >
-              <ClipboardList className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Tüm İşlemler</span>
-            </Link>
+              <button
+                onClick={() => setShowTaskDefinitionModal(true)}
+                className="shrink-0 p-2 rounded-xl cihaz-card transition-all hover:brightness-[0.97]"
+                style={{ color: 'var(--dashboard-muted)' }}
+                title="Görev tanımları"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+              <Link
+                href="/satin-alma/analiz-planlama"
+                className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-medium cihaz-card transition-all hover:brightness-[0.97]"
+                style={{ color: 'var(--dashboard-muted)' }}
+              >
+                <CalendarClock className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Analiz Planlama</span>
+              </Link>
+              <Link
+                href="/satin-alma/tum-islemler"
+                className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-medium cihaz-card transition-all hover:brightness-[0.97]"
+                style={{ color: 'var(--dashboard-muted)' }}
+              >
+                <ClipboardList className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Tüm İşlemler</span>
+              </Link>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Main Search */}
-      <div className="px-4 md:px-8 mt-2">
-        <div className="rounded-2xl border border-border bg-card p-3">
+        {/* Row 2: Global search — full width */}
+        <div className="px-4 md:px-8 pb-2 mt-1">
           <div className="relative">
-            <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--dashboard-muted)' }} />
             <input
               value={globalSearchQuery}
               onChange={(e) => setGlobalSearchQuery(e.target.value)}
               placeholder="Görevlerde ara: tarih, personel, başlık, açıklama, öncelik, dosya adı..."
-              className="w-full pl-9 pr-3 py-2 rounded-xl bg-secondary border border-border text-sm outline-none"
+              className="w-full pl-9 pr-3 py-2 rounded-xl text-xs outline-none cihaz-pressed"
+              style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
             />
           </div>
+        </div>
 
-          {normalizedSearchQuery && (
-            <div className="mt-3 rounded-xl border border-border bg-secondary/30 p-2">
-              <p className="text-xs text-muted-foreground mb-2">
-                {globalSearchResults.length} görev / {groupedSearchResults.length} gün eşleşti
-              </p>
-              <div className="max-h-52 overflow-y-auto space-y-2">
-                {groupedSearchResults.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Eşleşen kayıt bulunamadı.</p>
-                ) : (
-                  groupedSearchResults.map(([day, dayTasks]) => (
-                    <div key={day} className="rounded-lg border border-border bg-card p-2">
-                      <button
-                        onClick={() => setSelectedDate(parseISO(day))}
-                        className="text-[11px] font-semibold mb-1 hover:underline"
-                      >
-                        {format(parseISO(day), 'd MMMM EEEE', { locale: tr })}
-                      </button>
-                      <div className="space-y-1">
-                        {dayTasks.map((task) => (
-                          <button
-                            key={task.id}
-                            onClick={() => {
-                              setSelectedDate(parseISO(task.date));
-                              setEditingTask(task);
-                            }}
-                            className="w-full text-left text-[11px] p-1.5 rounded-md hover:bg-accent/40 border border-transparent hover:border-border"
-                          >
-                            <span className="font-medium">{task.startTime}</span> • {task.title}
-                            <span className="text-muted-foreground"> • {task.priority}</span>
-                            {task.attachments?.length ? (
-                              <span className="text-muted-foreground"> • {task.attachments.map((a) => a.name).join(', ')}</span>
-                            ) : null}
-                          </button>
-                        ))}
+        {/* Row 3: Horizontal date strip (always visible) */}
+        <div className="px-1 md:px-4 pb-2">
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setSelectedDate((d) => subDays(d, 1))}
+              className="hidden md:block shrink-0 p-1 rounded-lg cihaz-card transition-all hover:brightness-[0.97]"
+            >
+              <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+            </button>
+
+            <div
+              ref={sliderRef}
+              className="grid grid-flow-col auto-cols-[52px] sm:auto-cols-[60px] md:auto-cols-[68px] gap-1 overflow-x-auto scrollbar-none py-1 flex-1 min-w-0"
+              style={{ scrollSnapType: 'x mandatory' }}
+            >
+              {sliderDates.map((date) => {
+                const dateStr = format(date, 'yyyy-MM-dd');
+                const isSelected = isSameDay(date, selectedDate);
+                const today = isToday(date);
+                const occupancy = getOccupancyForDay(tasks, dateStr);
+                const dayTaskCount = tasks.filter((t) => t.date === dateStr).length;
+                const specialDay = getSpecialDay(dateStr);
+
+                return (
+                  <button
+                    key={dateStr}
+                    onClick={() => setSelectedDate(date)}
+                    style={{
+                      scrollSnapAlign: 'center',
+                      ...(isSelected ? { background: 'var(--dashboard-accent)', color: '#fff' } : {}),
+                    }}
+                    className={cn(
+                      'shrink-0 flex flex-col items-center justify-center rounded-xl py-1.5 transition-all duration-200',
+                      isSelected
+                        ? 'shadow-md scale-105 z-10'
+                        : today
+                        ? 'cihaz-card-strong ring-1 ring-[#F2994A]/30'
+                        : 'opacity-60 hover:opacity-90'
+                    )}
+                  >
+                    <span className="text-[9px] uppercase font-medium opacity-70">
+                      {format(date, 'EEE', { locale: tr })}
+                    </span>
+                    <span className="text-base font-bold leading-tight mt-0.5">
+                      {format(date, 'd')}
+                    </span>
+                    {specialDay && (
+                      <span className={cn('mt-0.5 text-[8px] px-1 rounded-full', specialDay.type === 'holiday' ? 'bg-red-500/15 text-red-500' : 'bg-blue-500/15 text-blue-500')}>
+                        {specialDay.name}
+                      </span>
+                    )}
+                    {dayTaskCount > 0 && (
+                      <div className="mt-0.5 flex items-center gap-0.5" title={`${dayTaskCount} görev / %${occupancy} dolu`}>
+                        <div className={cn('w-1.5 h-1.5 rounded-full', isSelected ? 'bg-white/60' : getOccupancyColor(occupancy))} />
                       </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setSelectedDate((d) => addDays(d, 1))}
+              className="hidden md:block shrink-0 p-1 rounded-lg cihaz-card transition-all hover:brightness-[0.97]"
+            >
+              <ChevronRight className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+            </button>
+          </div>
+
+          {/* Expand calendar toggle — inline */}
+          <div className="flex items-center justify-between px-3 md:px-4 mt-1">
+            <button
+              onClick={() => { setCalendarExpanded((v) => !v); setCalendarMonth(selectedDate); }}
+              className="flex items-center gap-1.5 text-[11px] transition-colors hover:brightness-[0.9]"
+              style={{ color: 'var(--dashboard-muted)' }}
+            >
+              <CalendarIcon className="w-3 h-3" />
+              <span>{calendarExpanded ? 'Takvimi Kapat' : 'Takvimi Genişlet'}</span>
+              <ChevronsUpDown className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Search Results (shown when search is active) */}
+      {normalizedSearchQuery && (
+        <div className="px-4 md:px-8 mt-3">
+          <div className="cihaz-card rounded-2xl p-3">
+            <p className="text-xs mb-2" style={{ color: 'var(--dashboard-muted)' }}>
+              {globalSearchResults.length} görev / {groupedSearchResults.length} gün eşleşti
+            </p>
+            <div className="max-h-52 overflow-y-auto space-y-2">
+              {groupedSearchResults.length === 0 ? (
+                <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Eşleşen kayıt bulunamadı.</p>
+              ) : (
+                groupedSearchResults.map(([day, dayTasks]) => (
+                  <div key={day} className="rounded-xl p-2 cihaz-pressed">
+                    <button
+                      onClick={() => setSelectedDate(parseISO(day))}
+                      className="text-[11px] font-semibold mb-1 hover:underline"
+                      style={{ color: 'var(--dashboard-text)' }}
+                    >
+                      {format(parseISO(day), 'd MMMM EEEE', { locale: tr })}
+                    </button>
+                    <div className="space-y-1">
+                      {dayTasks.map((task) => (
+                        <button
+                          key={task.id}
+                          onClick={() => {
+                            setSelectedDate(parseISO(task.date));
+                            setEditingTask(task);
+                          }}
+                          className="w-full text-left text-[11px] p-1.5 rounded-lg hover:brightness-[0.97] transition-all"
+                          style={{ color: 'var(--dashboard-text)' }}
+                        >
+                          <span className="font-medium">{task.startTime}</span> • {task.title}
+                          <span style={{ color: 'var(--dashboard-muted)' }}> • {task.priority}</span>
+                          {task.attachments?.length ? (
+                            <span style={{ color: 'var(--dashboard-muted)' }}> • {task.attachments.map((a) => a.name).join(', ')}</span>
+                          ) : null}
+                        </button>
+                      ))}
                     </div>
-                  ))
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 1.1 TODAY HERO CARD (Bugün Kartı) ===== */}
+      <div className="px-4 md:px-8 mt-3">
+        <div className="cihaz-card-strong rounded-2xl p-4 md:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-accent)' }}>
+                  Bugün — {format(new Date(), 'd MMMM', { locale: tr })} ({format(new Date(), 'EEEE', { locale: tr })})
+                </p>
+              </div>
+              <p className="text-sm mt-1.5" style={{ color: 'var(--dashboard-text)' }}>
+                <span className="font-medium">Şu an: {format(new Date(), 'HH:mm')}</span>
+                {nextUpcomingTask
+                  ? <span style={{ color: 'var(--dashboard-muted)' }}> &middot; Sonraki: <span style={{ color: 'var(--dashboard-text)' }}>"{nextUpcomingTask.title}"</span> {nextUpcomingTask.startTime}–{nextUpcomingTask.endTime}</span>
+                  : todayTasks.length === 0
+                    ? <span style={{ color: 'var(--dashboard-muted)' }}> &middot; Plan boş</span>
+                    : <span style={{ color: 'var(--dashboard-muted)' }}> &middot; Sonraki görev yok</span>}
+              </p>
+              <div className="flex items-center gap-3 mt-1.5">
+                <span className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>
+                  {todayTasks.length} görev
+                </span>
+                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                  %{todayOccupancy} dolu
+                </span>
+                {todayUrgentCount > 0 && (
+                  <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-red-500/10 text-red-600">{todayUrgentCount} acil</span>
                 )}
               </div>
+            </div>
+          </div>
+          {/* Two hero action buttons — larger, more prominent CTA */}
+          <div className="flex items-center gap-3 mt-4">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold transition-all hover:brightness-[0.93] active:scale-[0.97]"
+              style={{ background: 'var(--dashboard-accent)', color: '#fff', boxShadow: '0 4px 16px rgba(242,153,74,.25)' }}
+            >
+              <Plus className="w-5 h-5" strokeWidth={2.5} />
+              Hızlı Görev
+            </button>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold cihaz-card transition-all hover:brightness-[0.96] active:scale-[0.97]"
+              style={{ color: 'var(--dashboard-text)' }}
+            >
+              <CalendarIcon className="w-4 h-4" />
+              Planlı Görev
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ===== 1.2 TODAY AGENDA — Task list before calendar ===== */}
+      <div className="px-4 md:px-8 mt-3">
+        <div className="cihaz-card rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>
+              Bugün Yapılacaklar
+            </h3>
+            <span className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+              {todayIncompleteTasks.length} açık / {todayCompletedTasks.length} tamamlandı
+            </span>
+          </div>
+          {todayTasks.length === 0 ? (
+            <div className="flex flex-col items-center py-6">
+              <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Bugün görev yok</p>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="mt-3 flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all hover:brightness-[0.95]"
+                style={{ background: 'var(--dashboard-accent)', color: '#fff' }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Hızlı Görev
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {todayIncompleteTasks.map((task) => {
+                const priority = (task.priority || 'normal') as Priority;
+                const priorityConf = PRIORITY_CONFIG[priority];
+                const isHighlighted = justAddedTaskId === task.id;
+                return (
+                  <div
+                    key={task.id}
+                    className={cn(
+                      'flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer hover:brightness-[0.98]',
+                      isHighlighted ? 'ring-2 ring-[#F2994A]/40' : ''
+                    )}
+                    style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)' }}
+                    onClick={() => setEditingTask(task)}
+                  >
+                    <button
+                      onClick={(e) => { e.stopPropagation(); requestTaskCompletion(task); }}
+                      className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all"
+                      style={{ borderColor: 'rgba(108,114,122,.35)' }}
+                    >
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--dashboard-text)' }}>{task.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>{task.startTime}–{task.endTime}</span>
+                        {priority !== 'normal' && (
+                          <span className={cn('inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full font-medium', priorityConf.bg, priorityConf.color)}>
+                            <priorityConf.icon className="w-2.5 h-2.5" />
+                            {priorityConf.label}
+                          </span>
+                        )}
+                        {task.laboratoryName && (
+                          <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{task.laboratoryName}</span>
+                        )}
+                        {task.assignedPersonnel && task.assignedPersonnel.length > 0 && (
+                          <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{task.assignedPersonnel[0].name}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {todayCompletedTasks.length > 0 && (
+                <div className="pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
+                  <p className="text-[10px] font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Tamamlanan ({todayCompletedTasks.length})</p>
+                  {todayCompletedTasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="flex items-center gap-3 p-2.5 rounded-xl opacity-60 cursor-pointer hover:opacity-80 transition-all"
+                      onClick={() => setEditingTask(task)}
+                    >
+                      <button
+                        onClick={(e) => { e.stopPropagation(); requestTaskCompletion(task); }}
+                        className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
+                        style={{ background: 'var(--dashboard-accent)', borderColor: 'var(--dashboard-accent)' }}
+                      >
+                        <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                      </button>
+                      <p className="text-xs line-through truncate" style={{ color: 'var(--dashboard-muted)' }}>{task.title}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      <div className="px-4 md:px-8 mt-4">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {/* ===== KPI Cards — reduced shadow for density ===== */}
+      <div className="px-4 md:px-8 mt-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
           <Link href="/ariza-yonetimi" className="group">
-            <div className="dashboard-kpi-surface rounded-2xl border border-border p-4 transition-all hover:-translate-y-0.5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Wrench className="w-4 h-4" /> Cihaz Arıza KPI
+            <div className="cihaz-card rounded-2xl p-3.5 transition-all hover:brightness-[0.98]">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--dashboard-text)' }}>
+                  <Wrench className="w-3.5 h-3.5" /> Cihaz Arıza KPI
                 </h3>
-                <span className="text-[11px] text-muted-foreground">Detaya Git</span>
+                <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Detaya Git</span>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">Atama Bekleyen</p>
-                  <p className="text-xl font-bold mt-0.5">{faultKpi.pendingAssignment}</p>
+                <div className="rounded-lg p-2 cihaz-pressed">
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Atama Bekleyen</p>
+                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{faultKpi.pendingAssignment}</p>
                 </div>
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">Müdahale Bekleyen</p>
-                  <p className="text-xl font-bold mt-0.5">{faultKpi.pendingIntervention}</p>
+                <div className="rounded-lg p-2 cihaz-pressed">
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Müdahale Bekleyen</p>
+                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{faultKpi.pendingIntervention}</p>
                 </div>
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">Müdahale Edilen</p>
-                  <p className="text-xl font-bold mt-0.5">{faultKpi.inIntervention}</p>
+                <div className="rounded-lg p-2 cihaz-pressed">
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Müdahale Edilen</p>
+                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{faultKpi.inIntervention}</p>
                 </div>
               </div>
             </div>
           </Link>
 
           <Link href="/satin-alma/analiz-planlama" className="group">
-            <div className="dashboard-kpi-surface rounded-2xl border border-border p-4 transition-all hover:-translate-y-0.5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <CalendarClock className="w-4 h-4" /> Takvim KPI
+            <div className="cihaz-card rounded-2xl p-3.5 transition-all hover:brightness-[0.98]">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--dashboard-text)' }}>
+                  <CalendarClock className="w-3.5 h-3.5" /> Takvim KPI
                 </h3>
-                <span className="text-[11px] text-muted-foreground">Planlama Paneli</span>
+                <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Planlama Paneli</span>
               </div>
               <div className="grid grid-cols-2 gap-2 mb-2">
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">1 Haftalık</p>
-                  <p className="text-xl font-bold mt-0.5">{personalCalendarKpi.weekCount}</p>
+                <div className="rounded-lg p-2 cihaz-pressed">
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>1 Haftalık</p>
+                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{personalCalendarKpi.weekCount}</p>
                 </div>
-                <div className="rounded-xl bg-secondary/50 border border-border p-2">
-                  <p className="text-[11px] text-muted-foreground">1 Aylık</p>
-                  <p className="text-xl font-bold mt-0.5">{personalCalendarKpi.monthCount}</p>
+                <div className="rounded-lg p-2 cihaz-pressed">
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>1 Aylık</p>
+                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{personalCalendarKpi.monthCount}</p>
                 </div>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {personalCalendarKpi.nextTasks.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground">Yaklaşan görev bulunmuyor.</p>
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Yaklaşan görev bulunmuyor.</p>
                 ) : (
                   personalCalendarKpi.nextTasks.map((task) => (
-                    <p key={task.id} className="text-[11px] truncate text-muted-foreground">
-                      {task.date} • {task.startTime} • <span className="text-foreground">{task.title}</span>
+                    <p key={task.id} className="text-[10px] truncate" style={{ color: 'var(--dashboard-muted)' }}>
+                      {task.date} &middot; {task.startTime} &middot; <span style={{ color: 'var(--dashboard-text)' }}>{task.title}</span>
                     </p>
                   ))
                 )}
@@ -1718,113 +1972,28 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
-      {/* Date Slider */}
-      <div className="mt-4 px-1 md:px-4">
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => setSelectedDate((d) => subDays(d, 1))}
-            className="hidden md:block shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
-          >
-            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
-          </button>
-
-          <div
-            ref={sliderRef}
-            className="grid grid-flow-col auto-cols-[56px] sm:auto-cols-[64px] md:auto-cols-[72px] gap-1.5 overflow-x-auto scrollbar-none py-2 flex-1 min-w-0"
-            style={{ scrollSnapType: 'x mandatory' }}
-          >
-            {sliderDates.map((date) => {
-              const dateStr = format(date, 'yyyy-MM-dd');
-              const isSelected = isSameDay(date, selectedDate);
-              const today = isToday(date);
-              const occupancy = getOccupancyForDay(tasks, dateStr);
-              const dayTaskCount = tasks.filter((t) => t.date === dateStr).length;
-              const specialDay = getSpecialDay(dateStr);
-
-              return (
-                <button
-                  key={dateStr}
-                  onClick={() => setSelectedDate(date)}
-                  style={{ scrollSnapAlign: 'center' }}
-                  className={cn(
-                    'shrink-0 w-[56px] sm:w-[64px] md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center justify-center rounded-2xl py-2.5 transition-all duration-200',
-                    isSelected
-                      ? `${ACCENT_BG} text-zinc-900 shadow-lg shadow-[#d4ec00]/20 scale-105 z-10`
-                      : today
-                      ? `bg-accent text-foreground ring-1 ${ACCENT_RING}`
-                      : 'bg-secondary text-muted-foreground hover:bg-accent'
-                  )}
-                >
-                  <span className="text-[10px] uppercase font-medium opacity-70">
-                    {format(date, 'EEE', { locale: tr })}
-                  </span>
-                  <span className="text-lg font-bold leading-tight mt-0.5">
-                    {format(date, 'd')}
-                  </span>
-                  <span className="text-[10px] opacity-60">
-                    {format(date, 'MMM', { locale: tr })}
-                  </span>
-                  {specialDay && (
-                    <span className={cn('mt-1 text-[9px] px-1 rounded-full', specialDay.type === 'holiday' ? 'bg-red-500/15 text-red-500' : 'bg-blue-500/15 text-blue-500')}>
-                      {specialDay.name}
-                    </span>
-                  )}
-                  {dayTaskCount > 0 && (
-                    <div className="mt-1 flex items-center gap-0.5">
-                      <div className={cn('w-1.5 h-1.5 rounded-full', isSelected ? 'bg-zinc-900/60' : getOccupancyColor(occupancy))} />
-                      <span className={cn('text-[9px] font-medium', isSelected ? 'text-zinc-900/70' : 'opacity-50')}>
-                        %{occupancy}
-                      </span>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            onClick={() => setSelectedDate((d) => addDays(d, 1))}
-            className="hidden md:block shrink-0 p-1.5 rounded-xl hover:bg-accent transition-colors"
-          >
-            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </div>
-      </div>
-
-      {/* Expand calendar toggle */}
-      <div className="px-4 md:px-8 mt-3">
-        <button
-          onClick={() => { setCalendarExpanded((v) => !v); setCalendarMonth(selectedDate); }}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <CalendarIcon className="w-4 h-4" />
-          <span>{calendarExpanded ? 'Takvimi Kapat' : 'Takvimi Genişlet'}</span>
-          <ChevronsUpDown className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Expandable Monthly Calendar */}
+      {/* ===== 1.3 Expandable Monthly Calendar (second layer) ===== */}
       {calendarExpanded && (
         <div className="px-4 md:px-8 mt-3 animate-in slide-in-from-top-2 duration-300">
-          <div className="bg-card rounded-2xl p-4 border border-border">
+          <div className="cihaz-card rounded-2xl p-4">
             <div className="flex items-center justify-between mb-4">
               <button
                 onClick={() => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
-                className="p-1.5 rounded-lg hover:bg-accent transition-colors"
+                className="p-1.5 rounded-lg cihaz-card transition-all hover:brightness-[0.97]"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-sm font-semibold">{format(calendarMonth, 'MMMM yyyy', { locale: tr })}</span>
+              <span className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>{format(calendarMonth, 'MMMM yyyy', { locale: tr })}</span>
               <button
                 onClick={() => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
-                className="p-1.5 rounded-lg hover:bg-accent transition-colors"
+                className="p-1.5 rounded-lg cihaz-card transition-all hover:brightness-[0.97]"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
             <div className="grid grid-cols-7 gap-1 mb-1">
               {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((d) => (
-                <div key={d} className="text-center text-[10px] text-muted-foreground font-medium py-1">{d}</div>
+                <div key={d} className="text-center text-[10px] font-medium py-1" style={{ color: 'var(--dashboard-muted)' }}>{d}</div>
               ))}
             </div>
             <div className="grid grid-cols-7 gap-1">
@@ -1840,10 +2009,14 @@ export default function SatinAlmaPanel() {
                   <button
                     key={dayStr}
                     onClick={() => { setSelectedDate(day); setCalendarExpanded(false); }}
+                    style={{
+                      color: isSelected ? '#fff' : 'var(--dashboard-text)',
+                      ...(isSelected ? { background: 'var(--dashboard-accent)' } : {}),
+                    }}
                     className={cn(
                       'relative flex flex-col items-center justify-center py-2 rounded-xl text-sm transition-all',
                       !inMonth && 'opacity-30',
-                      isSelected ? `${ACCENT_BG} text-zinc-900 font-bold` : today ? 'bg-accent text-foreground font-semibold' : 'hover:bg-accent text-foreground'
+                      isSelected ? 'font-bold' : today ? 'cihaz-card-strong font-semibold' : 'hover:brightness-[0.97]'
                     )}
                   >
                     <span>{format(day, 'd')}</span>
@@ -1854,7 +2027,7 @@ export default function SatinAlmaPanel() {
                     )}
                     {hasTasks && (
                       <div className="flex items-center gap-0.5 mt-0.5">
-                        <div className={cn('w-1 h-1 rounded-full', isSelected ? 'bg-zinc-900/60' : getOccupancyColor(occupancy))} />
+                        <div className={cn('w-1 h-1 rounded-full', isSelected ? 'bg-white/60' : getOccupancyColor(occupancy))} />
                       </div>
                     )}
                   </button>
@@ -1865,100 +2038,161 @@ export default function SatinAlmaPanel() {
         </div>
       )}
 
-      {/* Occupancy bar */}
-      <div className="px-4 md:px-8 mt-5">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-base font-semibold">
+      {/* ===== Occupancy bar — compact ===== */}
+      <div className="px-4 md:px-8 mt-4">
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>
             {isToday(selectedDate) ? 'Bugün' : format(selectedDate, 'd MMMM EEEE', { locale: tr })}
           </h2>
-          <span className={cn('text-xs font-medium', getOccupancyRingColor(selectedOccupancy))}>
+          <span className={cn('text-[11px] font-medium', getOccupancyRingColor(selectedOccupancy))}>
             %{selectedOccupancy} dolu
           </span>
         </div>
-        <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
+        <div className="w-full h-1 rounded-full overflow-hidden cihaz-pressed">
           <div
             className={cn('h-full rounded-full transition-all duration-500', getOccupancyColor(selectedOccupancy))}
             style={{ width: `${selectedOccupancy}%` }}
           />
         </div>
-        <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+        <div className="flex justify-between mt-0.5 text-[9px]" style={{ color: 'var(--dashboard-muted)' }}>
           <span>09:00</span><span>12:00</span><span>15:00</span><span>17:00</span>
         </div>
       </div>
 
-      {/* Natural Language Quick Add */}
-      <div className="px-4 md:px-8 mt-5">
-        <div className="rounded-2xl border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground mb-2">Doğal dil ile hızlı görev girişi</p>
+      {/* ===== Natural Language Quick Add — with preview chips ===== */}
+      <div className="px-4 md:px-8 mt-3">
+        <div className="cihaz-card rounded-2xl p-3">
+          <p className="text-[10px] mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Doğal dil ile hızlı görev girişi</p>
           <div className="flex gap-2">
             <input
               value={naturalInput}
               onChange={(e) => setNaturalInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNaturalQuickAdd(); } }}
               placeholder="Örn: 'Yarın saat 14:00'da Merkez Lab ziyareti #acil"
-              className="flex-1 px-3 py-2 bg-secondary border border-border rounded-xl text-sm outline-none"
+              className="flex-1 px-3 py-2 rounded-xl text-xs outline-none cihaz-pressed"
+              style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
             />
             <button
               onClick={handleNaturalQuickAdd}
               disabled={!naturalInput.trim() || naturalSubmitting}
-              className={cn('px-3 py-2 rounded-xl text-sm font-medium', naturalInput.trim() && !naturalSubmitting ? `${ACCENT_BG} text-zinc-900` : 'bg-secondary text-muted-foreground')}
+              className={cn('px-4 py-2 rounded-xl text-xs font-semibold transition-all', naturalInput.trim() && !naturalSubmitting ? 'hover:brightness-[0.95] active:scale-[0.98]' : 'cihaz-pressed cursor-not-allowed')}
+              style={naturalInput.trim() && !naturalSubmitting ? { background: 'var(--dashboard-accent)', color: '#fff' } : { color: 'var(--dashboard-muted)' }}
             >
               {naturalSubmitting ? 'Ekleniyor...' : 'Ekle'}
             </button>
           </div>
+          {/* Preview chips when user is typing */}
+          {naturalInput.trim() && (
+            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+              {(() => {
+                const parsed = parseNaturalTaskInputForPlanning(naturalInput, mainLaboratories);
+                return (
+                  <>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full cihaz-pressed" style={{ color: 'var(--dashboard-muted)' }}>
+                      {format(parseISO(parsed.date), 'd MMM', { locale: tr })} {parsed.startTime}
+                    </span>
+                    {parsed.laboratoryName && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full cihaz-pressed" style={{ color: 'var(--dashboard-muted)' }}>
+                        {parsed.laboratoryName}
+                      </span>
+                    )}
+                    {parsed.priority !== 'normal' && (
+                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', PRIORITY_CONFIG[parsed.priority].bg, PRIORITY_CONFIG[parsed.priority].color)}>
+                        {PRIORITY_CONFIG[parsed.priority].label}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Task Views */}
       <div className="px-4 md:px-8 mt-6">
         {tasksLoading ? (
-          <div className="flex items-center justify-center py-14 text-muted-foreground">
+          <div className="flex items-center justify-center py-14" style={{ color: 'var(--dashboard-muted)' }}>
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
             Görevler yükleniyor...
           </div>
         ) : (
         <>
         <div className="flex items-center justify-between mb-3 gap-2">
-          <h3 className="text-sm font-semibold text-muted-foreground">
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--dashboard-muted)' }}>
             {viewMode === 'daily' ? `Günlük Görevler (${dayTasks.length})` : viewMode === 'weekly' ? 'Haftalık Zaman Çizelgesi' : viewMode === 'monthly' ? 'Aylık Görev Görünümü' : viewMode === 'timeline' ? 'Timeline / Gantt' : viewMode === 'heatmap' ? 'Personel Aktivite Haritası' : viewMode === 'workflow' ? 'Workflow Kanvası' : 'Bugünüm'}
           </h3>
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
-            {([
-              ['daily', 'Günlük'],
-              ['weekly', 'Haftalık'],
-              ['monthly', 'Aylık'],
-              ['timeline', 'Timeline'],
-              ['heatmap', 'Heatmap'],
-              ['myday', 'Bugünüm'],
-              ['workflow', 'Workflow'],
-            ] as const).map(([mode, label]) => (
+          <div className="flex items-center gap-1">
+            {/* 3 primary tabs */}
+            <div className="flex items-center gap-1 p-1 rounded-xl cihaz-pressed">
+              {([
+                ['daily', 'Günlük'],
+                ['weekly', 'Haftalık'],
+                ['monthly', 'Aylık'],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={cn('px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all', viewMode === mode ? 'cihaz-card-strong' : 'hover:brightness-[0.97]')}
+                  style={viewMode === mode ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* Analiz dropdown for secondary modes */}
+            <div className="relative group">
               <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={cn('px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all', viewMode === mode ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground hover:text-foreground')}
+                className={cn(
+                  'flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-medium transition-all',
+                  ['timeline', 'heatmap', 'myday', 'workflow'].includes(viewMode) ? 'cihaz-card-strong' : 'cihaz-pressed'
+                )}
+                style={['timeline', 'heatmap', 'myday', 'workflow'].includes(viewMode) ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
               >
-                {label}
+                Analiz
+                <ChevronDown className="w-3 h-3" />
               </button>
-            ))}
+              <div className="absolute right-0 top-full mt-1 w-40 rounded-xl p-1 cihaz-card-strong opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
+                {([
+                  ['timeline', 'Timeline'],
+                  ['heatmap', 'Heatmap'],
+                  ['myday', 'Bugünüm'],
+                  ['workflow', 'Workflow'],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setViewMode(mode)}
+                    className={cn('w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all', viewMode === mode ? 'cihaz-pressed' : 'hover:brightness-[0.97]')}
+                    style={viewMode === mode ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-text)' }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
         {viewMode === 'myday' && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-border bg-card p-3">
-              <h4 className="text-sm font-semibold mb-2">Bugünüm</h4>
+            <div className="cihaz-card rounded-2xl p-4">
+              <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--dashboard-text)' }}>Bugünüm</h4>
               {myDayTasks.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Bugün için henüz görev seçmediniz.</p>
+                <div className="flex flex-col items-center py-6">
+                  <CalendarIcon className="w-8 h-8 mb-2 opacity-30" style={{ color: 'var(--dashboard-muted)' }} />
+                  <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Bugün için henüz görev seçmediniz.</p>
+                </div>
               ) : (
                 <div className="space-y-2">
                   {myDayTasks.map((task) => (
-                    <div key={task.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/50 border border-border">
+                    <div key={task.id} className="flex items-center justify-between gap-2 p-3 rounded-xl cihaz-pressed">
                       <div className="min-w-0">
-                        <p className="text-sm truncate">{task.title}</p>
-                        <p className="text-[11px] text-muted-foreground">{task.date} • {task.startTime}-{task.endTime}</p>
+                        <p className="text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{task.title}</p>
+                        <p className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>{task.date} • {task.startTime}-{task.endTime}</p>
                       </div>
                       <div className="flex items-center gap-1">
-                        <button onClick={() => setEditingTask(task)} className="text-[11px] px-2 py-1 rounded bg-secondary border border-border">Aç</button>
-                        <button onClick={() => removeFromMyDay(task.id)} className="text-[11px] px-2 py-1 rounded bg-secondary border border-border text-muted-foreground">Çıkar</button>
+                        <button onClick={() => setEditingTask(task)} className="text-[11px] px-2.5 py-1 rounded-lg cihaz-card font-medium" style={{ color: 'var(--dashboard-text)' }}>Aç</button>
+                        <button onClick={() => removeFromMyDay(task.id)} className="text-[11px] px-2.5 py-1 rounded-lg cihaz-card" style={{ color: 'var(--dashboard-muted)' }}>Çıkar</button>
                       </div>
                     </div>
                   ))}
@@ -1966,22 +2200,23 @@ export default function SatinAlmaPanel() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-border bg-card p-3">
-              <h4 className="text-sm font-semibold mb-2">Akıllı Öneriler</h4>
+            <div className="cihaz-card rounded-2xl p-4">
+              <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--dashboard-text)' }}>Akıllı Öneriler</h4>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {myDaySuggestions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Önerilecek görev bulunamadı.</p>
+                  <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Önerilecek görev bulunamadı.</p>
                 ) : (
                   myDaySuggestions.map((task) => (
-                    <div key={task.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/40 border border-border">
+                    <div key={task.id} className="flex items-center justify-between gap-2 p-3 rounded-xl cihaz-pressed">
                       <div className="min-w-0">
-                        <p className="text-sm truncate">{task.title}</p>
-                        <p className="text-[11px] text-muted-foreground">{task.date} • {task.startTime}-{task.endTime}{task.recurring ? ' • Tekrarlı' : ''}</p>
+                        <p className="text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{task.title}</p>
+                        <p className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>{task.date} • {task.startTime}-{task.endTime}{task.recurring ? ' • Tekrarlı' : ''}</p>
                       </div>
                       <button
                         onClick={() => addToMyDay(task.id)}
                         disabled={myDayTaskIds.includes(task.id)}
-                        className={cn('text-[11px] px-2 py-1 rounded border', myDayTaskIds.includes(task.id) ? 'bg-secondary text-muted-foreground border-border' : `${ACCENT_BG_SUBTLE} ${ACCENT} ${ACCENT_BORDER}`)}
+                        className={cn('text-[11px] px-3 py-1.5 rounded-lg font-medium transition-all', myDayTaskIds.includes(task.id) ? 'cihaz-pressed cursor-not-allowed' : 'cihaz-card hover:brightness-[0.97]')}
+                        style={myDayTaskIds.includes(task.id) ? { color: 'var(--dashboard-muted)' } : { color: 'var(--dashboard-accent)' }}
                       >
                         {myDayTaskIds.includes(task.id) ? 'Eklendi' : 'Bugüne ekle'}
                       </button>
@@ -1995,15 +2230,44 @@ export default function SatinAlmaPanel() {
 
         {viewMode === 'daily' && (
           dayTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <CalendarIcon className="w-10 h-10 mb-3 opacity-40" />
-              <p className="text-sm">Bu güne ait görev bulunmuyor</p>
-              <button onClick={() => setShowAddModal(true)} className={cn('mt-3 text-xs hover:underline', ACCENT)}>
-                Yeni görev ekle
-              </button>
+            <div className="flex flex-col items-center justify-center py-10">
+              <CalendarIcon className="w-8 h-8 mb-3 opacity-30" style={{ color: 'var(--dashboard-muted)' }} />
+              <p className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>Bu güne ait görev bulunmuyor</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--dashboard-muted)' }}>Aşağıdan hızlıca ekleyebilirsiniz</p>
+              <div className="flex items-center gap-2 mt-4">
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all hover:brightness-[0.95]"
+                  style={{ background: 'var(--dashboard-accent)', color: '#fff' }}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Hızlı Görev
+                </button>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold cihaz-card transition-all hover:brightness-[0.97]"
+                  style={{ color: 'var(--dashboard-text)' }}
+                >
+                  <CalendarIcon className="w-3.5 h-3.5" />
+                  Detaylı Görev
+                </button>
+              </div>
+              {/* Template suggestions */}
+              <div className="flex flex-wrap justify-center gap-2 mt-3">
+                {['Kurum Ziyareti', 'Toplantı', 'Stok Kontrol', 'Arıza Takibi'].map((tpl) => (
+                  <button
+                    key={tpl}
+                    onClick={() => setShowAddModal(true)}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-medium cihaz-pressed transition-all hover:brightness-[0.97]"
+                    style={{ color: 'var(--dashboard-muted)' }}
+                  >
+                    {tpl}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {dayTasks.map((task) => (
                 <div
                   key={task.id}
@@ -2030,24 +2294,37 @@ export default function SatinAlmaPanel() {
         )}
 
         {viewMode === 'weekly' && (
-          <div className="grid grid-cols-1 md:grid-cols-7 gap-2"> 
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
             {weekDays.map((day) => {
               const dayStr = format(day, 'yyyy-MM-dd');
               const dayTasksForWeek = tasks
                 .filter((t) => t.date === dayStr)
                 .sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
               const layout = buildTimelineLayout(dayTasksForWeek);
+              const isCurrentDay = isToday(day);
 
               return (
-                <div key={dayStr} className={cn('rounded-xl border p-2', isSameDay(day, selectedDate) ? `${ACCENT_BORDER} bg-card` : 'border-border bg-card')}>
-                  <button onClick={() => setSelectedDate(day)} className="w-full text-left mb-2">
-                    <p className="text-[11px] text-muted-foreground uppercase">{format(day, 'EEE', { locale: tr })}</p>
-                    <p className={cn('text-sm font-semibold', isToday(day) && ACCENT)}>{format(day, 'd MMM', { locale: tr })}</p>
+                <div key={dayStr} className={cn('rounded-xl p-2', isSameDay(day, selectedDate) ? 'cihaz-card-strong' : 'cihaz-card')} style={isSameDay(day, selectedDate) ? { borderLeft: '2px solid var(--dashboard-accent)' } : {}}>
+                  {/* Sticky column header */}
+                  <button onClick={() => setSelectedDate(day)} className="w-full text-left mb-2 sticky top-0 z-10 py-1 rounded-lg" style={{ background: 'inherit' }}>
+                    <p className="text-[11px] uppercase" style={{ color: 'var(--dashboard-muted)' }}>{format(day, 'EEE', { locale: tr })}</p>
+                    <p className="text-sm font-semibold" style={{ color: isCurrentDay ? 'var(--dashboard-accent)' : 'var(--dashboard-text)' }}>{format(day, 'd MMM', { locale: tr })}</p>
                   </button>
-                  <div className="relative h-[420px] rounded-lg bg-secondary/40 border border-border overflow-hidden">
+                  <div className="relative h-[420px] rounded-lg overflow-hidden cihaz-pressed">
                     {[9, 11, 13, 15, 17].map((h) => (
-                      <div key={h} className="absolute left-0 right-0 border-t border-border/60" style={{ top: `${((h - 9) / 8) * 100}%` }} />
+                      <div key={h} className="absolute left-0 right-0" style={{ top: `${((h - 9) / 8) * 100}%`, borderTop: '1px solid var(--dashboard-stroke)' }} />
                     ))}
+
+                    {/* Now line indicator */}
+                    {isCurrentDay && showNowLine && (
+                      <div className="absolute left-0 right-0 z-30 pointer-events-none" style={{ top: `${nowLinePct}%` }}>
+                        <div className="relative">
+                          <div className="absolute left-0 right-0 h-[1.5px] bg-red-500/70" />
+                          <div className="absolute -left-1 -top-1 w-2 h-2 rounded-full bg-red-500" />
+                          <span className="absolute left-2.5 -top-2 text-[8px] font-semibold text-red-500">{`${nowHour.toString().padStart(2, '0')}:${nowMinute.toString().padStart(2, '0')}`}</span>
+                        </div>
+                      </div>
+                    )}
 
                     {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
                       const hour = WORK_START_HOUR + idx;
@@ -2085,9 +2362,18 @@ export default function SatinAlmaPanel() {
                           onDragStart={(e) => { setDraggedTimelineTask(task); e.dataTransfer.effectAllowed = 'move'; }}
                           onDragEnd={() => setDraggedTimelineTask(null)}
                           onClick={() => setEditingTask(task)}
-                          className={cn('absolute rounded-md px-1.5 py-1 text-left border-l-2 text-[10px] overflow-hidden z-20', task.completed ? 'bg-muted/60 border-muted-foreground/40 text-muted-foreground' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border} text-foreground`)}
-                          style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 8)}%`, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, borderLeftColor: task.workflowColor || undefined }}
-                          title="Sürükleyip saat/gün değiştirin"
+                          className={cn('absolute rounded-lg px-1.5 py-1 text-left border-l-2 text-[10px] overflow-hidden z-20', task.completed ? 'opacity-50' : '')}
+                          style={{
+                            top: `${topPct}%`,
+                            height: `${Math.max(heightPct, 8)}%`,
+                            left: `calc(${leftPct}% + 2px)`,
+                            width: `calc(${widthPct}% - 4px)`,
+                            borderLeftColor: task.workflowColor || 'var(--dashboard-accent)',
+                            background: task.completed ? 'var(--dashboard-surface-2)' : 'var(--dashboard-surface)',
+                            color: 'var(--dashboard-text)',
+                            boxShadow: 'var(--dashboard-raised-soft)',
+                          }}
+                          title={`${task.title} • ${task.startTime}–${task.endTime}`}
                         >
                           <p className="truncate font-medium">{task.title}</p>
                           <p className="truncate opacity-70">{task.startTime} - {task.endTime}</p>
@@ -2102,15 +2388,16 @@ export default function SatinAlmaPanel() {
         )}
 
         {viewMode === 'timeline' && (
-          <div className="rounded-2xl border border-border bg-card p-3">
+          <div className="cihaz-card rounded-2xl p-3">
             <div className="flex items-center justify-between mb-3 gap-2">
-              <h4 className="text-xs font-semibold text-muted-foreground">Zaman Çizelgesi (Gantt)</h4>
-              <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
+              <h4 className="text-xs font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Zaman Çizelgesi (Gantt)</h4>
+              <div className="flex items-center gap-1 p-1 rounded-xl cihaz-pressed">
                 {(['daily', 'weekly', 'monthly'] as const).map((scope) => (
                   <button
                     key={scope}
                     onClick={() => setTimelineScope(scope)}
-                    className={cn('px-2 py-1 text-[10px] rounded-lg', timelineScope === scope ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground')}
+                    className={cn('px-2.5 py-1 text-[10px] rounded-lg font-medium transition-all', timelineScope === scope ? 'cihaz-card-strong' : '')}
+                    style={timelineScope === scope ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
                   >
                     {scope === 'daily' ? 'Günlük' : scope === 'weekly' ? 'Haftalık' : 'Aylık'}
                   </button>
@@ -2122,14 +2409,14 @@ export default function SatinAlmaPanel() {
               <div className="grid gap-2" style={{ gridTemplateColumns: `80px repeat(${timelineDays.length}, minmax(120px, 1fr))` }}>
                 <div />
                 {timelineDays.map((day) => (
-                  <div key={day.toISOString()} className="text-[10px] text-center text-muted-foreground">{format(day, 'd MMM', { locale: tr })}</div>
+                  <div key={day.toISOString()} className="text-[10px] text-center" style={{ color: 'var(--dashboard-muted)' }}>{format(day, 'd MMM', { locale: tr })}</div>
                 ))}
 
                 {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
                   const hour = WORK_START_HOUR + idx;
                   return (
                     <React.Fragment key={`r-${hour}`}>
-                      <div className="text-[10px] text-muted-foreground pr-2">{`${hour.toString().padStart(2, '0')}:00`}</div>
+                      <div className="text-[10px] pr-2" style={{ color: 'var(--dashboard-muted)' }}>{`${hour.toString().padStart(2, '0')}:00`}</div>
                       {timelineDays.map((day) => {
                         const dayStr = format(day, 'yyyy-MM-dd');
                         const cnt = tasks.filter((t) => {
@@ -2140,27 +2427,37 @@ export default function SatinAlmaPanel() {
                           const ee = (hour + 1) * 60;
                           return ss < e && ee > s;
                         }).length;
-                        return <div key={`${dayStr}-${hour}`} className={cn('h-8 border rounded', cnt > 0 ? 'bg-[#d4ec00]/20 border-[#d4ec00]/30' : 'bg-secondary/30 border-border')} />;
+                        return (
+                          <div
+                            key={`${dayStr}-${hour}`}
+                            className="h-8 rounded"
+                            style={cnt > 0
+                              ? { background: 'rgba(242,153,74,.15)', border: '1px solid rgba(242,153,74,.3)' }
+                              : { background: 'var(--dashboard-surface-2)', border: '1px solid var(--dashboard-stroke)' }
+                            }
+                          />
+                        );
                       })}
                     </React.Fragment>
                   );
                 })}
               </div>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-2">Çakışan görevler aynı satırda birden fazla blok olarak gösterilir; haftalık görünümde blokları sürükleyip saat/gün değiştirin.</p>
+            <p className="text-[10px] mt-2" style={{ color: 'var(--dashboard-muted)' }}>Çakışan görevler aynı satırda birden fazla blok olarak gösterilir; haftalık görünümde blokları sürükleyip saat/gün değiştirin.</p>
           </div>
         )}
 
         {viewMode === 'heatmap' && (
-          <div className="rounded-2xl border border-border bg-card p-3">
+          <div className="cihaz-card rounded-2xl p-3">
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-semibold text-muted-foreground">Personel Aktivite Haritası</h4>
-              <div className="flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border">
+              <h4 className="text-xs font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Personel Aktivite Haritası</h4>
+              <div className="flex items-center gap-1 p-1 rounded-xl cihaz-pressed">
                 {(['weekly', 'monthly'] as const).map((scope) => (
                   <button
                     key={scope}
                     onClick={() => setTimelineScope(scope)}
-                    className={cn('px-2 py-1 text-[10px] rounded-lg', timelineScope === scope ? `${ACCENT_BG} text-zinc-900` : 'text-muted-foreground')}
+                    className={cn('px-2.5 py-1 text-[10px] rounded-lg font-medium transition-all', timelineScope === scope ? 'cihaz-card-strong' : '')}
+                    style={timelineScope === scope ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
                   >
                     {scope === 'weekly' ? 'Haftalık' : 'Aylık'}
                   </button>
@@ -2171,28 +2468,28 @@ export default function SatinAlmaPanel() {
               <div className="grid gap-1" style={{ gridTemplateColumns: `60px repeat(${heatmapData.days.length}, minmax(18px, 1fr))` }}>
                 <div />
                 {heatmapData.days.map((d) => (
-                  <div key={d.toISOString()} className="text-[9px] text-center text-muted-foreground">{timelineScope === 'weekly' ? format(d, 'EEE', { locale: tr }) : format(d, 'd')}</div>
+                  <div key={d.toISOString()} className="text-[9px] text-center" style={{ color: 'var(--dashboard-muted)' }}>{timelineScope === 'weekly' ? format(d, 'EEE', { locale: tr }) : format(d, 'd')}</div>
                 ))}
                 {Array.from({ length: WORK_END_HOUR - WORK_START_HOUR }, (_, idx) => {
                   const hour = WORK_START_HOUR + idx;
                   return (
                     <React.Fragment key={`h-${hour}`}>
-                      <div className="text-[9px] text-muted-foreground">{hour}:00</div>
+                      <div className="text-[9px]" style={{ color: 'var(--dashboard-muted)' }}>{hour}:00</div>
                       {heatmapData.days.map((_, di) => {
                         const val = heatmapData.matrix[di]?.[idx] || 0;
-                        return <div key={`${di}-${idx}`} className={cn('h-5 border rounded-sm', getHeatColor(val, heatmapData.max))} title={`${val} görev`} />;
+                        return <div key={`${di}-${idx}`} className={cn('h-5 rounded-sm', getHeatColor(val, heatmapData.max))} style={{ border: '1px solid var(--dashboard-stroke)' }} title={`${val} görev`} />;
                       })}
                     </React.Fragment>
                   );
                 })}
               </div>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-2">Boş zaman blokları yeşil, yoğun bloklar kırmızıya yakın tonlarda gösterilir.</p>
+            <p className="text-[10px] mt-2" style={{ color: 'var(--dashboard-muted)' }}>Boş zaman blokları yeşil, yoğun bloklar kırmızıya yakın tonlarda gösterilir.</p>
           </div>
         )}
 
         {viewMode === 'workflow' && (
-          <div className="rounded-2xl border border-border bg-card p-3">
+          <div className="cihaz-card rounded-2xl p-3">
             <WorkflowCanvasPanel
               tasks={tasks}
               workflows={workflows}
@@ -2215,10 +2512,16 @@ export default function SatinAlmaPanel() {
         )}
 
         {viewMode === 'monthly' && (
-          <div className="bg-card border border-border rounded-2xl p-3">
+          <div className="cihaz-card rounded-2xl p-3">
+            {/* Legend — mini, top right */}
+            <div className="flex items-center gap-3 mb-3 text-[9px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Normal</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Yaklaşan</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Çakışma / Overdue</span>
+            </div>
             <div className="grid grid-cols-7 gap-1 mb-1">
               {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((d) => (
-                <div key={d} className="text-center text-[10px] text-muted-foreground font-medium py-1">{d}</div>
+                <div key={d} className="text-center text-[10px] font-medium py-1" style={{ color: 'var(--dashboard-muted)' }}>{d}</div>
               ))}
             </div>
             <div className="grid grid-cols-7 gap-1">
@@ -2227,30 +2530,45 @@ export default function SatinAlmaPanel() {
                 const cellTasks = tasks.filter((t) => t.date === dayStr).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
                 const inMonth = isSameMonth(day, selectedDate);
                 const selected = isSameDay(day, selectedDate);
+                // Check for collisions (2+ tasks with overlapping times)
+                const hasCollision = cellTasks.some((t, i) => cellTasks.slice(i + 1).some((t2) => parseTime(t.startTime) < parseTime(t2.endTime) && parseTime(t.endTime) > parseTime(t2.startTime)));
                 const specialDay = getSpecialDay(dayStr);
                 return (
                   <button
                     key={dayStr}
                     onClick={() => handleMonthlyDayClick(day)}
-                    className={cn('min-h-[84px] md:min-h-[110px] rounded-xl border p-1.5 text-left transition-colors', selected ? `${ACCENT_BORDER} ring-1 ${ACCENT_RING}` : 'border-border hover:bg-accent/40', !inMonth && 'opacity-40')}
+                    className={cn('min-h-[84px] md:min-h-[110px] rounded-xl p-1.5 text-left transition-all', selected ? 'cihaz-card-strong ring-1 ring-[#F2994A]/30' : 'hover:brightness-[0.97]', !inMonth && 'opacity-30')}
+                    style={selected ? { borderLeft: '2px solid var(--dashboard-accent)' } : { border: '1px solid var(--dashboard-stroke)' }}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className={cn('text-[11px] font-semibold', isToday(day) && ACCENT)}>{format(day, 'd')}</span>
-                      {cellTasks.length > 0 && <span className="text-[9px] text-muted-foreground">{cellTasks.length} görev</span>}
+                      <span className="text-[11px] font-semibold" style={{ color: isToday(day) ? 'var(--dashboard-accent)' : 'var(--dashboard-text)' }}>{format(day, 'd')}</span>
+                      {cellTasks.length > 0 && <span className="text-[9px]" style={{ color: 'var(--dashboard-muted)' }}>{cellTasks.length}</span>}
                     </div>
                     {specialDay && (
                       <p className={cn('text-[9px] mb-1 truncate', specialDay.type === 'holiday' ? 'text-red-500' : 'text-blue-500')}>
                         {specialDay.name}
                       </p>
                     )}
-                    <div className="space-y-1">
-                      {cellTasks.slice(0, 3).map((task) => (
-                        <div key={task.id} className={cn('text-[10px] rounded px-1 py-0.5 truncate border-l-2', task.completed ? 'bg-secondary text-muted-foreground border-muted-foreground/40' : `${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].bg} ${PRIORITY_CONFIG[(task.priority || 'normal') as Priority].border}`)} style={{ borderLeftColor: task.workflowColor || undefined }}>
-                          {task.startTime} {task.title}
-                        </div>
-                      ))}
-                      {cellTasks.length > 3 && (
-                        <p className="text-[10px] text-muted-foreground">+{cellTasks.length - 3} daha</p>
+                    <div className="space-y-0.5">
+                      {cellTasks.slice(0, 2).map((task) => {
+                        const isOverdue = !task.completed && parseTime(task.endTime) < nowTotalMin && isToday(day);
+                        return (
+                          <div
+                            key={task.id}
+                            className="text-[9px] rounded px-1 py-0.5 truncate border-l-2"
+                            style={{
+                              borderLeftColor: isOverdue ? '#ef4444' : hasCollision ? '#f59e0b' : task.workflowColor || '#22c55e',
+                              background: task.completed ? 'var(--dashboard-surface-2)' : 'var(--dashboard-surface)',
+                              color: task.completed ? 'var(--dashboard-muted)' : 'var(--dashboard-text)',
+                            }}
+                            title={`${task.title} • ${task.startTime}–${task.endTime}${task.assignedPersonnel?.length ? ` • ${task.assignedPersonnel[0].name}` : ''}`}
+                          >
+                            {task.startTime} {task.title}
+                          </div>
+                        );
+                      })}
+                      {cellTasks.length > 2 && (
+                        <p className="text-[9px] font-semibold" style={{ color: 'var(--dashboard-accent)' }}>+{cellTasks.length - 2} daha</p>
                       )}
                     </div>
                   </button>
@@ -2265,16 +2583,16 @@ export default function SatinAlmaPanel() {
 
       {mobileMonthModalDate && (
         <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMonthModalDate(null)} />
-          <div className="absolute inset-x-3 bottom-4 top-20 bg-card border border-border rounded-2xl shadow-xl p-3 flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-border">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMobileMonthModalDate(null)} />
+          <div className="absolute inset-x-3 bottom-4 top-20 rounded-2xl p-4 flex flex-col" style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }}>
+            <div className="flex items-center justify-between pb-3" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
               <div>
-                <p className="text-xs text-muted-foreground">Günlük Görevler</p>
-                <h4 className="text-sm font-semibold">{format(mobileMonthModalDate, 'd MMMM EEEE', { locale: tr })}</h4>
+                <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Günlük Görevler</p>
+                <h4 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>{format(mobileMonthModalDate, 'd MMMM EEEE', { locale: tr })}</h4>
               </div>
               <button
                 onClick={() => setMobileMonthModalDate(null)}
-                className="p-2 rounded-lg bg-secondary border border-border"
+                className="p-2 rounded-lg cihaz-card"
                 aria-label="Kapat"
               >
                 <X className="w-4 h-4" />
@@ -2282,7 +2600,17 @@ export default function SatinAlmaPanel() {
             </div>
             <div className="mt-3 overflow-y-auto flex-1 space-y-2">
               {mobileMonthModalTasks.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Bu gün için görev bulunmuyor.</p>
+                <div className="flex flex-col items-center py-8">
+                  <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Bu gün için görev bulunmuyor.</p>
+                  <button
+                    onClick={() => { setMobileMonthModalDate(null); setShowAddModal(true); }}
+                    className="mt-3 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold"
+                    style={{ background: 'var(--dashboard-accent)', color: '#fff' }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Görev Ekle
+                  </button>
+                </div>
               ) : (
                 mobileMonthModalTasks.map((task) => (
                   <button
@@ -2291,10 +2619,10 @@ export default function SatinAlmaPanel() {
                       setEditingTask(task);
                       setMobileMonthModalDate(null);
                     }}
-                    className="w-full text-left p-2 rounded-xl border border-border bg-secondary/40"
+                    className="w-full text-left p-3 rounded-xl cihaz-pressed transition-all"
                   >
-                    <p className="text-sm truncate">{task.title}</p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{task.startTime} - {task.endTime}</p>
+                    <p className="text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{task.title}</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>{task.startTime} - {task.endTime}</p>
                   </button>
                 ))
               )}
@@ -2311,10 +2639,8 @@ export default function SatinAlmaPanel() {
       {/* Floating Add Button */}
       <button
         onClick={() => setShowAddModal(true)}
-        className={cn(
-          'fixed bottom-20 right-5 md:bottom-8 md:right-8 z-40 w-14 h-14 rounded-full shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-transform',
-          ACCENT_BG, 'text-zinc-900 shadow-[#d4ec00]/30'
-        )}
+        className="fixed bottom-20 right-5 md:bottom-8 md:right-8 z-40 w-14 h-14 rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-transform"
+        style={{ background: 'var(--dashboard-accent)', color: '#fff', boxShadow: '0 6px 20px rgba(242,153,74,.35)' }}
       >
         <Plus className="w-6 h-6" strokeWidth={2.5} />
       </button>
@@ -2549,38 +2875,41 @@ function TaskCard({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        style={{ transform: `translateX(${swipeOffset}px)`, borderLeftColor: workflowColor || undefined }}
+        style={{
+          transform: `translateX(${swipeOffset}px)`,
+          borderLeftColor: workflowColor || 'var(--dashboard-accent)',
+          background: task.completed ? 'var(--dashboard-surface-2)' : 'var(--dashboard-surface)',
+          border: '1px solid var(--dashboard-stroke)',
+          boxShadow: task.completed ? 'none' : 'var(--dashboard-raised-soft)',
+        }}
         className={cn(
-          'group relative flex items-start gap-3 p-4 rounded-2xl border-l-[3px] border border-border',
+          'group relative flex items-start gap-3 p-4 rounded-2xl border-l-[3px]',
           isSwiping ? 'transition-none' : 'transition-transform duration-200',
-          priorityConf.border,
-          task.completed ? 'bg-card/50 border-border/50' : 'bg-card hover:border-muted-foreground/30'
+          task.completed ? 'opacity-70' : 'hover:brightness-[0.98]'
         )}
       >
       {/* Drag handle */}
-      <div className="shrink-0 mt-1 p-0.5 rounded cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground">
+      <div className="shrink-0 mt-1 p-0.5 rounded cursor-grab active:cursor-grabbing opacity-30 hover:opacity-60" style={{ color: 'var(--dashboard-muted)' }}>
         <GripVertical className="w-4 h-4" />
       </div>
 
       {/* Checkbox */}
       <button
         onClick={(e) => { e.stopPropagation(); onToggle(); }}
-        className={cn(
-          'shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all',
-          task.completed ? `${ACCENT_BG} border-[#d4ec00]` : 'border-muted-foreground/40 hover:border-[#d4ec00]'
-        )}
+        className="shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all"
+        style={task.completed ? { background: 'var(--dashboard-accent)', borderColor: 'var(--dashboard-accent)' } : { borderColor: 'rgba(108,114,122,.4)' }}
       >
-        {task.completed && <Check className="w-3 h-3 text-zinc-900" strokeWidth={3} />}
+        {task.completed && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
       </button>
 
       {/* Content - clickable to edit */}
       <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
         <div className="flex items-center gap-2 flex-wrap">
-          <p className={cn('text-sm font-medium leading-tight transition-all', task.completed ? 'line-through text-muted-foreground' : 'text-foreground')}>
+          <p className={cn('text-sm font-medium leading-tight transition-all', task.completed && 'line-through')} style={{ color: task.completed ? 'var(--dashboard-muted)' : 'var(--dashboard-text)' }}>
             {task.title}
           </p>
           {isVisit && (
-            <span className={cn('shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium', ACCENT_BG_SUBTLE, ACCENT)}>Ziyaret</span>
+            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'rgba(242,153,74,.1)', color: 'var(--dashboard-accent)' }}>Ziyaret</span>
           )}
           {/* Priority badge */}
           {priority !== 'normal' && (
@@ -2605,39 +2934,39 @@ function TaskCard({
 
         {isVisit && task.laboratoryName && (
           <div className="flex items-center gap-1.5 mt-1.5">
-            <Building2 className="w-3 h-3 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">{task.laboratoryName}</span>
+            <Building2 className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} />
+            <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>{task.laboratoryName}</span>
           </div>
         )}
 
         {task.description && (
-          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.description}</p>
+          <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--dashboard-muted)' }}>{task.description}</p>
         )}
 
         {isVisit && task.accompanyingPersonnel && task.accompanyingPersonnel.length > 0 && (
           <div className="flex items-center gap-1.5 mt-1.5">
-            <Users className="w-3 h-3 text-muted-foreground" />
-            <span className="text-[11px] text-muted-foreground">{task.accompanyingPersonnel.map((p) => p.name).join(', ')}</span>
+            <Users className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} />
+            <span className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>{task.accompanyingPersonnel.map((p) => p.name).join(', ')}</span>
           </div>
         )}
 
         {assignedPersonnel.length > 0 && (
           <div className="flex items-center gap-1.5 mt-1.5">
-            <Users className="w-3 h-3 text-muted-foreground" />
-            <span className="text-[11px] text-muted-foreground">Takipçiler: {assignedPersonnel.map((p) => p.name).join(', ')}</span>
+            <Users className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} />
+            <span className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>Takipçiler: {assignedPersonnel.map((p) => p.name).join(', ')}</span>
           </div>
         )}
 
         {/* Subtasks */}
         {task.subtasks && task.subtasks.length > 0 && (
           <div className="mt-2 space-y-1">
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>
               <ListChecks className="w-3 h-3" />
               <span>{completedSubtasks}/{totalSubtasks} alt görev</span>
-              <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden ml-1">
+              <div className="flex-1 h-1 rounded-full overflow-hidden ml-1 cihaz-pressed">
                 <div
-                  className={cn('h-full rounded-full transition-all', ACCENT_BG)}
-                  style={{ width: `${totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0}%` }}
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0}%`, background: 'var(--dashboard-accent)' }}
                 />
               </div>
             </div>
@@ -2648,11 +2977,11 @@ function TaskCard({
                 className="flex items-center gap-2 text-left w-full group/st"
               >
                 {st.completed ? (
-                  <CheckSquare className={cn('w-3.5 h-3.5 shrink-0', ACCENT)} />
+                  <CheckSquare className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--dashboard-accent)' }} />
                 ) : (
-                  <Square className="w-3.5 h-3.5 shrink-0 text-muted-foreground group-hover/st:text-foreground" />
+                  <Square className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--dashboard-muted)' }} />
                 )}
-                <span className={cn('text-[11px]', st.completed ? 'line-through text-muted-foreground' : 'text-foreground/80')}>
+                <span className={cn('text-[11px]', st.completed && 'line-through')} style={{ color: st.completed ? 'var(--dashboard-muted)' : 'var(--dashboard-text)' }}>
                   {st.title}
                 </span>
               </button>
@@ -2683,20 +3012,21 @@ function TaskCard({
         )}
 
         <div className="flex items-center gap-3 mt-2">
-          <div className="flex items-center gap-1 text-muted-foreground">
+          <div className="flex items-center gap-1" style={{ color: 'var(--dashboard-muted)' }}>
             <Clock className="w-3 h-3" />
             <span className="text-[11px]">{task.startTime} - {task.endTime}</span>
           </div>
-          <span className="text-[11px] text-muted-foreground/70">
+          <span className="text-[11px]" style={{ color: 'var(--dashboard-muted)', opacity: 0.7 }}>
             {hours > 0 ? `${hours}s ` : ''}{mins > 0 ? `${mins}dk` : ''}
           </span>
         </div>
 
-        <div className="mt-3 border-t border-border/60 pt-2" onClick={(e) => e.stopPropagation()}>
+        <div className="mt-3 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }} onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             onClick={() => setShowActivityLogs((v) => !v)}
-            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-center gap-1 text-[11px] transition-colors hover:brightness-[0.8]"
+            style={{ color: 'var(--dashboard-muted)' }}
           >
             <Clock className="w-3.5 h-3.5" />
             <span>Geçmiş ({activityLogs.length})</span>
@@ -2705,19 +3035,19 @@ function TaskCard({
           {showActivityLogs && (
             <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
               {activityLogs.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">Henüz hareket kaydı yok.</p>
+                <p className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>Henüz hareket kaydı yok.</p>
               ) : (
                 activityLogs.map((log) => (
-                  <div key={log.id} className="rounded-lg bg-secondary/70 px-2.5 py-1.5">
+                  <div key={log.id} className="rounded-lg px-2.5 py-1.5 cihaz-pressed">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-medium text-foreground/90">{log.createdByName}</span>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-[10px] font-medium" style={{ color: 'var(--dashboard-text)' }}>{log.createdByName}</span>
+                      <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
                         {log.createdAt && 'seconds' in (log.createdAt as any)
                           ? format(new Date((log.createdAt as any).seconds * 1000), 'dd.MM HH:mm')
                           : '-'}
                       </span>
                     </div>
-                    <p className="text-[11px] text-foreground/80 mt-0.5 whitespace-pre-wrap">{log.message}</p>
+                    <p className="text-[11px] mt-0.5 whitespace-pre-wrap" style={{ color: 'var(--dashboard-text)', opacity: 0.8 }}>{log.message}</p>
                   </div>
                 ))
               )}
@@ -2727,7 +3057,8 @@ function TaskCard({
           <button
             type="button"
             onClick={() => setShowComments((v) => !v)}
-            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors mt-2"
+            className="inline-flex items-center gap-1 text-[11px] transition-colors hover:brightness-[0.8] mt-2"
+            style={{ color: 'var(--dashboard-muted)' }}
           >
             <MessageSquare className="w-3.5 h-3.5" />
             <span>Notlar ({comments.length})</span>
@@ -2736,20 +3067,20 @@ function TaskCard({
           {showComments && (
             <div className="mt-2 space-y-2">
               {comments.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">Henüz not eklenmedi.</p>
+                <p className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>Henüz not eklenmedi.</p>
               ) : (
                 <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
                   {comments.map((comment) => (
-                    <div key={comment.id} className="rounded-lg bg-secondary/70 px-2.5 py-1.5">
+                    <div key={comment.id} className="rounded-lg px-2.5 py-1.5 cihaz-pressed">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-medium text-foreground/90">{comment.createdByName}</span>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-[10px] font-medium" style={{ color: 'var(--dashboard-text)' }}>{comment.createdByName}</span>
+                        <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
                           {comment.createdAt && 'seconds' in (comment.createdAt as any)
                             ? format(new Date((comment.createdAt as any).seconds * 1000), 'dd.MM HH:mm')
                             : '-'}
                         </span>
                       </div>
-                      <p className="text-[11px] text-foreground/80 mt-0.5 whitespace-pre-wrap">{comment.message}</p>
+                      <p className="text-[11px] mt-0.5 whitespace-pre-wrap" style={{ color: 'var(--dashboard-text)', opacity: 0.8 }}>{comment.message}</p>
                     </div>
                   ))}
                 </div>
@@ -2766,12 +3097,14 @@ function TaskCard({
                     }
                   }}
                   placeholder="Göreve not ekleyin..."
-                  className="flex-1 h-8 px-2.5 bg-secondary border border-border rounded-lg text-[11px] text-foreground placeholder:text-muted-foreground outline-none"
+                  className="flex-1 h-8 px-2.5 rounded-lg text-[11px] outline-none cihaz-pressed"
+                  style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
                 />
                 <button
                   type="button"
                   onClick={submitComment}
-                  className={cn('h-8 w-8 rounded-lg flex items-center justify-center', ACCENT_BG, 'text-zinc-900')}
+                  className="h-8 w-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'var(--dashboard-accent)', color: '#fff' }}
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>
@@ -2782,19 +3115,19 @@ function TaskCard({
       </div>
 
       {/* Time bar */}
-      <div className="shrink-0 w-1 h-10 rounded-full bg-secondary overflow-hidden self-center">
+      <div className="shrink-0 w-1 h-10 rounded-full overflow-hidden self-center cihaz-pressed">
         <div
-          className={cn('w-full rounded-full transition-all', task.completed ? 'bg-muted-foreground/30' : ACCENT_BG)}
-          style={{ height: `${Math.min((durationMin / TOTAL_WORK_MINUTES) * 100, 100)}%` }}
+          className="w-full rounded-full transition-all"
+          style={{ height: `${Math.min((durationMin / TOTAL_WORK_MINUTES) * 100, 100)}%`, background: task.completed ? 'var(--dashboard-muted)' : 'var(--dashboard-accent)', opacity: task.completed ? 0.3 : 1 }}
         />
       </div>
 
       {/* Actions */}
       <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
-        <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-all">
+        <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-1.5 rounded-lg cihaz-card transition-all hover:brightness-[0.97]" style={{ color: 'var(--dashboard-muted)' }}>
           <Pencil className="w-3.5 h-3.5" />
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-red-400 transition-all">
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-lg cihaz-card transition-all hover:brightness-[0.97] hover:text-red-500" style={{ color: 'var(--dashboard-muted)' }}>
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -2832,26 +3165,26 @@ function TaskDefinitionsModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-t-3xl md:rounded-3xl p-6" style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold">Görev Tanımları</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent"><X className="w-5 h-5" /></button>
+          <h3 className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>Görev Tanımları</h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg cihaz-card transition-all hover:brightness-[0.97]"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="space-y-2 mb-4">
           {definitions.map((def) => (
-            <div key={def.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary border border-border">
+            <div key={def.id} className="flex items-center gap-2 px-3 py-2.5 rounded-xl cihaz-pressed">
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-foreground truncate">{def.name}</p>
-                {def.requiresLaboratory && <p className="text-[10px] text-muted-foreground">Laboratuvar seçimi zorunlu</p>}
+                <p className="text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{def.name}</p>
+                {def.requiresLaboratory && <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Laboratuvar seçimi zorunlu</p>}
               </div>
-              <button onClick={() => onDelete(def.id)} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400">
+              <button onClick={() => onDelete(def.id)} className="p-1 rounded-lg cihaz-card hover:text-red-500 transition-all" style={{ color: 'var(--dashboard-muted)' }}>
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
           ))}
-          {definitions.length === 0 && <p className="text-xs text-muted-foreground">Henüz tanım yok.</p>}
+          {definitions.length === 0 && <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Henüz tanım yok.</p>}
         </div>
 
         <div className="space-y-3">
@@ -2859,16 +3192,18 @@ function TaskDefinitionsModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Yeni görev tanımı"
-            className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-sm outline-none"
+            className="w-full px-4 py-3 rounded-xl text-sm outline-none cihaz-pressed"
+            style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
           />
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
             <input type="checkbox" checked={requiresLaboratory} onChange={(e) => setRequiresLaboratory(e.target.checked)} />
             Bu tanım laboratuvar gerektirir (kurum ziyareti benzeri)
           </label>
           <button
             onClick={handleCreate}
             disabled={!name.trim() || saving}
-            className={cn('w-full py-2.5 rounded-xl text-sm font-semibold', name.trim() && !saving ? `${ACCENT_BG} text-zinc-900` : 'bg-secondary text-muted-foreground')}
+            className={cn('w-full py-2.5 rounded-xl text-sm font-semibold transition-all', name.trim() && !saving ? 'hover:brightness-[0.95]' : 'cihaz-pressed cursor-not-allowed')}
+            style={name.trim() && !saving ? { background: 'var(--dashboard-accent)', color: '#fff' } : { color: 'var(--dashboard-muted)' }}
           >
             Tanım Ekle
           </button>
@@ -2918,42 +3253,42 @@ function TaskCompletionModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
-      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300" style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-lg font-bold text-foreground">Görev Tamamlama</h3>
-            <p className="text-xs text-muted-foreground mt-1">{task.title}</p>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>Görev Tamamlama</h3>
+            <p className="text-xs mt-1" style={{ color: 'var(--dashboard-muted)' }}>{task.title}</p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors">
+          <button onClick={onClose} className="p-1.5 rounded-lg cihaz-card transition-all hover:brightness-[0.97]" style={{ color: 'var(--dashboard-muted)' }}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {items.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">Çıktı checklisti: {done}/{total}</p>
+            <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Çıktı checklisti: {done}/{total}</p>
             {items.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => toggleItem(item.id)}
                 disabled={saving || completing}
-                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-secondary/60 text-left"
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-left cihaz-pressed"
               >
-                {item.completed ? <CheckSquare className={cn('w-4 h-4', ACCENT)} /> : <Square className="w-4 h-4 text-muted-foreground" />}
-                <span className={cn('text-sm', item.completed ? 'line-through text-muted-foreground' : 'text-foreground')}>{item.title}</span>
+                {item.completed ? <CheckSquare className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} /> : <Square className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />}
+                <span className={cn('text-sm', item.completed && 'line-through')} style={{ color: item.completed ? 'var(--dashboard-muted)' : 'var(--dashboard-text)' }}>{item.title}</span>
               </button>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Bu görev için checklist tanımı yok.</p>
+          <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>Bu görev için checklist tanımı yok.</p>
         )}
 
         {task.expectedCompletionFileName && (
-          <div className="mt-4 rounded-xl border border-border bg-secondary/40 p-3">
-            <p className="text-xs font-medium text-foreground">Beklenen çıktı dosyası</p>
-            <p className="text-xs text-muted-foreground mt-1">{task.expectedCompletionFileName}</p>
+          <div className="mt-4 rounded-xl p-3 cihaz-pressed">
+            <p className="text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>Beklenen çıktı dosyası</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--dashboard-muted)' }}>{task.expectedCompletionFileName}</p>
           </div>
         )}
 
@@ -2966,7 +3301,8 @@ function TaskCompletionModal({
               await onComplete(false);
               setCompleting(false);
             }}
-            className={cn('w-full py-3 rounded-xl text-sm font-semibold transition-all', items.length > 0 && !allDone ? 'bg-secondary text-muted-foreground cursor-not-allowed' : `${ACCENT_BG} text-zinc-900 hover:brightness-110`)}
+            className={cn('w-full py-3 rounded-xl text-sm font-semibold transition-all', items.length > 0 && !allDone ? 'cihaz-pressed cursor-not-allowed' : 'hover:brightness-[0.95]')}
+            style={items.length > 0 && !allDone ? { color: 'var(--dashboard-muted)' } : { background: 'var(--dashboard-accent)', color: '#fff' }}
           >
             Tüm Çıktılar Tamamlandı → Görevi Bitir
           </button>
@@ -3209,21 +3545,23 @@ function TaskFormModal({
     setSubmitting(false);
   };
 
-  const inputCls = 'w-full px-4 py-3 bg-secondary border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#d4ec00]/40 focus:border-[#d4ec00]/40 transition-all';
-  const dropdownTriggerCls = 'w-full flex items-center justify-between px-4 py-3 bg-secondary border rounded-xl text-sm transition-all';
+  const inputCls = 'w-full px-4 py-3 rounded-xl text-sm outline-none cihaz-pressed transition-all focus:ring-2 focus:ring-[#F2994A]/30';
+  const dropdownTriggerCls = 'w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all';
+  const [showDetails, setShowDetails] = useState(!!isEdit);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-card border border-border rounded-t-3xl md:rounded-3xl p-6 animate-in slide-in-from-bottom-4 duration-300"
+        className="w-full max-w-md max-h-[90vh] flex flex-col rounded-t-3xl md:rounded-3xl animate-in slide-in-from-bottom-4 duration-300"
+        style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-bold text-foreground">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <h3 className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>
             {isEdit ? 'Görevi Düzenle' : 'Yeni Görev'}
           </h3>
           <div className="flex items-center gap-1">
@@ -3231,50 +3569,150 @@ function TaskFormModal({
               <button
                 type="button"
                 onClick={() => { onDelete(); }}
-                className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors"
+                className="p-1.5 rounded-lg cihaz-card hover:text-red-500 transition-all"
+                style={{ color: 'var(--dashboard-muted)' }}
               >
                 <Trash2 className="w-5 h-5" />
               </button>
             )}
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors">
+            <button onClick={onClose} className="p-1.5 rounded-lg cihaz-card transition-all hover:brightness-[0.97]" style={{ color: 'var(--dashboard-muted)' }}>
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Task Type Selector */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 pb-2 space-y-4">
+          {/* ===== SECTION A: Core — Title + quick template chips ===== */}
+          {!isVisitType ? (
+            <div>
+              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ne yapacaksın?" className={cn(inputCls, 'text-base font-medium py-3.5')} style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }} autoFocus />
+              {/* Template chips */}
+              {!isEdit && !title.trim() && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {['Toplantı', 'Kurum Ziyareti', 'Stok Kontrol', 'Arıza Takibi'].map((tpl) => (
+                    <button
+                      key={tpl}
+                      type="button"
+                      onClick={() => setTitle(tpl)}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold cihaz-card transition-all hover:brightness-[0.96] active:scale-[0.97]"
+                      style={{ color: 'var(--dashboard-text)' }}
+                    >
+                      {tpl}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl cihaz-pressed" style={{ border: '1px solid var(--dashboard-stroke)' }}>
+              <Building2 className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} />
+              <span className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>{selectedDefinition?.name || 'Kurum Ziyareti'}</span>
+            </div>
+          )}
+
+          {/* Task Type selector — compact */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görev Tanımı</label>
             <div className="relative">
               <select
                 value={taskType}
                 onChange={(e) => setTaskType(e.target.value)}
-                className={cn(inputCls, 'pr-10 appearance-none')}
+                className={cn(inputCls, 'pr-10 appearance-none py-2.5 text-xs')}
+                style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
               >
                 {taskDefinitions.length === 0 && <option value="custom">Serbest Görev</option>}
                 {taskDefinitions.map((def) => (
                   <option key={def.id} value={def.id}>{def.name}</option>
                 ))}
               </select>
-              <ChevronDown className="w-4 h-4 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--dashboard-muted)' }} />
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">Yeni görev tanımları sol üstteki çark butonundan eklenebilir.</p>
           </div>
 
-{/* Priority Selector */}
+          {/* ===== SECTION B: Time — big preset buttons ===== */}
+          <div className="cihaz-card rounded-xl p-3 space-y-3">
+            <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Zaman</p>
+            {/* Date presets */}
+            <div className="flex gap-1.5">
+              {[
+                { label: 'Bugün', value: format(new Date(), 'yyyy-MM-dd') },
+                { label: 'Yarın', value: format(addDays(new Date(), 1), 'yyyy-MM-dd') },
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setDate(preset.value)}
+                  className={cn('flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all', date === preset.value ? 'cihaz-card-strong' : 'cihaz-pressed')}
+                  style={date === preset.value ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-text)' }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+              <div className="flex-1">
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, 'py-2.5 text-xs text-center dark:[color-scheme:dark]')} style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }} />
+              </div>
+            </div>
+            {/* Time range — side by side */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] mb-1" style={{ color: 'var(--dashboard-muted)' }}>Başlangıç</label>
+                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={cn(inputCls, 'py-2.5 text-xs dark:[color-scheme:dark]')} />
+              </div>
+              <div>
+                <label className="block text-[10px] mb-1" style={{ color: 'var(--dashboard-muted)' }}>Bitiş</label>
+                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className={cn(inputCls, 'py-2.5 text-xs dark:[color-scheme:dark]')} />
+              </div>
+            </div>
+            {/* Duration presets */}
+            <div className="flex gap-1.5">
+              {[
+                { label: '15 dk', mins: 15 },
+                { label: '30 dk', mins: 30 },
+                { label: '1 saat', mins: 60 },
+                { label: '2 saat', mins: 120 },
+              ].map((dur) => {
+                const computedEnd = `${Math.floor((parseTime(startTime) + dur.mins) / 60).toString().padStart(2, '0')}:${((parseTime(startTime) + dur.mins) % 60).toString().padStart(2, '0')}`;
+                const isActive = endTime === computedEnd;
+                return (
+                  <button
+                    key={dur.label}
+                    type="button"
+                    onClick={() => setEndTime(computedEnd)}
+                    className={cn('flex-1 py-2 rounded-lg text-[10px] font-semibold transition-all', isActive ? 'cihaz-card-strong' : 'cihaz-pressed')}
+                    style={isActive ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
+                  >
+                    {dur.label}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Duration preview */}
+            {timeValid && (
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg">
+                <Clock className="w-3 h-3" style={{ color: 'var(--dashboard-accent)' }} />
+                <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                  Süre: {(() => { const dur = parseTime(endTime) - parseTime(startTime); const h = Math.floor(dur / 60); const m = dur % 60; return `${h > 0 ? `${h} saat ` : ''}${m > 0 ? `${m} dakika` : ''}`; })()}
+                </span>
+              </div>
+            )}
+            {!timeValid && startTime && endTime && (
+              <p className="text-[10px] text-red-400">Bitiş saati başlangıçtan sonra olmalıdır</p>
+            )}
+          </div>
+
+          {/* ===== SECTION C: Priority — segmented, single row ===== */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Öncelik</label>
-            <div className="grid grid-cols-4 gap-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-wider mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Öncelik</p>
+            <div className="grid grid-cols-4 gap-1">
               {(Object.entries(PRIORITY_CONFIG) as [Priority, typeof PRIORITY_CONFIG[Priority]][]).map(([key, conf]) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setPriority(key)}
                   className={cn(
-                    'flex items-center justify-center gap-1 py-2 px-2 rounded-xl text-[11px] font-medium border transition-all',
-                    priority === key ? cn(conf.bg, conf.color, 'border-current') : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                    'flex items-center justify-center gap-1 py-2.5 rounded-xl text-[11px] font-semibold transition-all',
+                    priority === key ? 'cihaz-card-strong' : 'cihaz-pressed'
                   )}
+                  style={priority === key ? { color: conf.color.includes('red') ? '#dc2626' : conf.color.includes('amber') ? '#d97706' : conf.color.includes('blue') ? '#2563eb' : 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
                 >
                   <conf.icon className="w-3 h-3" />
                   {conf.label}
@@ -3283,48 +3721,109 @@ function TaskFormModal({
             </div>
           </div>
 
-          {/* Title */}
-          {!isVisitType ? (
-            <div>
-              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görev Adı *</label>
-              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Görev başlığı girin" className={inputCls} autoFocus />
-            </div>
-          ) : (
-            <div className={cn('flex items-center gap-2 px-4 py-3 rounded-xl border', ACCENT_BG_SUBTLE, 'border-border/50')}>
-              <Building2 className={cn('w-4 h-4', ACCENT)} />
-              <span className="text-sm font-medium text-foreground">{selectedDefinition?.name || 'Kurum Ziyareti'}</span>
-            </div>
-          )}
+          {/* ===== SECTION D: Assignees — single big button ===== */}
+          <div ref={assignedDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => { setShowAssignedDropdown((v) => !v); setShowLabDropdown(false); setShowPersonnelDropdown(false); }}
+              className={cn(dropdownTriggerCls, showAssignedDropdown ? 'ring-2 ring-[#F2994A]/30' : '', 'cihaz-pressed rounded-xl')}
+              style={{ color: assignedPersonnel.length > 0 ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}
+            >
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                <span className="text-sm">{assignedPersonnel.length > 0 ? `${assignedPersonnel.length} kişi seçildi` : 'Kişi seç (opsiyonel)'}</span>
+              </div>
+              <ChevronDown className={cn('w-4 h-4 shrink-0 transition-transform', showAssignedDropdown && 'rotate-180')} />
+            </button>
+            {assignedPersonnel.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {assignedPersonnel.map((p) => (
+                  <span key={p.uid} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] cihaz-card" style={{ color: 'var(--dashboard-text)' }}>
+                    {p.name}
+                    <button type="button" onClick={() => setAssignedPersonnel((prev) => prev.filter((x) => x.uid !== p.uid))} className="hover:text-red-500 transition-colors" style={{ color: 'var(--dashboard-muted)' }}><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {showAssignedDropdown && (
+              <div className="absolute z-20 mt-1 w-full rounded-xl overflow-hidden animate-in slide-in-from-top-1 duration-150" style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }}>
+                <div className="p-2" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
+                    <Search className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} />
+                    <input type="text" value={personnelSearchQuery} onChange={(e) => setPersonnelSearchQuery(e.target.value)} placeholder="Personel ara..." className="flex-1 bg-transparent text-sm outline-none" style={{ color: 'var(--dashboard-text)' }} autoFocus />
+                  </div>
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  {filteredPersonnel.length === 0 ? (
+                    <div className="px-4 py-3 text-xs text-center" style={{ color: 'var(--dashboard-muted)' }}>Sonuç bulunamadı</div>
+                  ) : (
+                    filteredPersonnel.map((user) => {
+                      const isSelected = assignedPersonnel.some((p) => p.uid === user.uid);
+                      return (
+                        <button key={user.uid} type="button" onClick={() => toggleAssignedPersonnel(user)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-all hover:brightness-[0.97]">
+                          <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all" style={isSelected ? { background: 'var(--dashboard-accent)', borderColor: 'var(--dashboard-accent)' } : { borderColor: 'rgba(108,114,122,.4)' }}>
+                            {isSelected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="truncate block" style={{ color: 'var(--dashboard-text)' }}>{user.name || user.email}</span>
+                            <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ===== COLLAPSIBLE DETAILS ===== */}
+          <button
+            type="button"
+            onClick={() => setShowDetails((v) => !v)}
+            className="flex items-center gap-2 text-xs font-medium w-full py-2 transition-colors"
+            style={{ color: 'var(--dashboard-muted)' }}
+          >
+            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', showDetails && 'rotate-180')} />
+            <span>{showDetails ? 'Detayları Gizle' : 'Detaylar'}</span>
+            {(description || (subtasks.length > 0) || (files.length > 0) || (existingAttachments.length > 0)) && (
+              <span className="w-1.5 h-1.5 rounded-full bg-[#F2994A]" />
+            )}
+          </button>
+
+          {showDetails && (
+            <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
 
           {/* Laboratory selector (kurum_ziyareti only) */}
           {isVisitType && (
             <div ref={labDropdownRef} className="relative">
-              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Kurum (Laboratuvar) *</label>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Kurum (Laboratuvar) *</label>
               <button
                 type="button"
                 onClick={() => { setShowLabDropdown((v) => !v); setShowPersonnelDropdown(false); setShowAssignedDropdown(false); }}
-                className={cn(dropdownTriggerCls, showLabDropdown ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40` : 'border-border', selectedLabId ? 'text-foreground' : 'text-muted-foreground')}
+                className={cn(dropdownTriggerCls, showLabDropdown ? 'ring-2 ring-[#F2994A]/30' : '', 'cihaz-pressed')}
+                style={{ color: selectedLabId ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}
               >
                 <span className="truncate">{selectedLab?.name || 'Laboratuvar seçin'}</span>
                 <ChevronDown className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', showLabDropdown && 'rotate-180')} />
               </button>
               {showLabDropdown && (
-                <div className="absolute z-20 mt-1 w-full bg-popover border border-border rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
-                  <div className="p-2 border-b border-border">
-                    <div className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
-                      <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                      <input type="text" value={labSearchQuery} onChange={(e) => setLabSearchQuery(e.target.value)} placeholder="Ara..." className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none" autoFocus />
+                <div className="absolute z-20 mt-1 w-full rounded-xl overflow-hidden animate-in slide-in-from-top-1 duration-150" style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }}>
+                  <div className="p-2" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
+                      <Search className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} />
+                      <input type="text" value={labSearchQuery} onChange={(e) => setLabSearchQuery(e.target.value)} placeholder="Ara..." className="flex-1 bg-transparent text-sm outline-none" style={{ color: 'var(--dashboard-text)' }} autoFocus />
                     </div>
                   </div>
                   <div className="max-h-48 overflow-y-auto">
                     {filteredLabs.length === 0 ? (
-                      <div className="px-4 py-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
+                      <div className="px-4 py-3 text-xs text-center" style={{ color: 'var(--dashboard-muted)' }}>Sonuç bulunamadı</div>
                     ) : (
                       filteredLabs.map((lab) => (
-                        <button key={lab.id} type="button" onClick={() => { setSelectedLabId(lab.id); setShowLabDropdown(false); setLabSearchQuery(''); }} className={cn('w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent transition-colors text-left', selectedLabId === lab.id ? cn('bg-accent/50', ACCENT) : 'text-foreground')}>
+                        <button key={lab.id} type="button" onClick={() => { setSelectedLabId(lab.id); setShowLabDropdown(false); setLabSearchQuery(''); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-all hover:brightness-[0.97]" style={{ color: selectedLabId === lab.id ? 'var(--dashboard-accent)' : 'var(--dashboard-text)' }}>
                           <Building2 className="w-3.5 h-3.5 shrink-0 opacity-50" />
                           <span className="truncate">{lab.name}</span>
-                          {selectedLabId === lab.id && <Check className={cn('w-3.5 h-3.5 shrink-0 ml-auto', ACCENT)} />}
+                          {selectedLabId === lab.id && <Check className="w-3.5 h-3.5 shrink-0 ml-auto" style={{ color: 'var(--dashboard-accent)' }} />}
                         </button>
                       ))
                     )}
@@ -3336,107 +3835,55 @@ function TaskFormModal({
 
           {/* Description */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Açıklama *</label>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Açıklama *</label>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Açıklama girin" rows={2} className={cn(inputCls, 'resize-none')} />
-          </div>
-
-          {/* Task Followers / Assignees */}
-          <div ref={assignedDropdownRef} className="relative">
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Görevi Takip Edecek Personeller</label>
-            <button
-              type="button"
-              onClick={() => { setShowAssignedDropdown((v) => !v); setShowLabDropdown(false); setShowPersonnelDropdown(false); }}
-              className={cn(dropdownTriggerCls, showAssignedDropdown ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40` : 'border-border', assignedPersonnel.length > 0 ? 'text-foreground' : 'text-muted-foreground')}
-            >
-              <span className="truncate">{assignedPersonnel.length > 0 ? `${assignedPersonnel.length} kişi seçildi` : 'Personel seçin (opsiyonel)'}</span>
-              <ChevronDown className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', showAssignedDropdown && 'rotate-180')} />
-            </button>
-            {assignedPersonnel.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {assignedPersonnel.map((p) => (
-                  <span key={p.uid} className="inline-flex items-center gap-1 px-2 py-1 bg-secondary border border-border rounded-lg text-[11px] text-foreground">
-                    {p.name}
-                    <button type="button" onClick={() => setAssignedPersonnel((prev) => prev.filter((x) => x.uid !== p.uid))} className="text-muted-foreground hover:text-red-400 transition-colors"><X className="w-3 h-3" /></button>
-                  </span>
-                ))}
-              </div>
-            )}
-            {showAssignedDropdown && (
-              <div className="absolute z-20 mt-1 w-full bg-popover border border-border rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
-                <div className="p-2 border-b border-border">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
-                    <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                    <input type="text" value={personnelSearchQuery} onChange={(e) => setPersonnelSearchQuery(e.target.value)} placeholder="Personel ara..." className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none" autoFocus />
-                  </div>
-                </div>
-                <div className="max-h-48 overflow-y-auto">
-                  {filteredPersonnel.length === 0 ? (
-                    <div className="px-4 py-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
-                  ) : (
-                    filteredPersonnel.map((user) => {
-                      const isSelected = assignedPersonnel.some((p) => p.uid === user.uid);
-                      return (
-                        <button key={user.uid} type="button" onClick={() => toggleAssignedPersonnel(user)} className={cn('w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent transition-colors text-left', isSelected ? 'bg-accent/50' : '')}>
-                          <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all', isSelected ? `${ACCENT_BG} border-[#d4ec00]` : 'border-muted-foreground/40')}>
-                            {isSelected && <Check className="w-2.5 h-2.5 text-zinc-900" strokeWidth={3} />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>{user.name || user.email}</span>
-                            <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Accompanying Personnel (kurum_ziyareti only) */}
           {isVisitType && (
             <div ref={personnelDropdownRef} className="relative">
-              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Eşlik Eden Personel</label>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Eşlik Eden Personel</label>
               <button
                 type="button"
                 onClick={() => { setShowPersonnelDropdown((v) => !v); setShowLabDropdown(false); setShowAssignedDropdown(false); }}
-                className={cn(dropdownTriggerCls, showPersonnelDropdown ? `${ACCENT_BORDER} ring-2 ring-[#d4ec00]/40` : 'border-border', selectedPersonnel.length > 0 ? 'text-foreground' : 'text-muted-foreground')}
+                className={cn(dropdownTriggerCls, showPersonnelDropdown ? 'ring-2 ring-[#F2994A]/30' : '', 'cihaz-pressed')}
+                style={{ color: selectedPersonnel.length > 0 ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}
               >
                 <span className="truncate">{selectedPersonnel.length > 0 ? `${selectedPersonnel.length} kişi seçildi` : 'Personel seçin (opsiyonel)'}</span>
-                <ChevronDown className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', showPersonnelDropdown && 'rotate-180')} />
+                <ChevronDown className={cn('w-4 h-4 shrink-0 transition-transform', showPersonnelDropdown && 'rotate-180')} style={{ color: 'var(--dashboard-muted)' }} />
               </button>
               {selectedPersonnel.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {selectedPersonnel.map((p) => (
-                    <span key={p.uid} className="inline-flex items-center gap-1 px-2 py-1 bg-secondary border border-border rounded-lg text-[11px] text-foreground">
+                    <span key={p.uid} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] cihaz-card" style={{ color: 'var(--dashboard-text)' }}>
                       {p.name}
-                      <button type="button" onClick={() => setSelectedPersonnel((prev) => prev.filter((x) => x.uid !== p.uid))} className="text-muted-foreground hover:text-red-400 transition-colors"><X className="w-3 h-3" /></button>
+                      <button type="button" onClick={() => setSelectedPersonnel((prev) => prev.filter((x) => x.uid !== p.uid))} className="hover:text-red-500 transition-colors" style={{ color: 'var(--dashboard-muted)' }}><X className="w-3 h-3" /></button>
                     </span>
                   ))}
                 </div>
               )}
               {showPersonnelDropdown && (
-                <div className="absolute z-20 mt-1 w-full bg-popover border border-border rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-1 duration-150">
-                  <div className="p-2 border-b border-border">
-                    <div className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
-                      <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                      <input type="text" value={personnelSearchQuery} onChange={(e) => setPersonnelSearchQuery(e.target.value)} placeholder="Personel ara..." className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none" autoFocus />
+                <div className="absolute z-20 mt-1 w-full rounded-xl overflow-hidden animate-in slide-in-from-top-1 duration-150" style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }}>
+                  <div className="p-2" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
+                      <Search className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} />
+                      <input type="text" value={personnelSearchQuery} onChange={(e) => setPersonnelSearchQuery(e.target.value)} placeholder="Personel ara..." className="flex-1 bg-transparent text-sm outline-none" style={{ color: 'var(--dashboard-text)' }} autoFocus />
                     </div>
                   </div>
                   <div className="max-h-48 overflow-y-auto">
                     {filteredPersonnel.length === 0 ? (
-                      <div className="px-4 py-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
+                      <div className="px-4 py-3 text-xs text-center" style={{ color: 'var(--dashboard-muted)' }}>Sonuç bulunamadı</div>
                     ) : (
                       filteredPersonnel.map((user) => {
                         const isSelected = selectedPersonnel.some((p) => p.uid === user.uid);
                         return (
-                          <button key={user.uid} type="button" onClick={() => togglePersonnel(user)} className={cn('w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent transition-colors text-left', isSelected ? 'bg-accent/50' : '')}>
-                            <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all', isSelected ? `${ACCENT_BG} border-[#d4ec00]` : 'border-muted-foreground/40')}>
-                              {isSelected && <Check className="w-2.5 h-2.5 text-zinc-900" strokeWidth={3} />}
+                          <button key={user.uid} type="button" onClick={() => togglePersonnel(user)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-all hover:brightness-[0.97]">
+                            <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all" style={isSelected ? { background: 'var(--dashboard-accent)', borderColor: 'var(--dashboard-accent)' } : { borderColor: 'rgba(108,114,122,.4)' }}>
+                              {isSelected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <span className={cn('truncate block', isSelected ? 'text-foreground' : 'text-foreground/80')}>{user.name || user.email}</span>
-                              <span className="text-[10px] text-muted-foreground">{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
+                              <span className="truncate block" style={{ color: 'var(--dashboard-text)' }}>{user.name || user.email}</span>
+                              <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{user.role === 'admin' ? 'Admin' : 'Planlama Birimi'}</span>
                             </div>
                           </button>
                         );
@@ -3450,16 +3897,16 @@ function TaskFormModal({
 
           {/* Subtasks */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>
               <ListChecks className="w-3.5 h-3.5 inline mr-1" />
               Alt Görevler
             </label>
             {subtasks.length > 0 && (
               <div className="space-y-1 mb-2">
                 {subtasks.map((st) => (
-                  <div key={st.id} className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
-                    <span className="flex-1 text-xs text-foreground">{st.title}</span>
-                    <button type="button" onClick={() => removeSubtask(st.id)} className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-red-400 transition-colors">
+                  <div key={st.id} className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
+                    <span className="flex-1 text-xs" style={{ color: 'var(--dashboard-text)' }}>{st.title}</span>
+                    <button type="button" onClick={() => removeSubtask(st.id)} className="shrink-0 p-0.5 rounded hover:text-red-500 transition-colors" style={{ color: 'var(--dashboard-muted)' }}>
                       <X className="w-3 h-3" />
                     </button>
                   </div>
@@ -3479,7 +3926,8 @@ function TaskFormModal({
                 type="button"
                 onClick={addSubtask}
                 disabled={!newSubtaskTitle.trim()}
-                className={cn('shrink-0 px-3 rounded-xl border transition-all', newSubtaskTitle.trim() ? cn(ACCENT_BG, 'text-zinc-900 border-transparent') : 'bg-secondary border-border text-muted-foreground')}
+                className={cn('shrink-0 px-3 rounded-xl transition-all', newSubtaskTitle.trim() ? 'cihaz-card' : 'cihaz-pressed')}
+                style={newSubtaskTitle.trim() ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
               >
                 <CirclePlus className="w-4 h-4" />
               </button>
@@ -3487,16 +3935,16 @@ function TaskFormModal({
           </div>
 
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>
               <CheckSquare className="w-3.5 h-3.5 inline mr-1" />
               Görev Sonlandırma Çıktı Listesi (opsiyonel)
             </label>
             {completionChecklist.length > 0 && (
               <div className="space-y-1 mb-2">
                 {completionChecklist.map((item) => (
-                  <div key={item.id} className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
-                    <span className="flex-1 text-xs text-foreground">{item.title}</span>
-                    <button type="button" onClick={() => removeCompletionChecklistItem(item.id)} className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-red-400 transition-colors">
+                  <div key={item.id} className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
+                    <span className="flex-1 text-xs" style={{ color: 'var(--dashboard-text)' }}>{item.title}</span>
+                    <button type="button" onClick={() => removeCompletionChecklistItem(item.id)} className="shrink-0 p-0.5 rounded hover:text-red-500 transition-colors" style={{ color: 'var(--dashboard-muted)' }}>
                       <X className="w-3 h-3" />
                     </button>
                   </div>
@@ -3516,7 +3964,8 @@ function TaskFormModal({
                 type="button"
                 onClick={addCompletionChecklistItem}
                 disabled={!newCompletionChecklistTitle.trim()}
-                className={cn('shrink-0 px-3 rounded-xl border transition-all', newCompletionChecklistTitle.trim() ? cn(ACCENT_BG, 'text-zinc-900 border-transparent') : 'bg-secondary border-border text-muted-foreground')}
+                className={cn('shrink-0 px-3 rounded-xl transition-all', newCompletionChecklistTitle.trim() ? 'cihaz-card' : 'cihaz-pressed')}
+                style={newCompletionChecklistTitle.trim() ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
               >
                 <CirclePlus className="w-4 h-4" />
               </button>
@@ -3524,7 +3973,7 @@ function TaskFormModal({
           </div>
 
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Tamamlandığında Beklenen Dosya Adı (opsiyonel)</label>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Tamamlandığında Beklenen Dosya Adı (opsiyonel)</label>
             <input
               type="text"
               value={expectedCompletionFileName}
@@ -3534,38 +3983,6 @@ function TaskFormModal({
             />
           </div>
 
-          {/* Date */}
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Tarih</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, 'dark:[color-scheme:dark]')} />
-          </div>
-
-          {/* Time range */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Başlangıç</label>
-              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={cn(inputCls, 'dark:[color-scheme:dark]')} />
-            </div>
-            <div>
-              <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Bitiş</label>
-              <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className={cn(inputCls, 'dark:[color-scheme:dark]')} />
-            </div>
-          </div>
-
-          {/* Duration preview */}
-          {timeValid && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-secondary/50 rounded-xl">
-              <Clock className={cn('w-3.5 h-3.5', ACCENT)} />
-              <span className="text-xs text-muted-foreground">
-                Süre: {(() => { const dur = parseTime(endTime) - parseTime(startTime); const h = Math.floor(dur / 60); const m = dur % 60; return `${h > 0 ? `${h} saat ` : ''}${m > 0 ? `${m} dakika` : ''}`; })()}
-              </span>
-            </div>
-          )}
-
-          {!timeValid && startTime && endTime && (
-            <p className="text-xs text-red-400">Bitiş saati başlangıçtan sonra olmalıdır</p>
-          )}
-
           {/* Recurring (only for add mode) */}
           {!isEdit && (
             <div>
@@ -3573,44 +3990,47 @@ function TaskFormModal({
                 <button
                   type="button"
                   onClick={() => setIsRecurring(!isRecurring)}
-                  className={cn('w-5 h-5 rounded border-2 flex items-center justify-center transition-all', isRecurring ? `${ACCENT_BG} border-[#d4ec00]` : 'border-muted-foreground/40')}
+                  className="w-5 h-5 rounded border-2 flex items-center justify-center transition-all"
+                  style={isRecurring ? { background: 'var(--dashboard-accent)', borderColor: 'var(--dashboard-accent)' } : { borderColor: 'rgba(108,114,122,.4)' }}
                 >
-                  {isRecurring && <Check className="w-3 h-3 text-zinc-900" strokeWidth={3} />}
+                  {isRecurring && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                 </button>
-                <Repeat className="w-3.5 h-3.5 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground font-medium">Tekrarlayan Görev</span>
+                <Repeat className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} />
+                <span className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>Tekrarlayan Görev</span>
               </label>
               {isRecurring && (
-                <div className="mt-2 p-3 bg-secondary/50 rounded-xl space-y-3 animate-in slide-in-from-top-1 duration-200">
+                <div className="mt-2 p-3 rounded-xl space-y-3 animate-in slide-in-from-top-1 duration-200 cihaz-pressed">
                   <div className="flex gap-2">
                     {(['daily', 'weekly', 'monthly'] as const).map((type) => (
                       <button
                         key={type}
                         type="button"
                         onClick={() => setRecurringType(type)}
-                        className={cn('flex-1 py-2 px-2 rounded-lg text-[11px] font-medium border transition-all', recurringType === type ? cn(ACCENT_BG_SUBTLE, ACCENT_BORDER, ACCENT) : 'bg-secondary border-border text-muted-foreground')}
+                        className={cn('flex-1 py-2 px-2 rounded-lg text-[11px] font-medium transition-all', recurringType === type ? 'cihaz-card-strong' : 'cihaz-pressed')}
+                        style={recurringType === type ? { color: 'var(--dashboard-accent)' } : { color: 'var(--dashboard-muted)' }}
                       >
                         {type === 'daily' ? 'Günlük' : type === 'weekly' ? 'Haftalık' : 'Aylık'}
                       </button>
                     ))}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Her</span>
+                    <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Her</span>
                     <input
                       type="number"
                       min={1}
                       max={30}
                       value={recurringInterval}
                       onChange={(e) => setRecurringInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                      className="w-16 px-2 py-1.5 bg-secondary border border-border rounded-lg text-sm text-foreground text-center outline-none"
+                      className="w-16 px-2 py-1.5 rounded-lg text-sm text-center outline-none cihaz-card"
+                      style={{ color: 'var(--dashboard-text)' }}
                     />
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
                       {recurringType === 'daily' ? 'günde' : recurringType === 'weekly' ? 'haftada' : 'ayda'} bir
                     </span>
                   </div>
                   <div>
-                    <label className="block text-[10px] text-muted-foreground mb-1">Bitiş Tarihi (opsiyonel)</label>
-                    <input type="date" value={recurringEndDate} onChange={(e) => setRecurringEndDate(e.target.value)} className={cn(inputCls, 'py-2 text-xs dark:[color-scheme:dark]')} />
+                    <label className="block text-[10px] mb-1" style={{ color: 'var(--dashboard-muted)' }}>Bitiş Tarihi (opsiyonel)</label>
+                    <input type="date" value={recurringEndDate} onChange={(e) => setRecurringEndDate(e.target.value)} className={cn(inputCls, 'py-2 text-xs')} style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }} />
                   </div>
                 </div>
               )}
@@ -3619,12 +4039,13 @@ function TaskFormModal({
 
           {/* File Attachments */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">Dosya Ekle (Resim / PDF / Diğer)</label>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Dosya Ekle (Resim / PDF / Diğer)</label>
             <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className={cn('w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed transition-all', 'border-border text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground bg-secondary/30')}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed transition-all hover:brightness-[0.97] cihaz-pressed"
+              style={{ borderColor: 'var(--dashboard-stroke)', color: 'var(--dashboard-muted)' }}
             >
               <Paperclip className="w-4 h-4" />
               <span className="text-sm">Dosya Seç</span>
@@ -3634,10 +4055,10 @@ function TaskFormModal({
             {existingAttachments.length > 0 && (
               <div className="mt-2 space-y-1.5">
                 {existingAttachments.map((att) => (
-                  <div key={att.storagePath} className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
-                    {att.type === 'image' ? <ImageIcon className="w-3.5 h-3.5 text-blue-400 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-red-400 shrink-0" />}
-                    <a href={att.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 text-xs text-foreground truncate hover:underline">{att.name}</a>
-                    <button type="button" onClick={() => removeExistingAttachment(att)} className="shrink-0 p-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400 transition-colors">
+                  <div key={att.storagePath} className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
+                    {att.type === 'image' ? <ImageIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-red-500 shrink-0" />}
+                    <a href={att.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 text-xs truncate hover:underline" style={{ color: 'var(--dashboard-text)' }}>{att.name}</a>
+                    <button type="button" onClick={() => removeExistingAttachment(att)} className="shrink-0 p-1 rounded-lg cihaz-card hover:text-red-500 transition-all" style={{ color: 'var(--dashboard-muted)' }}>
                       <X className="w-3 h-3" />
                     </button>
                   </div>
@@ -3651,13 +4072,13 @@ function TaskFormModal({
                 {files.map((file, idx) => {
                   const isImage = file.type.startsWith('image/');
                   return (
-                    <div key={`${file.name}-${idx}`} className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg">
-                      {isImage ? <ImageIcon className="w-3.5 h-3.5 text-blue-400 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+                    <div key={`${file.name}-${idx}`} className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
+                      {isImage ? <ImageIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-red-500 shrink-0" />}
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs text-foreground truncate">{file.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{formatFileSize(file.size)}{isImage && ' — sıkıştırılacak'}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--dashboard-text)' }}>{file.name}</p>
+                        <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{formatFileSize(file.size)}{isImage && ' — sıkıştırılacak'}</p>
                       </div>
-                      <button type="button" onClick={() => removeFile(idx)} className="shrink-0 p-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400 transition-colors">
+                      <button type="button" onClick={() => removeFile(idx)} className="shrink-0 p-1 rounded-lg cihaz-card hover:text-red-500 transition-all" style={{ color: 'var(--dashboard-muted)' }}>
                         <X className="w-3 h-3" />
                       </button>
                     </div>
@@ -3667,11 +4088,28 @@ function TaskFormModal({
             )}
           </div>
 
-          {/* Submit */}
+          {/* Close showDetails */}
+          </div>
+          )}
+        </form>
+
+        {/* ===== STICKY FOOTER — always visible, outside scroll ===== */}
+        <div className="px-6 py-3 flex items-center gap-3" style={{ borderTop: '1px solid var(--dashboard-stroke)', background: 'var(--dashboard-surface)' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-shrink-0 px-4 py-3 rounded-xl text-sm font-medium cihaz-card transition-all hover:brightness-[0.97]"
+            style={{ color: 'var(--dashboard-muted)' }}
+          >
+            Vazgeç
+          </button>
           <button
             type="submit"
+            form="task-form"
             disabled={!valid || submitting}
-            className={cn('w-full py-3.5 rounded-xl text-sm font-semibold transition-all', valid && !submitting ? `${ACCENT_BG} text-zinc-900 hover:brightness-110 active:scale-[0.98]` : 'bg-secondary text-muted-foreground cursor-not-allowed')}
+            onClick={(e) => { e.preventDefault(); handleSubmit(e as unknown as React.FormEvent); }}
+            className={cn('flex-1 py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.97]', valid && !submitting ? 'hover:brightness-[0.93]' : 'cihaz-pressed cursor-not-allowed')}
+            style={valid && !submitting ? { background: 'var(--dashboard-accent)', color: '#fff', boxShadow: '0 4px 16px rgba(242,153,74,.25)' } : { color: 'var(--dashboard-muted)' }}
           >
             {submitting ? (
               <span className="flex items-center justify-center gap-2">
@@ -3682,7 +4120,7 @@ function TaskFormModal({
               isEdit ? 'Kaydet' : `Görev Ekle${files.length > 0 ? ` (${files.length} dosya)` : ''}`
             )}
           </button>
-        </form>
+        </div>
       </div>
     </div>
   );
