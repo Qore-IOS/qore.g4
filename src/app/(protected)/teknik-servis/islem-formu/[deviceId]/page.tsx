@@ -1,9 +1,9 @@
 'use client';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
+import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle, Clock } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -126,6 +126,8 @@ export default function IslemFormuPage() {
   const params = useParams();
   const deviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const draftIdFromUrl = searchParams?.get('draftId') || null;
   const { currentUserProfile } = useAuth();
   const { toast } = useToast();
 
@@ -134,6 +136,9 @@ export default function IslemFormuPage() {
   const [loading, setLoading] = useState(true);
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [draftActionLogs, setDraftActionLogs] = useState<DraftActionLog[]>([]);
 
   // İşlem Tipi ve Türü
   const [islemTipi, setIslemTipi] = useState<IslemTipi>('');
@@ -240,6 +245,47 @@ export default function IslemFormuPage() {
       }
     })();
   }, [deviceId, router, toast]);
+
+  // Load draft if draftId is in URL
+  useEffect(() => {
+    if (!draftIdFromUrl || !deviceId) return;
+    (async () => {
+      try {
+        const draftSnap = await getDoc(doc(db, 'draftActionForms', draftIdFromUrl));
+        if (draftSnap.exists()) {
+          const draftData = draftSnap.data();
+          setCurrentDraftId(draftIdFromUrl);
+          if (draftData.actions) setActions(draftData.actions);
+          if (draftData.islemTipi) setIslemTipi(draftData.islemTipi);
+          if (draftData.islemTuru) setIslemTuru(draftData.islemTuru as IslemTuru);
+          if (draftData.aciklama) setAciklama(draftData.aciklama);
+          if (draftData.baslangicSaati) setBaslangicSaati(draftData.baslangicSaati);
+          if (draftData.bitisSaati) setBitisSaati(draftData.bitisSaati);
+          if (draftData.baslangicTarihi) setBaslangicTarihi(draftData.baslangicTarihi);
+          if (draftData.bitisTarihi) setBitisTarihi(draftData.bitisTarihi);
+          if (draftData.selectedMaintenanceTasks) setSelectedMaintenanceTasks(draftData.selectedMaintenanceTasks);
+          if (draftData.selectedPeriodicParts) setSelectedPeriodicParts(draftData.selectedPeriodicParts);
+          if (draftData.selectedFaultId) setSelectedFaultId(draftData.selectedFaultId);
+          if (draftData.selectedTests) setSelectedTests(draftData.selectedTests);
+          if (draftData.actionLogs) setDraftActionLogs(draftData.actionLogs);
+
+          // Add continuation log
+          const continuationLog: DraftActionLog = {
+            personnelUid: currentUserProfile?.uid || '',
+            personnelName: currentUserProfile?.name || 'Bilinmeyen',
+            timestamp: new Date(),
+            logType: 'draft_continued',
+            description: `${currentUserProfile?.name || 'Bilinmeyen'} ara kayıttan devam etti (önceki kayıt: ${draftData.createdByName})`,
+          };
+          setDraftActionLogs(prev => [...prev, continuationLog]);
+
+          toast({ title: 'Ara Kayıt Yüklendi', description: `${draftData.createdByName} tarafından oluşturulan ara kayıt yüklendi.` });
+        }
+      } catch (err) {
+        console.error('Error loading draft:', err);
+      }
+    })();
+  }, [draftIdFromUrl, deviceId, currentUserProfile?.uid, currentUserProfile?.name, toast]);
 
   // Fetch personal stock for current user
   useEffect(() => {
@@ -875,6 +921,67 @@ export default function IslemFormuPage() {
     });
   };
 
+  const handleSaveDraft = async () => {
+    setIsSavingDraft(true);
+    try {
+      const now = new Date();
+      const draftId = currentDraftId || doc(collection(db, 'draftActionForms')).id;
+
+      // Create action log for this draft save
+      const newLog: DraftActionLog = {
+        personnelUid: currentUserProfile?.uid || '',
+        personnelName: currentUserProfile?.name || 'Bilinmeyen',
+        timestamp: now,
+        logType: 'draft_created',
+        description: `${currentUserProfile?.name || 'Bilinmeyen'} ara kayıt oluşturdu`,
+      };
+
+      const updatedLogs = [...draftActionLogs, newLog];
+
+      const draftData: any = {
+        deviceId,
+        hospitalId: device?.hospitalId || '',
+        formType: 'teknik_servis',
+        actions,
+        islemTipi,
+        islemTuru,
+        aciklama: aciklama.trim(),
+        baslangicSaati,
+        bitisSaati,
+        baslangicTarihi,
+        bitisTarihi,
+        selectedMaintenanceTasks,
+        selectedPeriodicParts,
+        selectedFaultId,
+        selectedTests,
+        actionLogs: updatedLogs.map(log => ({
+          ...log,
+          timestamp: Timestamp.fromDate(log.timestamp instanceof Date ? log.timestamp : new Date(log.timestamp)),
+        })),
+        updatedAt: Timestamp.fromDate(now),
+        updatedByUid: currentUserProfile?.uid || '',
+        updatedByName: currentUserProfile?.name || '',
+      };
+
+      if (!currentDraftId) {
+        draftData.createdAt = Timestamp.fromDate(now);
+        draftData.createdByUid = currentUserProfile?.uid || '';
+        draftData.createdByName = currentUserProfile?.name || '';
+      }
+
+      await setDoc(doc(db, 'draftActionForms', draftId), draftData, { merge: true });
+      setCurrentDraftId(draftId);
+      setDraftActionLogs(updatedLogs);
+
+      toast({ title: 'Ara Kayıt Kaydedildi', description: 'Form ara kayıt olarak kaydedildi. Daha sonra devam edebilirsiniz.' });
+    } catch (err) {
+      console.error('Error saving draft:', err);
+      toast({ title: 'Hata', description: 'Ara kayıt kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
   const startSaveProcess = () => {
     // Validate başlangıç ve bitiş tarihleri ve saatleri (zorunlu)
     if (!baslangicTarihi) {
@@ -1001,6 +1108,12 @@ export default function IslemFormuPage() {
             selectedFaultName: resolvedFaultName,
             isCustomFault: isCustomFault || false,
             selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+            // Draft continuation logs (personnel attribution)
+            draftActionLogs: draftActionLogs.length > 0 ? draftActionLogs.map(log => ({
+              ...log,
+              timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
+            })) : null,
+            continuedFromDraft: !!currentDraftId,
         });
 
         // Mirror form to deviceActionForms for device history page
@@ -1118,7 +1231,31 @@ export default function IslemFormuPage() {
         }
 
         // Process part changes - update personal stock and create removed part entries
-        const partChanges = actions.filter(a => a.type === 'part_change');
+        // Deduplicate: if a periodic part was auto-added AND manually added, keep only the more detailed one
+        const allPartChanges = actions.filter(a => a.type === 'part_change');
+        const partChanges: typeof allPartChanges = [];
+        const processedPersonalStockIds = new Set<string>();
+        const processedPeriodicIds = new Set<string>();
+
+        for (const pc of allPartChanges) {
+          if (pc.personalStockId && processedPersonalStockIds.has(pc.personalStockId)) continue;
+          if (pc.periodicPartChangeId && processedPeriodicIds.has(pc.periodicPartChangeId)) {
+            const existingIdx = partChanges.findIndex(e => e.periodicPartChangeId === pc.periodicPartChangeId);
+            if (existingIdx >= 0) {
+              const existing = partChanges[existingIdx];
+              const pcHasDetails = !!(pc.personalStockId || pc.removedPartSerialNumber);
+              const existingHasDetails = !!(existing.personalStockId || existing.removedPartSerialNumber);
+              if (pcHasDetails && !existingHasDetails) {
+                partChanges[existingIdx] = pc;
+              }
+            }
+            continue;
+          }
+          partChanges.push(pc);
+          if (pc.personalStockId) processedPersonalStockIds.add(pc.personalStockId);
+          if (pc.periodicPartChangeId) processedPeriodicIds.add(pc.periodicPartChangeId);
+        }
+
         for (const partChange of partChanges) {
           let removedStockRefId: string | null = null;
 
@@ -1340,6 +1477,16 @@ export default function IslemFormuPage() {
         }
 
         await batch.commit();
+
+        // Delete draft if exists
+        if (currentDraftId) {
+          try {
+            await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
+          } catch (e) {
+            console.error('Error deleting draft:', e);
+          }
+          setCurrentDraftId(null);
+        }
 
         toast({title: 'Başarılı', description: `İşlem formu #${formRef.id.substring(0,6)}... kaydedildi.`});
         setActions([]);
@@ -1823,8 +1970,16 @@ export default function IslemFormuPage() {
                 </TableBody>
               </Table>
             </ScrollArea>
-          {/* Save Button */}
-          <div className="flex justify-end pt-2">
+          {/* Save Buttons */}
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft || isSaving}
+              className="cihaz-tool-item flex items-center gap-2 px-5 py-3 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSavingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />}
+              Ara Kayıt
+            </button>
             <button
               onClick={startSaveProcess}
               disabled={isSaving || actions.length === 0}
