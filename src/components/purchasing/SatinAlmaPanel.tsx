@@ -1955,68 +1955,6 @@ export default function SatinAlmaPanel() {
         </div>
       </div>
 
-      {/* ===== KPI Cards — reduced shadow for density ===== */}
-      <div className="px-4 md:px-8 mt-3">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-          <Link href="/ariza-yonetimi" className="group">
-            <div className="cihaz-card rounded-2xl p-3.5 transition-all hover:brightness-[0.98]">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--dashboard-text)' }}>
-                  <Wrench className="w-3.5 h-3.5" /> Cihaz Arıza KPI
-                </h3>
-                <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Detaya Git</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-lg p-2 cihaz-pressed">
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Atama Bekleyen</p>
-                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{faultKpi.pendingAssignment}</p>
-                </div>
-                <div className="rounded-lg p-2 cihaz-pressed">
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Müdahale Bekleyen</p>
-                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{faultKpi.pendingIntervention}</p>
-                </div>
-                <div className="rounded-lg p-2 cihaz-pressed">
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Müdahale Edilen</p>
-                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{faultKpi.inIntervention}</p>
-                </div>
-              </div>
-            </div>
-          </Link>
-
-          <Link href="/satin-alma/analiz-planlama" className="group">
-            <div className="cihaz-card rounded-2xl p-3.5 transition-all hover:brightness-[0.98]">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--dashboard-text)' }}>
-                  <CalendarClock className="w-3.5 h-3.5" /> Takvim KPI
-                </h3>
-                <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Planlama Paneli</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                <div className="rounded-lg p-2 cihaz-pressed">
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>1 Haftalık</p>
-                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{personalCalendarKpi.weekCount}</p>
-                </div>
-                <div className="rounded-lg p-2 cihaz-pressed">
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>1 Aylık</p>
-                  <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>{personalCalendarKpi.monthCount}</p>
-                </div>
-              </div>
-              <div className="space-y-1">
-                {personalCalendarKpi.nextTasks.length === 0 ? (
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Yaklaşan görev bulunmuyor.</p>
-                ) : (
-                  personalCalendarKpi.nextTasks.map((task) => (
-                    <p key={task.id} className="text-[10px] truncate" style={{ color: 'var(--dashboard-muted)' }}>
-                      {task.date} &middot; {task.startTime} &middot; <span style={{ color: 'var(--dashboard-text)' }}>{task.title}</span>
-                    </p>
-                  ))
-                )}
-              </div>
-            </div>
-          </Link>
-        </div>
-      </div>
-
       {/* ===== 1.3 Expandable Monthly Calendar (second layer) ===== */}
       {calendarExpanded && (
         <div className="px-4 md:px-8 mt-3 animate-in slide-in-from-top-2 duration-300">
@@ -2101,56 +2039,6 @@ export default function SatinAlmaPanel() {
         </div>
         <div className="flex justify-between mt-0.5 text-[9px]" style={{ color: 'var(--dashboard-muted)' }}>
           <span>09:00</span><span>12:00</span><span>15:00</span><span>17:00</span>
-        </div>
-      </div>
-
-      {/* ===== Natural Language Quick Add — with preview chips ===== */}
-      <div className="px-4 md:px-8 mt-3">
-        <div className="cihaz-card rounded-2xl p-3">
-          <p className="text-[10px] mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Doğal dil ile hızlı görev girişi</p>
-          <div className="flex gap-2">
-            <input
-              value={naturalInput}
-              onChange={(e) => setNaturalInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNaturalQuickAdd(); } }}
-              placeholder="Örn: 'Yarın saat 14:00'da Merkez Lab ziyareti #acil"
-              className="flex-1 px-3 py-2 rounded-xl text-xs outline-none cihaz-pressed"
-              style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
-            />
-            <button
-              onClick={handleNaturalQuickAdd}
-              disabled={!naturalInput.trim() || naturalSubmitting}
-              className={cn('px-4 py-2 rounded-xl text-xs font-semibold transition-all', naturalInput.trim() && !naturalSubmitting ? 'hover:brightness-[0.95] active:scale-[0.98]' : 'cihaz-pressed cursor-not-allowed')}
-              style={naturalInput.trim() && !naturalSubmitting ? { background: 'var(--dashboard-accent)', color: '#fff' } : { color: 'var(--dashboard-muted)' }}
-            >
-              {naturalSubmitting ? 'Ekleniyor...' : 'Ekle'}
-            </button>
-          </div>
-          {/* Preview chips when user is typing */}
-          {naturalInput.trim() && (
-            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-              {(() => {
-                const parsed = parseNaturalTaskInputForPlanning(naturalInput, mainLaboratories);
-                return (
-                  <>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full cihaz-pressed" style={{ color: 'var(--dashboard-muted)' }}>
-                      {format(parseISO(parsed.date), 'd MMM', { locale: tr })} {parsed.startTime}
-                    </span>
-                    {parsed.laboratoryName && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full cihaz-pressed" style={{ color: 'var(--dashboard-muted)' }}>
-                        {parsed.laboratoryName}
-                      </span>
-                    )}
-                    {parsed.priority !== 'normal' && (
-                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', PRIORITY_CONFIG[parsed.priority].bg, PRIORITY_CONFIG[parsed.priority].color)}>
-                        {PRIORITY_CONFIG[parsed.priority].label}
-                      </span>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          )}
         </div>
       </div>
 

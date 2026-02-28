@@ -34,6 +34,8 @@ import Link from 'next/link';
 
 // Accent color (neumorphic)
 const ACCENT_COLOR = 'var(--dashboard-accent)';
+const ACCENT = 'text-[#7a8a00] dark:text-[#d4ec00]';
+const ACCENT_BG = 'bg-[#d4ec00]';
 
 const PAGE_SIZE = 20;
 
