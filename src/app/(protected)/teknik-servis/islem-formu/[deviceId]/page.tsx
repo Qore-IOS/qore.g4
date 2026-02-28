@@ -205,6 +205,9 @@ export default function IslemFormuPage() {
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
   const [pendingPeriodicPartChangeId, setPendingPeriodicPartChangeId] = useState<string | null>(null);
+  const [isAutoStockConfirmOpen, setIsAutoStockConfirmOpen] = useState(false);
+  const [autoStockPendingPartId, setAutoStockPendingPartId] = useState<string | null>(null);
+  const [isAutoStockCreating, setIsAutoStockCreating] = useState(false);
 
   // Fault definitions for arıza
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
@@ -706,79 +709,42 @@ export default function IslemFormuPage() {
   }
   };
 
-  // Toggle periodic part selection and add to actions
-  const togglePeriodicPart = async (partChangeId: string) => {
-    const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
+  const findMatchingPersonalStockForPeriodicPart = (partChange: PeriodicPartChange): PersonalStockItem | undefined => {
+    const normalize = (value?: string) => (value || '').trim().toLowerCase();
+    const partCode = normalize(partChange.stokKodu);
+    const partName = normalize(partChange.stokAdi);
 
-    if (isCurrentlySelected) {
-      // Deselecting
-      setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
-      setActions(prev => prev.filter(a => a.periodicPartChangeId !== partChangeId));
-      return;
-    }
+    return personalStock.find(item => {
+      if (item.status !== 'in_stock') return false;
+      if (partChange.productCodeId && item.productCodeId && partChange.productCodeId === item.productCodeId) return true;
+      if (normalize(item.stokKodu) === partCode) return true;
+      return !!partName && normalize(item.stokAdi) === partName;
+    });
+  };
 
-    // Selecting
-    const partChange = periodicPartChanges.find(p => p.id === partChangeId);
-    if (!partChange) return;
-
-    const alreadyInActions = actions.some(a =>
-      a.periodicPartChangeId === partChangeId ||
-      (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
-    );
-
-    // Always add to selected
-    setSelectedPeriodicParts(prev => [...prev, partChangeId]);
-    if (alreadyInActions) return;
-
-    let matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
-
-    if (!matchingStockItem) {
-      const shouldAutoCreateStock = confirm(
-        `${partChange.stokAdi} (${partChange.stokKodu}) ürünü şahsi stoğunuzda bulunamadı. ` +
-        'Periyodik parça değişimine istinaden otomatik depo stok girişi ve personel transfer kaydı oluşturulsun mu?'
-      );
-
-      if (!shouldAutoCreateStock) {
-        setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
-        toast({ title: 'İptal Edildi', description: 'Periyodik parça değişimi için stok oluşturma iptal edildi.' });
-        return;
-      }
-
-      const autoCreatedStock = await createAutoStockForPeriodicPart(partChange);
-      if (!autoCreatedStock) {
-        setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
-        return;
-      }
-
-      matchingStockItem = autoCreatedStock;
-      toast({
-        title: 'Stok Otomatik Eklendi',
-        description: `${partChange.stokAdi} için depo giriş ve personel transfer kaydı otomatik oluşturuldu.`,
-      });
-    }
-
-    // If no serial tracking and no outgoing part tracking needed, auto-save
+  const applyPeriodicPartSelectionWithStock = (
+    partChangeId: string,
+    partChange: PeriodicPartChange,
+    matchingStockItem: PersonalStockItem
+  ) => {
     if (!partChange.requiresSerialTracking && !partChange.requiresOutgoingPartInfo) {
-      if (matchingStockItem) {
-        const newItem: ActionItem = {
-          id: crypto.randomUUID(),
-          type: 'part_change',
-          action: matchingStockItem.productCodeId,
-          stokKodu: matchingStockItem.stokKodu,
-          stokAdi: matchingStockItem.stokAdi,
-          serialNumber: matchingStockItem.serialNumber,
-          personalStockId: matchingStockItem.id,
-          quantity: 1,
-          periodicPartChangeId: partChangeId,
-          isPeriodicPartChange: true,
-        };
-        setActions(prev => [newItem, ...prev]);
-        toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
-      }
+      const newItem: ActionItem = {
+        id: crypto.randomUUID(),
+        type: 'part_change',
+        action: matchingStockItem.productCodeId,
+        stokKodu: matchingStockItem.stokKodu,
+        stokAdi: matchingStockItem.stokAdi,
+        serialNumber: matchingStockItem.serialNumber,
+        personalStockId: matchingStockItem.id,
+        quantity: 1,
+        periodicPartChangeId: partChangeId,
+        isPeriodicPartChange: true,
+      };
+      setActions(prev => [newItem, ...prev]);
+      toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
       return;
     }
 
-    // Tracking needed - open part modal with pre-fill
     setPendingPeriodicPartChangeId(partChangeId);
     setPartSearchQuery('');
     setManualPartCode('');
@@ -792,19 +758,76 @@ export default function IslemFormuPage() {
     setRemovedPartImagePreview(null);
     setUsedPartImageFile(null);
     setUsedPartImagePreview(null);
+    setSelectedStockItem(matchingStockItem);
+    setShowManualEntry(false);
+    setPartSearchQuery(matchingStockItem.stokAdi);
+    setIsPartModalOpen(true);
+  };
 
-    if (matchingStockItem) {
-      setSelectedStockItem(matchingStockItem);
-      setShowManualEntry(false);
-      setPartSearchQuery(matchingStockItem.stokAdi);
-    } else {
-      setSelectedStockItem(null);
-      setShowManualEntry(true);
-      setManualPartCode(partChange.stokKodu);
-      setManualPartName(partChange.stokAdi);
+  const handleAutoStockConfirm = async (confirmCreate: boolean) => {
+    const pendingPartId = autoStockPendingPartId;
+    const pendingPart = pendingPartId ? periodicPartChanges.find(p => p.id === pendingPartId) : null;
+    if (!pendingPartId || !pendingPart) {
+      setIsAutoStockConfirmOpen(false);
+      setAutoStockPendingPartId(null);
+      return;
     }
 
-    setIsPartModalOpen(true);
+    if (!confirmCreate) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== pendingPartId));
+      setIsAutoStockConfirmOpen(false);
+      setAutoStockPendingPartId(null);
+      toast({ title: 'İptal Edildi', description: 'Periyodik parça değişimi için stok oluşturma iptal edildi.' });
+      return;
+    }
+
+    setIsAutoStockCreating(true);
+    const autoCreatedStock = await createAutoStockForPeriodicPart(pendingPart);
+    setIsAutoStockCreating(false);
+    setIsAutoStockConfirmOpen(false);
+    setAutoStockPendingPartId(null);
+
+    if (!autoCreatedStock) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== pendingPartId));
+      return;
+    }
+
+    toast({
+      title: 'Stok Otomatik Eklendi',
+      description: `${pendingPart.stokAdi} için depo giriş ve personel transfer kaydı otomatik oluşturuldu.`,
+    });
+    applyPeriodicPartSelectionWithStock(pendingPartId, pendingPart, autoCreatedStock);
+  };
+
+  // Toggle periodic part selection and add to actions
+  const togglePeriodicPart = async (partChangeId: string) => {
+    const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
+
+    if (isCurrentlySelected) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+      setActions(prev => prev.filter(a => a.periodicPartChangeId !== partChangeId));
+      return;
+    }
+
+    const partChange = periodicPartChanges.find(p => p.id === partChangeId);
+    if (!partChange) return;
+
+    const alreadyInActions = actions.some(a =>
+      a.periodicPartChangeId === partChangeId ||
+      (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
+    );
+
+    setSelectedPeriodicParts(prev => [...prev, partChangeId]);
+    if (alreadyInActions) return;
+
+    const matchingStockItem = findMatchingPersonalStockForPeriodicPart(partChange);
+    if (matchingStockItem) {
+      applyPeriodicPartSelectionWithStock(partChangeId, partChange, matchingStockItem);
+      return;
+    }
+
+    setAutoStockPendingPartId(partChangeId);
+    setIsAutoStockConfirmOpen(true);
   };
 
   const openOperationModal = () => {
@@ -2112,6 +2135,41 @@ export default function IslemFormuPage() {
           </div>
         </div>
       </div>
+
+
+      <Dialog open={isAutoStockConfirmOpen} onOpenChange={(open) => {
+        setIsAutoStockConfirmOpen(open);
+        if (!open && !isAutoStockCreating) {
+          setAutoStockPendingPartId(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Periyodik Parça İçin Otomatik Stok Oluştur</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Seçilen periyodik parça şahsi stoğunuzda bulunamadı. Bu parça için otomatik depo stok girişi,
+            personel transfer kaydı ve şahsi stok kaydı oluşturulsun mu?
+          </p>
+          <DialogFooter className="gap-2">
+            <button
+              onClick={() => handleAutoStockConfirm(false)}
+              disabled={isAutoStockCreating}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium"
+            >
+              İptal
+            </button>
+            <button
+              onClick={() => handleAutoStockConfirm(true)}
+              disabled={isAutoStockCreating}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50"
+            >
+              {isAutoStockCreating ? 'Oluşturuluyor...' : 'Otomatik Oluştur'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       {/* Operation Selection Modal */}
       <Dialog open={isOperationModalOpen} onOpenChange={setIsOperationModalOpen}>
