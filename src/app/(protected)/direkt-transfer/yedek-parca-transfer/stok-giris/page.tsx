@@ -12,6 +12,7 @@ import {
   doc,
   Timestamp,
   addDoc,
+  setDoc,
 } from 'firebase/firestore';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -32,6 +33,8 @@ import {
 } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface StokGirisRow {
   id: string;
@@ -44,6 +47,11 @@ interface StokGirisRow {
   address: string;
 }
 
+type MissingProductCardItem = {
+  stokKodu: string;
+  stokAdi: string;
+};
+
 export default function YedekParcaStokGirisPage() {
   const router = useRouter();
   const { currentUserProfile } = useAuth();
@@ -52,6 +60,8 @@ export default function YedekParcaStokGirisPage() {
 
   const [loading, setLoading] = useState(true);
   const [spareParts, setSpareParts] = useState<ProductCode[]>([]);
+  const [allProductCodes, setAllProductCodes] = useState<ProductCode[]>([]);
+  const [brandOptions, setBrandOptions] = useState<string[]>([]);
   const [rows, setRows] = useState<StokGirisRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -71,6 +81,11 @@ export default function YedekParcaStokGirisPage() {
   const [excelNotFoundProducts, setExcelNotFoundProducts] = useState<string[]>([]);
   const [excelTotalRows, setExcelTotalRows] = useState(0);
   const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [isStockCardModalOpen, setIsStockCardModalOpen] = useState(false);
+  const [pendingMissingCards, setPendingMissingCards] = useState<MissingProductCardItem[]>([]);
+  const [selectedBrandForCards, setSelectedBrandForCards] = useState<string>('');
+  const [isCreatingCards, setIsCreatingCards] = useState(false);
+  const [pendingActionAfterCardCreate, setPendingActionAfterCardCreate] = useState<'save_stock' | 'confirm_excel' | null>(null);
 
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik';
 
@@ -82,12 +97,19 @@ export default function YedekParcaStokGirisPage() {
 
     const fetchData = async () => {
       try {
-        const productsQuery = query(
-          collection(db, 'productCodes'),
-          where('urunGrubu', '==', 'yedek_parca')
-        );
-        const productsSnap = await getDocs(productsQuery);
-        const sparePartProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const [productsSnap, brandsSnap] = await Promise.all([
+          getDocs(collection(db, 'productCodes')),
+          getDocs(collection(db, 'def_brands')),
+        ]);
+        const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const sparePartProducts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
+        const brands = brandsSnap.docs
+          .map(d => String(d.data().name || '').trim())
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, 'tr'));
+
+        setAllProductCodes(allProducts);
+        setBrandOptions(brands);
         setSpareParts(sparePartProducts);
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -168,6 +190,47 @@ export default function YedekParcaStokGirisPage() {
         : `${rowStokAdi} x${qty} listeye eklendi.`,
     });
   }, [selectedProduct, serialNumber, quantity, rows, toast, manualStokKodu, manualStokAdi]);
+
+  const findMissingCardsFromRows = useCallback((targetRows: StokGirisRow[]) => {
+    const existingCodes = new Set(allProductCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
+    const missingMap = new Map<string, MissingProductCardItem>();
+
+    for (const row of targetRows) {
+      const code = row.stokKodu.trim().toUpperCase();
+      if (!code || existingCodes.has(code)) continue;
+      if (!missingMap.has(code)) {
+        missingMap.set(code, {
+          stokKodu: code,
+          stokAdi: row.stokAdi?.trim() || code,
+        });
+      }
+    }
+
+    return Array.from(missingMap.values());
+  }, [allProductCodes]);
+
+  const createMissingSparePartCards = useCallback(async (items: MissingProductCardItem[], brandName: string) => {
+    if (items.length === 0) return;
+
+    const normalizeDocId = (stokKodu: string) =>
+      `auto-${stokKodu.toLowerCase().replace(/[^a-z0-9-]/gi, '-')}`;
+
+    const now = Timestamp.fromDate(new Date());
+
+    for (const item of items) {
+      const docId = normalizeDocId(item.stokKodu);
+      await setDoc(doc(db, 'productCodes', docId), {
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        urunGrubu: 'yedek_parca',
+        marka: brandName,
+        createdAt: now,
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+        autoCreatedFromDepotFlow: true,
+      }, { merge: true });
+    }
+  }, [currentUserProfile?.name, currentUserProfile?.uid]);
 
   const removeRow = (rowId: string) => {
     setRows(prev => prev.filter(r => r.id !== rowId));
@@ -251,7 +314,16 @@ export default function YedekParcaStokGirisPage() {
 
         if (!product) {
           notFoundProducts.add(rawStokKodu);
-          errors.push(`Satır ${i + 1}: "${rawStokKodu}" stok kodu sistemde tanımlı değil.`);
+          parsedRows.push({
+            id: `excel_${i}_${Date.now()}`,
+            productCodeId: '',
+            stokKodu: stokKoduUpper,
+            stokAdi: stokKoduUpper,
+            cihazGrubu: '',
+            serialNumber: rawSeriNo || '',
+            quantity: rawSeriNo ? 1 : (rawAdet && rawAdet >= 1 ? Math.floor(rawAdet) : 1),
+            address: rawAddress,
+          });
           continue;
         }
 
@@ -343,15 +415,42 @@ export default function YedekParcaStokGirisPage() {
     });
   }, [excelRows, rows, toast]);
 
+  const confirmExcelRowsWithStockCardCheck = useCallback(() => {
+    const existingSerials = new Set(rows.filter(r => r.serialNumber).map(r => r.serialNumber));
+    const filtered = excelRows.filter(r => !(r.serialNumber && existingSerials.has(r.serialNumber)));
+    const missing = findMissingCardsFromRows(filtered);
+
+    if (missing.length > 0) {
+      setPendingMissingCards(missing);
+      setPendingActionAfterCardCreate('confirm_excel');
+      setSelectedBrandForCards(brandOptions[0] || '');
+      setIsStockCardModalOpen(true);
+      return;
+    }
+
+    confirmExcelRows();
+  }, [brandOptions, confirmExcelRows, excelRows, findMissingCardsFromRows, rows]);
+
   // Toplam adet hesaplama
   const totalQuantity = useMemo(() => {
     return rows.reduce((sum, r) => sum + r.quantity, 0);
   }, [rows]);
 
-  const saveStock = async () => {
+  const performSaveStock = async (skipCardCheck = false) => {
     if (rows.length === 0) {
       toast({ title: 'Uyarı', description: 'Eklenecek ürün yok.', variant: 'default' });
       return;
+    }
+
+    if (!skipCardCheck) {
+      const missing = findMissingCardsFromRows(rows);
+      if (missing.length > 0) {
+        setPendingMissingCards(missing);
+        setPendingActionAfterCardCreate('save_stock');
+        setSelectedBrandForCards(brandOptions[0] || '');
+        setIsStockCardModalOpen(true);
+        return;
+      }
     }
 
     setIsSaving(true);
@@ -362,7 +461,6 @@ export default function YedekParcaStokGirisPage() {
 
       for (const row of rows) {
         if (row.serialNumber) {
-          // Seri numaralı: her biri 1 adet olarak ayrı document
           const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
           batch.set(stockRef, {
             productCodeId: row.productCodeId,
@@ -377,7 +475,6 @@ export default function YedekParcaStokGirisPage() {
             createdByName: currentUserProfile?.name || '',
           });
         } else {
-          // Seri numarasız: quantity ile tek document
           const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
           batch.set(stockRef, {
             productCodeId: row.productCodeId,
@@ -396,7 +493,6 @@ export default function YedekParcaStokGirisPage() {
 
       await batch.commit();
 
-      // Log kaydı oluştur - her satır için ayrı log
       for (const row of rows) {
         await addDoc(collection(db, 'yedekParcaDepoLog'), {
           action: 'stok_giris',
@@ -427,6 +523,56 @@ export default function YedekParcaStokGirisPage() {
       toast({ title: 'Hata', description: 'Stok girişi sırasında hata oluştu.', variant: 'destructive' });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const saveStock = async () => {
+    await performSaveStock(false);
+  };
+
+
+  const handleCreateStockCardsDecision = async (createCards: boolean) => {
+    const nextAction = pendingActionAfterCardCreate;
+    const missing = pendingMissingCards;
+
+    if (!nextAction) {
+      setIsStockCardModalOpen(false);
+      return;
+    }
+
+    if (createCards) {
+      if (!selectedBrandForCards) {
+        toast({ title: 'Eksik Bilgi', description: 'Lütfen stok kartları için marka seçin.', variant: 'destructive' });
+        return;
+      }
+
+      setIsCreatingCards(true);
+      try {
+        await createMissingSparePartCards(missing, selectedBrandForCards);
+        toast({ title: 'Stok Kartları Açıldı', description: `${missing.length} ürün için yedek parça stok kartı oluşturuldu.` });
+
+        const refreshedSnap = await getDocs(collection(db, 'productCodes'));
+        const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        setAllProductCodes(refreshed);
+        setSpareParts(refreshed.filter(p => p.urunGrubu === 'yedek_parca'));
+      } catch (err) {
+        console.error('Error auto-creating product cards:', err);
+        toast({ title: 'Hata', description: 'Stok kartları oluşturulamadı.', variant: 'destructive' });
+        setIsCreatingCards(false);
+        return;
+      } finally {
+        setIsCreatingCards(false);
+      }
+    }
+
+    setIsStockCardModalOpen(false);
+    setPendingMissingCards([]);
+    setPendingActionAfterCardCreate(null);
+
+    if (nextAction === 'save_stock') {
+      setTimeout(() => { performSaveStock(!createCards); }, 0);
+    } else if (nextAction === 'confirm_excel') {
+      setTimeout(() => { confirmExcelRows(); }, 0);
     }
   };
 
@@ -533,7 +679,7 @@ export default function YedekParcaStokGirisPage() {
         <section className="cihaz-card p-4 sm:p-5 space-y-4">
           <p className="cihaz-section-label">Yeni Ürün Ekle</p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
             {/* Product selector */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Yedek Parça *</label>
@@ -578,6 +724,30 @@ export default function YedekParcaStokGirisPage() {
               )}
             </div>
 
+            {/* Manuel Stok Kodu */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Manuel Stok Kodu</label>
+              <Input
+                placeholder="Ürün kodu"
+                value={manualStokKodu}
+                onChange={(e) => { setManualStokKodu(e.target.value.toUpperCase()); if (selectedProductId) setSelectedProductId(''); }}
+                className="cihaz-pressed !border-0 !ring-0 h-10"
+                style={{ borderRadius: 12 }}
+              />
+            </div>
+
+            {/* Manuel Stok Adı */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Manuel Stok Adı</label>
+              <Input
+                placeholder="Ürün adı"
+                value={manualStokAdi}
+                onChange={(e) => { setManualStokAdi(e.target.value); if (selectedProductId) setSelectedProductId(''); }}
+                className="cihaz-pressed !border-0 !ring-0 h-10"
+                style={{ borderRadius: 12 }}
+              />
+            </div>
+
             {/* Serial number */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No (Opsiyonel)</label>
@@ -585,7 +755,7 @@ export default function YedekParcaStokGirisPage() {
                 placeholder="Seri numarası"
                 value={serialNumber}
                 onChange={(e) => handleSerialNumberChange(e.target.value)}
-                disabled={!selectedProductId}
+                disabled={!canAddRow}
                 className="cihaz-pressed !border-0 !ring-0 h-10"
                 style={{ borderRadius: 12 }}
               />
@@ -600,7 +770,7 @@ export default function YedekParcaStokGirisPage() {
                 placeholder="Raf/Göz adresi"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                disabled={!selectedProductId}
+                disabled={!canAddRow}
                 className="cihaz-pressed !border-0 !ring-0 h-10"
                 style={{ borderRadius: 12 }}
               />
@@ -614,7 +784,7 @@ export default function YedekParcaStokGirisPage() {
                 min={1}
                 value={serialNumber.trim() ? 1 : quantity}
                 onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                disabled={!selectedProductId || !!serialNumber.trim()}
+                disabled={!canAddRow || !!serialNumber.trim()}
                 className="cihaz-pressed !border-0 !ring-0 h-10"
                 style={{ borderRadius: 12 }}
               />
@@ -625,9 +795,9 @@ export default function YedekParcaStokGirisPage() {
             <div className="flex items-end">
               <button
                 onClick={addRow}
-                disabled={!selectedProductId}
+                disabled={!canAddRow}
                 className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-2xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ background: selectedProductId ? 'var(--dashboard-accent)' : '#9CA3AF', boxShadow: selectedProductId ? 'var(--dashboard-raised-soft)' : 'none' }}
+                style={{ background: canAddRow ? 'var(--dashboard-accent)' : '#9CA3AF', boxShadow: canAddRow ? 'var(--dashboard-raised-soft)' : 'none' }}
               >
                 <Plus className="w-4 h-4" /> Ekle
               </button>
@@ -646,7 +816,7 @@ export default function YedekParcaStokGirisPage() {
             <p className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>Şablon formatı:</p>
             <div className="text-[11px] space-y-0.5" style={{ color: 'var(--dashboard-muted)' }}>
               <p>Sütun A: <strong>Stok Kodu</strong> · Sütun B: <strong>Seri No</strong> (opsiyonel) · Sütun C: <strong>Adet</strong> · Sütun D: <strong>Adres</strong> (opsiyonel)</p>
-              <p>Seri no varsa adet 1 · İlk satır başlık algılanır · Tanımsız kodlar atlanır</p>
+              <p>Seri no varsa adet 1 · İlk satır başlık algılanır · Tanımsız kodlar için stok kartı oluşturma onayı istenir</p>
             </div>
           </div>
 
@@ -704,7 +874,7 @@ export default function YedekParcaStokGirisPage() {
                 </div>
                 <div className="flex gap-1.5">
                   <button onClick={() => { setExcelRows([]); setExcelErrors([]); setExcelNotFoundProducts([]); setExcelTotalRows(0); }} className="cihaz-tool-item px-3 py-1 text-[11px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>İptal</button>
-                  <button onClick={confirmExcelRows} className="cihaz-action-tile px-3 py-1 text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}>
+                  <button onClick={confirmExcelRowsWithStockCardCheck} className="cihaz-action-tile px-3 py-1 text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}>
                     <Plus className="w-3 h-3 inline mr-0.5" /> Listeye Ekle
                   </button>
                 </div>
@@ -740,6 +910,49 @@ export default function YedekParcaStokGirisPage() {
           )}
         </section>
       )}
+
+      <Dialog open={isStockCardModalOpen} onOpenChange={(open) => { if (!isCreatingCards) setIsStockCardModalOpen(open); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Eksik Ürünler İçin Stok Kartı Aç</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Stoğa eklediğiniz bazı ürünler ürün kodu yönetiminde tanımlı değil. Bu ürünler için otomatik olarak
+              <strong> yedek parça</strong> statüsünde stok kartı açmak ister misiniz?
+            </p>
+            <div className="space-y-2 max-h-44 overflow-y-auto border rounded-md p-2">
+              {pendingMissingCards.map(item => (
+                <div key={item.stokKodu} className="text-xs">
+                  <p className="font-mono font-semibold">{item.stokKodu}</p>
+                  <p className="text-muted-foreground">{item.stokAdi}</p>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Marka</label>
+              <Select value={selectedBrandForCards} onValueChange={setSelectedBrandForCards}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Marka seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {brandOptions.map(brand => (
+                    <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <button className="cihaz-tool-item px-4 py-2 text-sm" disabled={isCreatingCards} onClick={() => handleCreateStockCardsDecision(false)}>
+              Hayır, Devam Et
+            </button>
+            <button className="cihaz-action-tile px-4 py-2 text-sm text-white" disabled={isCreatingCards || !selectedBrandForCards} onClick={() => handleCreateStockCardsDecision(true)}>
+              {isCreatingCards ? 'Açılıyor...' : 'Evet, Stok Kartı Aç'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Combined stock entry list ─── */}
       {rows.length > 0 && (
