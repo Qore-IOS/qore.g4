@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ImageIcon, FileText } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -280,7 +281,7 @@ export default function AplikasyonGecmisPage() {
             <div className="flex flex-col sm:flex-row gap-4 items-start">
               {device.imageUrl && (
                 <div className="w-24 h-24 flex-shrink-0 bg-muted rounded-lg p-2">
-                  <Image src={`/${device.imageUrl}`} alt={device.cihazAdi || ''} width={96} height={96} className="object-contain w-full h-full" />
+                  <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={96} height={96} className="object-contain w-full h-full" />
                 </div>
               )}
               <div>

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, Mail } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -132,6 +132,7 @@ export default function LaboratuvarPanel() {
         manualDeductionEnabled: currentHospital.manualDeductionEnabled ?? false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
+        sorumluEmail: ((currentHospital as any).sorumluEmail || '').trim(),
         updatedAt: new Date(),
       };
 
@@ -276,13 +277,14 @@ export default function LaboratuvarPanel() {
             ) : (
               <ScrollArea className="h-[300px] border rounded-md">
                 <Table>
-                  <TableHeader><TableRow><TableHead>Adı</TableHead><TableHead>Kod</TableHead><TableHead>Adres</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Adı</TableHead><TableHead>Kod</TableHead><TableHead>Adres</TableHead><TableHead>Sorumlu E-posta</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow></TableHeader>
                   <TableBody>
                     {hospitals.map(h => (
                       <TableRow key={h.id}>
                         <TableCell className="font-medium">{h.name}</TableCell>
                         <TableCell className="font-mono text-xs">{h.kod}</TableCell>
                         <TableCell>{h.address}</TableCell>
+                        <TableCell className="text-xs">{(h as any).sorumluEmail || '-'}</TableCell>
                         <TableCell className="text-right space-x-1">
                           <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)}><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => openModal(h)}><Edit3 className="h-4 w-4" /></Button>
@@ -306,7 +308,17 @@ export default function LaboratuvarPanel() {
               <Input placeholder="Laboratuvar Adı" value={currentHospital.name || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, name: e.target.value })} />
               <Input placeholder="Laboratuvar Kodu (Max 3 Karakter)" value={currentHospital.kod || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, kod: e.target.value.toUpperCase() })} maxLength={3} />
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
-              
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="email"
+                  placeholder="Sorumlu İletişim E-postası"
+                  value={(currentHospital as any).sorumluEmail || ''}
+                  onChange={(e) => setCurrentHospital({ ...currentHospital, sorumluEmail: e.target.value })}
+                  className="pl-9"
+                />
+              </div>
+
               <div className="space-y-4">
                 <div className="flex items-center space-x-2 rounded-md border p-3">
                     <Switch

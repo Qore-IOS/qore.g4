@@ -11,11 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -1165,6 +1167,7 @@ export default function AplikasyonIslemFormuPage() {
               serialNumber: partChange.serialNumber,
               deviceId,
               deviceName: device?.cihazAdi || device?.model || '',
+              labName: hospital?.name || '',
               formId: formRef.id,
               formType: 'aplikasyon',
               createdAt: Timestamp.fromDate(now),
@@ -1408,7 +1411,7 @@ export default function AplikasyonIslemFormuPage() {
             <div className="flex flex-col sm:flex-row gap-4 items-start">
               {device.imageUrl && (
                 <div className="w-28 h-28 flex-shrink-0 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2">
-                  <Image src={`/${device.imageUrl}`} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
+                  <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
                 </div>
               )}
               <div>

@@ -12,6 +12,7 @@ export { revokeUserSessions } from './revokeUserSessions';
 export { createCustomTokenForNfcUser } from './createCustomTokenForNfcUser';
 export { mirrorPresenceToFirestore } from './presence';
 export { nfcLoginWithSerial } from './nfc-login';
+export { onTeknikServisFormCreated, onAplikasyonFormCreated } from './actionFormEmailNotification';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];
@@ -151,28 +152,30 @@ export const onNotificationCreated = functions
         }
       }
 
-      // --- Intersection filter for fault notifications ---
-      // For fault_opened, a non-admin user must have BOTH the correct role AND be assigned to the lab
-      if (data.type === 'fault_opened' && data.meta?.faultType && data.meta?.hospitalId) {
+      // --- Strict filter for fault notifications ---
+      // For fault_opened, a non-admin user must always match the fault role.
+      // If hospitalId is provided, non-admin users must ALSO match the lab.
+      if (data.type === 'fault_opened' && data.meta?.faultType) {
         const requiredRole = `role:${data.meta.faultType}`;
-        const requiredLab = `lab:${data.meta.hospitalId}`;
-        let removedByIntersection = 0;
+        const requiredLab = data.meta?.hospitalId ? `lab:${data.meta.hospitalId}` : null;
+        let removedByStrictFilter = 0;
 
         for (const [key, tokenData] of tokenMap.entries()) {
           const keys = tokenData.membershipKeys || [];
           const isAdmin = keys.includes('role:admin');
-          // Non-admin users must match BOTH role and lab
           if (!isAdmin) {
             const hasCorrectRole = keys.includes(requiredRole);
-            const hasCorrectLab = keys.includes(requiredLab);
+            const hasCorrectLab = requiredLab ? keys.includes(requiredLab) : true;
             if (!hasCorrectRole || !hasCorrectLab) {
               tokenMap.delete(key);
-              removedByIntersection++;
+              removedByStrictFilter++;
             }
           }
         }
 
-        logger.info(`[fanOut] Fault intersection filter: removed ${removedByIntersection} tokens (require ${requiredRole} AND ${requiredLab})`);
+        logger.info(
+          `[fanOut] Fault strict filter: removed ${removedByStrictFilter} tokens (require ${requiredRole}${requiredLab ? ` AND ${requiredLab}` : ''})`
+        );
       }
 
       const tokens = Array.from(tokenMap.values());

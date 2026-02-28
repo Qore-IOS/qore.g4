@@ -1,8 +1,6 @@
-import { anthropic, CLAUDE_MODEL, MAX_TOKENS, ERROR_MESSAGES } from './config';
-import { planQueries, QueryPlan } from './queryPlanner';
-import { fetchDataForQueries, FetchedData } from './dataFetcher';
+import { MAX_TOKENS, ERROR_MESSAGES } from './config';
 import { executeSmartQuery, SmartQueryResult } from './smartQueryEngine';
-import Anthropic from '@anthropic-ai/sdk';
+import { generateWithGemini } from './geminiClient';
 import { aiLogger } from '@/lib/logger';
 
 export interface ChatMessage {
@@ -12,15 +10,11 @@ export interface ChatMessage {
 
 export interface ChatResponse {
   message: string;
-  queryPlan?: QueryPlan;
-  fetchedData?: FetchedData;
+  queryPlan?: unknown;
+  fetchedData?: { summary?: string };
   smartQueryResult?: SmartQueryResult;
   error?: string;
 }
-
-// ============================================
-// ENHANCED SYSTEM PROMPT
-// ============================================
 
 const ENHANCED_SYSTEM_PROMPT = `Sen Qore sisteminin yapay zeka asistanisin. Turkce konusuyorsun ve saglik sektoru ERP sisteminde uzmanlasmis bir asistansin.
 
@@ -42,221 +36,11 @@ const ENHANCED_SYSTEM_PROMPT = `Sen Qore sisteminin yapay zeka asistanisin. Turk
 - "TSH" dediginde "TSH ELECSYS" veya benzer urunleri anla
 - Eksik bilgiyle bile en iyi eslestirmeyi yapmaya calis
 
-## GOREVLERIN
-
-1. **Stok Yonetimi**: Urun stoklarini sorgulama, lot ve miad takibi, depo bazli stok durumu
-2. **Transfer Onerileri**: Hastaneler arasi optimal stok transferi onerileri
-3. **Cihaz Ariza Analizi**: Ariza raporlarini analiz etme, teknik servis/aplikasyon ayrimi
-4. **Verimlilik Raporlari**: Test bazli tuketim ve cihaz verimliligi analizi
-5. **Miad Takibi**: Son kullanma tarihi yaklasan urunlerin tespiti ve uyarilari
-6. **Tuketim Analizi**: Hastane bazli tuketim trendleri ve ongorular
-
-## AKILLI CEVAPLAMA
-
-Karmasik sorularda birden fazla veri kaynagini birlestir:
-- "Lab X verimlilik trendleri" = stok + ariza + tuketim + verimlilik verileri
-- "Y urunune ihtiyac duyan lablar" = tum hastane stoklari + min/max kurallari
-- "Son arizalar ve sebepleri" = ariza kayitlari + cihaz bilgileri + gecmis kayitlar
-
 ## CEVAP FORMATI
-
 - Listeler icin madde isaretleri kullan
 - Sayisal karsilastirmalar icin tablo formati tercih et
 - Kritik bilgileri **kalin** yap
-- Tarih formati: GG.AA.YYYY
-- Sayilari yuvarla (47.3 -> 47)
-
-## ONEMLI UYARILAR
-
-Asagidaki durumlarda MUTLAKA uyari ver:
-- Miadi 30 gun icinde dolacak urunler (KRITIK)
-- Minimum stok seviyesinin altindaki urunler (DUSUK STOK)
-- 7 gunden fazla acik kalan cihaz arizalari (GECIKEN ARIZA)
-- Verimlilik %70 altindaki laboratuvarlar (DUSUK VERIMLILIK)
-`;
-
-// Format fetched data as context for AI
-function formatDataAsContext(data: FetchedData): string {
-  const parts: string[] = [];
-
-  if (data.stocks && data.stocks.length > 0) {
-    parts.push('## Stok Verileri');
-    parts.push('| Urun Kodu | Urun Adi | Lot | Miad | Miktar | Lokasyon |');
-    parts.push('|-----------|----------|-----|------|--------|----------|');
-    for (const item of data.stocks.slice(0, 50)) {
-      parts.push(`| ${item.stokKodu} | ${item.stokAdi} | ${item.lotNumarasi || '-'} | ${item.miad || '-'} | ${item.miktar} | ${item.lokasyon} |`);
-    }
-    if (data.stocks.length > 50) {
-      parts.push(`\n*... ve ${data.stocks.length - 50} kayit daha*`);
-    }
-  }
-
-  if (data.hospitalStocks && data.hospitalStocks.length > 0) {
-    parts.push('\n## Hastane Bazli Stok Durumu');
-    for (const hospital of data.hospitalStocks.slice(0, 20)) {
-      parts.push(`\n### ${hospital.hospitalName} (Toplam: ${hospital.totalItems} adet)`);
-      if (hospital.items.length > 0) {
-        parts.push('| Urun Kodu | Urun Adi | Lot | Miad | Miktar |');
-        parts.push('|-----------|----------|-----|------|--------|');
-        for (const item of hospital.items.slice(0, 10)) {
-          parts.push(`| ${item.stokKodu} | ${item.stokAdi} | ${item.lotNumarasi || '-'} | ${item.miad || '-'} | ${item.miktar} |`);
-        }
-      }
-    }
-  }
-
-  if (data.consumptions && data.consumptions.length > 0) {
-    parts.push('\n## Tuketim Verileri');
-    parts.push('| Urun Kodu | Urun Adi | Miktar | Donem | Hastane |');
-    parts.push('|-----------|----------|--------|-------|---------|');
-    for (const item of data.consumptions.slice(0, 30)) {
-      parts.push(`| ${item.stokKodu} | ${item.stokAdi} | ${item.miktar} | ${item.tarih} | ${item.hospital} |`);
-    }
-  }
-
-  if (data.deviceFaults && data.deviceFaults.length > 0) {
-    parts.push('\n## Cihaz Ariza Kayitlari');
-    parts.push('| Hastane | Model | Seri No | Ariza Tipi | Aciklama | Durum | Tarih |');
-    parts.push('|---------|-------|---------|------------|----------|-------|-------|');
-    for (const fault of data.deviceFaults.slice(0, 20)) {
-      const desc = fault.description?.length > 50 ? fault.description.slice(0, 50) + '...' : fault.description || '-';
-      parts.push(`| ${fault.hospital} | ${fault.model} | ${fault.seriNumarasi} | ${fault.faultType} | ${desc} | ${fault.status} | ${fault.openedAt} |`);
-    }
-  }
-
-  if (data.efficiencyData && data.efficiencyData.length > 0) {
-    parts.push('\n## Verimlilik Verileri');
-    for (const eff of data.efficiencyData.slice(0, 10)) {
-      parts.push(`\n### ${eff.hospitalName} - ${eff.year}/${eff.month}`);
-      if (Object.keys(eff.verimlilikSonuclari).length > 0) {
-        parts.push('**Verimlilik Sonuclari:**');
-        parts.push('```json');
-        parts.push(JSON.stringify(eff.verimlilikSonuclari, null, 2));
-        parts.push('```');
-      }
-      if (Object.keys(eff.hesaplananTestBazliTuketim).length > 0) {
-        parts.push('**Test Bazli Tuketim:**');
-        parts.push('```json');
-        parts.push(JSON.stringify(eff.hesaplananTestBazliTuketim, null, 2));
-        parts.push('```');
-      }
-    }
-  }
-
-  if (data.products && data.products.length > 0) {
-    parts.push('\n## Urun Bilgileri');
-    parts.push('| Stok Kodu | Urun Adi | Grup | Marka | Ambalaj |');
-    parts.push('|-----------|----------|------|-------|---------|');
-    for (const product of data.products) {
-      parts.push(`| ${product.stokKodu} | ${product.stokAdi} | ${product.urunGrubu || '-'} | ${product.marka || '-'} | ${product.ambalajDegeri || '-'} |`);
-    }
-  }
-
-  if (parts.length === 0) {
-    return 'Sorgunuzla ilgili veri bulunamadi.';
-  }
-
-  return parts.join('\n');
-}
-
-// Convert our ChatMessage to Anthropic format
-function toAnthropicMessages(
-  history: ChatMessage[]
-): Anthropic.Messages.MessageParam[] {
-  return history.map((msg) => ({
-    role: msg.role,
-    content: msg.content,
-  }));
-}
-
-// Classify error type for better user feedback
-function classifyError(error: unknown): string {
-  const errorDetails = {
-    name: error instanceof Error ? error.name : 'unknown',
-    message: error instanceof Error ? error.message : String(error),
-    type: error?.constructor?.name,
-    stack: error instanceof Error ? error.stack : undefined,
-  };
-
-  aiLogger.error('AI error occurred', error, errorDetails);
-
-  if (error instanceof Anthropic.APIError) {
-    aiLogger.error('Anthropic API Error', error, {
-      status: error.status,
-      message: error.message,
-      headers: error.headers,
-    });
-
-    if (error.status === 401) {
-      return 'API anahtari gecersiz veya suresi dolmus. Lutfen console.anthropic.com adresinden yeni bir anahtar alin.';
-    }
-    if (error.status === 403) {
-      return 'API anahtarinin bu islem icin yetkisi yok. Lutfen API anahtar izinlerini kontrol edin.';
-    }
-    if (error.status === 429) {
-      return ERROR_MESSAGES.RATE_LIMIT;
-    }
-    if (error.status === 400) {
-      return ERROR_MESSAGES.INVALID_REQUEST;
-    }
-    if (error.status >= 500) {
-      return 'Claude API gecici olarak kullanilamiyor. Lutfen tekrar deneyin.';
-    }
-    // Unknown API error - log and return specific message
-    return `Claude API hatasi (${error.status}): ${error.message}`;
-  }
-
-  if (error instanceof Anthropic.AuthenticationError) {
-    aiLogger.error('Authentication Error', error);
-    return 'API anahtari gecersiz. Lutfen dogru Anthropic API anahtarini girdiginizden emin olun.';
-  }
-
-  if (error instanceof Error) {
-    const msg = error.message.toLowerCase();
-
-    // Network errors
-    if (msg.includes('fetch') || msg.includes('network') || msg.includes('enotfound') || msg.includes('econnrefused')) {
-      aiLogger.error('Network error', error);
-      return ERROR_MESSAGES.NETWORK_ERROR;
-    }
-
-    // API key related errors
-    if (msg.includes('api_key') || msg.includes('apikey') || msg.includes('authentication') || msg.includes('unauthorized')) {
-      aiLogger.error('API key error', error);
-      return 'API anahtari ile ilgili bir sorun var. Lutfen API anahtarinizi kontrol edin.';
-    }
-
-    // Timeout errors
-    if (msg.includes('timeout') || msg.includes('timed out')) {
-      aiLogger.error('Timeout error', error);
-      return 'Istek zaman asimina ugradi. Lutfen tekrar deneyin.';
-    }
-
-    // Firebase/Database errors
-    if (msg.includes('firebase') || msg.includes('firestore') || msg.includes('permission-denied')) {
-      aiLogger.error('Firebase error', error);
-      return 'Veritabani erisim hatasi. Lutfen sistem yoneticinize basvurun.';
-    }
-
-    // JSON parse errors
-    if (msg.includes('json') || msg.includes('parse') || msg.includes('unexpected token')) {
-      aiLogger.error('JSON parse error', error);
-      return 'Veri isleme hatasi. Lutfen tekrar deneyin.';
-    }
-
-    // Return the actual error message for better debugging
-    aiLogger.error('Unclassified error', error, { originalMessage: error.message });
-    return `Hata: ${error.message}`;
-  }
-
-  // Truly unknown error - log everything we can
-  aiLogger.fatal('Unknown error type', error, { rawError: String(error) });
-  return ERROR_MESSAGES.UNKNOWN_ERROR;
-}
-
-// ============================================
-// HALLUCINATION GUARD
-// ============================================
+- Tarih formati: GG.AA.YYYY`;
 
 function addHallucinationGuard(context: string, hasData: boolean): string {
   if (!hasData) {
@@ -281,42 +65,49 @@ ${context}`;
 ${context}`;
 }
 
-// ============================================
-// SMART CHAT FUNCTION
-// ============================================
+function classifyError(error: unknown): string {
+  aiLogger.error('AI error occurred', error);
 
-export async function smartChat(
-  userMessage: string,
-  conversationHistory: ChatMessage[] = []
-): Promise<ChatResponse> {
-  try {
-    // Step 1: Use Smart Query Engine
-    aiLogger.info('Processing smart chat', { message: userMessage.substring(0, 100) });
-    const smartResult = await executeSmartQuery(userMessage);
-    aiLogger.info('Smart query completed', { summary: smartResult.summary });
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
 
-    // Step 2: Build contextual prompt with hallucination guard
-    const guardedContext = addHallucinationGuard(
-      smartResult.context,
-      smartResult.dataQuality.hasData
-    );
-
-    // Add entity resolution info
-    let entityInfo = '';
-    if (smartResult.queryPlan.intent.entities.hospitals.length > 0) {
-      entityInfo += `\n## Tespit Edilen Hastane/Lab\n`;
-      for (const h of smartResult.queryPlan.intent.entities.hospitals) {
-        entityInfo += `- ${h.name} (ID: ${h.id}, Guven: ${Math.round(h.confidence * 100)}%)\n`;
-      }
+    if (msg.includes('401') || msg.includes('api key') || msg.includes('authentication') || msg.includes('unauthorized')) {
+      return 'API anahtari gecersiz veya suresi dolmus. Lutfen Gemini API anahtarinizi kontrol edin.';
     }
-    if (smartResult.queryPlan.intent.entities.products.length > 0) {
-      entityInfo += `\n## Tespit Edilen Urunler\n`;
-      for (const p of smartResult.queryPlan.intent.entities.products) {
-        entityInfo += `- ${p.name} (Kod: ${p.id}, Guven: ${Math.round(p.confidence * 100)}%)\n`;
-      }
+    if (msg.includes('429') || msg.includes('rate')) {
+      return ERROR_MESSAGES.RATE_LIMIT;
+    }
+    if (msg.includes('500') || msg.includes('503')) {
+      return 'Gemini API gecici olarak kullanilamiyor. Lutfen tekrar deneyin.';
+    }
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('enotfound') || msg.includes('econnrefused')) {
+      return ERROR_MESSAGES.NETWORK_ERROR;
     }
 
-    const contextualPrompt = `# Sistemden Cekilen Guncel Veriler
+    return `Hata: ${error.message}`;
+  }
+
+  return ERROR_MESSAGES.UNKNOWN_ERROR;
+}
+
+function buildContextualPrompt(userMessage: string, smartResult: SmartQueryResult): string {
+  const guardedContext = addHallucinationGuard(smartResult.context, smartResult.dataQuality.hasData);
+
+  let entityInfo = '';
+  if (smartResult.queryPlan.intent.entities.hospitals.length > 0) {
+    entityInfo += `\n## Tespit Edilen Hastane/Lab\n`;
+    for (const h of smartResult.queryPlan.intent.entities.hospitals) {
+      entityInfo += `- ${h.name} (ID: ${h.id}, Guven: ${Math.round(h.confidence * 100)}%)\n`;
+    }
+  }
+  if (smartResult.queryPlan.intent.entities.products.length > 0) {
+    entityInfo += `\n## Tespit Edilen Urunler\n`;
+    for (const p of smartResult.queryPlan.intent.entities.products) {
+      entityInfo += `- ${p.name} (Kod: ${p.id}, Guven: ${Math.round(p.confidence * 100)}%)\n`;
+    }
+  }
+
+  return `# Sistemden Cekilen Guncel Veriler
 
 ${guardedContext}
 
@@ -332,148 +123,70 @@ ${entityInfo}
 ${smartResult.dataQuality.warnings.length > 0 ? `- Uyarilar: ${smartResult.dataQuality.warnings.join(', ')}` : ''}
 
 Yukaridaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri KESINLIKLE uydurma.`;
+}
 
-    // Step 3: Build messages
-    const messages: Anthropic.Messages.MessageParam[] = [
-      ...toAnthropicMessages(conversationHistory),
+export async function smartChat(
+  userMessage: string,
+  conversationHistory: ChatMessage[] = []
+): Promise<ChatResponse> {
+  try {
+    aiLogger.info('Processing smart chat', { message: userMessage.substring(0, 100) });
+    const smartResult = await executeSmartQuery(userMessage);
+
+    const contextualPrompt = buildContextualPrompt(userMessage, smartResult);
+    const messages: ChatMessage[] = [
+      ...conversationHistory,
       { role: 'user', content: contextualPrompt },
     ];
 
-    // Step 4: Generate response
-    aiLogger.debug('Generating AI response');
-    const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: ENHANCED_SYSTEM_PROMPT,
+    const response = await generateWithGemini({
+      systemPrompt: ENHANCED_SYSTEM_PROMPT,
       messages,
+      temperature: 0.1,
+      maxOutputTokens: MAX_TOKENS,
     });
 
-    // Extract text
-    const textContent = response.content.find((block) => block.type === 'text');
-    const responseText = textContent?.type === 'text' ? textContent.text : '';
-
-    aiLogger.info('Response generated successfully', { responseLength: responseText.length });
-
     return {
-      message: responseText,
+      message: response.text,
+      queryPlan: smartResult.queryPlan,
+      fetchedData: { summary: smartResult.summary },
       smartQueryResult: smartResult,
     };
   } catch (error) {
-    aiLogger.error('SmartChat error', error, { userMessage: userMessage.substring(0, 100) });
     const errorMessage = classifyError(error);
-
     return {
       message: errorMessage,
       error: error instanceof Error ? error.message : 'Bilinmeyen hata',
     };
   }
 }
-
-// ============================================
-// LEGACY CHAT FUNCTION (for backward compatibility)
-// ============================================
 
 export async function chat(
   userMessage: string,
   conversationHistory: ChatMessage[] = []
 ): Promise<ChatResponse> {
-  // Use smart chat by default
   return smartChat(userMessage, conversationHistory);
 }
 
-// Streaming smart chat
 export async function smartChatStream(
   userMessage: string,
   conversationHistory: ChatMessage[] = [],
   onChunk: (chunk: string) => void
 ): Promise<ChatResponse> {
-  try {
-    // Step 1: Use Smart Query Engine
-    aiLogger.info('Processing smart chat stream', { message: userMessage.substring(0, 100) });
-    const smartResult = await executeSmartQuery(userMessage);
-    aiLogger.info('Smart query completed for stream', { summary: smartResult.summary });
+  const result = await smartChat(userMessage, conversationHistory);
 
-    // Step 2: Build contextual prompt
-    const guardedContext = addHallucinationGuard(
-      smartResult.context,
-      smartResult.dataQuality.hasData
-    );
-
-    let entityInfo = '';
-    if (smartResult.queryPlan.intent.entities.hospitals.length > 0) {
-      entityInfo += `\n## Tespit Edilen Hastane/Lab\n`;
-      for (const h of smartResult.queryPlan.intent.entities.hospitals) {
-        entityInfo += `- ${h.name} (ID: ${h.id})\n`;
-      }
-    }
-    if (smartResult.queryPlan.intent.entities.products.length > 0) {
-      entityInfo += `\n## Tespit Edilen Urunler\n`;
-      for (const p of smartResult.queryPlan.intent.entities.products) {
-        entityInfo += `- ${p.name} (Kod: ${p.id})\n`;
-      }
-    }
-
-    const contextualPrompt = `# Sistemden Cekilen Guncel Veriler
-
-${guardedContext}
-
-${entityInfo}
-
----
-
-**Kullanici Sorusu:** ${userMessage}
-
-Yukaridaki verileri kullanarak soruyu cevapla. Verilerde olmayan bilgileri KESINLIKLE uydurma.`;
-
-    // Step 3: Build messages
-    const messages: Anthropic.Messages.MessageParam[] = [
-      ...toAnthropicMessages(conversationHistory),
-      { role: 'user', content: contextualPrompt },
-    ];
-
-    // Step 4: Stream response
-    aiLogger.debug('Starting AI stream');
-    const stream = await anthropic.messages.stream({
-      model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: ENHANCED_SYSTEM_PROMPT,
-      messages,
-    });
-
-    let fullMessage = '';
-
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        const text = event.delta.text;
-        fullMessage += text;
-        onChunk(text);
-      }
-    }
-
-    aiLogger.info('Stream completed', { responseLength: fullMessage.length });
-
-    return {
-      message: fullMessage,
-      smartQueryResult: smartResult,
-    };
-  } catch (error) {
-    aiLogger.error('SmartChatStream error', error, { userMessage: userMessage.substring(0, 100) });
-    const errorMessage = classifyError(error);
-    onChunk(errorMessage);
-
-    return {
-      message: errorMessage,
-      error: error instanceof Error ? error.message : 'Bilinmeyen hata',
-    };
+  const chunks = result.message.match(/.{1,120}(\s|$)/g) || [result.message];
+  for (const chunk of chunks) {
+    onChunk(chunk);
   }
+
+  return result;
 }
 
-// Legacy streaming function (for backward compatibility)
 export async function chatStream(
   userMessage: string,
   conversationHistory: ChatMessage[] = [],
   onChunk: (chunk: string) => void
 ): Promise<ChatResponse> {
-  // Use smart chat stream by default
   return smartChatStream(userMessage, conversationHistory, onChunk);
 }

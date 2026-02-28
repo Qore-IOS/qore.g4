@@ -37,6 +37,7 @@ import {
   Wrench,
   Building2,
   RefreshCw,
+  Upload,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes } from 'date-fns';
@@ -72,6 +73,16 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { FileText } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+
+type AiKnowledgeDoc = {
+  id: string;
+  name: string;
+  type: 'txt' | 'pdf' | string;
+  active: boolean;
+  charCount: number;
+  updatedAt: string | null;
+};
 
 // Status tab değerleri
 type StatusTab = 'all' | 'atama_bekliyor' | 'mudahale_bekliyor' | 'mudahale_ediliyor' | 'cozuldu';
@@ -155,6 +166,7 @@ export default function ArizaYonetimiPage() {
   const [uniqueLabs, setUniqueLabs] = useState<string[]>([]);
   const [uniqueDevices, setUniqueDevices] = useState<string[]>([]);
   const [uniqueOpeners, setUniqueOpeners] = useState<string[]>([]);
+
 
   // API'den veri çekme
   const fetchReports = useCallback(async (isRefresh = false) => {
@@ -301,6 +313,7 @@ export default function ArizaYonetimiPage() {
     setExportModalOpen(false);
   };
 
+
   const handleExportToPdf = async () => {
     if (reports.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
@@ -320,6 +333,7 @@ export default function ArizaYonetimiPage() {
     <PageShell>
       <div className="device-module-page space-y-4">
         <BackButton fallback="/cihaz-yonetimi-ana" />
+
         <Card>
           <CardHeader>
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4">

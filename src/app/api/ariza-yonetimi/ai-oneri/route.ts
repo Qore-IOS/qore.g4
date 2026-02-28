@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { access, readFile } from 'fs/promises';
+import path from 'path';
 import { adminDb } from '@/lib/firebase-admin';
 
 type SimilarFaultSummary = {
   id: string;
   model?: string;
+  serial?: string;
   faultName?: string;
   faultType?: string;
   status?: string;
@@ -12,6 +15,8 @@ type SimilarFaultSummary = {
   openedAt?: string | null;
   closedAt?: string | null;
 };
+
+const AI_SUGGESTION_CACHE_VERSION = 2;
 
 const FAULT_ANALYSIS_GUIDE = `
 Aşağıdaki kurumsal servis rehberi, model ve arıza başlığına göre öncelikli kontrol adımlarını içerir. Bunu mevcut prompta EK bilgi olarak kullan.
@@ -90,6 +95,50 @@ function candidateGeminiModels(): string[] {
   return Array.from(new Set([...fromEnv, ...defaults]));
 }
 
+
+const MASTER_DOC_FILE = 'teknik_doc.txt';
+
+function candidateMasterDocPaths(): string[] {
+  const fromEnv = process.env.AI_MASTER_DOC_PATH?.trim();
+  const cwd = process.cwd();
+
+  return [
+    fromEnv,
+    path.join(cwd, 'public', MASTER_DOC_FILE),
+    '/home/user/studio/public/teknik_doc.txt',
+    '/workspace/qore.g4/public/teknik_doc.txt',
+  ].filter(Boolean) as string[];
+}
+
+async function resolveMasterDocPath(): Promise<string> {
+  const candidates = candidateMasterDocPaths();
+  for (const p of candidates) {
+    try {
+      await access(p);
+      return p;
+    } catch {
+      // continue
+    }
+  }
+
+  throw new Error(`Master teknik dokümanı bulunamadı. Denenen yollar: ${candidates.join(' | ')}`);
+}
+
+async function loadMasterKnowledgeDoc() {
+  const sourcePath = await resolveMasterDocPath();
+  const text = await readFile(sourcePath, 'utf-8');
+  const normalized = text.replace(/\u0000/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    throw new Error(`Master teknik dokümanı boş: ${sourcePath}`);
+  }
+  // Prompt boyutu için üst limit
+  return { text: normalized.slice(0, 60_000), sourcePath };
+}
+
+function buildKnowledgeSignature(masterDocText: string): string {
+  return `master_doc_v1:${masterDocText.length}`;
+}
+
 async function requestGeminiSuggestion(context: any) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) return null;
@@ -102,13 +151,17 @@ Yalnızca JSON döndür:
   "suggestedActions": ["..."],
   "chronicInsight": "kronik sorun yorumu",
   "resolutionAssessment": "geçmiş kapatma notlarına göre kalıcı/geçici çözüm analizi",
+  "evidenceBasedRecommendation": "ör: X cihazı bu arızayı şu tarihlerde yaşamış, temizlik geçici kalmış; Y parça kontrol/değişim öner",
   "confidence": 0-100
 }
 
 Kurallar:
 - Türkçe yaz.
+- Sadece verilen bağlamı kullan. Bağlamda olmayan sayı/tarih/olgu uydurma.
+- "benzer arıza sayısı" söylerken sadece bağlamdaki sameFaultCount değerini esas al.
+- Öneriler cihazın TEKİL SERİ NUMARALI geçmişine dayanmalı.
 - Teknik servis/aplikasyon için uygulanabilir ve kısa maddeler üret.
-- Model/marka + açıklama + geçmiş benzer arıza + kapatma notlarını birlikte değerlendir.
+- Genel-geçer cümlelerden kaçın; mümkünse tarih ve geçmiş çözüm notundan kanıt ver.
 - Emin olmadığında bunu açıkça belirt.
 
 Ek kurumsal rapor/yönergeler:
@@ -124,7 +177,7 @@ ${JSON.stringify(context)}`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 1000 },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1100 },
       }),
     });
 
@@ -154,6 +207,31 @@ ${JSON.stringify(context)}`;
   return { debug: lastDebug };
 }
 
+async function loadDeviceHistoryBySerial(serial: string, reportId: string) {
+  const snap = await adminDb.collection('deviceFaultReports').where('serial', '==', serial).orderBy('openedAt', 'desc').limit(120).get();
+
+  const allForDevice: SimilarFaultSummary[] = snap.docs.map((d) => {
+    const x = d.data() as any;
+    return {
+      id: d.id,
+      model: x.model,
+      serial: x.serial,
+      faultName: x.faultName,
+      faultType: x.faultType,
+      status: x.status,
+      description: x.description,
+      closeDescription: x.closeDescription,
+      openedAt: toIso(x.openedAt),
+      closedAt: toIso(x.closedAt),
+    };
+  });
+
+  return {
+    currentDeviceFaults: allForDevice,
+    otherFaultsOfSameDevice: allForDevice.filter((f) => f.id !== reportId),
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -171,55 +249,26 @@ export async function GET(request: NextRequest) {
     }
 
     const report = reportSnap.data() as any;
-    const cachedSuggestion = report?.aiSuggestion;
-    if (!forceRefresh && cachedSuggestion && typeof cachedSuggestion === 'object') {
-      return NextResponse.json({
-        success: true,
-        cached: true,
-        data: cachedSuggestion,
-      });
+    const serial = (report?.serial || '').trim();
+    if (!serial) {
+      return NextResponse.json({ success: false, error: 'Arıza kaydında seri numarası bulunamadı' }, { status: 400 });
     }
 
-    const [sameModelSnap, sameTitleCategorySnap] = await Promise.all([
-      report.model
-        ? adminDb.collection('deviceFaultReports').where('model', '==', report.model).orderBy('openedAt', 'desc').limit(40).get()
-        : Promise.resolve(null),
-      report.faultName
-        ? adminDb.collection('deviceFaultReports')
-          .where('faultName', '==', report.faultName)
-          .where('faultType', '==', report.faultType)
-          .orderBy('openedAt', 'desc')
-          .limit(40)
-          .get()
-        : Promise.resolve(null),
-    ]);
+    const { text: masterDocText, sourcePath: masterDocPath } = await loadMasterKnowledgeDoc();
+    const knowledgeSignature = buildKnowledgeSignature(masterDocText);
 
-    const combined = new Map<string, SimilarFaultSummary>();
-    const addDocs = (snap: FirebaseFirestore.QuerySnapshot | null) => {
-      if (!snap) return;
-      snap.docs.forEach((d) => {
-        if (d.id === reportId) return;
-        const x = d.data() as any;
-        combined.set(d.id, {
-          id: d.id,
-          model: x.model,
-          faultName: x.faultName,
-          faultType: x.faultType,
-          status: x.status,
-          description: x.description,
-          closeDescription: x.closeDescription,
-          openedAt: toIso(x.openedAt),
-          closedAt: toIso(x.closedAt),
-        });
-      });
-    };
+    const cachedSuggestion = report?.aiSuggestion;
+    const cacheVersionMatches = Number(cachedSuggestion?.cacheVersion || 0) === AI_SUGGESTION_CACHE_VERSION;
+    const knowledgeMatches = (cachedSuggestion?.knowledgeSignature || '') === knowledgeSignature;
+    if (!forceRefresh && cachedSuggestion && typeof cachedSuggestion === 'object' && cacheVersionMatches && knowledgeMatches) {
+      return NextResponse.json({ success: true, cached: true, data: cachedSuggestion });
+    }
 
-    addDocs(sameModelSnap as FirebaseFirestore.QuerySnapshot | null);
-    addDocs(sameTitleCategorySnap as FirebaseFirestore.QuerySnapshot | null);
+    const { otherFaultsOfSameDevice } = await loadDeviceHistoryBySerial(serial, reportId);
 
-    const similarFaults = Array.from(combined.values()).slice(0, 20);
+    const sameFaultGroup = otherFaultsOfSameDevice.filter((f) => (f.faultName || null) === (report.faultName || null) && (f.faultType || null) === (report.faultType || null));
 
-    const closeNotes = await Promise.all(similarFaults.slice(0, 12).map(async (f) => {
+    const closeNotes = await Promise.all(otherFaultsOfSameDevice.slice(0, 40).map(async (f) => {
       const historySnap = await adminDb.collection('deviceFaultReports').doc(f.id).collection('history').get();
       const closedEntry = historySnap.docs
         .map((d) => d.data() as any)
@@ -228,54 +277,79 @@ export async function GET(request: NextRequest) {
 
       return {
         id: f.id,
+        openedAt: f.openedAt,
+        faultName: f.faultName,
+        faultType: f.faultType,
+        description: f.description || '',
         closeDescription: f.closeDescription || closedEntry?.description || '',
+        resolutionClass: classifyResolution(f.closeDescription || closedEntry?.description || ''),
       };
     }));
 
     const resolutionStats = closeNotes.reduce(
       (acc, note) => {
-        const bucket = classifyResolution(note.closeDescription);
-        acc[bucket] += 1;
+        acc[note.resolutionClass] += 1;
         return acc;
       },
       { kalici: 0, gecici: 0, belirsiz: 0 }
     );
 
     const context = {
+      constraints: {
+        deviceScopedBy: 'serial',
+        serial,
+        sameFaultCount: sameFaultGroup.length,
+        totalPastFaultsForThisDevice: otherFaultsOfSameDevice.length,
+      },
       currentFault: {
         id: reportId,
-        marka: report.brand || null,
         model: report.model || null,
-        serial: report.serial || null,
+        serial,
         faultType: report.faultType || null,
         faultName: report.faultName || null,
         title: report.title || null,
         description: report.description || null,
+        openedAt: toIso(report.openedAt),
       },
-      similarFaultStats: {
-        total: similarFaults.length,
-        sameModelCount: sameModelSnap?.docs.filter((d) => d.id !== reportId).length || 0,
-        sameTitleCategoryCount: sameTitleCategorySnap?.docs.filter((d) => d.id !== reportId).length || 0,
-        resolvedCount: similarFaults.filter((f) => ['cozuldu', 'closed'].includes(f.status || '')).length,
-      },
-      resolutionStats,
-      sampleSimilarFaults: similarFaults.slice(0, 10).map((f) => ({
-        model: f.model,
-        faultName: f.faultName,
-        faultType: f.faultType,
+      sameFaultHistory: sameFaultGroup.slice(0, 20).map((f) => ({
+        id: f.id,
+        openedAt: f.openedAt,
+        closedAt: f.closedAt,
         description: f.description,
         closeDescription: f.closeDescription,
-        status: f.status,
       })),
-      sampleCloseNotes: closeNotes.slice(0, 8),
+      otherFaultHistorySameDevice: otherFaultsOfSameDevice.slice(0, 25).map((f) => ({
+        id: f.id,
+        faultName: f.faultName,
+        faultType: f.faultType,
+        openedAt: f.openedAt,
+        description: f.description,
+        closeDescription: f.closeDescription,
+      })),
+      closeNotes,
+      resolutionStats,
+      knowledgeDocs: [{
+        name: 'Master Teknik Doküman',
+        type: 'txt',
+        source: masterDocPath,
+        text: masterDocText,
+      }],
     };
 
     const ai = await requestGeminiSuggestion(context);
     const suggestionPayload = {
       ...ai,
-      similarFaultStats: context.similarFaultStats,
+      similarFaultStats: {
+        total: otherFaultsOfSameDevice.length,
+        sameModelCount: otherFaultsOfSameDevice.filter((f) => (f.model || null) === (report.model || null)).length,
+        sameTitleCategoryCount: sameFaultGroup.length,
+        resolvedCount: otherFaultsOfSameDevice.filter((f) => ['cozuldu', 'closed'].includes(f.status || '')).length,
+      },
       resolutionStats,
       generatedAt: new Date().toISOString(),
+      cacheVersion: AI_SUGGESTION_CACHE_VERSION,
+      scopeSerial: serial,
+      knowledgeSignature,
     };
 
     await reportRef.update({
@@ -283,11 +357,7 @@ export async function GET(request: NextRequest) {
       aiSuggestionUpdatedAt: new Date(),
     });
 
-    return NextResponse.json({
-      success: true,
-      cached: false,
-      data: suggestionPayload,
-    });
+    return NextResponse.json({ success: true, cached: false, data: suggestionPayload });
   } catch (error: any) {
     console.error('AI öneri oluşturma hatası:', error);
     return NextResponse.json({ success: false, error: error.message || 'AI öneri alınamadı' }, { status: 500 });

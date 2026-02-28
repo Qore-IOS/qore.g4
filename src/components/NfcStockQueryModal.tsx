@@ -11,6 +11,7 @@ import { db } from '@/lib/firebase';
 import { collection, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
 import type { ProductCode, DeviceGroup, DepoStokItem, Hospital } from '@/lib/types';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 
 interface NfcStockQueryModalProps {
   isOpen: boolean;
@@ -179,7 +180,7 @@ export default function NfcStockQueryModal({
                 <div className="flex items-center justify-center">
                   {productInfo.deviceGroupImage && (
                     <Image
-                      src={`/${productInfo.deviceGroupImage}`}
+                      src={resolveImageSrc(productInfo.deviceGroupImage)}
                       alt={productInfo.product.cihazGrubu || 'Cihaz Grubu'}
                       width={200}
                       height={200}

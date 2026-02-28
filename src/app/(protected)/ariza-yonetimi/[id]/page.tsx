@@ -16,8 +16,9 @@ import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, 
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
-import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, verifyLocationForIntervention } from '@/lib/faults';
+import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, transferFaultToOtherUnit, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
 import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -108,6 +109,7 @@ type AiSuggestion = {
   suggestedActions?: string[];
   chronicInsight?: string;
   resolutionAssessment?: string;
+  evidenceBasedRecommendation?: string;
   confidence?: number;
   debug?: string;
   similarFaultStats?: {
@@ -154,6 +156,7 @@ export default function FaultDetailPage() {
 
   // Yeni atama sistemi state'leri
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isTransferringUnit, setIsTransferringUnit] = useState(false);
   const [isStartingIntervention, setIsStartingIntervention] = useState(false);
   const [isVerifyingLocation, setIsVerifyingLocation] = useState(false);
   const [locationVerified, setLocationVerified] = useState(false);
@@ -419,6 +422,30 @@ export default function FaultDetailPage() {
       toast({ title: 'Hata', description: e.message || 'Arıza atanamadı.', variant: 'destructive' });
     } finally {
       setIsAssigning(false);
+    }
+  }, [fault, currentUser, currentUserProfile, toast]);
+
+
+  const handleTransferToOtherUnit = useCallback(async () => {
+    if (!fault || !currentUser) return;
+
+    setIsTransferringUnit(true);
+    try {
+      await transferFaultToOtherUnit(fault.id, {
+        uid: currentUser.uid,
+        name: currentUserProfile?.name || 'Bilinmeyen',
+      });
+
+      const targetUnitLabel = fault.faultType === 'teknik_servis' ? 'Aplikasyon' : 'Teknik Servis';
+      toast({
+        title: 'Arıza Aktarıldı',
+        description: `Arıza ${targetUnitLabel} birimine aktarıldı.`,
+      });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Hata', description: e.message || 'Arıza diğer birime aktarılamadı.', variant: 'destructive' });
+    } finally {
+      setIsTransferringUnit(false);
     }
   }, [fault, currentUser, currentUserProfile, toast]);
 
@@ -793,6 +820,8 @@ export default function FaultDetailPage() {
     fetchAiSuggestion();
   }, [fault?.id, fetchAiSuggestion]);
 
+
+
   const handleShare = async () => {
     if (!fault) return;
     const shareText = `Arıza Raporu: #${fault.id}\nLaboratuvar: ${fault.labName}\nCihaz: ${fault.model} (SN: ${fault.serial})\nAçan: ${fault.openedByName}\nAçılış: ${fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : 'Bilinmiyor'}`;
@@ -832,7 +861,7 @@ export default function FaultDetailPage() {
 
     if (device?.imageUrl) {
         try {
-            const response = await fetch(`/${device.imageUrl}`);
+            const response = await fetch(resolveImageSrc(device.imageUrl));
             const blob = await response.blob();
             const reader = new FileReader();
             reader.readAsDataURL(blob);
@@ -976,7 +1005,7 @@ export default function FaultDetailPage() {
               {device?.imageUrl && (
                 <div className="w-24 h-24 flex-shrink-0 bg-muted rounded-lg p-1">
                   <Image
-                    src={`/${device.imageUrl}`}
+                    src={resolveImageSrc(device.imageUrl)}
                     alt={device.model || ''}
                     width={96}
                     height={96}
@@ -1067,6 +1096,7 @@ export default function FaultDetailPage() {
                 )}
                 {aiSuggestion.chronicInsight && <p><span className="font-medium">Kronik Sorun Analizi:</span> {aiSuggestion.chronicInsight}</p>}
                 {aiSuggestion.resolutionAssessment && <p><span className="font-medium">Kalıcı/Geçici Çözüm Yorumu:</span> {aiSuggestion.resolutionAssessment}</p>}
+                {aiSuggestion.evidenceBasedRecommendation && <p><span className="font-medium">Cihaz Geçmişine Dayalı Özel Öneri:</span> {aiSuggestion.evidenceBasedRecommendation}</p>}
                 {aiSuggestion.similarFaultStats && (
                   <p className="text-xs text-muted-foreground">
                     Benzer arıza: {aiSuggestion.similarFaultStats.total} • Aynı model: {aiSuggestion.similarFaultStats.sameModelCount} • Aynı başlık+kategori: {aiSuggestion.similarFaultStats.sameTitleCategoryCount} • Çözülen: {aiSuggestion.similarFaultStats.resolvedCount}
@@ -1101,19 +1131,32 @@ export default function FaultDetailPage() {
                     {/* Üzerime Ata butonu */}
                     <div className="absolute inset-0 z-20 flex items-center justify-center flex-col gap-2">
                       {canAssign ? (
-                        <Button
-                          size="lg"
-                          onClick={handleAssignToSelf}
-                          disabled={isAssigning}
-                          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-lg px-8 py-6"
-                        >
-                          {isAssigning ? (
-                            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                          ) : (
-                            <UserPlus className="h-5 w-5 mr-2" />
-                          )}
-                          Arızayı Üzerime Al
-                        </Button>
+                        <>
+                          <Button
+                            size="lg"
+                            onClick={handleAssignToSelf}
+                            disabled={isAssigning || isTransferringUnit}
+                            className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-lg px-8 py-6"
+                          >
+                            {isAssigning ? (
+                              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                            ) : (
+                              <UserPlus className="h-5 w-5 mr-2" />
+                            )}
+                            Arızayı Üzerime Al
+                          </Button>
+                          <Button
+                            variant="link"
+                            onClick={handleTransferToOtherUnit}
+                            disabled={isAssigning || isTransferringUnit}
+                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                          >
+                            {isTransferringUnit ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : null}
+                            Bu arızayı eğer teknikse aplikasyona, eğer aplikasyonsa tekniğe aktar
+                          </Button>
+                        </>
                       ) : (
                         <div className="text-center p-4 bg-white/80 dark:bg-black/80 rounded-lg">
                           <p className="text-sm text-muted-foreground">

@@ -3,7 +3,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { useAuth } from './auth-context';
-import VideoSplashScreen from '@/components/VideoSplashScreen'; // Changed import
 import GlobalLoadingOverlay from '@/components/GlobalLoadingOverlay';
 
 interface LoadingContextType {
@@ -20,7 +19,7 @@ const LoadingContext = createContext<LoadingContextType | undefined>(undefined);
 
 export const LoadingProvider = ({ children }: { children: ReactNode }) => {
   const { isLoadingAuth } = useAuth();
-  const [isSplashLoading, setIsSplashLoading] = useState(true);
+  const [isSplashLoading, setIsSplashLoading] = useState(false);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
   const [suppressCount, setSuppressCount] = useState(0);
 
@@ -66,7 +65,6 @@ export const LoadingProvider = ({ children }: { children: ReactNode }) => {
         suppressGlobalLoading
       }}
     >
-      {isSplashLoading && <VideoSplashScreen />}
       {!isLoading && children}
       <GlobalLoadingOverlay isVisible={shouldShowGlobalLoading} />
     </LoadingContext.Provider>

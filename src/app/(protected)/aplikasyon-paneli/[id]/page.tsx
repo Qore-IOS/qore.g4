@@ -24,6 +24,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
 import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -39,6 +40,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 
 
 export default function AplikasyonPaneliDetayPage() {
@@ -609,7 +611,7 @@ export default function AplikasyonPaneliDetayPage() {
                             <div className="relative w-full aspect-square">
                               {device.imageUrl ? (
                                 <Image
-                                  src={`/${device.imageUrl}`}
+                                  src={resolveImageSrc(device.imageUrl)}
                                   alt={device.cihazAdi || device.model || ''}
                                   width={1024}
                                   height={1024}
