@@ -958,11 +958,15 @@ export default function TotalVerimlilikPanel({
       const endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
 
       // Seçilen depodan yapılan transferleri çek (transfers collection)
-      // sourceDepotId + mode='lab' ile filtrele; tarih ve lab filtrelemesi client-side
+      // sourceDepotId + mode='lab' + tarih aralığı ile filtrele; lab filtrelemesi client-side
+      const startTimestamp = Timestamp.fromDate(startDate);
+      const endTimestamp = Timestamp.fromDate(endDate);
       const transfersQuery = query(
         collection(db, 'transfers'),
         where('sourceDepotId', '==', selectedDepotForSevkiyat),
-        where('mode', '==', 'lab')
+        where('mode', '==', 'lab'),
+        where('timestamp', '>=', startTimestamp),
+        where('timestamp', '<=', endTimestamp)
       );
       const transfersSnap = await getDocs(transfersQuery);
 
@@ -975,9 +979,9 @@ export default function TotalVerimlilikPanel({
       for (const transferDoc of transfersSnap.docs) {
         const transferData = transferDoc.data();
 
-        // Tarih filtresini client-side uygula
+        // Tarih filtresini client-side uygula (sunucu tarafı filtreye ek güvenlik katmanı)
         const transferTimestamp = transferData.timestamp?.toDate ? transferData.timestamp.toDate() : new Date(transferData.timestamp);
-        if (transferTimestamp < startDate || transferTimestamp > endDate) continue;
+        if (!transferTimestamp || isNaN(transferTimestamp.getTime()) || transferTimestamp < startDate || transferTimestamp > endDate) continue;
 
         // targetHospitalId ile seçilen lab'ları doğrudan eşleştir
         const matchedLabId = transferData.targetHospitalId;
