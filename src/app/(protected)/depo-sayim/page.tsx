@@ -25,6 +25,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
 import { Label } from '@/components/ui/label';
@@ -153,19 +154,20 @@ export default function DepoSayimPage() {
                 getDocs(collection(db, 'depoStok')),
             ]);
             const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
-            setDepots(depotList);
+            const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
+            setDepots(filteredDepots);
             setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
             setFullDepotStok(stockSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)));
 
-            if(depotList.length > 0 && depotList[0].id && !selectedDepotId) {
-                setSelectedDepotId(depotList[0].id);
+            if(filteredDepots.length > 0 && filteredDepots[0].id && !selectedDepotId) {
+                setSelectedDepotId(filteredDepots[0].id);
             }
         } catch (e) {
             toast({ title: 'Veri Yükleme Hatası', description: 'Gerekli ana veriler yüklenemedi.', variant: 'destructive' });
         } finally {
             setIsLoading(false);
         }
-    }, [toast, selectedDepotId]);
+    }, [toast, selectedDepotId, currentUserProfile]);
 
     useEffect(() => {
         fetchData();

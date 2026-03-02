@@ -69,6 +69,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { siparislerLogger } from '@/lib/logger';
 
 
@@ -177,19 +178,20 @@ export default function SiparislerPanel(): JSX.Element {
           getDocs(collection(db, 'depoStok')),
         ]);
         const depotList = dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-        setDepots(depotList);
+        const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
+        setDepots(filteredDepots);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
         setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
         setDepoStok(sSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
         
-        if (dSnap.docs.length > 0) setSelectedDepotId(dSnap.docs[0].id);
+        if (filteredDepots.length > 0) setSelectedDepotId(filteredDepots[0].id);
       } catch (e) {
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
       }
     })();
-  }, [toast]);
+  }, [toast, currentUserProfile]);
 
 
   const addManualItem = () => {

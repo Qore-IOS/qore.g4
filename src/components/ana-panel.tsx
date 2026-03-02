@@ -55,6 +55,7 @@ import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 // Logging & Validation
 import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
@@ -412,6 +413,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   }, [scannedItems]);
 
   // Compute productTracking and productNames from productCodes (TanStack Query data)
+  const sourceDepots = useMemo(() => filterOperationalSourceDepots(depots, currentUserProfile), [depots, currentUserProfile]);
+
   const { productTracking, productNames } = useMemo(() => {
     const t: Record<string, TrackingMode> = {};
     const names: Record<string, string> = {};
@@ -426,10 +429,10 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   // Auto-select first depot when loaded
   useEffect(() => {
-    if (depots.length > 0 && !selectedDepotId && depots[0].id) {
-      setSelectedDepotId(depots[0].id);
+    if (sourceDepots.length > 0 && !selectedDepotId && sourceDepots[0].id) {
+      setSelectedDepotId(sourceDepots[0].id);
     }
-  }, [depots, selectedDepotId]);
+  }, [sourceDepots, selectedDepotId]);
 
   // Build existing serials map from TanStack Query data (polling instead of real-time listener)
   // This reduces Firestore reads dramatically
@@ -749,7 +752,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     mode: 'verified' | 'unverified'
   ): Promise<string> => {
     const transactionId = `MK-${generateId()}`;
-    const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
+    const depotName = sourceDepots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
     const header: MalKabulHeader = {
       transactionId,
       depotId: selectedDepotId,
@@ -850,7 +853,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     setMalKabulIsLoading(true);
     setCommitInfo(null);
     const processedIds = new Set<string>();
-    const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
+    const depotName = sourceDepots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
 
     const queue = new BatchQueue({
       chunkSize: 450,
@@ -1083,7 +1086,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                 <SelectValue placeholder="Depo seçin..." />
               </SelectTrigger>
               <SelectContent>
-                {depots.filter(d => !!d.id).map(dep => (
+                {sourceDepots.filter(d => !!d.id).map(dep => (
                   <SelectItem key={dep.id!} value={dep.id!}>{dep.name}</SelectItem>
                 ))}
               </SelectContent>
