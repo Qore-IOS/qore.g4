@@ -202,7 +202,8 @@ export default function TeknikServisPanel({
 
       const memberLabs = accessibleMembers
         .map(id => filteredHospitals.find(h => h.id === id))
-        .filter((h): h is Hospital => h !== undefined);
+        .filter((h): h is Hospital => h !== undefined)
+        .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
 
       if (memberLabs.length > 0) {
         poolGroups.push({ pool, mainLab, memberLabs });
@@ -375,7 +376,7 @@ export default function TeknikServisPanel({
         {/* ── Lab pools section ── */}
         {poolGroups.length > 0 && (
           <section>
-            <SectionLabel>Laboratuvar Havuzları</SectionLabel>
+            <SectionLabel>Cihaz Model Grupları</SectionLabel>
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
               {poolGroups.map(({ pool, mainLab, memberLabs }) => {
                 const stats = getPoolStats(memberLabs.map(l => l.id));
@@ -390,12 +391,9 @@ export default function TeknikServisPanel({
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm sm:text-[15px] font-semibold text-[var(--dashboard-text)] truncate leading-snug" title={mainLab.name}>
-                          {mainLab.name}
+                        <h3 className="text-sm sm:text-[15px] font-semibold text-[var(--dashboard-text)] truncate leading-snug" title={pool.name || mainLab.name}>
+                          {pool.name || mainLab.name}
                         </h3>
-                        {pool.name && pool.name !== mainLab.name && (
-                          <p className="text-xs text-[var(--dashboard-muted)] mt-0.5 truncate">{pool.name}</p>
-                        )}
                       </div>
                       <div className="flex items-center gap-1 text-[var(--dashboard-muted)] shrink-0">
                         <Layers className="h-3.5 w-3.5" />
@@ -414,7 +412,7 @@ export default function TeknikServisPanel({
         {/* ── Standalone labs section ── */}
         {standaloneLabs.length > 0 && (
           <section>
-            <SectionLabel>Kurumlar</SectionLabel>
+            <SectionLabel>Gruplanmamış Kurumlar</SectionLabel>
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
               {standaloneLabs.map(hospital => {
                 const stats = getHospitalStats(hospital.id);

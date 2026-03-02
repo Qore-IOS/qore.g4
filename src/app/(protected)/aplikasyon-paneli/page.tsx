@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Hospital, Device, AssignedDevice, LabPool } from '@/lib/types';
+import type { Hospital, Device, AssignedDevice, DeviceLabPool } from '@/lib/types';
 import { useToast } from "@/hooks/use-toast";
 import { collection, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -16,7 +16,7 @@ export default function AplikasyonPaneliPage() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [hospitalDeviceAssignments, setHospitalDeviceAssignments] = useState<AssignedDevice[]>([]);
-  const [labPools, setLabPools] = useState<LabPool[]>([]);
+  const [deviceLabPools, setDeviceLabPools] = useState<DeviceLabPool[]>([]);
 
   const fetchAllApplicationData = useCallback(async () => {
     setIsLoading(true);
@@ -52,9 +52,9 @@ export default function AplikasyonPaneliPage() {
 
       // Fetch active lab pools
       const unsubLabPools = onSnapshot(
-        query(collection(db, 'labPools'), where('active', '==', true)),
+        query(collection(db, 'deviceLabPools'), where('active', '==', true)),
         (snap) => {
-          setLabPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
+          setDeviceLabPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
           setIsLoading(false);
         },
         (err) => {
@@ -94,7 +94,7 @@ export default function AplikasyonPaneliPage() {
     devices,
     setDevices,
     hospitalDeviceAssignments,
-    labPools,
+    labPools: deviceLabPools,
     userAssignedLabs: currentUserProfile?.assignedLaboratories || [],
     userRole: currentUserProfile?.role || '',
     toast,
