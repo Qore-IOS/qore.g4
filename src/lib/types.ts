@@ -913,6 +913,17 @@ export interface EfficiencyPool {
   createdByName: string;
 }
 
+// Cihaz Laboratuvar Havuzu - Cihaz tanımlamaları panelinde laboratuvar gruplandırması
+export interface DeviceLabPool {
+  id: string;
+  name: string;
+  memberIds: string[]; // Havuza dahil laboratuvar ID'leri
+  active: boolean;
+  createdAt: any;
+  createdByUid: string;
+  createdByName: string;
+}
+
 // Total Verimlilik kayıt satırı
 export interface TotalEfficiencyRow {
   labId: string;
