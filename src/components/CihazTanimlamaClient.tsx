@@ -23,7 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -31,6 +31,7 @@ import { cn, exportDevicesToPdf } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
+import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 
 // Periyot birimi etiketleri
 const PERIOD_UNIT_LABELS: Record<MaintenancePeriodUnit, string> = {
@@ -91,6 +92,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const { toast } = useToast();
   const { currentUserProfile } = useAuth();
   const router = useRouter();
+
+  // Cihaz Laboratuvar Gruplandırma State
+  const [deviceLabPoolModalOpen, setDeviceLabPoolModalOpen] = useState(false);
 
   // Periyodik Bakım Planı State'leri
   const [maintenanceModalOpen, setMaintenanceModalOpen] = useState(false);
@@ -682,6 +686,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-headline">Cihaz Tanımlamaları</h1>
         <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setDeviceLabPoolModalOpen(true)}
+          >
+            <Server className="h-4 w-4 mr-2" />
+            Gruplandırma
+          </Button>
           <Button
             variant="secondary"
             onClick={() => router.push('/cihaz-tanimlamalari/periyodik-bakim-yonetimi')}
@@ -1688,6 +1699,14 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cihaz Laboratuvar Gruplandırma Modal */}
+      <DeviceLabPoolModal
+        open={deviceLabPoolModalOpen}
+        onOpenChange={setDeviceLabPoolModalOpen}
+        hospitals={hospitals}
+        devices={devices}
+      />
     </div>
   );
 }
