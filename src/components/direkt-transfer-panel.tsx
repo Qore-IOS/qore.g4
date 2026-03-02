@@ -73,6 +73,7 @@ import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tuta
 import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -296,13 +297,14 @@ export default function DirektTransferPanel() {
       ]);
 
       const depotList = depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-      setDepots(depotList);
+      const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
+      setDepots(filteredDepots);
       setProducts(productSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setHospitals(hospitalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setBorcDepots(borcSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
 
-      if (depotList.length > 0 && !selectedDepotId) {
-          setSelectedDepotId(depotList[0].id);
+      if (filteredDepots.length > 0 && !selectedDepotId) {
+          setSelectedDepotId(filteredDepots[0].id);
       }
 
     } catch (e: any) {
@@ -313,7 +315,7 @@ export default function DirektTransferPanel() {
     } finally {
       setPrereqsLoading(false);
     }
-  }, [selectedDepotId, toast]);
+  }, [selectedDepotId, toast, currentUserProfile]);
 
   useEffect(() => {
     fetchPrerequisites();

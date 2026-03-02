@@ -48,6 +48,7 @@ import { differenceInDays, parse, compareAsc, isValid } from 'date-fns';
 import BorcDepotPanel from './BorcDepotPanel';
 import debounce from 'lodash.debounce';
 import { useAuth } from '@/contexts/auth-context';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { saveManualChangeSnapshot } from '@/lib/depotCountHistory';
 import { Badge } from './ui/badge';
 import { Label } from '@/components/ui/label';
@@ -206,20 +207,21 @@ export default function StokYonetimiPanel() {
         getDocs(collection(db, 'hospitals')),
       ]);
       const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-      setDepots(depotList);
+      const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
+      setDepots(filteredDepots);
       setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setAddressDefinitions(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
       setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
 
-      if (depotList.length > 0 && !selectedDepotId && depotList[0]?.id) {
-        setSelectedDepotId(depotList[0].id);
+      if (filteredDepots.length > 0 && !selectedDepotId && filteredDepots[0]?.id) {
+        setSelectedDepotId(filteredDepots[0].id);
       }
     } catch (e) {
       toast({ title: 'Veri Yükleme Hatası', description: 'Gerekli ana veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast, selectedDepotId]);
+  }, [toast, selectedDepotId, currentUserProfile]);
 
   useEffect(() => {
     fetchMasterData();

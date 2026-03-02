@@ -1049,8 +1049,14 @@ export default function FaultDetailPage() {
             
 
           <div className="space-y-3 pt-4 border-t">
-            <p className="font-medium">Açıklama</p>
-            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
+            <div>
+              <p className="font-medium">Arıza Başlığı</p>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.title || fault.faultName || '-'}</p>
+            </div>
+            <div>
+              <p className="font-medium">Açıklama</p>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
+            </div>
           </div>
 
           <div className="space-y-3 pt-4 border-t">

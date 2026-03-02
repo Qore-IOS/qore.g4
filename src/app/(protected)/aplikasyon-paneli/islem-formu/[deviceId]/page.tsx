@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog } from '@/lib/types';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -65,6 +65,9 @@ type ActionItem = {
   isManualEntry?: boolean;
   // Personal stock info for part changes
   personalStockId?: string;
+  poolStockId?: string;
+  poolWarehouseId?: string;
+  poolWarehouseName?: string;
   serialNumber?: string;
   // Removed/replaced part info (from device)
   removedPartStokKodu?: string;
@@ -170,6 +173,9 @@ export default function AplikasyonIslemFormuPage() {
   // Part selection modal - now using personal stock
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
+  const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
+  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
+  const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool'>('personal');
   const [partSearchQuery, setPartSearchQuery] = useState('');
   const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
   const [manualPartCode, setManualPartCode] = useState('');
@@ -308,6 +314,61 @@ export default function AplikasyonIslemFormuPage() {
       }
     })();
   }, [currentUserProfile?.uid]);
+
+  // Fetch pool warehouse stock for lab groups connected to this device's hospital
+  useEffect(() => {
+    if (!deviceId) return;
+    (async () => {
+      try {
+        const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
+        if (!deviceSnap.exists()) return;
+        const deviceData = deviceSnap.data();
+        const hospitalId = deviceData.hospitalId;
+        if (!hospitalId) return;
+
+        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const matchingPoolIds: string[] = [];
+        poolsSnap.docs.forEach(d => {
+          const pool = d.data() as DeviceLabPool;
+          if (pool.memberIds?.includes(hospitalId)) {
+            matchingPoolIds.push(d.id);
+          }
+        });
+        if (matchingPoolIds.length === 0) return;
+
+        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const poolWarehouseIds: string[] = [];
+        depotsSnap.docs.forEach(d => {
+          const depot = d.data() as Depot;
+          if (depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some(id => matchingPoolIds.includes(id))) {
+            poolWarehouseIds.push(d.id);
+          }
+        });
+        if (poolWarehouseIds.length === 0) return;
+
+        const allPoolStock: PoolWarehouseStockItem[] = [];
+        for (const pwId of poolWarehouseIds) {
+          const stockQ = query(
+            collection(db, 'poolWarehouseStock'),
+            where('poolWarehouseId', '==', pwId),
+            where('status', '==', 'in_stock')
+          );
+          const stockSnap = await getDocs(stockQ);
+          stockSnap.docs.forEach(d => {
+            const data = d.data();
+            allPoolStock.push({
+              id: d.id,
+              ...data,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            } as PoolWarehouseStockItem);
+          });
+        }
+        setPoolStockItems(allPoolStock);
+      } catch (err) {
+        console.error("Error fetching pool stock:", err);
+      }
+    })();
+  }, [deviceId]);
 
   // Fetch users for accompanying personnel
   useEffect(() => {
@@ -487,10 +548,20 @@ export default function AplikasyonIslemFormuPage() {
     );
   }, [personalStock, partSearchQuery]);
 
+  const filteredPoolStock = useMemo(() => {
+    if (!partSearchQuery) return poolStockItems;
+    const q = partSearchQuery.toLowerCase();
+    return poolStockItems.filter(p =>
+      p.stokKodu.toLowerCase().includes(q) ||
+      p.stokAdi.toLowerCase().includes(q) ||
+      p.serialNumber.toLowerCase().includes(q)
+    );
+  }, [poolStockItems, partSearchQuery]);
+
   const installedPartDefaults = useMemo(() => ({
-    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || ''),
-    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || ''),
-  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem]);
+    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || ''),
+    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || ''),
+  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem, selectedPoolStockItem]);
 
   useEffect(() => {
     if (!isPartModalOpen) return;
@@ -1010,11 +1081,50 @@ export default function AplikasyonIslemFormuPage() {
           description: `${matchingPeriodic.stokAdi} periyodik değişim olarak kaydedilecek.`,
         });
       }
+    } else if (selectedPoolStockItem) {
+      if (actions.some(a => a.poolStockId === selectedPoolStockItem.id)) {
+        toast({ title: 'Uyarı', description: 'Bu parça zaten listeye eklendi.', variant: 'default' });
+        return;
+      }
+
+      const matchingPeriodic = pendingPeriodicPartChangeId
+        ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
+        : periodicPartChanges.find(p => p.stokKodu === selectedPoolStockItem.stokKodu);
+
+      const newItem: ActionItem = {
+        id: crypto.randomUUID(),
+        type: 'part_change',
+        action: selectedPoolStockItem.productCodeId,
+        stokKodu: selectedPoolStockItem.stokKodu,
+        stokAdi: selectedPoolStockItem.stokAdi,
+        serialNumber: selectedPoolStockItem.serialNumber,
+        poolStockId: selectedPoolStockItem.id,
+        poolWarehouseId: selectedPoolStockItem.poolWarehouseId,
+        poolWarehouseName: selectedPoolStockItem.poolWarehouseName,
+        quantity: 1,
+        removedPartStokKodu: installedPartDefaults.stokKodu,
+        removedPartStokAdi: installedPartDefaults.stokAdi,
+        removedPartSerialNumber: removedPartSerialNumber.trim(),
+        removedPartImageUrl,
+        usedPartImageUrl,
+        periodicPartChangeId: matchingPeriodic?.id,
+        isPeriodicPartChange: !!matchingPeriodic,
+      };
+      setActions(prev => [newItem, ...prev]);
+
+      if (matchingPeriodic && !selectedPeriodicParts.includes(matchingPeriodic.id)) {
+        setSelectedPeriodicParts(prev => [...prev, matchingPeriodic.id]);
+        toast({
+          title: 'Periyodik Değişim Algılandı',
+          description: `${matchingPeriodic.stokAdi} periyodik değişim olarak kaydedilecek.`,
+        });
+      }
     } else {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen şahsi stokunuzdan bir parça seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen stokunuzdan veya havuz stoktan bir parça seçin.', variant: 'destructive' });
       return;
     }
     setPendingPeriodicPartChangeId(null);
+    setSelectedPoolStockItem(null);
     setIsPartModalOpen(false);
   };
 
@@ -1455,6 +1565,43 @@ export default function AplikasyonIslemFormuPage() {
             });
           }
 
+          // If this is from pool stock, mark as used with user info
+          if (partChange.poolStockId) {
+            const poolStockRef = doc(db, 'poolWarehouseStock', partChange.poolStockId);
+            batch.update(poolStockRef, {
+              status: 'used',
+              usedAt: Timestamp.fromDate(now),
+              usedByUid: currentUserProfile?.uid || '',
+              usedByName: currentUserProfile?.name || '',
+              usedOnDeviceId: deviceId,
+              usedOnDeviceName: device?.cihazAdi || device?.model || '',
+              usedOnFormId: formRef.id,
+              usedOnFormType: 'aplikasyon',
+              usedOnLabId: device?.hospitalId || '',
+              usedOnLabName: hospital?.name || '',
+            });
+
+            const poolUseLogRef = doc(collection(db, 'sparePartTransferLogs'));
+            batch.set(poolUseLogRef, {
+              action: 'use_from_pool',
+              poolStockId: partChange.poolStockId,
+              poolWarehouseId: partChange.poolWarehouseId,
+              poolWarehouseName: partChange.poolWarehouseName,
+              stokKodu: partChange.stokKodu,
+              stokAdi: partChange.stokAdi,
+              serialNumber: partChange.serialNumber,
+              deviceId,
+              deviceName: device?.cihazAdi || device?.model || '',
+              labName: hospital?.name || '',
+              formId: formRef.id,
+              formType: 'aplikasyon',
+              createdAt: Timestamp.fromDate(now),
+              createdByUid: currentUserProfile?.uid || '',
+              createdByName: currentUserProfile?.name || '',
+              usageImageUrl: partChange.usedPartImageUrl || null,
+            });
+          }
+
           // If this is a manual entry (borrowed part), create a borrowed spare part record
           if (partChange.isManualEntry) {
             const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
@@ -1601,7 +1748,7 @@ export default function AplikasyonIslemFormuPage() {
               formId: formRef.id,
               formType: 'aplikasyon',
               installedPartSerialNumber: matchingPartChange?.serialNumber || null,
-              installedPartFromStock: !!matchingPartChange?.personalStockId,
+              installedPartFromStock: !!(matchingPartChange?.personalStockId || matchingPartChange?.poolStockId),
               removedPartSerialNumber: matchingPartChange?.removedPartSerialNumber || null,
               removedPartImageUrl: matchingPartChange?.removedPartImageUrl || null,
               periodDaysUsed: nextPeriodDays,
@@ -2198,10 +2345,31 @@ export default function AplikasyonIslemFormuPage() {
             <DialogTitle className="text-lg font-semibold tracking-tight">Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
           <div className="flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto">
-            {/* Section 1: Select part from personal stock */}
+            {/* Section 1: Select part from personal stock or pool stock */}
             <div className="p-4 border border-border rounded-lg bg-background space-y-3">
-              <Label className="font-semibold text-sm">1. Şahsi Stokunuzdan Parça Seçin</Label>
-              {!showManualEntry ? (
+              <Label className="font-semibold text-sm">1. Parça Seçin</Label>
+
+              {/* Stock source tabs */}
+              {poolStockItems.length > 0 && !showManualEntry && (
+                <div className="flex gap-1 p-1 rounded-lg bg-muted/40 border border-border">
+                  <button
+                    onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'personal' ? 'bg-background shadow-sm' : ''}`}
+                  >
+                    <Package className="h-3 w-3 inline mr-1" />
+                    Şahsi Stok ({personalStock.length})
+                  </button>
+                  <button
+                    onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'pool' ? 'bg-background shadow-sm' : ''}`}
+                  >
+                    <Package className="h-3 w-3 inline mr-1" />
+                    Havuz Stok ({poolStockItems.length})
+                  </button>
+                </div>
+              )}
+
+              {!showManualEntry && stockSourceTab === 'personal' ? (
                 <>
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -2224,7 +2392,7 @@ export default function AplikasyonIslemFormuPage() {
                         {filteredStock.map(item => (
                           <button
                             key={item.id}
-                            onClick={() => setSelectedStockItem(item)}
+                            onClick={() => { setSelectedStockItem(item); setSelectedPoolStockItem(null); }}
                             className={`w-full text-left p-3 rounded-lg transition-colors ${
                               selectedStockItem?.id === item.id
                                 ? 'bg-primary/10 border border-primary/40'
@@ -2258,7 +2426,62 @@ export default function AplikasyonIslemFormuPage() {
                     Stokta yok, manuel ekle
                   </Button>
                 </>
-              ) : (
+              ) : !showManualEntry && stockSourceTab === 'pool' ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Havuz stokta ara..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-44 border border-border rounded-lg bg-background">
+                    {filteredPoolStock.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {poolStockItems.length === 0
+                          ? 'Havuz depoda yedek parça bulunmuyor.'
+                          : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredPoolStock.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => { setSelectedPoolStockItem(item); setSelectedStockItem(null); }}
+                            className={`w-full text-left p-3 rounded-lg transition-colors ${
+                              selectedPoolStockItem?.id === item.id
+                                ? 'bg-purple-500/10 border border-purple-500/40'
+                                : 'hover:bg-muted/60 border border-transparent'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.stokAdi}</p>
+                                <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono">{item.serialNumber || '—'}</p>
+                                <p className="text-xs text-purple-600 font-medium">{item.poolWarehouseName}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualEntry(true)}
+                    className="w-full text-xs"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Stokta yok, manuel ekle
+                  </Button>
+                </>
+              ) : showManualEntry ? (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
@@ -2298,7 +2521,7 @@ export default function AplikasyonIslemFormuPage() {
                     Stoktan seç
                   </Button>
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Section 2: Removed part info (from device) */}
@@ -2444,13 +2667,14 @@ export default function AplikasyonIslemFormuPage() {
             </div>
 
             {/* Selected item summary */}
-            {(selectedStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
-              <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg text-sm">
-                <p className="font-medium text-green-800 dark:text-green-200">
-                  Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber})
+            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
+              <div className={`p-3 rounded-lg text-sm ${selectedPoolStockItem ? 'bg-purple-50 dark:bg-purple-950/20' : 'bg-green-50 dark:bg-green-950/20'}`}>
+                <p className={`font-medium ${selectedPoolStockItem ? 'text-purple-800 dark:text-purple-200' : 'text-green-800 dark:text-green-200'}`}>
+                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber})
+                  {selectedPoolStockItem && <span className="ml-1 text-xs text-purple-600">(Havuz: {selectedPoolStockItem.poolWarehouseName})</span>}
                 </p>
-                <p className="text-green-700 dark:text-green-300">
-                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
+                <p className={selectedPoolStockItem ? 'text-purple-700 dark:text-purple-300' : 'text-green-700 dark:text-green-300'}>
+                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
                 </p>
               </div>
             )}
@@ -2461,7 +2685,7 @@ export default function AplikasyonIslemFormuPage() {
               className="w-full sm:w-auto"
               onClick={addSelectedPart}
               disabled={
-                (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
+                (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
                 || isUploadingImage
               }
             >
