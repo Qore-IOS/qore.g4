@@ -1292,6 +1292,8 @@ export interface UserRequest {
   status: UserRequestStatus;
   createdBy: string; // uid
   createdByName: string;
+  assignedTo: string; // uid of assigned admin
+  assignedToName: string;
   createdAt: TimestampLike;
   updatedAt: TimestampLike;
   resolvedAt?: TimestampLike;
