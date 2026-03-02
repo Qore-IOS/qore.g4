@@ -3,18 +3,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
 import { Button as UiButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Loader2, Eye, Calendar, Clock, AlertTriangle, Package } from 'lucide-react';
+import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
-import { collection, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
-import { format } from 'date-fns';
-import { tr } from 'date-fns/locale';
-import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 interface AplikasyonPanelProps {
   hospitals: Hospital[];
@@ -29,52 +23,9 @@ interface AplikasyonPanelProps {
   fetchAllApplicationData: () => Promise<void>;
 }
 
-type ActionFormRecord = {
-  id: string;
-  deviceId: string;
-  cihazAdi?: string;
-  seriNumarasi?: string;
-  hospitalId?: string;
-  labName?: string;
-  aciklama?: string;
-  islemTuru?: string;
-  createdAt: Timestamp;
-  createdByName: string;
-  createdByUid?: string;
-  baslangicSaati?: string;
-  bitisSaati?: string;
-  cihazDurumu?: string;
-  cihazDurumuAciklama?: string;
-  faultName?: string;
-  selectedFaultId?: string;
-  selectedFaultName?: string;
-  isCustomFault?: boolean;
-  selectedTests?: string[];
-  actions?: any[];
-  eslikEdenPersonel?: { uid: string; name: string; role: string }[];
-  personnelSignature?: string;
-  technicianSignature?: string;
-  technicianName?: string;
-};
-
-const ISLEM_TURU_LABELS: Record<string, string> = {
-  rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
-  periyodik_bakim: 'Periyodik Bakım',
-  ariza: 'Arıza',
-  alis: 'ALIS',
-  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
-};
-
-const CIHAZ_DURUMU_LABELS: Record<string, string> = {
-  calisiyor: 'Çalışıyor',
-  arizali: 'Arızalı',
-  denemede: 'Denemede',
-  diger: 'Diğer',
-};
-
 export default function AplikasyonPanel({
-  hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = '', toast
-}: AplikasyonPanelProps & { toast?: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void }) {
+  hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = ''
+}: AplikasyonPanelProps) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
 
@@ -101,39 +52,6 @@ export default function AplikasyonPanel({
     };
     fetchOpenFaults();
   }, []);
-
-  // All forms dialog state
-  const [isAllFormsDialogOpen, setIsAllFormsDialogOpen] = useState(false);
-  const [allForms, setAllForms] = useState<ActionFormRecord[]>([]);
-  const [isLoadingForms, setIsLoadingForms] = useState(false);
-  const [selectedFormDetail, setSelectedFormDetail] = useState<ActionFormRecord | null>(null);
-
-  // Fetch all aplikasyon forms
-  const fetchAllForms = async () => {
-    setIsLoadingForms(true);
-    try {
-      const q = query(
-        collection(db, 'aplikasyonActionForms'),
-        orderBy('createdAt', 'desc')
-      );
-      const snap = await getDocs(q);
-      const forms = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-      })) as ActionFormRecord[];
-      setAllForms(forms);
-    } catch (err) {
-      console.error("Error fetching forms:", err);
-      toast?.({ title: 'Hata', description: 'Formlar yüklenemedi.', variant: 'destructive' });
-    } finally {
-      setIsLoadingForms(false);
-    }
-  };
-
-  const openAllFormsDialog = () => {
-    setIsAllFormsDialogOpen(true);
-    fetchAllForms();
-  };
 
   const getDevicesForHospital = (hospitalId: string): Device[] => {
     return devices

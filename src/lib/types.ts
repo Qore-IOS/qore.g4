@@ -111,6 +111,9 @@ export interface Depot {
   lat?: number;
   lng?: number;
   address?: string;
+  // Havuz Depo alanları
+  isPoolWarehouse?: boolean; // true ise bu bir havuz depo
+  linkedDeviceLabPoolIds?: string[]; // Bağlı Cihaz Laboratuvar Grubu ID'leri
   [k: string]: any;
 }
 
@@ -633,6 +636,8 @@ export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
 // Transfer log aksiyonları
 export type SparePartTransferAction =
   | 'transfer_to_personnel'  // Depodan personele transfer
+  | 'transfer_to_pool'       // Depodan havuz deposuna transfer
+  | 'use_from_pool'          // Havuz deposundan cihazda kullanıldı
   | 'use_on_device'          // Cihazda kullanıldı
   | 'return_to_depot'        // Depoya iade edildi (yeni parça)
   | 'submit_to_depot'        // Depoya teslim edildi (cihazdan çıkan)
@@ -663,6 +668,39 @@ export interface PersonalStockItem {
   replacedPartId?: string;     // Değişilen parça (cihazdan çıkan) ID
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
   usedPartImageUrl?: string;   // Cihaza takılan parça kullanım fotoğrafı URL
+}
+
+// ==========================================
+// Havuz Depo Stok Sistemi
+// ==========================================
+
+// Havuz deposundaki yedek parça durumu
+export type PoolStockStatus = 'in_stock' | 'used';
+
+// Havuz depo stok item
+export interface PoolWarehouseStockItem {
+  id: string;
+  poolWarehouseId: string;     // Hangi havuz deposuna ait
+  poolWarehouseName: string;
+  productCodeId: string;       // ProductCode referansı
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber: string;        // Seri numarası
+  status: PoolStockStatus;
+  createdAt: Date;
+  transferredByUid?: string;   // Transfer eden kişi (lojistik)
+  transferredByName?: string;
+  usedAt?: Date;               // Kullanıldığı tarih
+  usedByUid?: string;          // Kullanan personel UID
+  usedByName?: string;         // Kullanan personel adı
+  usedOnDeviceId?: string;     // Kullanıldığı cihaz
+  usedOnDeviceName?: string;
+  usedOnFormId?: string;       // Kullanıldığı form
+  usedOnFormType?: 'teknik_servis' | 'aplikasyon';
+  usedOnLabId?: string;        // Kullanıldığı laboratuvar
+  usedOnLabName?: string;
+  source: PersonalStockSource; // depot = yeni, device = cihazdan çıkan
+  cihazGrubu?: string;
 }
 
 // Transfer/kullanım/iade log kaydı
