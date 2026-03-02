@@ -9,6 +9,7 @@ import {
   updateDoc,
   doc,
   onSnapshot,
+  getDocs,
   query,
   where,
   orderBy,
@@ -51,12 +52,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type {
+  User as AppUser,
   UserRequest,
   UserRequestCategory,
   UserRequestPriority,
   UserRequestStatus,
   TimestampLike,
 } from "@/lib/types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ─── Helpers ────────────────────────────────────────────────
 function tsToDate(ts: TimestampLike): Date | null {
@@ -135,6 +144,7 @@ export default function KullaniciTalepPanel() {
         source={detailSource}
         isDark={isDark}
         uid={uid}
+        userName={currentUserProfile?.name || ""}
       />
     );
   }
@@ -561,6 +571,11 @@ function RequestCard({
                 {request.createdByName}
               </span>
             )}
+            {request.assignedToName && (
+              <span className={cn("text-xs px-2 py-0.5 rounded-full", isDark ? "bg-blue-500/15 text-blue-400" : "bg-blue-50 text-blue-600")}>
+                Atanan: {request.assignedToName}
+              </span>
+            )}
             <span className={cn("text-xs ml-auto", isDark ? "text-white/30" : "text-gray-400")}>
               {formatDate(request.createdAt)}
               {request.updatedAt && request.updatedAt !== request.createdAt && (
@@ -676,6 +691,7 @@ function RequestDetail({
   source,
   isDark,
   uid,
+  userName,
 }: {
   request: UserRequest;
   onBack: () => void;
@@ -683,6 +699,7 @@ function RequestDetail({
   source: DetailSource;
   isDark: boolean;
   uid: string;
+  userName: string;
 }) {
   const { toast } = useToast();
   const [liveRequest, setLiveRequest] = useState<UserRequest>(request);
@@ -706,8 +723,10 @@ function RequestDetail({
     }
   }, [liveRequest.unreadByUser, source, uid, request.id, liveRequest.createdBy]);
 
+  const isAssignedAdmin = liveRequest.assignedTo === uid;
+
   const toggleStatus = async () => {
-    if (!isAdminDeveloper && source !== "admin") return;
+    if (!isAssignedAdmin) return;
     setUpdating(true);
     try {
       const newStatus: UserRequestStatus = liveRequest.status === "open" ? "done" : "open";
@@ -719,9 +738,11 @@ function RequestDetail({
       if (newStatus === "done") {
         updateData.resolvedAt = serverTimestamp();
         updateData.resolvedBy = uid;
+        updateData.resolvedByName = userName;
       } else {
         updateData.resolvedAt = null;
         updateData.resolvedBy = null;
+        updateData.resolvedByName = null;
       }
       await updateDoc(doc(db, "userRequests", request.id), updateData);
       toast({ title: newStatus === "done" ? "Talep tamamlandı" : "Talep tekrar açıldı" });
@@ -806,6 +827,11 @@ function RequestDetail({
               {liveRequest.createdByName}
             </span>
           )}
+          {liveRequest.assignedToName && (
+            <span className={cn("text-xs px-2 py-0.5 rounded-full", isDark ? "bg-blue-500/15 text-blue-400" : "bg-blue-50 text-blue-600")}>
+              Atanan: {liveRequest.assignedToName}
+            </span>
+          )}
         </div>
 
         {/* Description */}
@@ -852,9 +878,16 @@ function RequestDetail({
             isDark={isDark}
             isFirst
           />
+          {liveRequest.assignedToName && (
+            <TimelineItem
+              label={`Atanan: ${liveRequest.assignedToName}`}
+              date=""
+              isDark={isDark}
+            />
+          )}
           {liveRequest.resolvedAt && (
             <TimelineItem
-              label="Tamamlandı"
+              label={`Tamamlandı${liveRequest.resolvedByName ? ` (${liveRequest.resolvedByName} tarafından)` : ""}`}
               date={formatDate(liveRequest.resolvedAt)}
               isDark={isDark}
               isCompleted
@@ -863,8 +896,8 @@ function RequestDetail({
         </div>
       </div>
 
-      {/* Admin actions */}
-      {isAdminDeveloper && source === "admin" && (
+      {/* Admin actions - only assigned admin can manage */}
+      {isAssignedAdmin && (
         <div
           className={cn(
             "p-5 rounded-2xl",
@@ -926,6 +959,25 @@ function RequestDetail({
               </Button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Show admin note to request creator (read-only) */}
+      {source === "my" && liveRequest.adminNote && (
+        <div
+          className={cn(
+            "p-5 rounded-2xl",
+            isDark
+              ? "bg-white/5 border border-white/10"
+              : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff]"
+          )}
+        >
+          <h3 className={cn("text-sm font-semibold mb-2", isDark ? "text-white/70" : "text-gray-700")}>
+            Admin Notu
+          </h3>
+          <p className={cn("text-sm whitespace-pre-wrap", isDark ? "text-white/60" : "text-gray-600")}>
+            {liveRequest.adminNote}
+          </p>
         </div>
       )}
     </div>
@@ -991,6 +1043,18 @@ function CreateRequestModal({
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [adminUsers, setAdminUsers] = useState<AppUser[]>([]);
+  const [assignedTo, setAssignedTo] = useState("");
+
+  // Fetch admin users
+  useEffect(() => {
+    getDocs(collection(db, "users")).then((snap) => {
+      const admins = snap.docs
+        .map((d) => ({ ...d.data(), uid: d.id } as AppUser))
+        .filter((u) => u.role === "admin" || u.role === "admin_developer");
+      setAdminUsers(admins);
+    });
+  }, []);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -1001,6 +1065,7 @@ function CreateRequestModal({
       setPriority("normal");
       setImages([]);
       setImagePreviews([]);
+      setAssignedTo("");
     }
   }, [open]);
 
@@ -1060,6 +1125,12 @@ function CreateRequestModal({
       toast({ title: "Başlık en fazla 100 karakter olabilir", variant: "destructive" });
       return;
     }
+    if (!assignedTo) {
+      toast({ title: "İlgilenecek kişi seçilmelidir", variant: "destructive" });
+      return;
+    }
+
+    const assignedAdmin = adminUsers.find((u) => u.uid === assignedTo);
 
     setSubmitting(true);
     try {
@@ -1083,6 +1154,8 @@ function CreateRequestModal({
         status: "open",
         createdBy: uid,
         createdByName: userName,
+        assignedTo: assignedTo,
+        assignedToName: assignedAdmin?.name || "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         unreadByUser: false,
@@ -1260,6 +1333,30 @@ function CreateRequestModal({
             </div>
           </div>
 
+          {/* Assigned Admin */}
+          <div className="flex flex-col gap-1.5">
+            <label className={cn("text-xs font-medium", isDark ? "text-white/60" : "text-gray-600")}>
+              İlgilenecek Kişi <span className="text-red-500">*</span>
+            </label>
+            <Select value={assignedTo} onValueChange={setAssignedTo}>
+              <SelectTrigger
+                className={cn(
+                  "h-11 rounded-xl",
+                  isDark ? "bg-white/5 border-white/10 text-white" : ""
+                )}
+              >
+                <SelectValue placeholder="Bir admin seçin..." />
+              </SelectTrigger>
+              <SelectContent>
+                {adminUsers.map((admin) => (
+                  <SelectItem key={admin.uid} value={admin.uid}>
+                    {admin.name} ({admin.role === "admin_developer" ? "Admin-Geliştirici" : "Admin"})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Submit */}
           <div className="flex gap-3 pt-2">
             <Button
@@ -1272,7 +1369,7 @@ function CreateRequestModal({
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={submitting || !title.trim()}
+              disabled={submitting || !title.trim() || !assignedTo}
               className="rounded-full flex-1 gap-2 bg-amber-500 hover:bg-amber-600 text-white"
             >
               {submitting ? (
