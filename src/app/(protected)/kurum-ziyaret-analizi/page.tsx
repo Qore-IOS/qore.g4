@@ -43,6 +43,7 @@ interface LabOption {
   id: string;
   name: string;
   memberIds: string[];
+  type: 'group' | 'lab';
 }
 
 interface PersonnelVisitDetail {
@@ -73,13 +74,13 @@ export default function KurumZiyaretAnaliziPage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [teknikSnap, appSnap, faultSnap, usersSnap, hospitalsSnap, labPoolsSnap] = await Promise.all([
+        const [teknikSnap, appSnap, faultSnap, usersSnap, hospitalsSnap, deviceLabPoolsSnap] = await Promise.all([
           getDocs(query(collection(db, 'teknikServisActionForms'), orderBy('createdAt', 'desc'))),
           getDocs(query(collection(db, 'aplikasyonActionForms'), orderBy('createdAt', 'desc'))),
           getDocs(query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))),
           getDocs(collection(db, 'users')),
           getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'labPools')),
+          getDocs(collection(db, 'deviceLabPools')),
         ]);
 
         const uMap = new Map<string, User>();
@@ -98,26 +99,26 @@ export default function KurumZiyaretAnaliziPage() {
         });
         setHospitalNamesMap(hospitalsNameMap);
 
-        const pools: LabPool[] = labPoolsSnap.docs
+        const pools: LabPool[] = deviceLabPoolsSnap.docs
           .map((d) => ({ id: d.id, ...d.data() } as LabPool))
           .filter((p) => p.active !== false);
 
-        const labsInPools = new Set<string>();
         const options: LabOption[] = [];
 
         for (const pool of pools) {
           if (!pool.memberIds?.length) continue;
-          const mainLabId = pool.mainLabId || pool.memberIds[0];
-          const mainLab = hospitalsMap.get(mainLabId);
-          const name = mainLab?.name || pool.name || 'Bilinmiyor';
-          pool.memberIds.forEach((id) => labsInPools.add(id));
-          options.push({ id: mainLabId, name, memberIds: [...pool.memberIds] });
+          const memberIds = pool.memberIds.filter((id, idx, arr) => id && arr.indexOf(id) === idx && hospitalsMap.has(id));
+          if (memberIds.length === 0) continue;
+          options.push({
+            id: pool.id,
+            name: pool.name || 'Bilinmiyor',
+            memberIds,
+            type: 'group',
+          });
         }
 
         hospitalsMap.forEach((h, id) => {
-          if (!labsInPools.has(id)) {
-            options.push({ id, name: h.name || 'Bilinmiyor', memberIds: [id] });
-          }
+          options.push({ id, name: h.name || 'Bilinmiyor', memberIds: [id], type: 'lab' });
         });
 
         options.sort((a, b) => a.name.localeCompare(b.name, 'tr'));
@@ -253,9 +254,15 @@ export default function KurumZiyaretAnaliziPage() {
   }, [teknikForms, aplikasyonForms, faultReports, usersMap]);
 
   const filteredLabOptions = useMemo(() => {
-    if (!labSearchTerm.trim()) return labOptions;
-    const lower = labSearchTerm.toLowerCase();
-    return labOptions.filter((l) => l.name.toLowerCase().includes(lower));
+    const lower = labSearchTerm.trim().toLowerCase();
+    const options = lower
+      ? labOptions.filter((l) => l.name.toLowerCase().includes(lower))
+      : labOptions;
+
+    return [...options].sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'group' ? -1 : 1;
+      return a.name.localeCompare(b.name, 'tr');
+    });
   }, [labOptions, labSearchTerm]);
 
   const filteredPersonnelOptions = useMemo(() => {
@@ -349,7 +356,7 @@ export default function KurumZiyaretAnaliziPage() {
           <PopoverTrigger asChild>
             <Button variant="outline" className="gap-2 h-9">
               <Building2 className="h-4 w-4" />
-              {selectedLabIds.size === 0 ? 'Tüm Kurumlar' : `${selectedLabIds.size} Kurum`}
+              {selectedLabIds.size === 0 ? 'Tüm Kurumlar ve Gruplar' : `${selectedLabIds.size} Seçim`}
               <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
             </Button>
           </PopoverTrigger>
@@ -357,7 +364,7 @@ export default function KurumZiyaretAnaliziPage() {
             <div className="p-2 border-b">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input placeholder="Kurum ara..." value={labSearchTerm} onChange={(e) => setLabSearchTerm(e.target.value)} className="pl-8 h-8 text-sm" />
+                <Input placeholder="Grup / kurum ara..." value={labSearchTerm} onChange={(e) => setLabSearchTerm(e.target.value)} className="pl-8 h-8 text-sm" />
               </div>
             </div>
             <ScrollArea className="h-[250px]">
@@ -366,7 +373,9 @@ export default function KurumZiyaretAnaliziPage() {
                   <div key={opt.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 cursor-pointer" onClick={() => toggleLab(opt.id)}>
                     <Checkbox checked={selectedLabIds.has(opt.id)} />
                     <span className="text-sm truncate">{opt.name}</span>
-                    {opt.memberIds.length > 1 && <Badge variant="secondary" className="ml-auto text-xs shrink-0">{opt.memberIds.length} lab</Badge>}
+                    <Badge variant="secondary" className="ml-auto text-xs shrink-0">
+                      {opt.type === 'group' ? `Grup · ${opt.memberIds.length} lab` : 'Tekli'}
+                    </Badge>
                   </div>
                 ))}
                 {filteredLabOptions.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Sonuç bulunamadı</p>}

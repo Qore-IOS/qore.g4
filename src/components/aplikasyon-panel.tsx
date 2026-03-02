@@ -1,13 +1,13 @@
 'use client';
 import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
-import { Button } from '@/components/ui/button';
+import { Button as UiButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Loader2, Eye, Calendar, Clock, AlertTriangle, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog as UiDialog, DialogContent as UiDialogContent, DialogHeader as UiDialogHeader, DialogTitle as UiDialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
@@ -130,11 +130,6 @@ export default function AplikasyonPanel({
     }
   };
 
-  const openAllFormsDialog = () => {
-    setIsAllFormsDialogOpen(true);
-    fetchAllForms();
-  };
-
   const getDevicesForHospital = (hospitalId: string): Device[] => {
     return devices
       .filter(d => (d as any).hospitalId === hospitalId)
@@ -182,7 +177,8 @@ export default function AplikasyonPanel({
 
       const memberLabs = accessibleMembers
         .map(id => filteredHospitals.find(h => h.id === id))
-        .filter((h): h is Hospital => h !== undefined);
+        .filter((h): h is Hospital => h !== undefined)
+        .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
 
       if (memberLabs.length > 0) {
         poolGroups.push({ pool, mainLab, memberLabs });
@@ -256,10 +252,10 @@ export default function AplikasyonPanel({
 
     return (
       <div className={"device-module-page space-y-6 p-4 sm:p-6"}>
-        <Button variant="ghost" onClick={() => setExpandedPoolId(null)} className="mb-2">
+        <UiButton variant="ghost" onClick={() => setExpandedPoolId(null)} className="mb-2">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Geri
-        </Button>
+        </UiButton>
         <Card className="cihaz-card-strong border-0">
           <CardHeader>
             <div className="flex justify-between items-center">
@@ -312,14 +308,14 @@ export default function AplikasyonPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
             <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
             <div className="flex w-full flex-col gap-2 sm:w-auto">
-              <Button variant="outline" onClick={openAllFormsDialog} className="w-full sm:w-auto">
+              <UiButton variant="outline" onClick={() => { setIsAllFormsDialogOpen(true); fetchAllForms(); }} className="w-full sm:w-auto">
                 <FileText className="mr-2 h-4 w-4" />
                 Tüm İşlem Formlarını Göster
-              </Button>
-              <Button variant="outline" onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')} className="w-full sm:w-auto">
+              </UiButton>
+              <UiButton variant="outline" onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')} className="w-full sm:w-auto">
                 <Package className="mr-2 h-4 w-4" />
                 Yedek Parça Stokları
-              </Button>
+              </UiButton>
             </div>
           </div>
           <CardDescription>Hastanelerdeki cihazların aplikasyon durumlarını görüntüleyin.</CardDescription>
@@ -328,7 +324,7 @@ export default function AplikasyonPanel({
 
       <div className="overflow-y-auto max-h-[calc(100vh-20rem)] p-2 sm:p-4 -m-2 sm:-m-4">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-          {/* Pool cards - show main lab as representative */}
+          {/* Group cards */}
           {poolGroups.map(({ pool, mainLab, memberLabs }) => {
             const stats = getPoolStats(memberLabs.map(l => l.id));
             return (
@@ -341,8 +337,8 @@ export default function AplikasyonPanel({
               >
                 <CardHeader className="pb-1 pt-3">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm sm:text-base font-headline text-[var(--dashboard-text)] truncate" title={mainLab.name}>
-                      {mainLab.name}
+                    <CardTitle className="text-sm sm:text-base font-headline text-[var(--dashboard-text)] truncate" title={pool.name || mainLab.name}>
+                      {pool.name || mainLab.name}
                     </CardTitle>
                     <div className="flex items-center text-muted-foreground">
                       <Layers className="h-4 w-4 mr-1" />
@@ -350,9 +346,6 @@ export default function AplikasyonPanel({
                       <ChevronRight className="h-4 w-4 ml-1" />
                     </div>
                   </div>
-                  {pool.name && pool.name !== mainLab.name && (
-                    <p className="text-xs text-muted-foreground">{pool.name}</p>
-                  )}
                 </CardHeader>
                 <CardContent className="pt-0 pb-4">
                   <DeviceDots devices={stats.devices} />
@@ -385,14 +378,14 @@ export default function AplikasyonPanel({
       </div>
 
       {/* All Forms Dialog */}
-      <Dialog open={isAllFormsDialogOpen} onOpenChange={setIsAllFormsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+      <UiDialog open={isAllFormsDialogOpen} onOpenChange={setIsAllFormsDialogOpen}>
+        <UiDialogContent className="max-w-4xl max-h-[90vh]">
+          <UiDialogHeader>
+            <UiDialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
               Tüm Aplikasyon İşlem Formları
-            </DialogTitle>
-          </DialogHeader>
+            </UiDialogTitle>
+          </UiDialogHeader>
           {isLoadingForms ? (
             <div className="flex justify-center items-center py-12">
               <Loader2 className="h-8 w-8 animate-spin" />
@@ -401,10 +394,10 @@ export default function AplikasyonPanel({
             // Form Detail View
             <div className="device-module-page space-y-4">
               <div className="flex items-center justify-between">
-                <Button variant="ghost" size="sm" onClick={() => setSelectedFormDetail(null)}>
+                <UiButton variant="ghost" size="sm" onClick={() => setSelectedFormDetail(null)}>
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   Listeye Dön
-                </Button>
+                </UiButton>
                 <AplikasyonTutanakPDFButton
                   device={{ id: selectedFormDetail.deviceId, cihazAdi: selectedFormDetail.cihazAdi, seriNumarasi: selectedFormDetail.seriNumarasi, hospitalId: selectedFormDetail.hospitalId } as Device}
                   hospital={selectedFormDetail.labName ? { id: selectedFormDetail.hospitalId || '', name: selectedFormDetail.labName } as Hospital : null}
@@ -556,9 +549,9 @@ export default function AplikasyonPanel({
                         </TableCell>
                         <TableCell className="text-sm">{form.createdByName || '-'}</TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setSelectedFormDetail(form); }}>
+                          <UiButton variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setSelectedFormDetail(form); }}>
                             <Eye className="h-4 w-4" />
-                          </Button>
+                          </UiButton>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -567,8 +560,8 @@ export default function AplikasyonPanel({
               )}
             </ScrollArea>
           )}
-        </DialogContent>
-      </Dialog>
+        </UiDialogContent>
+      </UiDialog>
     </div>
   );
 }
