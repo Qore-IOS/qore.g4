@@ -53,6 +53,34 @@ export default function AplikasyonPanel({
     fetchOpenFaults();
   }, []);
 
+  // All forms dialog state
+  const [isAllFormsDialogOpen, setIsAllFormsDialogOpen] = useState(false);
+  const [allForms, setAllForms] = useState<ActionFormRecord[]>([]);
+  const [isLoadingForms, setIsLoadingForms] = useState(false);
+  const [selectedFormDetail, setSelectedFormDetail] = useState<ActionFormRecord | null>(null);
+
+  // Fetch all aplikasyon forms
+  const fetchAllForms = async () => {
+    setIsLoadingForms(true);
+    try {
+      const q = query(
+        collection(db, 'aplikasyonActionForms'),
+        orderBy('createdAt', 'desc')
+      );
+      const snap = await getDocs(q);
+      const forms = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+      })) as ActionFormRecord[];
+      setAllForms(forms);
+    } catch (err) {
+      console.error("Error fetching forms:", err);
+      toast?.({ title: 'Hata', description: 'Formlar yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setIsLoadingForms(false);
+    }
+  };
+
   const getDevicesForHospital = (hospitalId: string): Device[] => {
     return devices
       .filter(d => (d as any).hospitalId === hospitalId)
@@ -231,7 +259,7 @@ export default function AplikasyonPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
             <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
             <div className="flex w-full flex-col gap-2 sm:w-auto">
-              <UiButton variant="outline" onClick={openAllFormsDialog} className="w-full sm:w-auto">
+              <UiButton variant="outline" onClick={() => { setIsAllFormsDialogOpen(true); fetchAllForms(); }} className="w-full sm:w-auto">
                 <FileText className="mr-2 h-4 w-4" />
                 Tüm İşlem Formlarını Göster
               </UiButton>
