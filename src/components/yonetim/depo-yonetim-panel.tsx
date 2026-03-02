@@ -1,16 +1,17 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Depot, ProductCode, AddressDefinition, Hospital } from '@/lib/types';
+import type { Depot, ProductCode, AddressDefinition, Hospital, DeviceLabPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, MapPin } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, MapPin, Database } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import MapDefinitionModal from '@/components/MapDefinitionModal';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import dynamic from 'next/dynamic';
@@ -26,6 +27,7 @@ export default function DepoYonetimPanel() {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
+  const [deviceLabPools, setDeviceLabPools] = useState<DeviceLabPool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [isDepotModalOpen, setIsDepotModalOpen] = useState(false);
@@ -33,23 +35,25 @@ export default function DepoYonetimPanel() {
 
   const [isMinMaxPanelOpen, setIsMinMaxPanelOpen] = useState(false);
   const [minMaxTarget, setMinMaxTarget] = useState<Depot | null>(null);
-  
+
   const [isMapEditorOpen, setIsMapEditorOpen] = useState(false);
   const [mapEditorTarget, setMapEditorTarget] = useState<Depot | null>(null);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap] = await Promise.all([
+      const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap, poolsSnap] = await Promise.all([
         getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'addressDefinitions')),
+        getDocs(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc'))),
       ]);
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
       setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setAddressDefinitions(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
+      setDeviceLabPools(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
@@ -87,6 +91,10 @@ export default function DepoYonetimPanel() {
       toast({ title: 'Hata', description: 'Depo adı boş olamaz.', variant: 'destructive' });
       return;
     }
+    if (currentDepot.isPoolWarehouse && (!currentDepot.linkedDeviceLabPoolIds || currentDepot.linkedDeviceLabPoolIds.length === 0)) {
+      toast({ title: 'Hata', description: 'Havuz depo için en az bir Cihaz Laboratuvar Grubu seçmelisiniz.', variant: 'destructive' });
+      return;
+    }
     setIsLoading(true);
     try {
       const dataToSave: Partial<Depot> = {
@@ -95,6 +103,8 @@ export default function DepoYonetimPanel() {
         lat: currentDepot.lat ?? null,
         lng: currentDepot.lng ?? null,
         linkedLaboratoryIds: (currentDepot.linkedLaboratoryIds || []).filter(Boolean),
+        isPoolWarehouse: currentDepot.isPoolWarehouse || false,
+        linkedDeviceLabPoolIds: currentDepot.isPoolWarehouse ? (currentDepot.linkedDeviceLabPoolIds || []).filter(Boolean) : [],
       };
 
       if (currentDepot.id) {
@@ -119,7 +129,7 @@ export default function DepoYonetimPanel() {
       fetchData();
     }
   };
-  
+
   const handleSaveMap = async (mapDefinition: any) => {
     if (!mapEditorTarget) return;
     try {
@@ -130,6 +140,14 @@ export default function DepoYonetimPanel() {
     } catch (e) {
       toast({ title: 'Hata', description: 'Harita kaydedilemedi.', variant: 'destructive' });
     }
+  };
+
+  const getPoolNames = (depot: Depot) => {
+    if (!depot.linkedDeviceLabPoolIds?.length) return '';
+    return depot.linkedDeviceLabPoolIds
+      .map(id => deviceLabPools.find(p => p.id === id)?.name)
+      .filter(Boolean)
+      .join(', ');
   };
 
   return (
@@ -156,6 +174,7 @@ export default function DepoYonetimPanel() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Depo Adı</TableHead>
+                    <TableHead>Tip</TableHead>
                     <TableHead>Adres</TableHead>
                     <TableHead>Konum</TableHead>
                     <TableHead>Bağlı Lab</TableHead>
@@ -166,6 +185,16 @@ export default function DepoYonetimPanel() {
                   {depots.map(d => (
                     <TableRow key={d.id}>
                       <TableCell className="font-medium">{d.name}</TableCell>
+                      <TableCell>
+                        {d.isPoolWarehouse ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                            <Database className="h-3 w-3" />
+                            Havuz
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Standart</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{d.address || '-'}</TableCell>
                       <TableCell>
                         {d.lat && d.lng ? (
@@ -178,7 +207,13 @@ export default function DepoYonetimPanel() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {(d.linkedLaboratoryIds || []).length}
+                        {d.isPoolWarehouse ? (
+                          <span className="text-xs text-muted-foreground" title={getPoolNames(d)}>
+                            {(d.linkedDeviceLabPoolIds || []).length} grup
+                          </span>
+                        ) : (
+                          (d.linkedLaboratoryIds || []).length
+                        )}
                       </TableCell>
                       <TableCell className="text-right space-x-1">
                         <Button variant="ghost" size="icon" onClick={() => { setMinMaxTarget(d); setIsMinMaxPanelOpen(true); }}><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
@@ -196,7 +231,7 @@ export default function DepoYonetimPanel() {
       </Card>
 
       <Dialog open={isDepotModalOpen} onOpenChange={setIsDepotModalOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{currentDepot.id ? 'Depo Düzenle' : 'Yeni Depo'}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             <div className="space-y-4">
@@ -209,6 +244,62 @@ export default function DepoYonetimPanel() {
                   className="mt-1"
                 />
               </div>
+
+              {/* Havuz Depo Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <Database className="h-4 w-4 text-purple-600" />
+                    Havuz Depo
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Personel haricinde paylaşılan havuz stok deposu olarak tanımla.
+                  </p>
+                </div>
+                <Switch
+                  checked={currentDepot.isPoolWarehouse || false}
+                  onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, isPoolWarehouse: checked })}
+                />
+              </div>
+
+              {/* Cihaz Laboratuvar Grubu seçimi - Sadece havuz depo seçiliyken */}
+              {currentDepot.isPoolWarehouse && (
+                <div>
+                  <label className="text-sm text-muted-foreground">Bağlı Cihaz Laboratuvar Grupları *</label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Bu havuz deposunun hizmet vereceği laboratuvar gruplarını seçin.
+                  </p>
+                  <ScrollArea className="h-40 border rounded-md p-2 mt-1">
+                    <div className="space-y-2">
+                      {deviceLabPools.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">
+                          Henüz Cihaz Laboratuvar Grubu tanımlanmamış. Önce Cihaz Tanımlamaları panelinden grup oluşturun.
+                        </p>
+                      ) : deviceLabPools.map(pool => {
+                        const selected = (currentDepot.linkedDeviceLabPoolIds || []).includes(pool.id);
+                        return (
+                          <label key={pool.id} className="flex items-center gap-2 text-sm cursor-pointer p-1.5 rounded hover:bg-muted/50">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(e) => {
+                                const prev = currentDepot.linkedDeviceLabPoolIds || [];
+                                const next = e.target.checked ? [...prev, pool.id] : prev.filter(id => id !== pool.id);
+                                setCurrentDepot({ ...currentDepot, linkedDeviceLabPoolIds: next });
+                              }}
+                            />
+                            <div>
+                              <span className="font-medium">{pool.name}</span>
+                              <span className="text-xs text-muted-foreground ml-2">({pool.memberIds.length} lab)</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                </div>
+              )}
+
               <div>
                 <label className="text-sm text-muted-foreground">Adres / Koordinat</label>
                 <Input
@@ -233,31 +324,33 @@ export default function DepoYonetimPanel() {
                 </div>
               )}
 
-              <div>
-                <label className="text-sm text-muted-foreground">Depoya Bağlı Laboratuvarlar (Toplu Sipariş için)</label>
-                <ScrollArea className="h-40 border rounded-md p-2 mt-1">
-                  <div className="space-y-2">
-                    {hospitals.map(h => {
-                      const selected = (currentDepot.linkedLaboratoryIds || []).includes(h.id);
-                      return (
-                        <label key={h.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={(e) => {
-                              const prev = currentDepot.linkedLaboratoryIds || [];
-                              const next = e.target.checked ? [...prev, h.id] : prev.filter(id => id !== h.id);
-                              setCurrentDepot({ ...currentDepot, linkedLaboratoryIds: next });
-                            }}
-                          />
-                          <span>{h.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
-                <p className="text-xs text-muted-foreground mt-1">Bu seçim yalnızca Merkez/Toplu Sipariş hesaplarında kullanılır.</p>
-              </div>
+              {!currentDepot.isPoolWarehouse && (
+                <div>
+                  <label className="text-sm text-muted-foreground">Depoya Bağlı Laboratuvarlar (Toplu Sipariş için)</label>
+                  <ScrollArea className="h-40 border rounded-md p-2 mt-1">
+                    <div className="space-y-2">
+                      {hospitals.map(h => {
+                        const selected = (currentDepot.linkedLaboratoryIds || []).includes(h.id);
+                        return (
+                          <label key={h.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(e) => {
+                                const prev = currentDepot.linkedLaboratoryIds || [];
+                                const next = e.target.checked ? [...prev, h.id] : prev.filter(id => id !== h.id);
+                                setCurrentDepot({ ...currentDepot, linkedLaboratoryIds: next });
+                              }}
+                            />
+                            <span>{h.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                  <p className="text-xs text-muted-foreground mt-1">Bu seçim yalnızca Merkez/Toplu Sipariş hesaplarında kullanılır.</p>
+                </div>
+              )}
             </div>
             <div className="h-80 rounded-md overflow-hidden border">
               <LocationPicker
@@ -273,7 +366,7 @@ export default function DepoYonetimPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {isMinMaxPanelOpen && minMaxTarget && (
         <MinMaxSettingsPanel
           isOpen={isMinMaxPanelOpen}
