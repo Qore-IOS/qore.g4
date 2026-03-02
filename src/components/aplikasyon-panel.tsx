@@ -182,7 +182,8 @@ export default function AplikasyonPanel({
 
       const memberLabs = accessibleMembers
         .map(id => filteredHospitals.find(h => h.id === id))
-        .filter((h): h is Hospital => h !== undefined);
+        .filter((h): h is Hospital => h !== undefined)
+        .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
 
       if (memberLabs.length > 0) {
         poolGroups.push({ pool, mainLab, memberLabs });
@@ -328,7 +329,7 @@ export default function AplikasyonPanel({
 
       <div className="overflow-y-auto max-h-[calc(100vh-20rem)] p-2 sm:p-4 -m-2 sm:-m-4">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-          {/* Pool cards - show main lab as representative */}
+          {/* Group cards */}
           {poolGroups.map(({ pool, mainLab, memberLabs }) => {
             const stats = getPoolStats(memberLabs.map(l => l.id));
             return (
@@ -341,8 +342,8 @@ export default function AplikasyonPanel({
               >
                 <CardHeader className="pb-1 pt-3">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm sm:text-base font-headline text-[var(--dashboard-text)] truncate" title={mainLab.name}>
-                      {mainLab.name}
+                    <CardTitle className="text-sm sm:text-base font-headline text-[var(--dashboard-text)] truncate" title={pool.name || mainLab.name}>
+                      {pool.name || mainLab.name}
                     </CardTitle>
                     <div className="flex items-center text-muted-foreground">
                       <Layers className="h-4 w-4 mr-1" />
@@ -350,9 +351,6 @@ export default function AplikasyonPanel({
                       <ChevronRight className="h-4 w-4 ml-1" />
                     </div>
                   </div>
-                  {pool.name && pool.name !== mainLab.name && (
-                    <p className="text-xs text-muted-foreground">{pool.name}</p>
-                  )}
                 </CardHeader>
                 <CardContent className="pt-0 pb-4">
                   <DeviceDots devices={stats.devices} />
