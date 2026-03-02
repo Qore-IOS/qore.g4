@@ -251,6 +251,7 @@ export default function YedekParcaTransferPage() {
 
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
+  const isAdmin = currentUserProfile?.role === 'admin';
 
   const loadRecentTransferLogs = useCallback(async () => {
     const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
@@ -1365,6 +1366,11 @@ export default function YedekParcaTransferPage() {
   };
 
   const deleteSerialFromDepot = async (group: GroupedDepoStokItem, serialEntry: { serialNumber: string; id: string }) => {
+    if (!isAdmin) {
+      toast({ title: 'Yetki Hatası', description: 'Bu işlem sadece admin kullanıcılar için izinlidir.', variant: 'destructive' });
+      return;
+    }
+
     try {
       const now = new Date();
       const batch = writeBatch(db);
@@ -1410,6 +1416,150 @@ export default function YedekParcaTransferPage() {
     } catch (err) {
       console.error('Error deleting serial from depot stock:', err);
       toast({ title: 'Hata', description: 'Seri numarası silinirken hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  const deleteDepotStockGroup = async (group: GroupedDepoStokItem) => {
+    if (!isAdmin) {
+      toast({ title: 'Yetki Hatası', description: 'Bu işlem sadece admin kullanıcılar için izinlidir.', variant: 'destructive' });
+      return;
+    }
+
+    const shouldDelete = window.confirm(`${group.stokKodu} kodlu stok kaydının tüm satırları silinsin mi? (${group.totalQuantity} adet)`);
+    if (!shouldDelete) return;
+
+    try {
+      const now = new Date();
+      const batch = writeBatch(db);
+
+      group.entries.forEach((entry) => {
+        batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+      });
+
+      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+      batch.set(depoLogRef, {
+        action: 'stok_silme_admin',
+        productCodeId: group.productCodeId,
+        stokKodu: group.stokKodu,
+        stokAdi: group.stokAdi,
+        cihazGrubu: group.cihazGrubu || '',
+        serialNumber: '',
+        address: group.entries.find(e => (e.address || '').trim())?.address || '',
+        quantity: group.totalQuantity,
+        notes: `Admin stok satırı silme: ${group.totalQuantity} adet kayıt kaldırıldı.`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(transferLogRef, {
+        action: 'depo_stock_deleted_admin',
+        productCodeId: group.productCodeId,
+        stokKodu: group.stokKodu,
+        stokAdi: group.stokAdi,
+        serialNumber: '',
+        quantity: group.totalQuantity,
+        notes: 'Admin depo stok satırı silme işlemi',
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      await batch.commit();
+      await fetchDepoStok();
+      await loadRecentTransferLogs();
+
+      toast({
+        title: 'Depo Stok Silindi',
+        description: `${group.stokKodu} için ${group.totalQuantity} adet stok kaydı silindi.`,
+      });
+    } catch (err) {
+      console.error('Error deleting depot stock group:', err);
+      toast({ title: 'Hata', description: 'Depo stok satırı silinirken hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  const deletePersonnelStockItem = async (item: PersonnelStockViewItem) => {
+    if (!isAdmin) {
+      toast({ title: 'Yetki Hatası', description: 'Bu işlem sadece admin kullanıcılar için izinlidir.', variant: 'destructive' });
+      return;
+    }
+
+    const shouldDelete = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) personel stok kaydı silinsin mi?`);
+    if (!shouldDelete) return;
+
+    try {
+      const now = new Date();
+      await deleteDoc(doc(db, 'personalStock', item.id));
+
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'personnel_stock_deleted_admin',
+        personalStockId: item.id,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber || '',
+        fromUid: item.ownerUid,
+        fromName: item.ownerName,
+        quantity: item.quantity || 1,
+        notes: 'Admin personel stok satırı silme işlemi',
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      await fetchAllPersonnelStock();
+      await loadRecentTransferLogs();
+
+      toast({ title: 'Personel Stok Kaydı Silindi', description: `${item.stokKodu} kaydı kaldırıldı.` });
+    } catch (err) {
+      console.error('Error deleting personnel stock item:', err);
+      toast({ title: 'Hata', description: 'Personel stok satırı silinirken hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  const deletePoolStockItem = async (item: PoolWarehouseStockItem) => {
+    if (!isAdmin) {
+      toast({ title: 'Yetki Hatası', description: 'Bu işlem sadece admin kullanıcılar için izinlidir.', variant: 'destructive' });
+      return;
+    }
+
+    const shouldDelete = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) havuz stok kaydı silinsin mi?`);
+    if (!shouldDelete) return;
+
+    try {
+      const now = new Date();
+      await deleteDoc(doc(db, 'poolWarehouseStock', item.id));
+
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'pool_stock_deleted_admin',
+        poolStockId: item.id,
+        poolWarehouseId: item.poolWarehouseId,
+        poolWarehouseName: menuSelection.poolWarehouseName || '',
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        serialNumber: item.serialNumber || '',
+        quantity: item.quantity || 1,
+        notes: 'Admin havuz stok satırı silme işlemi',
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      if (menuSelection.poolWarehouseId) {
+        await fetchPoolStock(menuSelection.poolWarehouseId);
+      }
+      await loadRecentTransferLogs();
+
+      toast({ title: 'Havuz Stok Kaydı Silindi', description: `${item.stokKodu} kaydı kaldırıldı.` });
+    } catch (err) {
+      console.error('Error deleting pool stock item:', err);
+      toast({ title: 'Hata', description: 'Havuz stok satırı silinirken hata oluştu.', variant: 'destructive' });
     }
   };
 
@@ -1650,6 +1800,9 @@ export default function YedekParcaTransferPage() {
       depo_stock_adjusted: 'Depo Stok Güncellendi',
       depo_serial_deleted: 'Depo Seri No Silindi',
       transfer_between_personnel: 'Personelden Personele Devir',
+      depo_stock_deleted_admin: 'Admin Depo Stok Silme',
+      personnel_stock_deleted_admin: 'Admin Personel Stok Silme',
+      pool_stock_deleted_admin: 'Admin Havuz Stok Silme',
     };
     return labels[action] || action;
   };
@@ -1955,6 +2108,9 @@ export default function YedekParcaTransferPage() {
                   <option value="borrowed_rejected">Borç Reddedildi</option>
                   <option value="depo_stock_adjusted">Depo Stok Güncellendi</option>
                   <option value="depo_serial_deleted">Depo Seri No Silindi</option>
+                  <option value="depo_stock_deleted_admin">Admin Depo Stok Silme</option>
+                  <option value="personnel_stock_deleted_admin">Admin Personel Stok Silme</option>
+                  <option value="pool_stock_deleted_admin">Admin Havuz Stok Silme</option>
                 </select>
               </div>
 
@@ -2119,6 +2275,9 @@ export default function YedekParcaTransferPage() {
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="cihaz-pressed px-2 py-0.5 text-xs font-bold" style={{ borderRadius: 8, color: 'var(--dashboard-text)' }}>{group.totalQuantity}</span>
                       <button onClick={(e) => { e.stopPropagation(); openDepoQuantityEditor(group); }} className="p-1 rounded-lg hover:bg-black/5 transition" title="Düzenle"><Pencil className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} /></button>
+                      {isAdmin && (
+                        <button onClick={(e) => { e.stopPropagation(); deleteDepotStockGroup(group); }} className="p-1 rounded-lg hover:bg-red-50 transition" title="Stok satırını sil"><Trash2 className="w-3 h-3" style={{ color: '#B91C1C' }} /></button>
+                      )}
                       {group.serialNumbers.length > 0 ? (
                         isExpanded ? <ChevronUp className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} /> : <div className="flex items-center gap-0.5"><Hash className="w-2.5 h-2.5" style={{ color: 'var(--dashboard-muted)' }} /><span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{group.serialNumbers.length}</span><ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} /></div>
                       ) : null}
@@ -2300,7 +2459,16 @@ export default function YedekParcaTransferPage() {
                           }
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {canTakeOver ? (
+                          {isAdmin ? (
+                            <button
+                              onClick={() => deletePersonnelStockItem(item)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
+                              style={{ color: '#B91C1C' }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Stok Sil
+                            </button>
+                          ) : canTakeOver ? (
                             <button
                               disabled={takingOverStockId === item.id}
                               onClick={() => takeOverPersonnelStock(item)}
@@ -2367,7 +2535,16 @@ export default function YedekParcaTransferPage() {
                         {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
                         {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
                       </span>
-                      {canTakeOver ? (
+                      {isAdmin ? (
+                        <button
+                          onClick={() => deletePersonnelStockItem(item)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
+                          style={{ color: '#B91C1C' }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Stok Sil
+                        </button>
+                      ) : canTakeOver ? (
                         <button
                           disabled={takingOverStockId === item.id}
                           onClick={() => takeOverPersonnelStock(item)}
@@ -2544,7 +2721,16 @@ export default function YedekParcaTransferPage() {
                           {item.usedByName || '—'}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {isUsed ? (
+                          {isAdmin ? (
+                            <button
+                              onClick={() => deletePoolStockItem(item)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
+                              style={{ color: '#B91C1C' }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Stok Sil
+                            </button>
+                          ) : isUsed ? (
                             <span className="text-[11px] text-left inline-block max-w-[220px]" style={{ color: 'var(--dashboard-muted)' }}>
                               {item.usedOnLabName || 'Lab bilgisi yok'} · {item.usedOnDeviceName || 'Cihaz bilgisi yok'}
                             </span>
@@ -2593,7 +2779,16 @@ export default function YedekParcaTransferPage() {
                         {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
                         {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
                       </span>
-                      {isUsed && item.usedByName && (
+                      {isAdmin ? (
+                        <button
+                          onClick={() => deletePoolStockItem(item)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
+                          style={{ color: '#B91C1C' }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Stok Sil
+                        </button>
+                      ) : isUsed && item.usedByName && (
                         <span className="text-[10px] font-medium" style={{ color: 'var(--dashboard-accent)' }}>
                           {item.usedByName}
                         </span>
