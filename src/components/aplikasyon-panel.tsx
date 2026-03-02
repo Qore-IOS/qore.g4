@@ -7,6 +7,9 @@ import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Package } from
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
+import { Dialog as UiDialog, DialogContent as UiDialogContent, DialogHeader as UiDialogHeader, DialogTitle as UiDialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 
@@ -329,14 +332,14 @@ export default function AplikasyonPanel({
       </div>
 
       {/* All Forms Dialog */}
-      <Dialog open={isAllFormsDialogOpen} onOpenChange={setIsAllFormsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+      <UiDialog open={isAllFormsDialogOpen} onOpenChange={setIsAllFormsDialogOpen}>
+        <UiDialogContent className="max-w-4xl max-h-[90vh]">
+          <UiDialogHeader>
+            <UiDialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
               Tüm Aplikasyon İşlem Formları
-            </DialogTitle>
-          </DialogHeader>
+            </UiDialogTitle>
+          </UiDialogHeader>
           {isLoadingForms ? (
             <div className="flex justify-center items-center py-12">
               <Loader2 className="h-8 w-8 animate-spin" />
@@ -511,8 +514,8 @@ export default function AplikasyonPanel({
               )}
             </ScrollArea>
           )}
-        </DialogContent>
-      </Dialog>
+        </UiDialogContent>
+      </UiDialog>
     </div>
   );
 }
