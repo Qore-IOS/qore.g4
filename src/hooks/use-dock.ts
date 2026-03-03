@@ -62,6 +62,8 @@ import {
   Barcode,
   PlusCircle,
   Palette,
+  FolderKanban,
+  Boxes,
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
 import { playNotificationSound } from "@/lib/utils";
@@ -560,18 +562,72 @@ export function useDock() {
       const navItems: DockItemData[] = VIEWS.filter(
         (view) =>
           view.type === "nav" && accessibleViews.includes(view.key as AppView)
-      ).map((view) => ({
-        ...view,
-        onClick:
-          view.key === "verimlilik-hesaplama"
-            ? () => setIsVerimlilikSwitchOpen(true)
-            : view.key === "planner"
-            ? () => setIsPlannerPanelOpen(true)
-            : view.href
-            ? () => router.push(view.href!)
-            : undefined,
-        subItems: subItemMap[view.key] || [],
-      }));
+      ).map((view) => {
+        const isTeknikServis = currentUserProfile?.role === 'teknik_servis';
+        const isAplikasyon = currentUserProfile?.role === 'aplikasyon';
+        const ownStockHref = currentUserProfile?.uid
+          ? `/direkt-transfer/yedek-parca-transfer/${currentUserProfile.uid}`
+          : '/direkt-transfer/yedek-parca-transfer';
+
+        let subItems = subItemMap[view.key] || [];
+        if (view.key === 'cihaz-yonetimi-ana' && (isTeknikServis || isAplikasyon)) {
+          const formsHref = isAplikasyon ? '/aplikasyon-paneli/tum-formlar' : '/teknik-servis/tum-formlar';
+          subItems = [
+            {
+              key: 'islem-formlarim',
+              label: 'İşlem Formlarım',
+              icon: FolderKanban,
+              href: formsHref,
+            },
+            {
+              key: 'stogum',
+              label: 'Stoğum',
+              icon: Boxes,
+              href: ownStockHref,
+            },
+          ];
+        }
+
+        return {
+          ...view,
+          onClick:
+            view.key === "verimlilik-hesaplama"
+              ? () => setIsVerimlilikSwitchOpen(true)
+              : view.key === "planner"
+              ? () => setIsPlannerPanelOpen(true)
+              : view.href
+              ? () => router.push(view.href!)
+              : undefined,
+          subItems,
+        };
+      });
+
+      if (isMobile && (currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon')) {
+        const formsHref = currentUserProfile.role === 'aplikasyon' ? '/aplikasyon-paneli/tum-formlar' : '/teknik-servis/tum-formlar';
+        const stockHref = currentUserProfile?.uid
+          ? `/direkt-transfer/yedek-parca-transfer/${currentUserProfile.uid}`
+          : '/direkt-transfer/yedek-parca-transfer';
+
+        navItems.push(
+          {
+            key: 'islem-formlarim-mobile',
+            label: 'İşlem Formlarım',
+            icon: FolderKanban,
+            type: 'nav',
+            href: formsHref,
+            onClick: () => router.push(formsHref),
+          },
+          {
+            key: 'stogum-mobile',
+            label: 'Stoğum',
+            icon: Boxes,
+            type: 'nav',
+            href: stockHref,
+            onClick: () => router.push(stockHref),
+          }
+        );
+      }
+
       return [...navItems, ...actionItems];
     }
   }, [
@@ -583,6 +639,9 @@ export function useDock() {
     unreadCount,
     loadingNotifications,
     notificationsAllowed,
+    currentUserProfile?.role,
+    currentUserProfile?.uid,
+    isMobile,
   ]);
 
   const handleMouseEnter = () => {

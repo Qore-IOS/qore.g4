@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -174,6 +174,7 @@ interface PersonnelStockViewItem extends PersonalStockItem {
 
 export default function YedekParcaTransferPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const { currentUserProfile } = useAuth();
   const { toast } = useToast();
   const depotExcelInputRef = useRef<HTMLInputElement>(null);
@@ -2893,7 +2894,7 @@ export default function YedekParcaTransferPage() {
                   {/* Personnel header - clickable */}
                   <button
                     className="w-full p-3 flex items-center justify-between transition-colors hover:opacity-80"
-                    onClick={() => setMenuSelection({
+                    onClick={() => handleMenuSelect({
                       section: 'personnel',
                       personnelUid: personnel.ownerUid,
                       personnelName: personnel.ownerName,
@@ -2952,8 +2953,35 @@ export default function YedekParcaTransferPage() {
 
   const handleMenuSelect = useCallback((selection: MenuSelection, closeMenu?: () => void) => {
     setMenuSelection(selection);
+
+    if (selection.section === 'personnel' && selection.personnelUid) {
+      router.push(`/direkt-transfer/yedek-parca-transfer/${selection.personnelUid}`);
+    } else if (pathname !== '/direkt-transfer/yedek-parca-transfer') {
+      router.push('/direkt-transfer/yedek-parca-transfer');
+    }
+
     closeMenu?.();
-  }, []);
+  }, [pathname, router]);
+
+
+  useEffect(() => {
+    const segments = pathname.split('/').filter(Boolean);
+    const routePersonnelUid = segments.length > 2 ? segments[2] : '';
+
+    if (!routePersonnelUid) return;
+    const selectedUser = users.find((user) => user.uid === routePersonnelUid);
+    if (!selectedUser) return;
+
+    setMenuSelection((prev) => {
+      if (prev.section === 'personnel' && prev.personnelUid === routePersonnelUid) return prev;
+      return {
+        section: 'personnel',
+        personnelUid: selectedUser.uid || '',
+        personnelName: selectedUser.name || selectedUser.email || '',
+        personnelRole: selectedUser.role || '',
+      };
+    });
+  }, [pathname, users]);
 
   const renderManagementMenu = (closeMenu?: () => void) => {
     const menuItem = (section: MenuSection, icon: React.ReactNode, label: string, sub: string, extra?: React.ReactNode) => {
