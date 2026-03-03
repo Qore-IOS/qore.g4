@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
 import { Button as UiButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Package } from 'lucide-react';
+import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Package, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
@@ -11,7 +11,32 @@ import { Dialog as UiDialog, DialogContent as UiDialogContent, DialogHeader as U
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+
+
+
+type ActionFormRecord = {
+  id: string;
+  deviceId: string;
+  cihazAdi?: string;
+  seriNumarasi?: string;
+  hospitalId?: string;
+  labName?: string;
+  createdByName?: string;
+  createdAt?: { toDate?: () => Date };
+  islemTuru?: string;
+  islemTipi?: string;
+  cihazDurumu?: string;
+  baslangicSaati?: string;
+  bitisSaati?: string;
+  selectedFaultName?: string;
+  faultName?: string;
+  selectedTests?: string[];
+  aciklama?: string;
+  actions?: Array<{ id?: string; action?: string; type?: string; stokKodu?: string; stokAdi?: string; quantity?: number; description?: string; serialNumber?: string; removedPartStokKodu?: string; removedPartStokAdi?: string; removedPartSerialNumber?: string; poolWarehouseName?: string }>;
+  selectedMaintenanceTasks?: Array<{ id?: string; taskName?: string }>;
+};
 
 interface AplikasyonPanelProps {
   hospitals: Hospital[];
@@ -27,7 +52,7 @@ interface AplikasyonPanelProps {
 }
 
 export default function AplikasyonPanel({
-  hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = ''
+  hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = '', toast
 }: AplikasyonPanelProps) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
@@ -78,7 +103,7 @@ export default function AplikasyonPanel({
       setAllForms(forms);
     } catch (err) {
       console.error("Error fetching forms:", err);
-      toast?.({ title: 'Hata', description: 'Formlar yüklenemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', description: 'Formlar yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoadingForms(false);
     }
