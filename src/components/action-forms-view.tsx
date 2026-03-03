@@ -1,20 +1,25 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
-import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { resolveImageSrc } from '@/lib/image-utils';
+import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import type { Device, Hospital } from '@/lib/types';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/hooks/use-toast';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -241,17 +246,58 @@ function InfoField({ label, value }: { label: string; value: string }) {
   );
 }
 
+
+function prettifyActionText(value?: string) {
+  if (!value) return '-';
+  return value
+    .replace(/_/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toLocaleUpperCase('tr-TR') + word.slice(1))
+    .join(' ');
+}
+
+
 export function ActionFormDetailView({ moduleType, formId }: { moduleType: ModuleType; formId: string }) {
   const router = useRouter();
+  const { currentUserProfile } = useAuth();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<ActionRecord | null>(null);
+  const [deviceImageUrl, setDeviceImageUrl] = useState<string | null>(null);
+  const [labDevices, setLabDevices] = useState<Device[]>([]);
+  const [partTransferModalOpen, setPartTransferModalOpen] = useState(false);
+  const [selectedActionIndex, setSelectedActionIndex] = useState<number | null>(null);
+  const [selectedTargetDeviceId, setSelectedTargetDeviceId] = useState<string>('');
+  const [isSavingPartTransfer, setIsSavingPartTransfer] = useState(false);
 
   useEffect(() => {
     const fetchForm = async () => {
       setLoading(true);
       const ref = doc(db, getCollectionName(moduleType), formId);
       const snap = await getDoc(ref);
-      setForm(snap.exists() ? ({ id: snap.id, ...snap.data() } as ActionRecord) : null);
+      const nextForm = snap.exists() ? ({ id: snap.id, ...snap.data() } as ActionRecord) : null;
+      setForm(nextForm);
+
+      if (nextForm?.deviceId) {
+        const deviceSnap = await getDoc(doc(db, 'devices', nextForm.deviceId));
+        if (deviceSnap.exists()) {
+          const data = deviceSnap.data() as Device;
+          setDeviceImageUrl(data.imageUrl || null);
+        }
+      }
+
+      if (nextForm?.hospitalId) {
+        const q = query(collection(db, 'devices'), where('hospitalId', '==', nextForm.hospitalId));
+        const devicesSnap = await getDocs(q);
+        const candidates = devicesSnap.docs
+          .map((item) => ({ id: item.id, ...item.data() } as Device))
+          .filter((item) => item.id !== nextForm.deviceId);
+        setLabDevices(candidates);
+      } else {
+        setLabDevices([]);
+      }
+
       setLoading(false);
     };
 
@@ -274,6 +320,75 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     return <AplikasyonTutanakPDFButton device={device} hospital={hospital} actionRecord={form as any} className="ml-auto" />;
   }, [form, moduleType]);
 
+  const openPartTransferModal = (actionIndex: number) => {
+    setSelectedActionIndex(actionIndex);
+    setSelectedTargetDeviceId('');
+    setPartTransferModalOpen(true);
+  };
+
+  const savePartTransfer = async () => {
+    if (!form || selectedActionIndex === null || !form.actions || !form.actions[selectedActionIndex]) return;
+    if (!selectedTargetDeviceId) {
+      toast({ title: 'Cihaz seçin', description: 'Lütfen parçanın aktarılacağı cihazı seçin.', variant: 'destructive' });
+      return;
+    }
+
+    const targetDevice = labDevices.find((item) => item.id === selectedTargetDeviceId);
+    if (!targetDevice) {
+      toast({ title: 'Cihaz bulunamadı', description: 'Seçilen cihaz listede yok.', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      setIsSavingPartTransfer(true);
+      const updatedActions = [...form.actions];
+      const currentAction = { ...updatedActions[selectedActionIndex] } as any;
+
+      updatedActions[selectedActionIndex] = {
+        ...currentAction,
+        reassignedDeviceId: targetDevice.id,
+        reassignedDeviceName: (targetDevice.cihazAdi || (targetDevice as any).model || 'Cihaz') as string,
+        reassignedDeviceSerial: targetDevice.seriNumarasi || '',
+        reassignedAt: new Date(),
+        reassignedByUid: currentUserProfile?.uid || '',
+        reassignedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+      };
+
+      await updateDoc(doc(db, getCollectionName(moduleType), form.id), {
+        actions: updatedActions,
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, 'actionFormPartReassignLogs'), {
+        formId: form.id,
+        moduleType,
+        actionIndex: selectedActionIndex,
+        stokKodu: currentAction.stokKodu || '',
+        stokAdi: currentAction.stokAdi || '',
+        fromDeviceId: form.deviceId,
+        fromDeviceName: form.cihazAdi || '',
+        fromDeviceSerial: form.seriNumarasi || '',
+        toDeviceId: targetDevice.id,
+        toDeviceName: targetDevice.cihazAdi || (targetDevice as any).model || '',
+        toDeviceSerial: targetDevice.seriNumarasi || '',
+        labName: form.labName || '',
+        hospitalId: form.hospitalId || '',
+        updatedByUid: currentUserProfile?.uid || '',
+        updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        updatedAt: serverTimestamp(),
+      });
+
+      setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
+      setPartTransferModalOpen(false);
+      toast({ title: 'Parça aktarımı kaydedildi', description: 'Parça bilgisi seçilen cihaz ile güncellendi.' });
+    } catch (error) {
+      console.error('Part reassignment error:', error);
+      toast({ title: 'Kayıt hatası', description: 'Parça aktarımı kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingPartTransfer(false);
+    }
+  };
+
   return (
     <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
       <div className="max-w-5xl mx-auto space-y-5">
@@ -289,9 +404,16 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           <>
             <div className="flex items-center justify-between">{pdfSection}</div>
             <div className="cihaz-card p-5 space-y-4">
-              <div className="pb-3 border-b border-[var(--dashboard-stroke)]">
-                <h3 className="text-base font-semibold text-[var(--dashboard-text)]">{form.cihazAdi || 'Cihaz'}</h3>
-                <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">Seri No: {form.seriNumarasi || '-'} · {form.labName || '-'}</p>
+              <div className="pb-3 border-b border-[var(--dashboard-stroke)] flex items-start gap-3">
+                {deviceImageUrl ? (
+                  <div className="w-16 h-16 rounded-xl border border-[var(--dashboard-stroke)] bg-white/70 overflow-hidden shrink-0">
+                    <Image src={resolveImageSrc(deviceImageUrl)} alt={form.cihazAdi || 'Cihaz'} width={64} height={64} className="w-full h-full object-contain" />
+                  </div>
+                ) : null}
+                <div>
+                  <h3 className="text-base font-semibold text-[var(--dashboard-text)]">{form.cihazAdi || 'Cihaz'}</h3>
+                  <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">Seri No: {form.seriNumarasi || '-'} · {form.labName || '-'}</p>
+                </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <InfoField label="Form ID" value={`${form.id.slice(0, 8)}...`} />
@@ -316,13 +438,32 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
                   <div className="text-sm font-medium text-[var(--dashboard-text)]">Yapılan İşlemler ve Yedek Parça Değişimleri</div>
                   {form.actions.map((action, idx) => (
                     <div key={action.id || idx} className="rounded-xl border border-[var(--dashboard-stroke)] p-3 bg-[var(--dashboard-surface-2)]/40 text-sm">
-                      <div className="font-medium text-[var(--dashboard-text)]">{action.action || '-'}</div>
+                      <div className="font-medium text-[var(--dashboard-text)]">{prettifyActionText(action.action)}</div>
                       <div className="text-xs text-[var(--dashboard-muted)] mt-1 flex items-center gap-2 flex-wrap">
                         <span>{action.type === 'part_change' ? `Yedek Parça · ${action.stokKodu || '-'} / ${action.stokAdi || '-'} · Adet: ${action.quantity || 0}` : 'Operasyon'}</span>
                         {(action as any).isPostClosure && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-200">Sonradan Eklendi{(action as any).addedByName ? ` - ${(action as any).addedByName}` : ''}</span>
                         )}
                       </div>
+                      {action.type === 'part_change' && (
+                        <div className="flex items-center gap-2 flex-wrap mt-2">
+                          {action.stokKodu && <span className="text-[11px] px-2 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200">Stok: {action.stokKodu}</span>}
+                          {action.stokAdi && <span className="text-[11px] px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">{action.stokAdi}</span>}
+                          {!!action.quantity && <span className="text-[11px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Adet: {action.quantity}</span>}
+                          {(action as any).reassignedDeviceName && (
+                            <span className="text-[11px] px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                              Yeni Cihaz: {(action as any).reassignedDeviceName} {(action as any).reassignedDeviceSerial ? `(${(action as any).reassignedDeviceSerial})` : ''}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openPartTransferModal(idx)}
+                            className="cihaz-tool-item inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px]"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" /> Değişim
+                          </button>
+                        </div>
+                      )}
                       {(action.serialNumber || action.poolWarehouseName) && <div className="text-xs text-[var(--dashboard-muted)] mt-0.5">{action.serialNumber ? `Seri: ${action.serialNumber}` : ''} {action.poolWarehouseName ? `· Depo: ${action.poolWarehouseName}` : ''}</div>}
                       {(action.removedPartStokKodu || action.removedPartStokAdi || action.removedPartSerialNumber) && (
                         <div className="text-xs text-[var(--dashboard-muted)] mt-0.5">Sökülen Parça: {action.removedPartStokKodu || '-'} / {action.removedPartStokAdi || '-'} {action.removedPartSerialNumber ? `· Seri: ${action.removedPartSerialNumber}` : ''}</div>
@@ -357,6 +498,44 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           </>
         )}
       </div>
+
+      <Dialog open={partTransferModalOpen} onOpenChange={setPartTransferModalOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Yedek Parçayı Başka Cihaza Aktar</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-[var(--dashboard-muted)]">Aynı laboratuvardaki cihazlardan birini seçin (mevcut form cihazı hariç).</p>
+            <div className="max-h-[40vh] overflow-y-auto border border-[var(--dashboard-stroke)] rounded-xl p-2 space-y-1">
+              {labDevices.length === 0 ? (
+                <p className="text-sm text-[var(--dashboard-muted)] p-2">Seçilebilecek başka cihaz bulunamadı.</p>
+              ) : (
+                labDevices.map((device) => {
+                  const label = `${device.cihazAdi || (device as any).model || 'Cihaz'} - ${device.seriNumarasi || '-'}`;
+                  const isSelected = selectedTargetDeviceId === device.id;
+                  return (
+                    <button
+                      type="button"
+                      key={device.id}
+                      onClick={() => setSelectedTargetDeviceId(device.id)}
+                      className={cn('w-full text-left px-3 py-2 rounded-lg text-sm border', isSelected ? 'bg-amber-50 border-amber-300 text-amber-900' : 'border-transparent hover:bg-[var(--dashboard-surface-2)]')}
+                    >
+                      {label}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPartTransferModalOpen(false)}>İptal</Button>
+              <Button onClick={savePartTransfer} disabled={isSavingPartTransfer || !selectedTargetDeviceId || labDevices.length === 0}>
+                {isSavingPartTransfer ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Kaydet'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

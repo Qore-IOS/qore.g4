@@ -37,6 +37,8 @@ type ActionFormRecord = {
 
 
 
+
+
 interface AplikasyonPanelProps {
   hospitals: Hospital[];
   devices: Device[];
