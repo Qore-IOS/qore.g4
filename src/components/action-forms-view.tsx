@@ -262,8 +262,11 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
                   {form.actions.map((action, idx) => (
                     <div key={action.id || idx} className="rounded-xl border border-[var(--dashboard-stroke)] p-3 bg-[var(--dashboard-surface-2)]/40 text-sm">
                       <div className="font-medium text-[var(--dashboard-text)]">{action.action || '-'}</div>
-                      <div className="text-xs text-[var(--dashboard-muted)] mt-1">
-                        {action.type === 'part_change' ? `Yedek Parça · ${action.stokKodu || '-'} / ${action.stokAdi || '-'} · Adet: ${action.quantity || 0}` : 'Operasyon'}
+                      <div className="text-xs text-[var(--dashboard-muted)] mt-1 flex items-center gap-2 flex-wrap">
+                        <span>{action.type === 'part_change' ? `Yedek Parça · ${action.stokKodu || '-'} / ${action.stokAdi || '-'} · Adet: ${action.quantity || 0}` : 'Operasyon'}</span>
+                        {(action as any).isPostClosure && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-200">Sonradan Eklendi{(action as any).addedByName ? ` - ${(action as any).addedByName}` : ''}</span>
+                        )}
                       </div>
                       {(action.serialNumber || action.poolWarehouseName) && <div className="text-xs text-[var(--dashboard-muted)] mt-0.5">{action.serialNumber ? `Seri: ${action.serialNumber}` : ''} {action.poolWarehouseName ? `· Depo: ${action.poolWarehouseName}` : ''}</div>}
                       {(action.removedPartStokKodu || action.removedPartStokAdi || action.removedPartSerialNumber) && (
