@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where, addDoc, Timestamp, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where, addDoc, Timestamp, writeBatch, arrayUnion } from 'firebase/firestore';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,7 @@ import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, transferFaultToOtherUnit, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
-import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem } from '@/lib/types';
+import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem, PoolWarehouseStockItem, Depot, DeviceLabPool } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import jsPDF from 'jspdf';
@@ -199,6 +199,11 @@ export default function FaultDetailPage() {
   const [faultPartChanges, setFaultPartChanges] = useState<FaultPartChange[]>([]);
   const [isSavingPart, setIsSavingPart] = useState(false);
 
+  // Pool stock state
+  const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
+  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
+  const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool'>('personal');
+
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -352,6 +357,61 @@ export default function FaultDetailPage() {
     };
     fetchPersonalStock();
   }, [currentUser]);
+
+  // Havuz stok verilerini çek
+  useEffect(() => {
+    if (!fault?.deviceId) return;
+    (async () => {
+      try {
+        const deviceSnap = await getDoc(doc(db, 'devices', fault.deviceId));
+        if (!deviceSnap.exists()) return;
+        const deviceData = deviceSnap.data();
+        const hospitalId = deviceData.hospitalId;
+        if (!hospitalId) return;
+
+        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const matchingPoolIds: string[] = [];
+        poolsSnap.docs.forEach(d => {
+          const pool = d.data() as DeviceLabPool;
+          if (pool.memberIds?.includes(hospitalId)) {
+            matchingPoolIds.push(d.id);
+          }
+        });
+        if (matchingPoolIds.length === 0) return;
+
+        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const poolWarehouseIds: string[] = [];
+        depotsSnap.docs.forEach(d => {
+          const depot = d.data() as Depot;
+          if (depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some(id => matchingPoolIds.includes(id))) {
+            poolWarehouseIds.push(d.id);
+          }
+        });
+        if (poolWarehouseIds.length === 0) return;
+
+        const allPoolStock: PoolWarehouseStockItem[] = [];
+        for (const pwId of poolWarehouseIds) {
+          const stockQ = query(
+            collection(db, 'poolWarehouseStock'),
+            where('poolWarehouseId', '==', pwId),
+            where('status', '==', 'in_stock')
+          );
+          const stockSnap = await getDocs(stockQ);
+          stockSnap.docs.forEach(d => {
+            const data = d.data();
+            allPoolStock.push({
+              id: d.id,
+              ...data,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            } as PoolWarehouseStockItem);
+          });
+        }
+        setPoolStockItems(allPoolStock);
+      } catch (err) {
+        console.error("Error fetching pool stock:", err);
+      }
+    })();
+  }, [fault?.deviceId]);
 
   // Arızaya eklenen parça değişimlerini çek
   useEffect(() => {
@@ -629,6 +689,16 @@ export default function FaultDetailPage() {
     );
   }, [personalStock, partSearchQuery]);
 
+  const filteredPoolStock = useMemo(() => {
+    if (!partSearchQuery) return poolStockItems;
+    const q = partSearchQuery.toLowerCase();
+    return poolStockItems.filter(p =>
+      p.stokKodu?.toLowerCase().includes(q) ||
+      p.stokAdi?.toLowerCase().includes(q) ||
+      p.serialNumber?.toLowerCase().includes(q)
+    );
+  }, [poolStockItems, partSearchQuery]);
+
   const handleRemovedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -678,6 +748,8 @@ export default function FaultDetailPage() {
 
   const resetPartModalState = () => {
     setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setStockSourceTab('personal');
     setPartSearchQuery('');
     setManualPartCode('');
     setManualPartName('');
@@ -699,6 +771,13 @@ export default function FaultDetailPage() {
 
   const addFaultPartChange = async () => {
     if (!fault || !currentUser) return;
+
+    // Validate selection
+    if (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName)) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen stokunuzdan, havuz stoktan bir parça seçin veya manuel girin.', variant: 'destructive' });
+      return;
+    }
+
     setIsSavingPart(true);
 
     try {
@@ -717,21 +796,31 @@ export default function FaultDetailPage() {
 
       const batch = writeBatch(db);
       const now = new Date();
+      const normalized = normalizeStatus(fault.status);
+      const isPostClosure = normalized === 'cozuldu';
+
+      const resolvedStokKodu = selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || manualPartCode.trim();
+      const resolvedStokAdi = selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName.trim();
+      const resolvedSerialNumber = selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber.trim();
 
       const partChangeData: any = {
-        stokKodu: selectedStockItem?.stokKodu || manualPartCode.trim(),
-        stokAdi: selectedStockItem?.stokAdi || manualPartName.trim(),
-        serialNumber: selectedStockItem?.serialNumber || manualSerialNumber.trim(),
+        stokKodu: resolvedStokKodu,
+        stokAdi: resolvedStokAdi,
+        serialNumber: resolvedSerialNumber,
         personalStockId: selectedStockItem?.id || null,
-        isManualEntry: !selectedStockItem,
-        removedPartStokKodu: removedPartStokKodu.trim() || selectedStockItem?.stokKodu || manualPartCode.trim(),
-        removedPartStokAdi: removedPartStokAdi.trim() || selectedStockItem?.stokAdi || manualPartName.trim(),
+        poolStockId: selectedPoolStockItem?.id || null,
+        poolWarehouseId: selectedPoolStockItem?.poolWarehouseId || null,
+        poolWarehouseName: selectedPoolStockItem?.poolWarehouseName || null,
+        isManualEntry: !selectedStockItem && !selectedPoolStockItem,
+        removedPartStokKodu: removedPartStokKodu.trim() || resolvedStokKodu,
+        removedPartStokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim() || null,
         removedPartImageUrl: removedImgUrl || null,
         usedPartImageUrl: usedImgUrl || null,
         addedAt: Timestamp.fromDate(now),
         addedByUid: currentUser.uid,
         addedByName: currentUserProfile?.name || 'Bilinmeyen',
+        isPostClosure: isPostClosure,
       };
 
       // Add to fault's partChanges subcollection
@@ -751,6 +840,23 @@ export default function FaultDetailPage() {
         });
       }
 
+      // If from pool stock, mark pool stock item as used
+      if (selectedPoolStockItem?.id) {
+        const poolStockRef = doc(db, 'poolWarehouseStock', selectedPoolStockItem.id);
+        batch.update(poolStockRef, {
+          status: 'used',
+          usedAt: Timestamp.fromDate(now),
+          usedByUid: currentUser.uid,
+          usedByName: currentUserProfile?.name || '',
+          usedOnDeviceId: fault.deviceId,
+          usedOnDeviceName: fault.model || '',
+          usedOnFormId: fault.id,
+          usedOnFormType: 'ariza_yonetimi',
+          usedOnLabId: fault.labId || null,
+          usedOnLabName: fault.labName || null,
+        });
+      }
+
       // If removed part has serial number, create personal stock entry for removed part
       if (removedPartSerialNumber.trim()) {
         const removedStockRef = doc(collection(db, 'personalStock'));
@@ -758,8 +864,8 @@ export default function FaultDetailPage() {
           ownerUid: currentUser.uid,
           ownerName: currentUserProfile?.name || '',
           productCodeId: null,
-          stokKodu: removedPartStokKodu.trim() || selectedStockItem?.stokKodu || manualPartCode.trim(),
-          stokAdi: removedPartStokAdi.trim() || selectedStockItem?.stokAdi || manualPartName.trim(),
+          stokKodu: removedPartStokKodu.trim() || resolvedStokKodu,
+          stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
           serialNumber: removedPartSerialNumber.trim(),
           imageUrl: removedImgUrl || null,
           source: 'device',
@@ -767,23 +873,53 @@ export default function FaultDetailPage() {
           sourceDeviceName: fault.model || '',
           status: 'in_stock',
           createdAt: Timestamp.fromDate(now),
-          replacedPartId: selectedStockItem?.id || null,
+          replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
         });
       }
 
-      // Add history entry for part change
+      // Add history entry for part change (with post-closure flag)
       const historyRef = doc(collection(db, 'deviceFaultReports', fault.id, 'history'));
+      const historyDescription = `${isPostClosure ? '[Sonradan Eklendi] ' : ''}Parça değişimi: ${partChangeData.stokAdi} (${resolvedSerialNumber || 'Seri No Yok'})${removedPartSerialNumber.trim() ? ` → Çıkan: ${partChangeData.removedPartStokAdi} (${removedPartSerialNumber.trim()})` : ''}${selectedPoolStockItem ? ` [Havuz Stok: ${selectedPoolStockItem.poolWarehouseName}]` : ''}`;
       batch.set(historyRef, {
         type: 'note',
         actorUid: currentUser.uid,
         actorName: currentUserProfile?.name || 'Bilinmeyen',
-        description: `Parça değişimi: ${partChangeData.stokAdi} (${partChangeData.serialNumber || 'Seri No Yok'})${removedPartSerialNumber.trim() ? ` → Çıkan: ${partChangeData.removedPartStokAdi} (${removedPartSerialNumber.trim()})` : ''}`,
+        description: historyDescription,
         timestamp: Timestamp.fromDate(now),
+        isPostClosure: isPostClosure,
       });
+
+      // Log post-closure part change to dedicated collection for audit trail
+      if (isPostClosure) {
+        const logRef = doc(collection(db, 'postClosurePartChangeLogs'));
+        batch.set(logRef, {
+          faultReportId: fault.id,
+          deviceId: fault.deviceId,
+          model: fault.model,
+          serial: fault.serial,
+          labName: fault.labName,
+          faultType: fault.faultType,
+          stokKodu: resolvedStokKodu,
+          stokAdi: resolvedStokAdi,
+          serialNumber: resolvedSerialNumber,
+          removedPartStokKodu: removedPartStokKodu.trim() || resolvedStokKodu,
+          removedPartStokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
+          removedPartSerialNumber: removedPartSerialNumber.trim() || null,
+          personalStockId: selectedStockItem?.id || null,
+          poolStockId: selectedPoolStockItem?.id || null,
+          poolWarehouseId: selectedPoolStockItem?.poolWarehouseId || null,
+          poolWarehouseName: selectedPoolStockItem?.poolWarehouseName || null,
+          isManualEntry: !selectedStockItem && !selectedPoolStockItem,
+          addedByUid: currentUser.uid,
+          addedByName: currentUserProfile?.name || 'Bilinmeyen',
+          addedAt: Timestamp.fromDate(now),
+          sourceType: 'ariza_yonetimi',
+        });
+      }
 
       await batch.commit();
 
-      toast({ title: 'Başarılı', description: 'Parça değişimi eklendi.' });
+      toast({ title: 'Başarılı', description: isPostClosure ? 'Parça değişimi sonradan eklendi ve loglandı.' : 'Parça değişimi eklendi.' });
       resetPartModalState();
       setIsPartModalOpen(false);
     } catch (e: any) {
@@ -1313,7 +1449,13 @@ export default function FaultDetailPage() {
           {/* Yedek Parça Değişimleri */}
           {(() => {
             const normalized = normalizeStatus(fault.status);
-            const showPartChange = normalized === 'mudahale_ediliyor' || normalized === 'mudahale_bekliyor';
+            const isActiveIntervention = normalized === 'mudahale_ediliyor' || normalized === 'mudahale_bekliyor';
+            // Çözülmüş arızalarda, sadece arızayı kapatan kişi sonradan parça ekleyebilir
+            const isOwnClosedFault = normalized === 'cozuldu' && (
+              fault.closedBy === currentUser?.uid ||
+              fault.assignedToUid === currentUser?.uid
+            );
+            const showPartChange = isActiveIntervention || isOwnClosedFault;
             if (!showPartChange && faultPartChanges.length === 0) return null;
 
             return (
@@ -1329,7 +1471,7 @@ export default function FaultDetailPage() {
                   {showPartChange && (
                     <Button variant="outline" size="sm" onClick={openPartModal}>
                       <Plus className="h-4 w-4 mr-1" />
-                      Parça Değişimi Ekle
+                      {isOwnClosedFault ? 'Sonradan Parça Ekle' : 'Parça Değişimi Ekle'}
                     </Button>
                   )}
                 </div>
@@ -1344,9 +1486,16 @@ export default function FaultDetailPage() {
                             </p>
                             {pc.stokKodu && <p className="text-xs text-muted-foreground font-mono">{pc.stokKodu}</p>}
                           </div>
-                          <Badge variant={pc.isManualEntry ? 'outline' : 'secondary'} className="text-xs">
-                            {pc.isManualEntry ? 'Manuel' : 'Stoktan'}
-                          </Badge>
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge variant={pc.isManualEntry ? 'outline' : 'secondary'} className="text-xs">
+                              {pc.isManualEntry ? 'Manuel' : (pc as any).poolStockId ? 'Havuz Stok' : 'Stoktan'}
+                            </Badge>
+                            {(pc as any).isPostClosure && (
+                              <Badge variant="outline" className="text-xs border-amber-500 text-amber-600">
+                                Sonradan Eklendi
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                         {pc.removedPartSerialNumber && (
                           <p className="text-amber-700 dark:text-amber-400">
@@ -1662,10 +1811,39 @@ export default function FaultDetailPage() {
             <DialogTitle>Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
           <div className="py-4 space-y-4">
-            {/* Section 1: Select part from personal stock */}
+            {/* Section 1: Select part from personal stock or pool stock */}
             <div className="p-3 border rounded-lg bg-muted/30 space-y-3">
-              <Label className="font-semibold">1. Şahsi Stokunuzdan Parça Seçin</Label>
-              {!showManualEntry ? (
+              <Label className="font-semibold">1. Parça Seçin</Label>
+
+              {/* Stock source tabs */}
+              {poolStockItems.length > 0 && !showManualEntry && (
+                <div className="flex gap-1 p-1 rounded-lg bg-muted border">
+                  <button
+                    onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                      stockSourceTab === 'personal'
+                        ? 'bg-background shadow-sm'
+                        : 'text-muted-foreground'
+                    }`}
+                  >
+                    <Package className="h-3 w-3 inline mr-1" />
+                    Şahsi Stok ({personalStock.length})
+                  </button>
+                  <button
+                    onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                      stockSourceTab === 'pool'
+                        ? 'bg-background shadow-sm'
+                        : 'text-muted-foreground'
+                    }`}
+                  >
+                    <Package className="h-3 w-3 inline mr-1" />
+                    Havuz Stok ({poolStockItems.length})
+                  </button>
+                </div>
+              )}
+
+              {!showManualEntry && stockSourceTab === 'personal' ? (
                 <>
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -1688,7 +1866,7 @@ export default function FaultDetailPage() {
                         {filteredStock.map(item => (
                           <button
                             key={item.id}
-                            onClick={() => setSelectedStockItem(item)}
+                            onClick={() => { setSelectedStockItem(item); setSelectedPoolStockItem(null); }}
                             className={`w-full text-left p-2 rounded-md transition-colors ${
                               selectedStockItem?.id === item.id
                                 ? 'bg-primary/10 border-primary border'
@@ -1722,7 +1900,62 @@ export default function FaultDetailPage() {
                     Stokta yok, manuel ekle
                   </Button>
                 </>
-              ) : (
+              ) : !showManualEntry && stockSourceTab === 'pool' ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Havuz stokta ara..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-40 border rounded-md bg-background">
+                    {filteredPoolStock.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {poolStockItems.length === 0
+                          ? 'Havuz depoda yedek parça bulunmuyor.'
+                          : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredPoolStock.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => { setSelectedPoolStockItem(item); setSelectedStockItem(null); }}
+                            className={`w-full text-left p-2 rounded-md transition-colors ${
+                              selectedPoolStockItem?.id === item.id
+                                ? 'bg-purple-500/10 border-purple-500 border'
+                                : 'hover:bg-muted'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.stokAdi}</p>
+                                <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono">{item.serialNumber || '—'}</p>
+                                <p className="text-xs text-purple-600 font-medium">{item.poolWarehouseName}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualEntry(true)}
+                    className="w-full text-xs"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Stokta yok, manuel ekle
+                  </Button>
+                </>
+              ) : showManualEntry ? (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
@@ -1762,7 +1995,7 @@ export default function FaultDetailPage() {
                     Stoktan seç
                   </Button>
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Section 2: Removed part info (from device) - opsiyonel */}
@@ -1775,7 +2008,7 @@ export default function FaultDetailPage() {
                 <div className="space-y-1">
                   <Label className="text-xs">Parça Kodu</Label>
                   <Input
-                    placeholder={selectedStockItem?.stokKodu || manualPartCode || 'Kod...'}
+                    placeholder={selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || manualPartCode || 'Kod...'}
                     value={removedPartStokKodu}
                     onChange={(e) => setRemovedPartStokKodu(e.target.value)}
                     className="h-9"
@@ -1795,7 +2028,7 @@ export default function FaultDetailPage() {
               <div className="space-y-1">
                 <Label className="text-xs">Parça Adı</Label>
                 <Input
-                  placeholder={selectedStockItem?.stokAdi || manualPartName || 'Parça adı...'}
+                  placeholder={selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName || 'Parça adı...'}
                   value={removedPartStokAdi}
                   onChange={(e) => setRemovedPartStokAdi(e.target.value)}
                   className="h-9"
@@ -1901,14 +2134,19 @@ export default function FaultDetailPage() {
             </div>
 
             {/* Selected item summary */}
-            {(selectedStockItem || (showManualEntry && manualPartCode && manualPartName)) && (
+            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualPartName)) && (
               <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg text-sm">
                 <p className="font-medium text-green-800 dark:text-green-200">
-                  Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber || 'Seri No Yok'})
+                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber || 'Seri No Yok'})
                 </p>
+                {selectedPoolStockItem && (
+                  <p className="text-purple-700 dark:text-purple-300 text-xs">
+                    Kaynak: Havuz Stok - {selectedPoolStockItem.poolWarehouseName}
+                  </p>
+                )}
                 {removedPartSerialNumber && (
                   <p className="text-green-700 dark:text-green-300">
-                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
+                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
                   </p>
                 )}
               </div>
@@ -1919,7 +2157,7 @@ export default function FaultDetailPage() {
             <Button
               onClick={addFaultPartChange}
               disabled={
-                (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName))
+                (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName))
                 || isSavingPart
                 || isUploadingImage
               }

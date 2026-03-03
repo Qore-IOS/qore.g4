@@ -17,6 +17,7 @@ import { tr } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { cn } from '@/lib/utils';
+import PostClosurePartChangeButton from '@/components/PostClosurePartChangeButton';
 
 // Operation types
 type OperationType =
@@ -43,23 +44,31 @@ type ActionItem = {
   description?: string;
   isManualEntry?: boolean;
   personalStockId?: string;
+  poolStockId?: string;
+  poolWarehouseId?: string;
+  poolWarehouseName?: string;
   serialNumber?: string;
   removedPartStokKodu?: string;
   removedPartStokAdi?: string;
   removedPartSerialNumber?: string;
   removedPartImageUrl?: string;
   usedPartImageUrl?: string;
+  isPostClosure?: boolean;
+  addedAt?: string;
+  addedByName?: string;
 };
 
 type ActionFormRecord = {
   id: string;
   createdAt: { toDate: () => Date };
   createdByName: string;
+  createdByUid?: string;
   actions: ActionItem[];
   islemTuru?: IslemTuru;
   cihazDurumu?: CihazDurumu;
   cihazDurumuAciklama?: string;
   aciklama?: string;
+  hospitalId?: string;
   eslikEdenPersonel?: { uid: string; name: string; role: string }[];
   personnelSignature?: string;
   technicianSignature?: string;
@@ -385,7 +394,7 @@ export default function AplikasyonGecmisPage() {
                                         >
                                           <div className="flex items-start justify-between">
                                             <div className="flex-1">
-                                              <div className="flex items-center gap-2">
+                                              <div className="flex items-center gap-2 flex-wrap">
                                                 <span className={cn(
                                                   "text-xs px-2 py-0.5 rounded",
                                                   act.type === 'part_change'
@@ -396,6 +405,14 @@ export default function AplikasyonGecmisPage() {
                                                 </span>
                                                 {act.isManualEntry && (
                                                   <span className="text-xs text-muted-foreground">(Manuel)</span>
+                                                )}
+                                                {act.isPostClosure && (
+                                                  <span className="text-xs px-2 py-0.5 rounded bg-orange-200 text-orange-800 dark:bg-orange-800 dark:text-orange-200">
+                                                    Sonradan Eklendi
+                                                  </span>
+                                                )}
+                                                {act.poolWarehouseName && (
+                                                  <span className="text-xs text-purple-600 dark:text-purple-400">[Havuz: {act.poolWarehouseName}]</span>
                                                 )}
                                               </div>
                                               <p className="font-medium mt-1">{getActionLabel(act)}</p>
@@ -506,6 +523,21 @@ export default function AplikasyonGecmisPage() {
                                         Teknisyen imzası var
                                       </span>
                                     )}
+                                  </div>
+
+                                  {/* Post-closure part change button */}
+                                  <div className="pt-2 border-t">
+                                    <PostClosurePartChangeButton
+                                      formId={rec.id}
+                                      deviceId={deviceId}
+                                      deviceName={device?.cihazAdi || device?.model}
+                                      hospitalId={rec.hospitalId || device?.hospitalId}
+                                      labName={hospital?.name}
+                                      formType="aplikasyon"
+                                      sourceType="gecmis_accordion"
+                                      formCollection="deviceActionForms"
+                                      createdByUid={rec.createdByUid}
+                                    />
                                   </div>
                                 </div>
                               </TableCell>
