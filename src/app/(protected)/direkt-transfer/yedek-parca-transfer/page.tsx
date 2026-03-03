@@ -2966,7 +2966,7 @@ export default function YedekParcaTransferPage() {
 
   useEffect(() => {
     const segments = pathname.split('/').filter(Boolean);
-    const routePersonnelUid = segments.length > 3 ? segments[3] : '';
+    const routePersonnelUid = segments.length > 2 ? segments[2] : '';
 
     if (!routePersonnelUid) return;
     const selectedUser = users.find((user) => user.uid === routePersonnelUid);

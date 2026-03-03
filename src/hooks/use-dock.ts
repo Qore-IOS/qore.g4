@@ -601,6 +601,33 @@ export function useDock() {
           subItems,
         };
       });
+
+      if (isMobile && (currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon')) {
+        const formsHref = currentUserProfile.role === 'aplikasyon' ? '/aplikasyon-paneli/tum-formlar' : '/teknik-servis/tum-formlar';
+        const stockHref = currentUserProfile?.uid
+          ? `/direkt-transfer/yedek-parca-transfer/${currentUserProfile.uid}`
+          : '/direkt-transfer/yedek-parca-transfer';
+
+        navItems.push(
+          {
+            key: 'islem-formlarim-mobile',
+            label: 'İşlem Formlarım',
+            icon: FolderKanban,
+            type: 'nav',
+            href: formsHref,
+            onClick: () => router.push(formsHref),
+          },
+          {
+            key: 'stogum-mobile',
+            label: 'Stoğum',
+            icon: Boxes,
+            type: 'nav',
+            href: stockHref,
+            onClick: () => router.push(stockHref),
+          }
+        );
+      }
+
       return [...navItems, ...actionItems];
     }
   }, [
@@ -614,6 +641,7 @@ export function useDock() {
     notificationsAllowed,
     currentUserProfile?.role,
     currentUserProfile?.uid,
+    isMobile,
   ]);
 
   const handleMouseEnter = () => {
