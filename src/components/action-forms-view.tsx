@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, doc, getDoc, getDocs, orderBy, query } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle } from 'lucide-react';
@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Device, Hospital } from '@/lib/types';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
+import { useAuth } from '@/contexts/auth-context';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -29,6 +30,7 @@ type ActionRecord = {
   islemTuru?: string;
   createdAt?: { toDate?: () => Date };
   createdByName?: string;
+  createdByUid?: string;
   baslangicSaati?: string;
   bitisSaati?: string;
   cihazDurumu?: string;
@@ -85,14 +87,17 @@ function getTitle(moduleType: ModuleType) {
 
 export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) {
   const router = useRouter();
+  const { currentUserProfile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [forms, setForms] = useState<ActionRecord[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const FORMS_PER_PAGE = 20;
 
   useEffect(() => {
     const fetchForms = async () => {
       setLoading(true);
-      const q = query(collection(db, getCollectionName(moduleType)), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
+      const snap = await getDocs(collection(db, getCollectionName(moduleType)));
       setForms(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ActionRecord));
       setLoading(false);
     };
@@ -102,6 +107,30 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       setLoading(false);
     });
   }, [moduleType]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [moduleType, currentUserProfile?.uid]);
+
+  const ownForms = useMemo(() => {
+    const uid = currentUserProfile?.uid;
+    if (!uid) return [];
+
+    return forms
+      .filter((form) => form.createdByUid === uid)
+      .sort((a, b) => {
+        const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+        const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+        return bTime - aTime;
+      });
+  }, [forms, currentUserProfile?.uid]);
+
+  const totalPages = Math.max(1, Math.ceil(ownForms.length / FORMS_PER_PAGE));
+  const clampedPage = Math.min(currentPage, totalPages);
+  const pagedForms = useMemo(() => {
+    const start = (clampedPage - 1) * FORMS_PER_PAGE;
+    return ownForms.slice(start, start + FORMS_PER_PAGE);
+  }, [clampedPage, ownForms]);
 
   return (
     <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
@@ -114,7 +143,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
             </span>
             <div>
               <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)]">{getTitle(moduleType)}</h1>
-              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Tüm işlem formları</p>
+              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Sadece sizin oluşturduğunuz işlem formları</p>
             </div>
           </div>
         </div>
@@ -124,52 +153,78 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
             <div className="flex items-center justify-center py-16 gap-2 text-[var(--dashboard-muted)]">
               <Loader2 className="h-5 w-5 animate-spin" /> Yükleniyor...
             </div>
-          ) : forms.length === 0 ? (
-            <div className="text-center py-16 text-[var(--dashboard-muted)]">Henüz işlem formu bulunmuyor.</div>
+          ) : ownForms.length === 0 ? (
+            <div className="text-center py-16 text-[var(--dashboard-muted)]">Size ait işlem formu bulunmuyor.</div>
           ) : (
-            <ScrollArea className="h-[68vh]">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-[var(--dashboard-stroke)]">
-                    <TableHead className="text-[var(--dashboard-muted)]">Tarih</TableHead>
-                    <TableHead className="text-[var(--dashboard-muted)]">Cihaz</TableHead>
-                    <TableHead className="text-[var(--dashboard-muted)]">Laboratuvar</TableHead>
-                    <TableHead className="text-[var(--dashboard-muted)]">İşlem Türü</TableHead>
-                    <TableHead className="text-[var(--dashboard-muted)]">Oluşturan</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {forms.map((form) => (
-                    <TableRow
-                      key={form.id}
-                      className="cursor-pointer border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]/50"
-                      onClick={() => router.push(`/${moduleType}/tum-formlar/${form.id}`)}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="h-3 w-3 text-[var(--dashboard-muted)]" />
-                          <span className="text-sm">{form.createdAt?.toDate ? format(form.createdAt.toDate(), 'dd.MM.yyyy', { locale: tr }) : '-'}</span>
-                        </div>
-                        <span className="text-xs text-[var(--dashboard-muted)] ml-[18px]">{form.createdAt?.toDate ? format(form.createdAt.toDate(), 'HH:mm', { locale: tr }) : ''}</span>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm font-medium text-[var(--dashboard-text)]">{form.cihazAdi || '-'}</div>
-                        <div className="text-xs text-[var(--dashboard-muted)] font-mono">{form.seriNumarasi || '-'}</div>
-                      </TableCell>
-                      <TableCell className="text-sm">{form.labName || '-'}</TableCell>
-                      <TableCell>
-                        <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium', form.islemTuru === 'ariza' ? 'bg-red-50 text-red-700 border border-red-200/60' : form.islemTuru === 'periyodik_bakim' ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]')}>
-                          {ISLEM_TURU_LABELS[form.islemTuru || ''] || '-'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-sm">{form.createdByName || '-'}</TableCell>
-                      <TableCell><ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)]" /></TableCell>
+            <div className="space-y-3">
+              <ScrollArea className="h-[62vh]">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-[var(--dashboard-stroke)]">
+                      <TableHead className="text-[var(--dashboard-muted)]">Tarih</TableHead>
+                      <TableHead className="text-[var(--dashboard-muted)]">Cihaz</TableHead>
+                      <TableHead className="text-[var(--dashboard-muted)]">Laboratuvar</TableHead>
+                      <TableHead className="text-[var(--dashboard-muted)]">İşlem Türü</TableHead>
+                      <TableHead className="text-[var(--dashboard-muted)]">Oluşturan</TableHead>
+                      <TableHead className="w-10" />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+                  </TableHeader>
+                  <TableBody>
+                    {pagedForms.map((form) => (
+                      <TableRow
+                        key={form.id}
+                        className="cursor-pointer border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]/50"
+                        onClick={() => router.push(`/${moduleType}/tum-formlar/${form.id}`)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="h-3 w-3 text-[var(--dashboard-muted)]" />
+                            <span className="text-sm">{form.createdAt?.toDate ? format(form.createdAt.toDate(), 'dd.MM.yyyy', { locale: tr }) : '-'}</span>
+                          </div>
+                          <span className="text-xs text-[var(--dashboard-muted)] ml-[18px]">{form.createdAt?.toDate ? format(form.createdAt.toDate(), 'HH:mm', { locale: tr }) : ''}</span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm font-medium text-[var(--dashboard-text)]">{form.cihazAdi || '-'}</div>
+                          <div className="text-xs text-[var(--dashboard-muted)] font-mono">{form.seriNumarasi || '-'}</div>
+                        </TableCell>
+                        <TableCell className="text-sm">{form.labName || '-'}</TableCell>
+                        <TableCell>
+                          <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium', form.islemTuru === 'ariza' ? 'bg-red-50 text-red-700 border border-red-200/60' : form.islemTuru === 'periyodik_bakim' ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]')}>
+                            {ISLEM_TURU_LABELS[form.islemTuru || ''] || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm">{form.createdByName || '-'}</TableCell>
+                        <TableCell><ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)]" /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+
+              <div className="flex items-center justify-between gap-3 px-2">
+                <p className="text-xs text-[var(--dashboard-muted)]">
+                  Toplam {ownForms.length} kayıt &middot; Sayfa {clampedPage}/{totalPages}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    disabled={clampedPage <= 1}
+                    className="cihaz-tool-item px-3 py-1.5 text-xs disabled:opacity-50"
+                  >
+                    Önceki
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={clampedPage >= totalPages}
+                    className="cihaz-tool-item px-3 py-1.5 text-xs disabled:opacity-50"
+                  >
+                    Sonraki
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

@@ -62,6 +62,8 @@ import {
   Barcode,
   PlusCircle,
   Palette,
+  FolderKanban,
+  Boxes,
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
 import { playNotificationSound } from "@/lib/utils";
@@ -560,18 +562,45 @@ export function useDock() {
       const navItems: DockItemData[] = VIEWS.filter(
         (view) =>
           view.type === "nav" && accessibleViews.includes(view.key as AppView)
-      ).map((view) => ({
-        ...view,
-        onClick:
-          view.key === "verimlilik-hesaplama"
-            ? () => setIsVerimlilikSwitchOpen(true)
-            : view.key === "planner"
-            ? () => setIsPlannerPanelOpen(true)
-            : view.href
-            ? () => router.push(view.href!)
-            : undefined,
-        subItems: subItemMap[view.key] || [],
-      }));
+      ).map((view) => {
+        const isTeknikServis = currentUserProfile?.role === 'teknik_servis';
+        const isAplikasyon = currentUserProfile?.role === 'aplikasyon';
+        const ownStockHref = currentUserProfile?.uid
+          ? `/direkt-transfer/yedek-parca-transfer/${currentUserProfile.uid}`
+          : '/direkt-transfer/yedek-parca-transfer';
+
+        let subItems = subItemMap[view.key] || [];
+        if (view.key === 'cihaz-yonetimi-ana' && (isTeknikServis || isAplikasyon)) {
+          const formsHref = isAplikasyon ? '/aplikasyon-paneli/tum-formlar' : '/teknik-servis/tum-formlar';
+          subItems = [
+            {
+              key: 'islem-formlarim',
+              label: 'İşlem Formlarım',
+              icon: FolderKanban,
+              href: formsHref,
+            },
+            {
+              key: 'stogum',
+              label: 'Stoğum',
+              icon: Boxes,
+              href: ownStockHref,
+            },
+          ];
+        }
+
+        return {
+          ...view,
+          onClick:
+            view.key === "verimlilik-hesaplama"
+              ? () => setIsVerimlilikSwitchOpen(true)
+              : view.key === "planner"
+              ? () => setIsPlannerPanelOpen(true)
+              : view.href
+              ? () => router.push(view.href!)
+              : undefined,
+          subItems,
+        };
+      });
       return [...navItems, ...actionItems];
     }
   }, [
@@ -583,6 +612,8 @@ export function useDock() {
     unreadCount,
     loadingNotifications,
     notificationsAllowed,
+    currentUserProfile?.role,
+    currentUserProfile?.uid,
   ]);
 
   const handleMouseEnter = () => {
