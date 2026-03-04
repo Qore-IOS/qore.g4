@@ -1,21 +1,23 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
-import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import type { Device, Hospital } from '@/lib/types';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import type { Depot, Device, DeviceLabPool, Hospital, PersonalStockItem, PoolWarehouseStockItem } from '@/lib/types';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { useAuth } from '@/contexts/auth-context';
@@ -55,6 +57,12 @@ type ActionRecord = {
     removedPartStokAdi?: string;
     removedPartSerialNumber?: string;
     poolWarehouseName?: string;
+    personalStockId?: string;
+    poolStockId?: string;
+    poolWarehouseId?: string;
+    isManualEntry?: boolean;
+    removedPartImageUrl?: string;
+    usedPartImageUrl?: string;
   }>;
   selectedMaintenanceTasks?: Array<{ id?: string; taskName?: string }>;
 };
@@ -270,6 +278,29 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   const [selectedActionIndex, setSelectedActionIndex] = useState<number | null>(null);
   const [selectedTargetDeviceId, setSelectedTargetDeviceId] = useState<string>('');
   const [isSavingPartTransfer, setIsSavingPartTransfer] = useState(false);
+  const [isAddPartModalOpen, setIsAddPartModalOpen] = useState(false);
+  const [isSavingAddedPart, setIsSavingAddedPart] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
+  const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
+  const [partSearchQuery, setPartSearchQuery] = useState('');
+  const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
+  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
+  const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool'>('personal');
+  const [manualPartCode, setManualPartCode] = useState('');
+  const [manualPartName, setManualPartName] = useState('');
+  const [manualSerialNumber, setManualSerialNumber] = useState('');
+  const [partQuantity, setPartQuantity] = useState(1);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [removedPartStokKodu, setRemovedPartStokKodu] = useState('');
+  const [removedPartStokAdi, setRemovedPartStokAdi] = useState('');
+  const [removedPartSerialNumber, setRemovedPartSerialNumber] = useState('');
+  const [removedPartImageFile, setRemovedPartImageFile] = useState<File | null>(null);
+  const [removedPartImagePreview, setRemovedPartImagePreview] = useState<string | null>(null);
+  const [usedPartImageFile, setUsedPartImageFile] = useState<File | null>(null);
+  const [usedPartImagePreview, setUsedPartImagePreview] = useState<string | null>(null);
+  const removedPartImageInputRef = useRef<HTMLInputElement>(null);
+  const usedPartImageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const fetchForm = async () => {
@@ -319,6 +350,93 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
     return <AplikasyonTutanakPDFButton device={device} hospital={hospital} actionRecord={form as any} className="ml-auto" />;
   }, [form, moduleType]);
+
+  useEffect(() => {
+    if (!currentUserProfile?.uid) return;
+    (async () => {
+      try {
+        const q = query(
+          collection(db, 'personalStock'),
+          where('ownerUid', '==', currentUserProfile.uid),
+          where('status', '==', 'in_stock')
+        );
+        const snap = await getDocs(q);
+        setPersonalStock(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PersonalStockItem)));
+      } catch (error) {
+        console.error('Error fetching personal stock:', error);
+      }
+    })();
+  }, [currentUserProfile?.uid]);
+
+  useEffect(() => {
+    if (!form?.hospitalId) return;
+    (async () => {
+      try {
+        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const matchingPoolIds = poolsSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as DeviceLabPool))
+          .filter((pool) => pool.memberIds?.includes(form.hospitalId || ''))
+          .map((pool) => pool.id);
+
+        if (matchingPoolIds.length === 0) {
+          setPoolStockItems([]);
+          return;
+        }
+
+        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const poolWarehouseIds = depotsSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as Depot))
+          .filter((depot) => depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some((id) => matchingPoolIds.includes(id)))
+          .map((depot) => depot.id);
+
+        if (poolWarehouseIds.length === 0) {
+          setPoolStockItems([]);
+          return;
+        }
+
+        const allPoolStock: PoolWarehouseStockItem[] = [];
+        for (const warehouseId of poolWarehouseIds) {
+          const stockQ = query(
+            collection(db, 'poolWarehouseStock'),
+            where('poolWarehouseId', '==', warehouseId),
+            where('status', '==', 'in_stock')
+          );
+          const stockSnap = await getDocs(stockQ);
+          stockSnap.docs.forEach((d) => allPoolStock.push({ id: d.id, ...d.data() } as PoolWarehouseStockItem));
+        }
+        setPoolStockItems(allPoolStock);
+      } catch (error) {
+        console.error('Error fetching pool stock:', error);
+      }
+    })();
+  }, [form?.hospitalId]);
+
+  const filteredStock = useMemo(() => {
+    if (!partSearchQuery) return personalStock;
+    const q = partSearchQuery.toLowerCase();
+    return personalStock.filter((p) =>
+      p.stokKodu.toLowerCase().includes(q) || p.stokAdi.toLowerCase().includes(q) || p.serialNumber.toLowerCase().includes(q)
+    );
+  }, [partSearchQuery, personalStock]);
+
+  const filteredPoolStock = useMemo(() => {
+    if (!partSearchQuery) return poolStockItems;
+    const q = partSearchQuery.toLowerCase();
+    return poolStockItems.filter((p) =>
+      p.stokKodu.toLowerCase().includes(q) || p.stokAdi.toLowerCase().includes(q) || p.serialNumber.toLowerCase().includes(q)
+    );
+  }, [partSearchQuery, poolStockItems]);
+
+  const installedPartDefaults = useMemo(() => ({
+    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || ''),
+    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || ''),
+  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem, selectedPoolStockItem]);
+
+  useEffect(() => {
+    if (!isAddPartModalOpen) return;
+    setRemovedPartStokKodu(installedPartDefaults.stokKodu);
+    setRemovedPartStokAdi(installedPartDefaults.stokAdi);
+  }, [isAddPartModalOpen, installedPartDefaults]);
 
   const openPartTransferModal = (actionIndex: number) => {
     setSelectedActionIndex(actionIndex);
@@ -389,6 +507,155 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     }
   };
 
+  const resetPartModalState = () => {
+    setPartSearchQuery('');
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setStockSourceTab('personal');
+    setManualPartCode('');
+    setManualPartName('');
+    setManualSerialNumber('');
+    setPartQuantity(1);
+    setShowManualEntry(false);
+    setRemovedPartStokKodu('');
+    setRemovedPartStokAdi('');
+    setRemovedPartSerialNumber('');
+    setRemovedPartImageFile(null);
+    setRemovedPartImagePreview(null);
+    setUsedPartImageFile(null);
+    setUsedPartImagePreview(null);
+  };
+
+  const handleRemovedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRemovedPartImageFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setRemovedPartImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleUsedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUsedPartImageFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setUsedPartImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const uploadPartImage = async (file: File, pathPrefix: 'removed-parts' | 'used-parts'): Promise<string | null> => {
+    setIsUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', pathPrefix);
+      formData.append('deviceId', form?.deviceId || 'unknown-device');
+
+      const response = await fetch('/api/storage/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.url) {
+        throw new Error(payload?.error || 'Resim yüklenemedi.');
+      }
+
+      return payload.url as string;
+    } catch (error: any) {
+      toast({ title: 'Hata', description: error?.message || 'Resim yüklenemedi.', variant: 'destructive' });
+      return null;
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const saveAddedPart = async () => {
+    if (!form) return;
+
+    if (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName && manualSerialNumber)) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen stoktan bir parça seçin veya manuel giriş yapın.', variant: 'destructive' });
+      return;
+    }
+
+    let removedPartImageUrl: string | undefined;
+    if (removedPartImageFile) {
+      removedPartImageUrl = (await uploadPartImage(removedPartImageFile, 'removed-parts')) || undefined;
+    }
+
+    let usedPartImageUrl: string | undefined;
+    if (usedPartImageFile) {
+      usedPartImageUrl = (await uploadPartImage(usedPartImageFile, 'used-parts')) || undefined;
+    }
+
+    const isManual = showManualEntry;
+    const stokKodu = isManual ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || '');
+    const stokAdi = isManual ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || '');
+    const serialNumber = isManual ? manualSerialNumber.trim() : (selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || '');
+    const quantity = isManual ? partQuantity : 1;
+
+    const appendedAction = {
+      id: crypto.randomUUID(),
+      type: 'part_change',
+      action: isManual ? 'manual_part' : (selectedStockItem?.productCodeId || selectedPoolStockItem?.productCodeId || stokAdi),
+      stokKodu,
+      stokAdi,
+      quantity,
+      serialNumber,
+      personalStockId: selectedStockItem?.id,
+      poolStockId: selectedPoolStockItem?.id,
+      poolWarehouseId: selectedPoolStockItem?.poolWarehouseId,
+      poolWarehouseName: selectedPoolStockItem?.poolWarehouseName,
+      removedPartStokKodu: removedPartStokKodu.trim(),
+      removedPartStokAdi: removedPartStokAdi.trim(),
+      removedPartSerialNumber: removedPartSerialNumber.trim(),
+      removedPartImageUrl,
+      usedPartImageUrl,
+      isManualEntry: isManual,
+    };
+
+    const updatedActions = [...(form.actions || []), appendedAction] as any[];
+
+    try {
+      setIsSavingAddedPart(true);
+      await updateDoc(doc(db, getCollectionName(moduleType), form.id), {
+        actions: updatedActions,
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, 'actionFormHistoryLogs'), {
+        formId: form.id,
+        moduleType,
+        type: 'part_added_after_save',
+        part: {
+          stokKodu: appendedAction.stokKodu,
+          stokAdi: appendedAction.stokAdi,
+          quantity: appendedAction.quantity,
+          serialNumber: appendedAction.serialNumber || '',
+          removedPartStokKodu: appendedAction.removedPartStokKodu || '',
+          removedPartStokAdi: appendedAction.removedPartStokAdi || '',
+          removedPartSerialNumber: appendedAction.removedPartSerialNumber || '',
+          removedPartImageUrl: appendedAction.removedPartImageUrl || '',
+          usedPartImageUrl: appendedAction.usedPartImageUrl || '',
+        },
+        updatedByUid: currentUserProfile?.uid || '',
+        updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        updatedAt: serverTimestamp(),
+      });
+
+      setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
+      setIsAddPartModalOpen(false);
+      resetPartModalState();
+      toast({ title: 'Parça eklendi', description: 'Değişen parça forma ve form geçmişine kaydedildi.' });
+    } catch (error) {
+      console.error('Add part after save error:', error);
+      toast({ title: 'Kayıt hatası', description: 'Parça kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingAddedPart(false);
+    }
+  };
+
   return (
     <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
       <div className="max-w-5xl mx-auto space-y-5">
@@ -402,7 +669,17 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           <div className="cihaz-card-strong p-10 text-center text-[var(--dashboard-muted)]">Form bulunamadı.</div>
         ) : (
           <>
-            <div className="flex items-center justify-between">{pdfSection}</div>
+            <div className="flex items-center justify-between gap-2">
+              {pdfSection}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsAddPartModalOpen(true)}
+                className="ml-auto"
+              >
+                Değişen Parça Ekle
+              </Button>
+            </div>
             <div className="cihaz-card p-5 space-y-4">
               <div className="pb-3 border-b border-[var(--dashboard-stroke)] flex items-start gap-3">
                 {deviceImageUrl ? (
@@ -535,7 +812,108 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={isAddPartModalOpen}
+        onOpenChange={(open) => {
+          setIsAddPartModalOpen(open);
+          if (!open) resetPartModalState();
+        }}
+      >
+        <DialogContent className="left-0 right-0 top-auto bottom-0 translate-x-0 translate-y-0 w-screen max-w-none h-[100dvh] max-h-[100dvh] rounded-none border-0 bg-background p-0 shadow-none overflow-hidden sm:left-[50%] sm:right-auto sm:top-[50%] sm:bottom-auto sm:w-full sm:max-w-2xl sm:h-auto sm:max-h-[90vh] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border sm:shadow-lg">
+          <DialogHeader className="px-4 sm:px-6 py-4 border-b border-[var(--dashboard-stroke)]">
+            <DialogTitle className="text-lg font-semibold tracking-tight text-[var(--dashboard-text)]">Yedek Parça Değişimi</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto">
+            <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] space-y-3">
+              <Label className="font-semibold text-sm text-[var(--dashboard-text)]">1. Parça Seçin</Label>
+
+              {poolStockItems.length > 0 && !showManualEntry && (
+                <div className="flex gap-1 p-1 rounded-xl bg-[var(--dashboard-surface)]" style={{ border: '1px solid var(--dashboard-stroke)' }}>
+                  <button onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); }} className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all" style={{ background: stockSourceTab === 'personal' ? 'var(--dashboard-surface-2)' : 'transparent', color: stockSourceTab === 'personal' ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', boxShadow: stockSourceTab === 'personal' ? 'var(--dashboard-raised-soft)' : 'none' }}>
+                    <Package className="h-3 w-3 inline mr-1" />Şahsi Stok ({personalStock.length})
+                  </button>
+                  <button onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }} className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all" style={{ background: stockSourceTab === 'pool' ? 'var(--dashboard-surface-2)' : 'transparent', color: stockSourceTab === 'pool' ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', boxShadow: stockSourceTab === 'pool' ? 'var(--dashboard-raised-soft)' : 'none' }}>
+                    <Package className="h-3 w-3 inline mr-1" />Havuz Stok ({poolStockItems.length})
+                  </button>
+                </div>
+              )}
+
+              {!showManualEntry && stockSourceTab === 'personal' ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Parça kodu, adı veya seri no ile arayın..." value={partSearchQuery} onChange={(e) => setPartSearchQuery(e.target.value)} className="pl-10" />
+                  </div>
+                  <ScrollArea className="h-44 rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+                    {filteredStock.length === 0 ? <div className="p-4 text-center text-[var(--dashboard-muted)]">{personalStock.length === 0 ? 'Şahsi stokunuzda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}</div> : (
+                      <div className="p-2 space-y-1">
+                        {filteredStock.map((item) => (
+                          <button key={item.id} onClick={() => { setSelectedStockItem(item); setSelectedPoolStockItem(null); }} className={`w-full text-left p-3 rounded-xl transition-colors ${selectedStockItem?.id === item.id ? 'bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/40' : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'}`}>
+                            <div className="flex justify-between items-start"><div><p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p><p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p></div><div className="text-right"><p className="text-xs font-mono text-[var(--dashboard-text)]">{item.serialNumber}</p><p className="text-xs text-[var(--dashboard-muted)]">{item.source === 'depot' ? 'Depodan' : 'Cihazdan'}</p></div></div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <button onClick={() => setShowManualEntry(true)} className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"><Plus className="h-4 w-4" />Stokta yok, manuel ekle</button>
+                </>
+              ) : !showManualEntry && stockSourceTab === 'pool' ? (
+                <>
+                  <div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input placeholder="Havuz stokta ara..." value={partSearchQuery} onChange={(e) => setPartSearchQuery(e.target.value)} className="pl-10" /></div>
+                  <ScrollArea className="h-44 rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+                    {filteredPoolStock.length === 0 ? <div className="p-4 text-center text-[var(--dashboard-muted)]">{poolStockItems.length === 0 ? 'Havuz depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}</div> : (
+                      <div className="p-2 space-y-1">
+                        {filteredPoolStock.map((item) => (
+                          <button key={item.id} onClick={() => { setSelectedPoolStockItem(item); setSelectedStockItem(null); }} className={`w-full text-left p-3 rounded-xl transition-colors ${selectedPoolStockItem?.id === item.id ? 'bg-purple-100/80 border border-purple-300/60' : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'}`}>
+                            <div className="flex justify-between items-start"><div><p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p><p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p></div><div className="text-right"><p className="text-xs font-mono text-[var(--dashboard-text)]">{item.serialNumber}</p><p className="text-xs text-purple-600">{item.poolWarehouseName}</p></div></div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <button onClick={() => setShowManualEntry(true)} className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"><Plus className="h-4 w-4" />Stokta yok, manuel ekle</button>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <Input placeholder="Parça Kodu" value={manualPartCode} onChange={(e) => setManualPartCode(e.target.value)} />
+                  <Input placeholder="Parça Adı" value={manualPartName} onChange={(e) => setManualPartName(e.target.value)} />
+                  <Input placeholder="Seri No" value={manualSerialNumber} onChange={(e) => setManualSerialNumber(e.target.value)} />
+                  <Input type="number" min={1} value={partQuantity} onChange={(e) => setPartQuantity(Math.max(1, Number(e.target.value || '1')))} />
+                  <button onClick={() => setShowManualEntry(false)} className="w-full text-xs text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] py-1">Stok listesine geri dön</button>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 rounded-2xl border border-amber-200/80 bg-amber-50/40 space-y-3">
+              <Label className="font-semibold text-sm text-[var(--dashboard-text)]">2. Cihazdan Çıkan Parça Bilgisi <span className="font-normal text-[var(--dashboard-muted)]">(zorunlu)</span></Label>
+              <div className="space-y-2"><Label className="text-xs">Parça Kodu</Label><Input value={removedPartStokKodu} onChange={(e) => setRemovedPartStokKodu(e.target.value)} placeholder="Takılan parçadan otomatik doldurulur" /><p className="text-xs text-[var(--dashboard-muted)]">Takılan parçanın kodundan otomatik alınır.</p></div>
+              <div className="space-y-2"><Label className="text-xs">Seri No (Opsiyonel)</Label><Input value={removedPartSerialNumber} onChange={(e) => setRemovedPartSerialNumber(e.target.value)} placeholder="Çıkan parça seri no..." /></div>
+              <div className="space-y-2"><Label className="text-xs">Parça Adı</Label><Input value={removedPartStokAdi} onChange={(e) => setRemovedPartStokAdi(e.target.value)} placeholder="Takılan parçadan otomatik doldurulur" /><p className="text-xs text-[var(--dashboard-muted)]">Takılan parçanın adından otomatik alınır.</p></div>
+              <div className="space-y-2"><Label className="text-xs flex items-center gap-1"><Camera className="h-3 w-3" />Çıkan Parça Fotoğrafı (Opsiyonel)</Label><input type="file" accept="image/*" ref={removedPartImageInputRef} onChange={handleRemovedPartImageSelect} className="hidden" />{removedPartImagePreview ? <div className="relative"><img src={removedPartImagePreview} alt="Çıkan parça" className="w-full h-32 object-cover rounded-md border" /><button type="button" className="absolute top-1 right-1 h-6 w-6 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600" onClick={() => { setRemovedPartImageFile(null); setRemovedPartImagePreview(null); if (removedPartImageInputRef.current) removedPartImageInputRef.current.value=''; }}><X className="h-3 w-3" /></button></div> : <button type="button" className="w-full h-16 border border-dashed border-[var(--dashboard-stroke)] rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-[var(--dashboard-surface-2)]" onClick={() => removedPartImageInputRef.current?.click()}><ImageIcon className="h-5 w-5 text-[var(--dashboard-muted)]" /><span className="text-xs text-[var(--dashboard-muted)]">Çıkan parça fotoğrafı (Kamera/Galeri)</span></button>}</div>
+              <div className="space-y-2"><Label className="text-xs flex items-center gap-1"><Camera className="h-3 w-3" />Takılan/Kullanılan Parça Fotoğrafı (Opsiyonel)</Label><input type="file" accept="image/*" ref={usedPartImageInputRef} onChange={handleUsedPartImageSelect} className="hidden" />{usedPartImagePreview ? <div className="relative"><img src={usedPartImagePreview} alt="Takılan parça" className="w-full h-32 object-cover rounded-md border" /><button type="button" className="absolute top-1 right-1 h-6 w-6 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600" onClick={() => { setUsedPartImageFile(null); setUsedPartImagePreview(null); if (usedPartImageInputRef.current) usedPartImageInputRef.current.value=''; }}><X className="h-3 w-3" /></button></div> : <button type="button" className="w-full h-16 border border-dashed border-[var(--dashboard-stroke)] rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-[var(--dashboard-surface-2)]" onClick={() => usedPartImageInputRef.current?.click()}><ImageIcon className="h-5 w-5 text-[var(--dashboard-muted)]" /><span className="text-xs text-[var(--dashboard-muted)]">Takılan parça fotoğrafı (Kamera/Galeri)</span></button>}</div>
+            </div>
+
+            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
+              <div className={`p-3 border rounded-xl text-sm ${selectedPoolStockItem ? 'bg-purple-50/80 border-purple-200/60' : 'bg-emerald-50/80 border-emerald-200/60'}`}>
+                <p className={`font-medium ${selectedPoolStockItem ? 'text-purple-800' : 'text-emerald-800'}`}>
+                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber})
+                  {selectedPoolStockItem && <span className="ml-1 text-xs text-purple-600">(Havuz: {selectedPoolStockItem.poolWarehouseName})</span>}
+                </p>
+                <p className={selectedPoolStockItem ? 'text-purple-700' : 'text-emerald-700'}>
+                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="px-4 sm:px-6 py-3 sm:py-4 border-t border-[var(--dashboard-stroke)] grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
+            <button className="w-full sm:w-auto cihaz-tool-item px-4 py-2.5 text-sm font-medium" onClick={() => setIsAddPartModalOpen(false)}>İptal</button>
+            <button className="w-full sm:w-auto cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2" onClick={saveAddedPart} disabled={(!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName && manualSerialNumber)) || isUploadingImage || isSavingAddedPart}>
+              {(isUploadingImage || isSavingAddedPart) ? <><Loader2 className="h-4 w-4 animate-spin" />Yükleniyor...</> : 'Ekle'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
