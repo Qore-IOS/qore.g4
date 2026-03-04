@@ -160,6 +160,58 @@ export type ParsedGeneric = {
   remainder?: string;
 };
 
+export type BulkSerialQrPayload = {
+  t: 'serial_bulk';
+  v: 1;
+  barcodes: string[];
+};
+
+const BULK_SERIAL_QR_PREFIX = '/qr/serial-bulk?d=';
+
+const toB64Url = (input: string): string => {
+  const base64 = typeof window !== 'undefined'
+    ? btoa(unescape(encodeURIComponent(input)))
+    : Buffer.from(input, 'utf8').toString('base64');
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+};
+
+const fromB64Url = (b64url: string): string => {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  if (typeof window !== 'undefined') {
+    return decodeURIComponent(escape(atob(padded)));
+  }
+  return Buffer.from(padded, 'base64').toString('utf8');
+};
+
+export function encodeBulkSerialQrPayload(barcodes: string[]): string {
+  const payload: BulkSerialQrPayload = {
+    t: 'serial_bulk',
+    v: 1,
+    barcodes: Array.from(new Set((barcodes || []).map(b => (b || '').trim()).filter(Boolean))),
+  };
+  return `/qr/serial-bulk?d=${toB64Url(JSON.stringify(payload))}`;
+}
+
+export function decodeBulkSerialQrPayload(raw: string): string[] | null {
+  const value = (raw || '').trim();
+  if (!value) return null;
+  if (!value.includes(BULK_SERIAL_QR_PREFIX)) return null;
+
+  try {
+    const url = value.startsWith('http') ? new URL(value) : new URL(value, 'https://qore.local');
+    if (!url.pathname.includes('/qr/serial-bulk')) return null;
+    const encoded = url.searchParams.get('d');
+    if (!encoded) return null;
+    const payload = JSON.parse(fromB64Url(encoded)) as BulkSerialQrPayload;
+    if (payload?.t !== 'serial_bulk' || payload?.v !== 1 || !Array.isArray(payload.barcodes)) return null;
+    const unique = Array.from(new Set(payload.barcodes.map(v => (v || '').trim()).filter(Boolean)));
+    return unique.length > 0 ? unique : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedGeneric | null {
   const raw = (rawInput || '').trim();
   if (!raw) return null;
