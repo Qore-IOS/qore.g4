@@ -219,7 +219,8 @@ const decodeLegacyPayload = (value: string): string[] | null => {
 
 export function encodeBulkSerialQrPayload(barcodes: string[]): string {
   const unique = uniqueBarcodes(barcodes);
-  return `${BULK_SERIAL_QR_TEXT_PREFIX}${unique.join('\n')}`;
+  const wrapped = unique.map(v => `\"RB${v}RB\"`).join('-');
+  return `${BULK_SERIAL_QR_TEXT_PREFIX}\n${wrapped}`;
 }
 
 export function decodeBulkSerialQrPayload(raw: string): string[] | null {
@@ -227,9 +228,11 @@ export function decodeBulkSerialQrPayload(raw: string): string[] | null {
   if (!value) return null;
 
   // New readable text format
-  if (value.startsWith(BULK_SERIAL_QR_TEXT_PREFIX)) {
-    const body = value.slice(BULK_SERIAL_QR_TEXT_PREFIX.length);
-    const unique = uniqueBarcodes(body.split(/\r?\n/));
+  if (value.includes(BULK_SERIAL_QR_TEXT_PREFIX)) {
+    const body = value.slice(value.indexOf(BULK_SERIAL_QR_TEXT_PREFIX) + BULK_SERIAL_QR_TEXT_PREFIX.length).trim();
+    const matches = Array.from(body.matchAll(/(?:\"RB([^\"]+?)RB\")|(?:RB([^\"\\s-]+?)RB)/g));
+    const extracted = matches.map(m => (m[1] || m[2] || '').trim()).filter(Boolean);
+    const unique = uniqueBarcodes(extracted);
     return unique.length > 0 ? unique : null;
   }
 

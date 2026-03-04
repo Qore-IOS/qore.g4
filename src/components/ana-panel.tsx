@@ -343,6 +343,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
   const [showManualInline, setShowManualInline] = useState(false);
   
@@ -448,16 +449,28 @@ export default function AnaPanel(props: AnaPanelProps) {
     return () => unsub();
   }, [activeSession]);
 
-  const processScan = useCallback(async (barcodeData: string, source = 'barcode') => {
+  const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const trimmedData = (barcodeData || '').trim();
     if (!trimmedData) return;
+
+    const isBulkItem = source === 'bulk_item';
 
     const bulkBarcodes = decodeBulkSerialQrPayload(trimmedData);
     if (bulkBarcodes) {
       for (const serialBarcode of bulkBarcodes) {
-        await processScan(serialBarcode, 'barcode');
+        await processScan(serialBarcode, 'bulk_item');
       }
+      setIsBulkScanMode(false);
       toast({ title: 'Toplu barkod okundu', description: `${bulkBarcodes.length} ürün tek seferde işlendi.` });
+      return;
+    }
+
+    if (isBulkScanMode && !isBulkItem) {
+      toast({
+        title: 'Toplu barkod bekleniyor',
+        description: 'Bu modda sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar okutulabilir.',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -549,7 +562,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     } finally {
       setIsProcessingScan(false);
     }
-  }, [toast, productCodes, barcodeFormats, existingDepotSerials, productTracking]);
+  }, [toast, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
 
   useHidScanner({
     enabled: !isPreCheckModalOpen && !isProcessingScan && !isCameraScannerOpen && !showManualInline,
@@ -1385,6 +1398,28 @@ export default function AnaPanel(props: AnaPanelProps) {
                 <CheckSquare className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Seç ({unprocessedScannedItems})</span>
                 <span className="sm:hidden">{unprocessedScannedItems}</span>
+              </button>
+              <button
+                onClick={() => {
+                  const next = !isBulkScanMode;
+                  setIsBulkScanMode(next);
+                  toast({
+                    title: next ? 'Toplu barkod modu açık' : 'Toplu barkod modu kapalı',
+                    description: next
+                      ? 'Sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar kabul edilecek.'
+                      : 'Normal barkod okuma moduna dönüldü.',
+                  });
+                }}
+                disabled={malKabulIsLoading}
+                className={cn(
+                  "cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed",
+                  isBulkScanMode && "bg-[var(--dashboard-accent)] text-white"
+                )}
+                title="Sadece toplu barkod okutma modunu aç/kapat"
+              >
+                <QrCode className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Toplu Barkod Oku</span>
+                <span className="sm:hidden">Toplu</span>
               </button>
               <button
                 onClick={clearAllScannedItems}
