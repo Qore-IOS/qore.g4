@@ -953,14 +953,52 @@ export default function TotalVerimlilikPanel({
 
     setIsFetchingSevkiyat(true);
     try {
-      // Seçilen ay için tarih aralığı oluştur
-      const startDate = new Date(selectedYear, selectedMonth, 1);
-      const endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
+      // Seçilen ay için tarih aralığı oluştur (bitiş tarihini exclusive tutarak milisaniye taşmalarını önle)
+      const startDate = new Date(selectedYear, selectedMonth, 1, 0, 0, 0, 0);
+      const endDateExclusive = new Date(selectedYear, selectedMonth + 1, 1, 0, 0, 0, 0);
+
+      const normalizeTransferDate = (rawDate: any): Date | null => {
+        if (!rawDate) return null;
+
+        // Firestore Timestamp
+        if (rawDate?.toDate && typeof rawDate.toDate === 'function') {
+          const d = rawDate.toDate();
+          return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+        }
+
+        if (rawDate instanceof Date) {
+          return !isNaN(rawDate.getTime()) ? rawDate : null;
+        }
+
+        if (typeof rawDate === 'number') {
+          // seconds veya milliseconds gelebilir
+          const d = new Date(rawDate < 1e12 ? rawDate * 1000 : rawDate);
+          return !isNaN(d.getTime()) ? d : null;
+        }
+
+        if (typeof rawDate === 'string') {
+          // ISO formatını önce dene
+          let d = new Date(rawDate);
+          if (!isNaN(d.getTime())) return d;
+
+          // DD.MM.YYYY vb. lokal formatlar
+          const parts = rawDate.trim().split(/[./\-]/);
+          if (parts.length === 3) {
+            const [day, month, year] = parts.map(p => Number(p));
+            if (Number.isFinite(day) && Number.isFinite(month) && Number.isFinite(year)) {
+              d = new Date(year, month - 1, day);
+              if (!isNaN(d.getTime())) return d;
+            }
+          }
+        }
+
+        return null;
+      };
 
       // Seçilen depodan yapılan transferleri çek (transfers collection)
       // sourceDepotId + mode='lab' + tarih aralığı ile filtrele; lab filtrelemesi client-side
       const startTimestamp = Timestamp.fromDate(startDate);
-      const endTimestamp = Timestamp.fromDate(endDate);
+      const endTimestamp = Timestamp.fromDate(new Date(endDateExclusive.getTime() - 1));
       const transfersQuery = query(
         collection(db, 'transfers'),
         where('sourceDepotId', '==', selectedDepotForSevkiyat),
@@ -980,8 +1018,14 @@ export default function TotalVerimlilikPanel({
         const transferData = transferDoc.data();
 
         // Tarih filtresini client-side uygula (sunucu tarafı filtreye ek güvenlik katmanı)
-        const transferTimestamp = transferData.timestamp?.toDate ? transferData.timestamp.toDate() : new Date(transferData.timestamp);
-        if (!transferTimestamp || isNaN(transferTimestamp.getTime()) || transferTimestamp < startDate || transferTimestamp > endDate) continue;
+        const transferTimestamp = normalizeTransferDate(
+          transferData.timestamp ?? transferData.createdAt ?? transferData.sevkTarihi ?? transferData.transferDate
+        );
+        if (!transferTimestamp) continue;
+
+        // Seçilen ay/yıl dönemine kesin filtre (sunucu sorgusuna ek güvenlik)
+        if (transferTimestamp < startDate || transferTimestamp >= endDateExclusive) continue;
+        if (transferTimestamp.getFullYear() !== selectedYear || transferTimestamp.getMonth() !== selectedMonth) continue;
 
         // targetHospitalId ile seçilen lab'ları doğrudan eşleştir
         const matchedLabId = transferData.targetHospitalId;
