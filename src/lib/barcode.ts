@@ -166,50 +166,75 @@ export type BulkSerialQrPayload = {
   barcodes: string[];
 };
 
-const BULK_SERIAL_QR_PREFIX = '/qr/serial-bulk?d=';
+const BULK_SERIAL_QR_TEXT_PREFIX = 'QORE_SERIAL_BULK_V1|';
+const BULK_SERIAL_QR_LEGACY_PREFIX = '/qr/serial-bulk?d=';
 
-const toB64Url = (input: string): string => {
-  const base64 = typeof window !== 'undefined'
-    ? btoa(unescape(encodeURIComponent(input)))
-    : Buffer.from(input, 'utf8').toString('base64');
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+const uniqueBarcodes = (barcodes: string[]): string[] => {
+  const unique = Array.from(new Set((barcodes || []).map(v => (v || '').trim()).filter(Boolean)));
+  return unique;
 };
 
 const fromB64Url = (b64url: string): string => {
-  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/=]/g, '');
   const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
   if (typeof window !== 'undefined') {
-    return decodeURIComponent(escape(atob(padded)));
+    try {
+      return decodeURIComponent(escape(atob(padded)));
+    } catch {
+      return atob(padded);
+    }
   }
   return Buffer.from(padded, 'base64').toString('utf8');
 };
 
+const decodeLegacyPayload = (value: string): string[] | null => {
+  try {
+    // 1) Full/relative URL payload: /qr/serial-bulk?d=<base64url>
+    if (value.includes(BULK_SERIAL_QR_LEGACY_PREFIX) || value.startsWith('http')) {
+      const url = value.startsWith('http') ? new URL(value) : new URL(value, 'https://qore.local');
+      if (!url.pathname.includes('/qr/serial-bulk')) return null;
+      const encoded = url.searchParams.get('d');
+      if (!encoded) return null;
+      const payload = JSON.parse(fromB64Url(encoded)) as BulkSerialQrPayload;
+      if (payload?.t !== 'serial_bulk' || payload?.v !== 1 || !Array.isArray(payload.barcodes)) return null;
+      const unique = uniqueBarcodes(payload.barcodes);
+      return unique.length > 0 ? unique : null;
+    }
+
+    // 2) Scanner may return only d=... part (or with stray chars), try direct decode
+    if (/^[A-Za-z0-9+/_=.\-]+$/.test(value)) {
+      const maybeDecoded = fromB64Url(value);
+      const payload = JSON.parse(maybeDecoded) as BulkSerialQrPayload;
+      if (payload?.t === 'serial_bulk' && payload?.v === 1 && Array.isArray(payload.barcodes)) {
+        const unique = uniqueBarcodes(payload.barcodes);
+        return unique.length > 0 ? unique : null;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
 export function encodeBulkSerialQrPayload(barcodes: string[]): string {
-  const payload: BulkSerialQrPayload = {
-    t: 'serial_bulk',
-    v: 1,
-    barcodes: Array.from(new Set((barcodes || []).map(b => (b || '').trim()).filter(Boolean))),
-  };
-  return `/qr/serial-bulk?d=${toB64Url(JSON.stringify(payload))}`;
+  const unique = uniqueBarcodes(barcodes);
+  return `${BULK_SERIAL_QR_TEXT_PREFIX}${unique.join('\n')}`;
 }
 
 export function decodeBulkSerialQrPayload(raw: string): string[] | null {
   const value = (raw || '').trim();
   if (!value) return null;
-  if (!value.includes(BULK_SERIAL_QR_PREFIX)) return null;
 
-  try {
-    const url = value.startsWith('http') ? new URL(value) : new URL(value, 'https://qore.local');
-    if (!url.pathname.includes('/qr/serial-bulk')) return null;
-    const encoded = url.searchParams.get('d');
-    if (!encoded) return null;
-    const payload = JSON.parse(fromB64Url(encoded)) as BulkSerialQrPayload;
-    if (payload?.t !== 'serial_bulk' || payload?.v !== 1 || !Array.isArray(payload.barcodes)) return null;
-    const unique = Array.from(new Set(payload.barcodes.map(v => (v || '').trim()).filter(Boolean)));
+  // New readable text format
+  if (value.startsWith(BULK_SERIAL_QR_TEXT_PREFIX)) {
+    const body = value.slice(BULK_SERIAL_QR_TEXT_PREFIX.length);
+    const unique = uniqueBarcodes(body.split(/\r?\n/));
     return unique.length > 0 ? unique : null;
-  } catch {
-    return null;
   }
+
+  // Backward compatibility for already generated legacy QR content
+  return decodeLegacyPayload(value);
 }
 
 export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedGeneric | null {
