@@ -15,11 +15,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { Device, Hospital } from '@/lib/types';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
+import { nanoid } from 'nanoid';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -270,6 +272,16 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   const [selectedActionIndex, setSelectedActionIndex] = useState<number | null>(null);
   const [selectedTargetDeviceId, setSelectedTargetDeviceId] = useState<string>('');
   const [isSavingPartTransfer, setIsSavingPartTransfer] = useState(false);
+  const [isAddPartModalOpen, setIsAddPartModalOpen] = useState(false);
+  const [isSavingAddedPart, setIsSavingAddedPart] = useState(false);
+  const [newPartCode, setNewPartCode] = useState('');
+  const [newPartName, setNewPartName] = useState('');
+  const [newPartQuantity, setNewPartQuantity] = useState('1');
+  const [newPartSerial, setNewPartSerial] = useState('');
+  const [removedPartCode, setRemovedPartCode] = useState('');
+  const [removedPartName, setRemovedPartName] = useState('');
+  const [removedPartSerial, setRemovedPartSerial] = useState('');
+  const [newPartNote, setNewPartNote] = useState('');
 
   useEffect(() => {
     const fetchForm = async () => {
@@ -389,6 +401,90 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     }
   };
 
+  const resetPartModalState = () => {
+    setNewPartCode('');
+    setNewPartName('');
+    setNewPartQuantity('1');
+    setNewPartSerial('');
+    setRemovedPartCode('');
+    setRemovedPartName('');
+    setRemovedPartSerial('');
+    setNewPartNote('');
+  };
+
+  const saveAddedPart = async () => {
+    if (!form) return;
+
+    if (!newPartCode.trim() || !newPartName.trim()) {
+      toast({ title: 'Eksik bilgi', description: 'Parça kodu ve parça adı zorunludur.', variant: 'destructive' });
+      return;
+    }
+
+    const quantity = Number(newPartQuantity || '1');
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      toast({ title: 'Geçersiz adet', description: 'Adet 0’dan büyük olmalıdır.', variant: 'destructive' });
+      return;
+    }
+
+    const appendedAction = {
+      id: nanoid(),
+      type: 'part_change',
+      action: newPartName.trim(),
+      stokKodu: newPartCode.trim(),
+      stokAdi: newPartName.trim(),
+      quantity,
+      serialNumber: newPartSerial.trim(),
+      removedPartStokKodu: removedPartCode.trim(),
+      removedPartStokAdi: removedPartName.trim(),
+      removedPartSerialNumber: removedPartSerial.trim(),
+      description: newPartNote.trim(),
+      isManualEntry: true,
+      addedAfterSave: true,
+      addedAfterSaveAt: new Date(),
+      addedAfterSaveByUid: currentUserProfile?.uid || '',
+      addedAfterSaveByName: currentUserProfile?.name || currentUserProfile?.email || '',
+    };
+
+    const updatedActions = [...(form.actions || []), appendedAction] as any[];
+
+    try {
+      setIsSavingAddedPart(true);
+      await updateDoc(doc(db, getCollectionName(moduleType), form.id), {
+        actions: updatedActions,
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, 'actionFormHistoryLogs'), {
+        formId: form.id,
+        moduleType,
+        type: 'part_added_after_save',
+        part: {
+          stokKodu: appendedAction.stokKodu,
+          stokAdi: appendedAction.stokAdi,
+          quantity: appendedAction.quantity,
+          serialNumber: appendedAction.serialNumber || '',
+          removedPartStokKodu: appendedAction.removedPartStokKodu || '',
+          removedPartStokAdi: appendedAction.removedPartStokAdi || '',
+          removedPartSerialNumber: appendedAction.removedPartSerialNumber || '',
+          description: appendedAction.description || '',
+        },
+        updatedByUid: currentUserProfile?.uid || '',
+        updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        updatedAt: serverTimestamp(),
+      });
+
+      setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
+      setIsAddPartModalOpen(false);
+      resetPartModalState();
+      toast({ title: 'Parça eklendi', description: 'Değişen parça forma ve form geçmişine kaydedildi.' });
+    } catch (error) {
+      console.error('Add part after save error:', error);
+      toast({ title: 'Kayıt hatası', description: 'Parça kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingAddedPart(false);
+    }
+  };
+
   return (
     <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
       <div className="max-w-5xl mx-auto space-y-5">
@@ -402,7 +498,17 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           <div className="cihaz-card-strong p-10 text-center text-[var(--dashboard-muted)]">Form bulunamadı.</div>
         ) : (
           <>
-            <div className="flex items-center justify-between">{pdfSection}</div>
+            <div className="flex items-center justify-between gap-2">
+              {pdfSection}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsAddPartModalOpen(true)}
+                className="ml-auto"
+              >
+                Değişen Parça Ekle
+              </Button>
+            </div>
             <div className="cihaz-card p-5 space-y-4">
               <div className="pb-3 border-b border-[var(--dashboard-stroke)] flex items-start gap-3">
                 {deviceImageUrl ? (
@@ -535,7 +641,62 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={isAddPartModalOpen}
+        onOpenChange={(open) => {
+          setIsAddPartModalOpen(open);
+          if (!open) resetPartModalState();
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Değişen Parça Ekle</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--dashboard-muted)]">Parça Kodu *</label>
+                <Input value={newPartCode} onChange={(e) => setNewPartCode(e.target.value)} placeholder="Örn: D1" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--dashboard-muted)]">Parça Adı *</label>
+                <Input value={newPartName} onChange={(e) => setNewPartName(e.target.value)} placeholder="Örn: Halogen Lamp" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--dashboard-muted)]">Adet *</label>
+                <Input type="number" min={1} value={newPartQuantity} onChange={(e) => setNewPartQuantity(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--dashboard-muted)]">Takılan Seri No</label>
+                <Input value={newPartSerial} onChange={(e) => setNewPartSerial(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--dashboard-muted)]">Sökülen Parça Kodu</label>
+                <Input value={removedPartCode} onChange={(e) => setRemovedPartCode(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--dashboard-muted)]">Sökülen Parça Adı</label>
+                <Input value={removedPartName} onChange={(e) => setRemovedPartName(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-[var(--dashboard-muted)]">Sökülen Parça Seri No</label>
+              <Input value={removedPartSerial} onChange={(e) => setRemovedPartSerial(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-[var(--dashboard-muted)]">Not</label>
+              <Input value={newPartNote} onChange={(e) => setNewPartNote(e.target.value)} placeholder="İsteğe bağlı" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsAddPartModalOpen(false)}>İptal</Button>
+              <Button onClick={saveAddedPart} disabled={isSavingAddedPart}>
+                {isSavingAddedPart ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Kaydet'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
