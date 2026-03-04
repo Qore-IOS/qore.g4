@@ -450,22 +450,48 @@ export default function AnaPanel(props: AnaPanelProps) {
   }, [activeSession]);
 
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
+    const scanCorrelationId = createCorrelationId();
     const trimmedData = (barcodeData || '').trim();
-    if (!trimmedData) return;
+    if (!trimmedData) {
+      malKabulLogger.warn('Scan ignored: empty payload', { source, isBulkScanMode }, { correlationId: scanCorrelationId });
+      return;
+    }
 
     const isBulkItem = source === 'bulk_item';
+    malKabulLogger.info('Scan received', {
+      source,
+      isBulkItem,
+      isBulkScanMode,
+      payloadLength: trimmedData.length,
+      hasBulkHeader: trimmedData.includes('QORE_SERIAL_BULK_V1|'),
+      payloadPreview: trimmedData.slice(0, 120),
+    }, { correlationId: scanCorrelationId });
 
     const bulkBarcodes = decodeBulkSerialQrPayload(trimmedData);
+    malKabulLogger.info('Bulk decode result', {
+      source,
+      isBulkMode: isBulkScanMode,
+      decodedCount: bulkBarcodes?.length || 0,
+      decodedPreview: (bulkBarcodes || []).slice(0, 5),
+    }, { correlationId: scanCorrelationId });
+
     if (bulkBarcodes) {
       for (const serialBarcode of bulkBarcodes) {
         await processScan(serialBarcode, 'bulk_item');
       }
       setIsBulkScanMode(false);
+      malKabulLogger.info('Bulk scan processed successfully', {
+        itemCount: bulkBarcodes.length,
+      }, { correlationId: scanCorrelationId });
       toast({ title: 'Toplu barkod okundu', description: `${bulkBarcodes.length} ürün tek seferde işlendi.` });
       return;
     }
 
     if (isBulkScanMode && !isBulkItem) {
+      malKabulLogger.warn('Bulk mode reject: payload is not recognized as bulk format', {
+        payloadLength: trimmedData.length,
+        payloadPreview: trimmedData.slice(0, 160),
+      }, { correlationId: scanCorrelationId });
       toast({
         title: 'Toplu barkod bekleniyor',
         description: 'Bu modda sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar okutulabilir.',
@@ -477,7 +503,13 @@ export default function AnaPanel(props: AnaPanelProps) {
     setIsProcessingScan(true);
     try {
         const parsed: ParsedGeneric | null = parseAnyBarcode(trimmedData, barcodeFormats);
-        if (!parsed) throw new Error('Barkod tanımlı formatlarla eşleşmiyor.');
+        if (!parsed) {
+          malKabulLogger.warn('Single barcode parse failed', {
+            source,
+            payloadPreview: trimmedData.slice(0, 160),
+          }, { correlationId: scanCorrelationId });
+          throw new Error('Barkod tanımlı formatlarla eşleşmiyor.');
+        }
 
         const resolved = resolveProductFromParsed(parsed, productCodes as any);
         if (!resolved.product) throw new Error(`Barkod numarası/referans herhangi bir ürünle eşleşmedi.`);
@@ -553,6 +585,11 @@ export default function AnaPanel(props: AnaPanelProps) {
         }
 
     } catch (err: any) {
+      malKabulLogger.error('Scan processing failed', err, {
+        source,
+        isBulkMode: isBulkScanMode,
+        payloadPreview: trimmedData.slice(0, 160),
+      }, { correlationId: scanCorrelationId });
       playFeedback(true);
       toast({ title: 'Ayrıştırma Hatası', description: err.message || 'Barkod işlenemedi.', variant: 'destructive' });
       if (source === 'barcode') {
@@ -869,6 +906,11 @@ export default function AnaPanel(props: AnaPanelProps) {
     setIsGeneratingBulkQr(true);
     try {
       const encodedUrl = encodeBulkSerialQrPayload(barcodeValues);
+      malKabulLogger.info('Bulk QR payload generated', {
+        barcodeCount: barcodeValues.length,
+        encodedLength: encodedUrl.length,
+        encodedPreview: encodedUrl.slice(0, 180),
+      });
       const qrDataUrl = await QRCode.toDataURL(encodedUrl, {
         errorCorrectionLevel: 'M',
         width: 512,
