@@ -284,7 +284,9 @@ export default function TransferGecmisPanel() {
                 {transfers.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">Bu depo için transfer kaydı bulunamadı.</p>
                 ) : (
-                  transfers.map(t => (
+                  transfers.map(t => {
+                    const transferPersonName = t.userName || t.createdByName || t.createdBy || 'Bilinmiyor';
+                    return (
                     <AccordionItem key={t.id} value={t.id} data-row-id={t.id}>
                         <AccordionTrigger
                           className="flex justify-between items-center hover:no-underline p-4 rounded-lg hover:bg-[var(--dashboard-surface-2)]/60"
@@ -296,11 +298,11 @@ export default function TransferGecmisPanel() {
                             </div>
                             <div className="text-center">
                                 <p className="font-mono text-sm">{t.itemCount} adet</p>
-                                <p className="text-xs text-muted-foreground">{t.userName}</p>
+                                <p className="text-xs text-muted-foreground">Personel: {transferPersonName}</p>
                             </div>
                         </AccordionTrigger>
                     </AccordionItem>
-                  ))
+                  )})
                 )}
              </Accordion>
           )}
