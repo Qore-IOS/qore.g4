@@ -16,7 +16,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
-import { Loader2 } from 'lucide-react';
+import { Building2, CalendarClock, Loader2, Package2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -32,7 +32,7 @@ import {
 } from 'firebase/firestore';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import type { Transfer, Depot } from '@/lib/types';
+import type { Transfer, Depot, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
 import { transferGecmisLogger } from '@/lib/logger';
@@ -51,10 +51,13 @@ export default function TransferGecmisPanel() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const depotIdFromUrl = searchParams.get('depotId') || '';
+  const labIdFromUrl = searchParams.get('labId') || 'all';
   const { toast } = useToast();
 
   const [depots, setDepots] = useState<Depot[]>([]);
+  const [labs, setLabs] = useState<Hospital[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string>(depotIdFromUrl);
+  const [selectedLabId, setSelectedLabId] = useState<string>(labIdFromUrl);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalCount, setTotalCount] = useState<number>(0);
@@ -80,25 +83,36 @@ export default function TransferGecmisPanel() {
     return () => unsub();
   }, [selectedDepotId]);
 
+  // Fetch labs once for target laboratory filter
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'hospitals'), snap => {
+      const labList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      setLabs(labList);
+    });
+    return () => unsub();
+  }, []);
+
   /**
    * Fetch total count for the selected depot (server-side)
    */
-  const fetchTotalCount = useCallback(async (depotId: string) => {
+  const fetchTotalCount = useCallback(async (depotId: string, labId: string) => {
     if (!depotId) {
       setTotalCount(0);
       return;
     }
     try {
-      const countQuery = query(
-        collection(db, 'transfers'),
-        where('sourceDepotId', '==', depotId)
-      );
+      const filters = [where('sourceDepotId', '==', depotId)];
+      if (labId && labId !== 'all') {
+        filters.push(where('targetHospitalId', '==', labId));
+      }
+      const countQuery = query(collection(db, 'transfers'), ...filters);
       const snapshot = await getCountFromServer(countQuery);
       setTotalCount(snapshot.data().count);
     } catch (error) {
       transferGecmisLogger.error('Transfer sayısı alınamadı', error as Error, {
         operation: 'fetchTotalCount',
         depotId,
+        labId,
       });
       setTotalCount(0);
     }
@@ -109,6 +123,7 @@ export default function TransferGecmisPanel() {
    */
   const fetchTransfers = useCallback(async (
     depotId: string,
+    labId: string,
     pageNum: number,
     pageSize: number,
     cursors: QueryDocumentSnapshot[]
@@ -124,18 +139,17 @@ export default function TransferGecmisPanel() {
     try {
       // Build query with server-side filtering
       // Requires composite index: sourceDepotId ASC + timestamp DESC
-      let q = query(
-        collection(db, 'transfers'),
-        where('sourceDepotId', '==', depotId),
-        orderBy('timestamp', 'desc'),
-        limit(pageSize)
-      );
+      const filters = [where('sourceDepotId', '==', depotId)];
+      if (labId && labId !== 'all') {
+        filters.push(where('targetHospitalId', '==', labId));
+      }
+      let q = query(collection(db, 'transfers'), ...filters, orderBy('timestamp', 'desc'), limit(pageSize));
 
       // If not first page, use cursor from previous page
       if (pageNum > 1 && cursors[pageNum - 2]) {
         q = query(
           collection(db, 'transfers'),
-          where('sourceDepotId', '==', depotId),
+          ...filters,
           orderBy('timestamp', 'desc'),
           startAfter(cursors[pageNum - 2]),
           limit(pageSize)
@@ -163,6 +177,7 @@ export default function TransferGecmisPanel() {
       setTransfers(data);
       transferGecmisLogger.info('Transfer geçmişi yüklendi (server-side)', {
         depotId,
+        labId,
         page: pageNum,
         count: data.length,
       });
@@ -170,6 +185,7 @@ export default function TransferGecmisPanel() {
       transferGecmisLogger.error('Transfer geçmişi yüklenemedi', error as Error, {
         operation: 'fetchTransferHistory',
         depotId,
+        labId,
       });
       toast({ title: 'Hata', description: 'Transfer geçmişi yüklenirken bir hata oluştu.', variant: 'destructive' });
       setTransfers([]);
@@ -183,14 +199,14 @@ export default function TransferGecmisPanel() {
     setPage(1);
     cursorStackRef.current = [];
     if (selectedDepotId) {
-      fetchTotalCount(selectedDepotId);
+      fetchTotalCount(selectedDepotId, selectedLabId);
     }
-  }, [selectedDepotId, rowsPerPage, fetchTotalCount]);
+  }, [selectedDepotId, selectedLabId, rowsPerPage, fetchTotalCount]);
 
   // Fetch transfers when page, depot, or page size changes
   useEffect(() => {
-    fetchTransfers(selectedDepotId, page, rowsPerPage, cursorStackRef.current);
-  }, [selectedDepotId, page, rowsPerPage, fetchTransfers]);
+    fetchTransfers(selectedDepotId, selectedLabId, page, rowsPerPage, cursorStackRef.current);
+  }, [selectedDepotId, selectedLabId, page, rowsPerPage, fetchTransfers]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
 
@@ -201,21 +217,27 @@ export default function TransferGecmisPanel() {
       aria-label="Transfer geçmişi sayfası"
     >
       <BackButton fallback="/direkt-transfer" aria-label="Geri dön" />
-      <Card>
-        <CardHeader>
-          <CardTitle id="transfer-history-title">Transfer Geçmişi</CardTitle>
+      <Card className="border-0 shadow-xl bg-gradient-to-b from-background to-[var(--dashboard-surface-1)]/35">
+        <CardHeader className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-[var(--dashboard-surface-2)] text-[var(--dashboard-primary)]">
+              <Package2 className="h-5 w-5" />
+            </div>
+            <CardTitle id="transfer-history-title" className="text-3xl font-semibold tracking-tight">Transfer Geçmişi</CardTitle>
+          </div>
           <CardDescription>
             Depodan yapılan tüm direkt transfer işlemlerini görüntüleyin.
             {totalCount > 0 && <span className="ml-2 font-medium">({totalCount} kayıt)</span>}
           </CardDescription>
         </CardHeader>
         <CardContent aria-labelledby="transfer-history-title">
-          <div className="max-w-md mb-4">
-            <label htmlFor="depot-filter-select" className="text-sm font-medium">Depo</label>
+          <div className="grid gap-4 md:grid-cols-2 mb-5">
+            <div className="space-y-2">
+            <label htmlFor="depot-filter-select" className="text-sm font-medium flex items-center gap-2"><Building2 className="h-4 w-4 text-[var(--dashboard-primary)]" />Depo</label>
             <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
               <SelectTrigger
                 id="depot-filter-select"
-                className="w-full"
+                className="w-full bg-[var(--dashboard-surface-1)] border-[var(--dashboard-border)]"
                 aria-label="Depo filtresi"
               >
                 <SelectValue placeholder="Depo Seçin..." />
@@ -226,6 +248,26 @@ export default function TransferGecmisPanel() {
                 ))}
               </SelectContent>
             </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="lab-filter-select" className="text-sm font-medium flex items-center gap-2"><CalendarClock className="h-4 w-4 text-[var(--dashboard-primary)]" />Hedef Laboratuvar</label>
+              <Select value={selectedLabId} onValueChange={setSelectedLabId}>
+                <SelectTrigger
+                  id="lab-filter-select"
+                  className="w-full bg-[var(--dashboard-surface-1)] border-[var(--dashboard-border)]"
+                  aria-label="Laboratuvar filtresi"
+                >
+                  <SelectValue placeholder="Laboratuvar Seçin..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
+                  {labs.map(l => (
+                    <SelectItem key={l.id} value={l.id}>{l.name || l.id}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           
           {loading ? (
@@ -238,15 +280,17 @@ export default function TransferGecmisPanel() {
                <span className="sr-only">Yükleniyor...</span>
              </div>
           ) : (
-             <Accordion type="single" collapsible className="w-full">
+             <Accordion type="single" collapsible className="w-full rounded-xl border border-[var(--dashboard-border)] bg-[var(--dashboard-surface-1)]/80 px-2">
                 {transfers.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">Bu depo için transfer kaydı bulunamadı.</p>
                 ) : (
-                  transfers.map(t => (
+                  transfers.map(t => {
+                    const transferPersonName = t.userName || t.createdByName || t.createdBy || 'Bilinmiyor';
+                    return (
                     <AccordionItem key={t.id} value={t.id} data-row-id={t.id}>
                         <AccordionTrigger
-                          className="flex justify-between items-center hover:no-underline p-4"
-                          onClick={() => router.push(`/transfer-gecmis/${t.id}?depotId=${selectedDepotId}`)}
+                          className="flex justify-between items-center hover:no-underline p-4 rounded-lg hover:bg-[var(--dashboard-surface-2)]/60"
+                          onClick={() => router.push(`/transfer-gecmis/${t.id}?depotId=${selectedDepotId}&labId=${selectedLabId}`)}
                         >
                             <div className="text-left space-y-1">
                                 <p className="font-semibold">{t.targetName}</p>
@@ -254,17 +298,17 @@ export default function TransferGecmisPanel() {
                             </div>
                             <div className="text-center">
                                 <p className="font-mono text-sm">{t.itemCount} adet</p>
-                                <p className="text-xs text-muted-foreground">{t.userName}</p>
+                                <p className="text-xs text-muted-foreground">Personel: {transferPersonName}</p>
                             </div>
                         </AccordionTrigger>
                     </AccordionItem>
-                  ))
+                  )})
                 )}
              </Accordion>
           )}
         </CardContent>
         {totalPages > 1 && (
-            <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t">
+            <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t border-[var(--dashboard-border)]">
                  <div className="flex items-center space-x-2 text-sm">
                     <span>Satır/sayfa:</span>
                     <Select value={String(rowsPerPage)} onValueChange={val => { setRowsPerPage(Number(val)); setPage(1); }}>
