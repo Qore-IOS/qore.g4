@@ -22,6 +22,7 @@ import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutan
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
+import { nanoid } from 'nanoid';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
