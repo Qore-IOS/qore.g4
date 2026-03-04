@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -620,12 +620,17 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
     try {
       setIsSavingAddedPart(true);
-      await updateDoc(doc(db, getCollectionName(moduleType), form.id), {
+      const now = new Date();
+      const formType = moduleType === 'teknik-servis' ? 'teknik_servis' : 'aplikasyon';
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, getCollectionName(moduleType), form.id), {
         actions: updatedActions,
         updatedAt: serverTimestamp(),
       });
 
-      await addDoc(collection(db, 'actionFormHistoryLogs'), {
+      const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
+      batch.set(historyRef, {
         formId: form.id,
         moduleType,
         type: 'part_added_after_save',
@@ -645,7 +650,81 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedAt: serverTimestamp(),
       });
 
+      if (appendedAction.personalStockId) {
+        const stockRef = doc(db, 'personalStock', appendedAction.personalStockId);
+        batch.update(stockRef, {
+          status: 'used',
+          usedAt: Timestamp.fromDate(now),
+          usedOnDeviceId: form.deviceId,
+          usedOnDeviceName: form.cihazAdi || '',
+          usedOnFormId: form.id,
+          usedOnFormType: formType,
+          usedPartImageUrl: appendedAction.usedPartImageUrl || null,
+        });
+
+        const useLogRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(useLogRef, {
+          action: 'use_on_device',
+          personalStockId: appendedAction.personalStockId,
+          stokKodu: appendedAction.stokKodu,
+          stokAdi: appendedAction.stokAdi,
+          serialNumber: appendedAction.serialNumber,
+          deviceId: form.deviceId,
+          deviceName: form.cihazAdi || '',
+          labName: form.labName || '',
+          formId: form.id,
+          formType,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+          usageImageUrl: appendedAction.usedPartImageUrl || null,
+        });
+      }
+
+      if (appendedAction.poolStockId) {
+        const poolStockRef = doc(db, 'poolWarehouseStock', appendedAction.poolStockId);
+        batch.update(poolStockRef, {
+          status: 'used',
+          usedAt: Timestamp.fromDate(now),
+          usedByUid: currentUserProfile?.uid || '',
+          usedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+          usedOnDeviceId: form.deviceId,
+          usedOnDeviceName: form.cihazAdi || '',
+          usedOnFormId: form.id,
+          usedOnFormType: formType,
+          usedOnLabId: form.hospitalId || '',
+          usedOnLabName: form.labName || '',
+        });
+
+        const poolUseLogRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(poolUseLogRef, {
+          action: 'use_from_pool',
+          poolStockId: appendedAction.poolStockId,
+          poolWarehouseId: appendedAction.poolWarehouseId || '',
+          poolWarehouseName: appendedAction.poolWarehouseName || '',
+          stokKodu: appendedAction.stokKodu,
+          stokAdi: appendedAction.stokAdi,
+          serialNumber: appendedAction.serialNumber,
+          deviceId: form.deviceId,
+          deviceName: form.cihazAdi || '',
+          labName: form.labName || '',
+          formId: form.id,
+          formType,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        });
+      }
+
+      await batch.commit();
+
       setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
+      if (appendedAction.personalStockId) {
+        setPersonalStock((prev) => prev.filter((item) => item.id !== appendedAction.personalStockId));
+      }
+      if (appendedAction.poolStockId) {
+        setPoolStockItems((prev) => prev.filter((item) => item.id !== appendedAction.poolStockId));
+      }
       setIsAddPartModalOpen(false);
       resetPartModalState();
       toast({ title: 'Parça eklendi', description: 'Değişen parça forma ve form geçmişine kaydedildi.' });
