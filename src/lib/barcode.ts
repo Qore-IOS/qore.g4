@@ -169,6 +169,21 @@ export type BulkSerialQrPayload = {
 const BULK_SERIAL_QR_TEXT_PREFIX = 'QORE_SERIAL_BULK_V1|';
 const BULK_SERIAL_QR_LEGACY_PREFIX = '/qr/serial-bulk?d=';
 
+const BULK_HEADER_LOOSE_RE = /QORE[^A-Z0-9]*SERIAL[^A-Z0-9]*BULK[^A-Z0-9]*V1/;
+
+const normalizeBulkPayload = (value: string): string => {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/İ/g, 'I')
+    .replace(/ı/g, 'i')
+    .toUpperCase();
+};
+
+const toLooseTokenString = (value: string): string => {
+  return normalizeBulkPayload(value).replace(/[^A-Z0-9]+/g, ' ');
+};
+
 const uniqueBarcodes = (barcodes: string[]): string[] => {
   const unique = Array.from(new Set((barcodes || []).map(v => (v || '').trim()).filter(Boolean)));
   return unique;
@@ -227,11 +242,14 @@ export function decodeBulkSerialQrPayload(raw: string): string[] | null {
   const value = (raw || '').trim();
   if (!value) return null;
 
-  // New readable text format
-  if (value.includes(BULK_SERIAL_QR_TEXT_PREFIX)) {
-    const body = value.slice(value.indexOf(BULK_SERIAL_QR_TEXT_PREFIX) + BULK_SERIAL_QR_TEXT_PREFIX.length).trim();
-    const matches = Array.from(body.matchAll(/(?:\"RB([^\"]+?)RB\")|(?:RB([^\"\\s-]+?)RB)/g));
-    const extracted = matches.map(m => (m[1] || m[2] || '').trim()).filter(Boolean);
+  // New readable text format (robust against scanner punctuation/locale corruption)
+  const normalized = normalizeBulkPayload(value);
+  const looseTokens = toLooseTokenString(value);
+
+  if (normalized.includes(BULK_SERIAL_QR_TEXT_PREFIX) || BULK_HEADER_LOOSE_RE.test(looseTokens)) {
+    // Parse RB...RB pairs from a loosened stream, e.g. QORE?SERIAL?BULK?V1;İRB...RBİ*İRB
+    const matches = Array.from(looseTokens.matchAll(/RB\s*([0-9A-Z]{8,})\s*RB/g));
+    const extracted = matches.map(m => (m[1] || '').trim()).filter(Boolean);
     const unique = uniqueBarcodes(extracted);
     return unique.length > 0 ? unique : null;
   }
