@@ -2238,34 +2238,28 @@ export default function AplikasyonIslemFormuPage() {
 
   return (
     <>
-      <div className="cihaz-shell px-4 py-6 sm:px-6 sm:py-8 space-y-6">
-        <BackButton fallback={`/aplikasyon-paneli/${device.hospitalId}`} />
-
-        {/* Sticky Device Info Header */}
-        <header className="sticky top-0 z-30 cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6" style={{ borderRadius: '16px', backgroundColor: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)' }}>
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div className="flex flex-col sm:flex-row gap-4 items-start">
-              {device.imageUrl && (
-                <div className="w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2">
-                  <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={96} height={96} className="object-contain w-full h-full" />
-                </div>
-              )}
-              <div>
-                <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">
-                  Aplikasyon İşlem Formu
-                </h1>
-                <p className="text-base font-medium text-[var(--dashboard-accent)]">{device.cihazAdi}</p>
-                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-0.5">Seri No: {device.seriNumarasi}</p>
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs sm:text-sm text-[var(--dashboard-muted)]">
-                  <span><strong className="text-[var(--dashboard-text)]">Lab:</strong> {hospital?.name || '-'}</span>
-                  <span><strong className="text-[var(--dashboard-text)]">İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
-                  <span><strong className="text-[var(--dashboard-text)]">Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
-                </div>
-              </div>
+      <div className="wizard-page-wrapper">
+        {/* Compact Device Info Header */}
+        <header className="wizard-compact-header sticky top-0 z-30">
+          <BackButton fallback={`/aplikasyon-paneli/${device.hospitalId}`} />
+          {device.imageUrl && (
+            <div className="wizard-header-image">
+              <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={48} height={48} />
             </div>
+          )}
+          <div className="wizard-header-info">
+            <div className="wizard-header-title">Aplikasyon İşlem Formu</div>
+            <div className="wizard-header-device">{device.cihazAdi} <span style={{ fontSize: '11px', color: 'var(--dashboard-muted)', fontFamily: 'monospace' }}>Seri No: {device.seriNumarasi}</span></div>
+            <div className="wizard-header-meta">
+              <span><strong>Lab:</strong> {hospital?.name || '-'}</span>
+              <span><strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
+              <span><strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
+            </div>
+          </div>
+          <div className="wizard-header-actions">
             <button
               onClick={() => router.push(`/aplikasyon-paneli/gecmis/${deviceId}`)}
-              className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium self-start"
+              className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium"
             >
               <History className="h-4 w-4" />
               <span>Geçmiş</span>
