@@ -6,17 +6,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { DatePickerWithRange } from '@/components/ui/date-range-picker';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft } from 'lucide-react';
+import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft, Settings2, CalendarDays } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import type { Hospital, LabPool, User } from '@/lib/types';
+import type { DateRange } from 'react-day-picker';
 
 interface ActionForm {
   id: string;
@@ -37,6 +41,7 @@ interface FaultReport {
   labId?: string;
   labName?: string;
   status: string;
+  closedAt: Date | null;
 }
 
 interface LabOption {
@@ -69,6 +74,58 @@ export default function KurumZiyaretAnaliziPage() {
   const [labPopoverOpen, setLabPopoverOpen] = useState(false);
   const [personnelPopoverOpen, setPersonnelPopoverOpen] = useState(false);
   const [selectedChartPersonnelUid, setSelectedChartPersonnelUid] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  const [shiftFilter, setShiftFilter] = useState<'all' | 'inside' | 'outside'>('all');
+  const [workStartTime, setWorkStartTime] = useState('09:00');
+  const [workEndTime, setWorkEndTime] = useState('18:00');
+  const [workSettingsOpen, setWorkSettingsOpen] = useState(false);
+
+  const toDateValue = (value: unknown): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+    if (value instanceof Timestamp) return value.toDate();
+    if (typeof value === 'object' && value !== null && 'toDate' in value && typeof (value as { toDate?: () => Date }).toDate === 'function') {
+      return (value as { toDate: () => Date }).toDate();
+    }
+    const parsed = new Date(String(value));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const isDateInRange = (date: Date | null) => {
+    if (!date) return false;
+    if (!dateRange?.from) return true;
+    const start = new Date(dateRange.from);
+    start.setHours(0, 0, 0, 0);
+    if (date < start) return false;
+    if (dateRange.to) {
+      const end = new Date(dateRange.to);
+      end.setHours(23, 59, 59, 999);
+      return date <= end;
+    }
+    return true;
+  };
+
+  const getMinutes = (hhmm: string) => {
+    const [hours, minutes] = hhmm.split(':').map(Number);
+    return (hours * 60) + minutes;
+  };
+
+  const isWithinWorkHours = (date: Date | null) => {
+    if (!date) return false;
+    const currentMinute = date.getHours() * 60 + date.getMinutes();
+    const start = getMinutes(workStartTime);
+    const end = getMinutes(workEndTime);
+    if (start <= end) {
+      return currentMinute >= start && currentMinute <= end;
+    }
+    return currentMinute >= start || currentMinute <= end;
+  };
+
+  const matchesShiftFilter = (date: Date | null) => {
+    if (shiftFilter === 'all') return true;
+    const inShift = isWithinWorkHours(date);
+    return shiftFilter === 'inside' ? inShift : !inShift;
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -130,7 +187,7 @@ export default function KurumZiyaretAnaliziPage() {
             return {
               id: d.id, createdByUid: data.createdByUid, createdByName: data.createdByName || 'Bilinmiyor',
               hospitalId: data.hospitalId, labName: data.labName, formType: 'teknik_servis' as const,
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
+              createdAt: toDateValue(data.createdAt) || new Date(0),
             };
           })
         );
@@ -141,7 +198,7 @@ export default function KurumZiyaretAnaliziPage() {
             return {
               id: d.id, createdByUid: data.createdByUid, createdByName: data.createdByName || 'Bilinmiyor',
               hospitalId: data.hospitalId, labName: data.labName, formType: 'aplikasyon' as const,
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
+              createdAt: toDateValue(data.createdAt) || new Date(0),
             };
           })
         );
@@ -153,6 +210,7 @@ export default function KurumZiyaretAnaliziPage() {
               id: d.id, interventionType: data.interventionType, faultType: data.faultType,
               assignedToUid: data.assignedToUid, assignedToName: data.assignedToName,
               labId: data.labId, labName: data.labName, status: data.status,
+              closedAt: toDateValue(data.closedAt),
             };
           })
         );
@@ -194,8 +252,12 @@ export default function KurumZiyaretAnaliziPage() {
       filteredFaults = filteredFaults.filter((f) => f.assignedToUid && selectedPersonnelUids.has(f.assignedToUid));
     }
 
+    filteredTeknik = filteredTeknik.filter((f) => isDateInRange(f.createdAt) && matchesShiftFilter(f.createdAt));
+    filteredApp = filteredApp.filter((f) => isDateInRange(f.createdAt) && matchesShiftFilter(f.createdAt));
+    filteredFaults = filteredFaults.filter((f) => isDateInRange(f.closedAt) && matchesShiftFilter(f.closedAt));
+
     return { filteredTeknik, filteredApp, filteredFaults };
-  }, [teknikForms, aplikasyonForms, faultReports, selectedLabIdsFull, selectedPersonnelUids]);
+  }, [teknikForms, aplikasyonForms, faultReports, selectedLabIdsFull, selectedPersonnelUids, dateRange, shiftFilter, workStartTime, workEndTime]);
 
   const analysis = useMemo(() => {
     const { filteredTeknik, filteredApp, filteredFaults } = filteredData;
@@ -209,9 +271,9 @@ export default function KurumZiyaretAnaliziPage() {
     const totalTeknik = teknikFormCount + teknikFaultVisits.length;
     const totalApp = appFormCount + appFaultVisits.length;
 
-    const personnelMap = new Map<string, { name: string; role: string; visitCount: number }>();
+    const personnelMap = new Map<string, { name: string; role: string; visitCount: number; formVisitCount: number; faultVisitCount: number }>();
 
-    const addVisit = (uid: string | undefined, name: string, visitType: 'teknik_servis' | 'aplikasyon') => {
+    const addVisit = (uid: string | undefined, name: string, visitType: 'teknik_servis' | 'aplikasyon', source: 'form' | 'fault') => {
       if (!uid) return;
       const user = usersMap.get(uid);
       const userRole = user?.role || '';
@@ -219,21 +281,23 @@ export default function KurumZiyaretAnaliziPage() {
       const isAppPerson = userRole === 'aplikasyon';
       if (isTeknikPerson && visitType !== 'teknik_servis') return;
       if (isAppPerson && visitType !== 'aplikasyon') return;
-      const existing = personnelMap.get(uid) || { name: name || user?.name || 'Bilinmiyor', role: userRole, visitCount: 0 };
+      const existing = personnelMap.get(uid) || { name: name || user?.name || 'Bilinmiyor', role: userRole, visitCount: 0, formVisitCount: 0, faultVisitCount: 0 };
       existing.visitCount++;
+      if (source === 'form') existing.formVisitCount++;
+      if (source === 'fault') existing.faultVisitCount++;
       personnelMap.set(uid, existing);
     };
 
-    filteredTeknik.forEach((f) => addVisit(f.createdByUid, f.createdByName, 'teknik_servis'));
-    filteredApp.forEach((f) => addVisit(f.createdByUid, f.createdByName, 'aplikasyon'));
-    teknikFaultVisits.forEach((f) => addVisit(f.assignedToUid, f.assignedToName || 'Bilinmiyor', 'teknik_servis'));
-    appFaultVisits.forEach((f) => addVisit(f.assignedToUid, f.assignedToName || 'Bilinmiyor', 'aplikasyon'));
+    filteredTeknik.forEach((f) => addVisit(f.createdByUid, f.createdByName, 'teknik_servis', 'form'));
+    filteredApp.forEach((f) => addVisit(f.createdByUid, f.createdByName, 'aplikasyon', 'form'));
+    teknikFaultVisits.forEach((f) => addVisit(f.assignedToUid, f.assignedToName || 'Bilinmiyor', 'teknik_servis', 'fault'));
+    appFaultVisits.forEach((f) => addVisit(f.assignedToUid, f.assignedToName || 'Bilinmiyor', 'aplikasyon', 'fault'));
 
     const personnelList = Array.from(personnelMap.entries()).map(([uid, data]) => ({ uid, ...data })).sort((a, b) => b.visitCount - a.visitCount);
     const chartData = personnelList.slice(0, 15).map((p) => ({
       uid: p.uid,
       name: p.name.length > 15 ? p.name.substring(0, 15) + '...' : p.name,
-      fullName: p.name, role: p.role, ziyaret: p.visitCount,
+      fullName: p.name, role: p.role, ziyaret: p.visitCount, formVisitCount: p.formVisitCount, faultVisitCount: p.faultVisitCount,
     }));
 
     return { totalTeknik, totalApp, teknikFormCount, appFormCount, teknikFaultVisitCount: teknikFaultVisits.length, appFaultVisitCount: appFaultVisits.length, personnelList, chartData };
@@ -430,6 +494,24 @@ export default function KurumZiyaretAnaliziPage() {
           </PopoverContent>
         </Popover>
 
+        <DatePickerWithRange date={dateRange} setDate={setDateRange} className="w-[280px]" />
+
+        <Select value={shiftFilter} onValueChange={(value: 'all' | 'inside' | 'outside') => setShiftFilter(value)}>
+          <SelectTrigger className="w-[220px] h-9">
+            <SelectValue placeholder="Mesai filtresi" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tüm Zamanlar</SelectItem>
+            <SelectItem value="inside">Mesai İçi</SelectItem>
+            <SelectItem value="outside">Mesai Dışı</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Button variant="outline" className="gap-2 h-9" onClick={() => setWorkSettingsOpen(true)}>
+          <Settings2 className="h-4 w-4" />
+          Mesai Ayarı
+        </Button>
+
         {selectedLabIds.size > 0 && (
           <div className="flex flex-wrap gap-1 items-center">
             {Array.from(selectedLabIds).map((id) => {
@@ -517,6 +599,7 @@ export default function KurumZiyaretAnaliziPage() {
                           <p className="font-semibold mb-1">{data?.fullName}</p>
                           <Badge className={cn('text-xs mb-1', getRoleBadgeColor(data?.role || ''))}>{getRoleLabel(data?.role || '')}</Badge>
                           <p className="font-semibold mt-1">Ziyaret: {data?.ziyaret}</p>
+                          <p className="text-xs text-muted-foreground">{data?.formVisitCount || 0} form + {data?.faultVisitCount || 0} arıza</p>
                         </div>
                       );
                     }}
@@ -568,7 +651,10 @@ export default function KurumZiyaretAnaliziPage() {
                   <TableCell className="text-center">
                     <Badge className={cn('text-xs', getRoleBadgeColor(p.role))}>{getRoleLabel(p.role)}</Badge>
                   </TableCell>
-                  <TableCell className="text-center font-semibold">{p.visitCount}</TableCell>
+                  <TableCell className="text-center font-semibold">
+                    {p.visitCount}
+                    <p className="text-xs text-muted-foreground font-normal">{p.formVisitCount} form + {p.faultVisitCount} arıza</p>
+                  </TableCell>
                 </TableRow>
               ))}
               {analysis.personnelList.length === 0 && (
@@ -620,6 +706,32 @@ export default function KurumZiyaretAnaliziPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={workSettingsOpen} onOpenChange={setWorkSettingsOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4" /> Mesai Saatleri
+            </DialogTitle>
+            <DialogDescription>
+              Mesai içi/dışı filtreleri bu başlangıç ve bitiş saatine göre çalışır.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="work-start-time">Başlangıç</Label>
+              <Input id="work-start-time" type="time" value={workStartTime} onChange={(e) => setWorkStartTime(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="work-end-time">Bitiş</Label>
+              <Input id="work-end-time" type="time" value={workEndTime} onChange={(e) => setWorkEndTime(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => setWorkSettingsOpen(false)}>Kaydet</Button>
           </div>
         </DialogContent>
       </Dialog>
