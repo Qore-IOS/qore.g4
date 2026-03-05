@@ -1883,164 +1883,166 @@ export default function AplikasyonIslemFormuPage() {
       case 'islem_turu':
         return (
           <div className="wizard-option-list">
-            {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi'] as IslemTuru[]).map(tur => (
-              <button
-                key={tur}
-                className={`wizard-option-item ${islemTuru === tur ? 'selected' : ''}`}
-                onClick={() => {
-                  setIslemTuru(tur);
-                  if (tur !== 'ariza') setSelectedFaultId('');
-                  goBack();
-                }}
-              >
-                {ISLEM_TURU_LABELS[tur]}
-              </button>
-            ))}
+            {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi'] as IslemTuru[]).map(tur => {
+              const hasSubFields = tur === 'ariza' || tur === 'periyodik_bakim';
+              return (
+                <React.Fragment key={tur}>
+                  <button
+                    className={`wizard-option-item ${islemTuru === tur ? 'selected' : ''}`}
+                    onClick={() => {
+                      setIslemTuru(tur);
+                      if (tur !== 'ariza') setSelectedFaultId('');
+                      if (!hasSubFields) goBack();
+                    }}
+                  >
+                    {ISLEM_TURU_LABELS[tur]}
+                  </button>
 
-            {/* Arıza specific fields */}
-            {islemTuru === 'ariza' && (
-              <div className="wizard-fault-section" style={{ margin: '16px 24px' }}>
-                <label style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500, display: 'block', marginBottom: '12px' }}>
-                  <AlertTriangle className="h-4 w-4 inline mr-2" style={{ color: '#ef4444' }} />
-                  Arıza Türü *
-                </label>
-                <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
-                  <SelectTrigger className="wizard-dark-select bg-white/10 border-white/20 text-white">
-                    <SelectValue placeholder="Tespit edilen arızayı seçin..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {faultDefinitions.map(fault => (
-                      <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
-                    ))}
-                    <SelectItem value="diger">Diğer (Özel Arıza)</SelectItem>
-                  </SelectContent>
-                </Select>
-                {selectedFaultId === 'diger' && (
-                  <input
-                    type="text"
-                    placeholder="Arıza açıklamasını girin... (zorunlu)"
-                    value={customFaultName}
-                    onChange={(e) => setCustomFaultName(e.target.value)}
-                    style={{ marginTop: '8px' }}
-                  />
-                )}
-
-                {/* İlişkili Testler */}
-                <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(239,68,68,0.2)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <label style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)' }}>İlişkili Testler (Opsiyonel)</label>
-                    <button
-                      type="button"
-                      onClick={() => setIsTestModalOpen(true)}
-                      disabled={availableTests.length === 0}
-                      className="wizard-add-button"
-                      style={{ width: 'auto', padding: '6px 12px', fontSize: '12px', marginTop: 0 }}
-                    >
-                      <Plus className="h-3 w-3" /> Test Seç
-                    </button>
-                  </div>
-                  {selectedTests.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {selectedTests.map(test => (
-                        <span key={test} className="wizard-chip">
-                          {test}
-                          <button className="wizard-chip-delete" onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}>
-                            <X className="h-3 w-3" />
+                  {/* Arıza sub-fields shown inline below the arıza option */}
+                  {tur === 'ariza' && islemTuru === 'ariza' && (
+                    <div className="wizard-fault-section" style={{ margin: '8px 24px 16px' }}>
+                      <label style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500, display: 'block', marginBottom: '12px' }}>
+                        <AlertTriangle className="h-4 w-4 inline mr-2" style={{ color: '#ef4444' }} />
+                        Arıza Türü *
+                      </label>
+                      <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
+                        <SelectTrigger className="wizard-dark-select bg-white/10 border-white/20 text-white">
+                          <SelectValue placeholder="Tespit edilen arızayı seçin..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {faultDefinitions.map(fault => (
+                            <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
+                          ))}
+                          <SelectItem value="diger">Diğer (Özel Arıza)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {selectedFaultId === 'diger' && (
+                        <input
+                          type="text"
+                          placeholder="Arıza açıklamasını girin... (zorunlu)"
+                          value={customFaultName}
+                          onChange={(e) => setCustomFaultName(e.target.value)}
+                          style={{ marginTop: '8px' }}
+                        />
+                      )}
+                      {/* İlişkili Testler */}
+                      <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(239,68,68,0.2)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)' }}>İlişkili Testler (Opsiyonel)</label>
+                          <button
+                            type="button"
+                            onClick={() => setIsTestModalOpen(true)}
+                            disabled={availableTests.length === 0}
+                            className="wizard-add-button"
+                            style={{ width: 'auto', padding: '6px 12px', fontSize: '12px', marginTop: 0 }}
+                          >
+                            <Plus className="h-3 w-3" /> Test Seç
                           </button>
-                        </span>
-                      ))}
+                        </div>
+                        {selectedTests.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {selectedTests.map(test => (
+                              <span key={test} className="wizard-chip">
+                                {test}
+                                <button className="wizard-chip-delete" onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}>
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
-                </div>
-              </div>
-            )}
 
-            {/* Periyodik Bakım specific fields */}
-            {islemTuru === 'periyodik_bakim' && (
-              <div style={{ margin: '16px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {maintenanceTasksWithStatus.length > 0 && (
-                  <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style={{ width: '36px' }}></th>
-                          <th>İş Adı</th>
-                          <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
-                          <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
-                          <tr key={plan.id} style={{ cursor: 'pointer' }} onClick={() => toggleMaintenanceTask(plan.id)}>
-                            <td>
-                              <Checkbox
-                                checked={selectedMaintenanceTasks.includes(plan.id)}
-                                onCheckedChange={() => toggleMaintenanceTask(plan.id)}
-                              />
-                            </td>
-                            <td style={{ fontWeight: 500 }}>{plan.taskName}</td>
-                            <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
-                            <td style={{ textAlign: 'center' }}>
-                              {daysRemaining === null ? (
-                                <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz yapılmadı</span>
-                              ) : isOverdue ? (
-                                <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
-                              ) : (
-                                <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {periodicPartChangesWithStatus.length > 0 && (
-                  <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
-                    <label style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '8px' }}>Periyodik Parça Değişimleri</label>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style={{ width: '36px' }}></th>
-                          <th>Ürün</th>
-                          <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
-                          <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
-                          <tr key={partChange.id} style={{ cursor: 'pointer' }} onClick={() => togglePeriodicPart(partChange.id)}>
-                            <td>
-                              <Checkbox
-                                checked={selectedPeriodicParts.includes(partChange.id)}
-                                onCheckedChange={() => togglePeriodicPart(partChange.id)}
-                              />
-                            </td>
-                            <td>
-                              <div>
-                                <p style={{ fontWeight: 500 }}>{partChange.stokAdi}</p>
-                                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{partChange.stokKodu}</p>
-                              </div>
-                            </td>
-                            <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
-                            <td style={{ textAlign: 'center' }}>
-                              {daysRemaining === null ? (
-                                <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz değişilmedi</span>
-                              ) : isOverdue ? (
-                                <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
-                              ) : (
-                                <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün kaldı</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
+                  {/* Periyodik Bakım sub-fields shown inline below the periyodik_bakim option */}
+                  {tur === 'periyodik_bakim' && islemTuru === 'periyodik_bakim' && (
+                    <div style={{ margin: '8px 24px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {maintenanceTasksWithStatus.length > 0 && (
+                        <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th style={{ width: '36px' }}></th>
+                                <th>İş Adı</th>
+                                <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
+                                <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
+                                <tr key={plan.id} style={{ cursor: 'pointer' }} onClick={() => toggleMaintenanceTask(plan.id)}>
+                                  <td>
+                                    <Checkbox
+                                      checked={selectedMaintenanceTasks.includes(plan.id)}
+                                      onCheckedChange={() => toggleMaintenanceTask(plan.id)}
+                                    />
+                                  </td>
+                                  <td style={{ fontWeight: 500 }}>{plan.taskName}</td>
+                                  <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {daysRemaining === null ? (
+                                      <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz yapılmadı</span>
+                                    ) : isOverdue ? (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
+                                    ) : (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {periodicPartChangesWithStatus.length > 0 && (
+                        <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+                          <label style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '8px' }}>Periyodik Parça Değişimleri</label>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th style={{ width: '36px' }}></th>
+                                <th>Ürün</th>
+                                <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
+                                <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
+                                <tr key={partChange.id} style={{ cursor: 'pointer' }} onClick={() => togglePeriodicPart(partChange.id)}>
+                                  <td>
+                                    <Checkbox
+                                      checked={selectedPeriodicParts.includes(partChange.id)}
+                                      onCheckedChange={() => togglePeriodicPart(partChange.id)}
+                                    />
+                                  </td>
+                                  <td>
+                                    <div>
+                                      <p style={{ fontWeight: 500 }}>{partChange.stokAdi}</p>
+                                      <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{partChange.stokKodu}</p>
+                                    </div>
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {daysRemaining === null ? (
+                                      <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz değişilmedi</span>
+                                    ) : isOverdue ? (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
+                                    ) : (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün kaldı</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
         );
 
