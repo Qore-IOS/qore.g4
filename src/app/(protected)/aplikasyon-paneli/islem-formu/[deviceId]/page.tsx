@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
+import WizardFormShell from '@/components/islem-formu/WizardFormShell';
+import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -1837,27 +1839,424 @@ export default function AplikasyonIslemFormuPage() {
     );
   }
 
+  // Wizard heading definitions with completion tracking
+  const wizardHeadings: WizardHeading[] = useMemo(() => [
+    {
+      id: 'islem_turu',
+      label: 'İŞLEM TÜRÜ',
+      isComplete: !!islemTuru,
+      completedSublabel: islemTuru ? ISLEM_TURU_LABELS[islemTuru] : undefined,
+    },
+    {
+      id: 'tarih_saat',
+      label: 'TARİH / SAAT',
+      isComplete: !!(baslangicTarihi && baslangicSaati && bitisTarihi && bitisSaati),
+      completedSublabel: baslangicSaati && bitisSaati ? `${baslangicSaati} - ${bitisSaati}` : undefined,
+    },
+    {
+      id: 'degisen_parca',
+      label: 'DEĞİŞEN PARÇA',
+      isComplete: actions.some(a => a.type === 'part_change'),
+      completedSublabel: actions.filter(a => a.type === 'part_change').length > 0
+        ? `${actions.filter(a => a.type === 'part_change').length} parça`
+        : undefined,
+    },
+    {
+      id: 'yapilan_islem',
+      label: 'YAPILAN İŞLEM',
+      isComplete: actions.some(a => a.type === 'operation'),
+      completedSublabel: actions.filter(a => a.type === 'operation').length > 0
+        ? `${actions.filter(a => a.type === 'operation').length} işlem`
+        : undefined,
+    },
+    {
+      id: 'aciklama',
+      label: 'AÇIKLAMA',
+      isComplete: !!aciklama.trim(),
+      completedSublabel: aciklama.trim() ? (aciklama.trim().length > 40 ? aciklama.trim().substring(0, 40) + '...' : aciklama.trim()) : undefined,
+    },
+  ], [islemTuru, baslangicTarihi, baslangicSaati, bitisTarihi, bitisSaati, actions, aciklama]);
+
+  // Render wizard detail content for each heading
+  const renderWizardDetail = (headingId: string, goBack: () => void) => {
+    switch (headingId) {
+      case 'islem_turu':
+        return (
+          <div className="wizard-option-list">
+            {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi'] as IslemTuru[]).map(tur => (
+              <button
+                key={tur}
+                className={`wizard-option-item ${islemTuru === tur ? 'selected' : ''}`}
+                onClick={() => {
+                  setIslemTuru(tur);
+                  if (tur !== 'ariza') setSelectedFaultId('');
+                  goBack();
+                }}
+              >
+                {ISLEM_TURU_LABELS[tur]}
+              </button>
+            ))}
+
+            {/* Arıza specific fields */}
+            {islemTuru === 'ariza' && (
+              <div className="wizard-fault-section" style={{ margin: '16px 24px' }}>
+                <label style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500, display: 'block', marginBottom: '12px' }}>
+                  <AlertTriangle className="h-4 w-4 inline mr-2" style={{ color: '#ef4444' }} />
+                  Arıza Türü *
+                </label>
+                <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
+                  <SelectTrigger className="wizard-dark-select bg-white/10 border-white/20 text-white">
+                    <SelectValue placeholder="Tespit edilen arızayı seçin..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {faultDefinitions.map(fault => (
+                      <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
+                    ))}
+                    <SelectItem value="diger">Diğer (Özel Arıza)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {selectedFaultId === 'diger' && (
+                  <input
+                    type="text"
+                    placeholder="Arıza açıklamasını girin... (zorunlu)"
+                    value={customFaultName}
+                    onChange={(e) => setCustomFaultName(e.target.value)}
+                    style={{ marginTop: '8px' }}
+                  />
+                )}
+
+                {/* İlişkili Testler */}
+                <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(239,68,68,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)' }}>İlişkili Testler (Opsiyonel)</label>
+                    <button
+                      type="button"
+                      onClick={() => setIsTestModalOpen(true)}
+                      disabled={availableTests.length === 0}
+                      className="wizard-add-button"
+                      style={{ width: 'auto', padding: '6px 12px', fontSize: '12px', marginTop: 0 }}
+                    >
+                      <Plus className="h-3 w-3" /> Test Seç
+                    </button>
+                  </div>
+                  {selectedTests.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {selectedTests.map(test => (
+                        <span key={test} className="wizard-chip">
+                          {test}
+                          <button className="wizard-chip-delete" onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}>
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Periyodik Bakım specific fields */}
+            {islemTuru === 'periyodik_bakim' && (
+              <div style={{ margin: '16px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {maintenanceTasksWithStatus.length > 0 && (
+                  <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '36px' }}></th>
+                          <th>İş Adı</th>
+                          <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
+                          <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
+                          <tr key={plan.id} style={{ cursor: 'pointer' }} onClick={() => toggleMaintenanceTask(plan.id)}>
+                            <td>
+                              <Checkbox
+                                checked={selectedMaintenanceTasks.includes(plan.id)}
+                                onCheckedChange={() => toggleMaintenanceTask(plan.id)}
+                              />
+                            </td>
+                            <td style={{ fontWeight: 500 }}>{plan.taskName}</td>
+                            <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
+                            <td style={{ textAlign: 'center' }}>
+                              {daysRemaining === null ? (
+                                <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz yapılmadı</span>
+                              ) : isOverdue ? (
+                                <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
+                              ) : (
+                                <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {periodicPartChangesWithStatus.length > 0 && (
+                  <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+                    <label style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '8px' }}>Periyodik Parça Değişimleri</label>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '36px' }}></th>
+                          <th>Ürün</th>
+                          <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
+                          <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
+                          <tr key={partChange.id} style={{ cursor: 'pointer' }} onClick={() => togglePeriodicPart(partChange.id)}>
+                            <td>
+                              <Checkbox
+                                checked={selectedPeriodicParts.includes(partChange.id)}
+                                onCheckedChange={() => togglePeriodicPart(partChange.id)}
+                              />
+                            </td>
+                            <td>
+                              <div>
+                                <p style={{ fontWeight: 500 }}>{partChange.stokAdi}</p>
+                                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{partChange.stokKodu}</p>
+                              </div>
+                            </td>
+                            <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
+                            <td style={{ textAlign: 'center' }}>
+                              {daysRemaining === null ? (
+                                <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz değişilmedi</span>
+                              ) : isOverdue ? (
+                                <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
+                              ) : (
+                                <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün kaldı</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'tarih_saat':
+        return (
+          <div style={{ padding: '8px 0' }}>
+            <div className="wizard-datetime-grid">
+              <div>
+                <label>Başlangıç Tarihi *</label>
+                <input type="date" value={baslangicTarihi} onChange={(e) => setBaslangicTarihi(e.target.value)} />
+              </div>
+              <div>
+                <label>Başlangıç Saati *</label>
+                <input type="time" value={baslangicSaati} onChange={(e) => setBaslangicSaati(e.target.value)} />
+              </div>
+              <div>
+                <label>Bitiş Tarihi *</label>
+                <input type="date" value={bitisTarihi} onChange={(e) => setBitisTarihi(e.target.value)} />
+              </div>
+              <div>
+                <label>Bitiş Saati *</label>
+                <input type="time" value={bitisSaati} onChange={(e) => setBitisSaati(e.target.value)} />
+              </div>
+            </div>
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '12px' }}>
+              İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz.
+            </p>
+          </div>
+        );
+
+      case 'degisen_parca':
+        return (
+          <div>
+            {actions.filter(a => a.type === 'part_change').length > 0 ? (
+              <div className="wizard-action-list">
+                {actions.filter(a => a.type === 'part_change').map(item => (
+                  <div key={item.id} className="wizard-action-item">
+                    <div>
+                      <div className="wizard-action-item-label">{item.stokAdi || item.action}</div>
+                      <div className="wizard-action-item-sub">
+                        {item.stokKodu} {item.serialNumber ? `/ SN: ${item.serialNumber}` : ''}
+                        {item.isManualEntry && ' (Manuel)'}
+                        {item.isPeriodicPartChange && ' (Periyodik)'}
+                      </div>
+                    </div>
+                    <button className="wizard-action-item-delete" onClick={() => removeActionRow(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="wizard-empty-state">Henüz değişen parça eklenmedi.</div>
+            )}
+
+            <div className="wizard-sub-tabs" style={{ paddingLeft: 0 }}>
+              <button
+                className={`wizard-sub-tab ${stockSourceTab === 'personal' ? 'active' : ''}`}
+                onClick={() => { setStockSourceTab('personal'); }}
+              >
+                ŞAHSİ STOK
+              </button>
+              {poolStockItems.length > 0 && (
+                <button
+                  className={`wizard-sub-tab ${stockSourceTab === 'pool' ? 'active' : ''}`}
+                  onClick={() => { setStockSourceTab('pool'); }}
+                >
+                  HAVUZ STOK
+                </button>
+              )}
+            </div>
+
+            <button className="wizard-add-button" onClick={openPartModal}>
+              <Plus className="h-4 w-4" /> Parça Ekle
+            </button>
+          </div>
+        );
+
+      case 'yapilan_islem':
+        return (
+          <div>
+            {actions.filter(a => a.type === 'operation').length > 0 ? (
+              <div className="wizard-action-list">
+                {actions.filter(a => a.type === 'operation').map(item => (
+                  <div key={item.id} className="wizard-action-item">
+                    <div className="wizard-action-item-label">{getActionLabel(item)}</div>
+                    <button className="wizard-action-item-delete" onClick={() => removeActionRow(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="wizard-empty-state">Henüz işlem eklenmedi.</div>
+            )}
+
+            <div className="wizard-option-list" style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
+              {ALL_OPERATIONS.map(op => {
+                const alreadyAdded = actions.some(a => a.type === 'operation' && a.action === op);
+                return (
+                  <button
+                    key={op}
+                    className={`wizard-option-item ${alreadyAdded ? 'selected' : ''}`}
+                    style={{ fontSize: '18px', padding: '14px 24px' }}
+                    onClick={() => {
+                      if (alreadyAdded) {
+                        setActions(prev => prev.filter(a => !(a.type === 'operation' && a.action === op)));
+                      } else {
+                        const newItem: ActionItem = {
+                          id: crypto.randomUUID(),
+                          type: 'operation',
+                          action: op,
+                          quantity: 1,
+                        };
+                        setActions(prev => [newItem, ...prev]);
+                      }
+                    }}
+                  >
+                    {alreadyAdded && (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width: '20px', height: '20px', marginRight: '12px', flexShrink: 0 }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                    {OPERATION_LABELS[op]}
+                    {op === 'diger' && alreadyAdded && (
+                      <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginLeft: '8px' }}>
+                        {digerAciklama ? `(${digerAciklama})` : ''}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+
+      case 'aciklama':
+        return (
+          <div style={{ padding: '8px 0' }}>
+            <label>Açıklama *</label>
+            <textarea
+              placeholder="Yapılan işlem hakkında açıklama yazın... (zorunlu)"
+              value={aciklama}
+              onChange={(e) => setAciklama(e.target.value)}
+              rows={5}
+              style={{ minHeight: '140px', resize: 'vertical' }}
+            />
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>
+              Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
+            </p>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  // Render save confirmation inside wizard
+  const renderWizardSaveConfirm = (goBack: () => void) => (
+    <div className="wizard-save-summary">
+      <h3>Form Özeti</h3>
+      <div className="wizard-save-summary-item">
+        <span className="label">İşlem Türü</span>
+        <span className="value">{islemTuru ? ISLEM_TURU_LABELS[islemTuru] : '—'}</span>
+      </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Tarih / Saat</span>
+        <span className="value">{baslangicSaati && bitisSaati ? `${baslangicTarihi} ${baslangicSaati} — ${bitisTarihi} ${bitisSaati}` : '—'}</span>
+      </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Değişen Parça</span>
+        <span className="value">{actions.filter(a => a.type === 'part_change').length} parça</span>
+      </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Yapılan İşlem</span>
+        <span className="value">{actions.filter(a => a.type === 'operation').length} işlem</span>
+      </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Açıklama</span>
+        <span className="value">{aciklama.trim() ? (aciklama.trim().length > 60 ? aciklama.trim().substring(0, 60) + '...' : aciklama.trim()) : '—'}</span>
+      </div>
+      <div style={{ marginTop: '24px', display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+        <button className="wizard-btn wizard-btn-secondary" onClick={goBack}>Geri</button>
+        <button
+          className="wizard-btn wizard-btn-primary"
+          onClick={startSaveProcess}
+          disabled={isSaving || actions.length === 0}
+        >
+          {isSaving ? 'Kaydediliyor...' : 'Onayla ve Kaydet'}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <>
       <div className="cihaz-shell px-4 py-6 sm:px-6 sm:py-8 space-y-6">
         <BackButton fallback={`/aplikasyon-paneli/${device.hospitalId}`} />
 
-        {/* Header */}
-        <header className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6">
+        {/* Sticky Device Info Header */}
+        <header className="sticky top-0 z-30 cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6" style={{ borderRadius: '16px', backgroundColor: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)' }}>
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex flex-col sm:flex-row gap-4 items-start">
               {device.imageUrl && (
-                <div className="w-28 h-28 flex-shrink-0 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2">
-                  <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
+                <div className="w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2">
+                  <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={96} height={96} className="object-contain w-full h-full" />
                 </div>
               )}
               <div>
-                <h1 className="text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">
+                <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">
                   Aplikasyon İşlem Formu
                 </h1>
                 <p className="text-base font-medium text-[var(--dashboard-accent)]">{device.cihazAdi}</p>
-                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">Seri No: {device.seriNumarasi}</p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-[var(--dashboard-muted)]">
+                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-0.5">Seri No: {device.seriNumarasi}</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs sm:text-sm text-[var(--dashboard-muted)]">
                   <span><strong className="text-[var(--dashboard-text)]">Lab:</strong> {hospital?.name || '-'}</span>
                   <span><strong className="text-[var(--dashboard-text)]">İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
                   <span><strong className="text-[var(--dashboard-text)]">Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
@@ -1874,388 +2273,18 @@ export default function AplikasyonIslemFormuPage() {
           </div>
         </header>
 
-        {/* Form Body */}
-        <div className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6 space-y-6">
-            {/* İşlem Türü Seçici */}
-            <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-[var(--dashboard-text)]">
-                  <Cog className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                  İşlem Türü
-                </Label>
-                <Select value={islemTuru} onValueChange={(v) => {
-                  setIslemTuru(v as IslemTuru);
-                  if (v !== 'ariza') setSelectedFaultId('');
-                }}>
-                  <SelectTrigger className="w-full sm:w-64">
-                    <SelectValue placeholder="İşlem türü seçin (opsiyonel)..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="rutin_kurum_ziyareti">Rutin Kurum Ziyareti</SelectItem>
-                    <SelectItem value="periyodik_bakim">Periyodik Bakım</SelectItem>
-                    <SelectItem value="ariza">Arıza</SelectItem>
-                    <SelectItem value="alis">ALIS</SelectItem>
-                    <SelectItem value="roche_bilgisayar_arizasi">Roche Bilgisayar Arızası</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-[var(--dashboard-muted)]">
-                  İşlem türünü belirtmek opsiyoneldir.
-                </p>
-              </div>
-            </div>
-
-            {/* Arıza Seçimi - only when ariza selected */}
-            {islemTuru === 'ariza' && (
-              <div className="p-4 rounded-2xl bg-red-50/80 border border-red-200/60 space-y-4">
-                <div>
-                  <Label className="flex items-center gap-2 mb-4 text-[var(--dashboard-text)]">
-                    <AlertTriangle className="h-4 w-4 text-red-600" />
-                    Arıza Türü <span className="text-red-500">*</span>
-                  </Label>
-                  <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Tespit edilen arızayı seçin..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {faultDefinitions.map(fault => (
-                        <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
-                      ))}
-                      <SelectItem value="diger">Diğer (Özel Arıza)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {selectedFaultId === 'diger' && (
-                    <div className="mt-2">
-                      <Input
-                        placeholder="Arıza açıklamasını girin... (zorunlu)"
-                        value={customFaultName}
-                        onChange={(e) => setCustomFaultName(e.target.value)}
-                        className="border-red-300"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* İlişkili Test Seçimi */}
-                <div className="pt-3 border-t border-red-200/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="text-sm text-[var(--dashboard-text)]">İlişkili Testler (Opsiyonel)</Label>
-                    <button
-                      type="button"
-                      onClick={() => setIsTestModalOpen(true)}
-                      disabled={availableTests.length === 0}
-                      className="cihaz-tool-item flex items-center gap-1 px-3 py-1.5 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Test Seç
-                    </button>
-                  </div>
-                  {availableTests.length === 0 ? (
-                    <p className="text-xs text-[var(--dashboard-muted)]">
-                      Bu laboratuvara tanımlı test bulunamadı.
-                    </p>
-                  ) : selectedTests.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {selectedTests.map(test => (
-                        <span
-                          key={test}
-                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-100/80 text-red-800 text-xs rounded-full"
-                        >
-                          {test}
-                          <button
-                            type="button"
-                            onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}
-                            className="hover:text-red-600"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-[var(--dashboard-muted)]">
-                      Arızayla ilişkili test seçilmedi.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Periyodik Bakım İş Listesi - only when periyodik_bakim selected */}
-            {islemTuru === 'periyodik_bakim' && (
-              <div className="p-4 border rounded-lg bg-muted/30">
-                <Label className="flex items-center gap-2 mb-4">
-                  <ClipboardList className="h-4 w-4" />
-                  Periyodik Bakım İş Listesi
-                </Label>
-                {maintenanceTasksWithStatus.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Bu cihaz için tanımlı aplikasyon periyodik bakım planı bulunmuyor.
-                    Cihaz tanımlama panelinden bakım planı ekleyebilirsiniz.
-                  </p>
-                ) : (
-                  <div className="border rounded-md">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-12"></TableHead>
-                          <TableHead>İş Adı</TableHead>
-                          <TableHead className="w-24 text-center">Periyot</TableHead>
-                          <TableHead className="w-32 text-center">Kalan Gün</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
-                          <TableRow key={plan.id} className="cursor-pointer hover:bg-muted/50" onClick={() => toggleMaintenanceTask(plan.id)}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedMaintenanceTasks.includes(plan.id)}
-                                onCheckedChange={() => toggleMaintenanceTask(plan.id)}
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">{plan.taskName}</TableCell>
-                            <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
-                            <TableCell className="text-center">
-                              {daysRemaining === null ? (
-                                <span className="text-xs text-muted-foreground italic">Henüz yapılmadı</span>
-                              ) : isOverdue ? (
-                                <span className="text-xs font-medium text-red-600 dark:text-red-400">
-                                  {Math.abs(daysRemaining)} gün gecikmiş
-                                </span>
-                              ) : (
-                                <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
-                                  {daysRemaining} gün
-                                </span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-                {selectedMaintenanceTasks.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {selectedMaintenanceTasks.length} bakım işi seçildi
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Periyodik Parça Değişimi Listesi - only when periyodik_bakim selected */}
-            {islemTuru === 'periyodik_bakim' && periodicPartChangesWithStatus.length > 0 && (
-              <div className="p-4 border rounded-lg bg-muted/30">
-                <Label className="flex items-center gap-2 mb-4">
-                  <Package className="h-4 w-4" />
-                  Periyodik Parça Değişimleri
-                </Label>
-                <div className="border rounded-md">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12"></TableHead>
-                        <TableHead>Ürün</TableHead>
-                        <TableHead className="w-24 text-center">Periyot</TableHead>
-                        <TableHead className="w-36 text-center">Kalan Gün</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
-                        <TableRow
-                          key={partChange.id}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => togglePeriodicPart(partChange.id)}
-                        >
-                          <TableCell>
-                            <Checkbox
-                              checked={selectedPeriodicParts.includes(partChange.id)}
-                              onCheckedChange={() => togglePeriodicPart(partChange.id)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{partChange.stokAdi}</p>
-                              <p className="text-xs text-muted-foreground font-mono">{partChange.stokKodu}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
-                          <TableCell className="text-center">
-                            {daysRemaining === null ? (
-                              <span className="text-xs text-muted-foreground italic">Henüz değişilmedi</span>
-                            ) : isOverdue ? (
-                              <span className="text-xs font-medium text-red-600 dark:text-red-400 flex items-center justify-center gap-1">
-                                <AlertTriangle className="h-3 w-3" />
-                                {Math.abs(daysRemaining)} gün gecikmiş
-                              </span>
-                            ) : (
-                              <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
-                                {daysRemaining} gün kaldı
-                              </span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                {selectedPeriodicParts.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {selectedPeriodicParts.length} periyodik parça değişimi seçildi (otomatik olarak değişen parçalar listesine eklendi)
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Başlangıç ve Bitiş Tarihleri/Saatleri (Zorunlu) */}
-            <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-              <Label className="flex items-center gap-2 mb-4">
-                <Clock className="h-4 w-4" />
-                İşlem Tarihi ve Saatleri <span className="text-destructive">*</span>
-              </Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="baslangicTarihi" className="text-sm">Başlangıç Tarihi <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="baslangicTarihi"
-                    type="date"
-                    value={baslangicTarihi}
-                    onChange={(e) => setBaslangicTarihi(e.target.value)}
-                    className={!baslangicTarihi ? 'border-amber-500/50' : ''}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="baslangicSaati" className="text-sm">Başlangıç Saati <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="baslangicSaati"
-                    type="time"
-                    value={baslangicSaati}
-                    onChange={(e) => setBaslangicSaati(e.target.value)}
-                    className={!baslangicSaati ? 'border-amber-500/50' : ''}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="bitisTarihi" className="text-sm">Bitiş Tarihi <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="bitisTarihi"
-                    type="date"
-                    value={bitisTarihi}
-                    onChange={(e) => setBitisTarihi(e.target.value)}
-                    className={!bitisTarihi ? 'border-amber-500/50' : ''}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="bitisSaati" className="text-sm">Bitiş Saati <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="bitisSaati"
-                    type="time"
-                    value={bitisSaati}
-                    onChange={(e) => setBitisSaati(e.target.value)}
-                    className={!bitisSaati ? 'border-amber-500/50' : ''}
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz. Bu alanlar zorunludur.
-              </p>
-            </div>
-
-            {/* Açıklama Alanı (Zorunlu) */}
-            <div className="p-4 border rounded-lg bg-muted/30">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Açıklama <span className="text-destructive">*</span>
-                </Label>
-                <Textarea
-                  placeholder="Yapılan işlem hakkında açıklama yazın... (zorunlu)"
-                  value={aciklama}
-                  onChange={(e) => setAciklama(e.target.value)}
-                  rows={3}
-                  className={!aciklama.trim() ? 'border-amber-500/50' : ''}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
-                </p>
-              </div>
-            </div>
-
-            {/* Butonlar */}
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={openPartModal} variant="outline">
-                <Wrench className="mr-2 h-4 w-4" /> Değişen Parça Ekle
-              </Button>
-              <Button onClick={openOperationModal} variant="outline">
-                <ClipboardList className="mr-2 h-4 w-4" /> Yapılan İşlemi Seç
-              </Button>
-            </div>
-            <ScrollArea className="h-72 border rounded-md">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-20">Tür</TableHead>
-                    <TableHead>İşlem/Parça</TableHead>
-                    <TableHead className="w-28">Kod</TableHead>
-                    <TableHead className="w-28">Seri No</TableHead>
-                    <TableHead className="w-16"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {actions.length === 0 ? (
-                    <TableRow><TableCell colSpan={5} className="text-center h-24 text-muted-foreground">Henüz işlem eklenmedi. Yukarıdaki butonları kullanarak parça değişimi veya işlem ekleyin.</TableCell></TableRow>
-                  ) : (
-                    actions.map(item => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <span className={`text-xs font-medium px-2 py-1 rounded ${item.type === 'part_change' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'}`}>
-                            {item.type === 'part_change' ? 'Parça' : 'İşlem'}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <span className="font-medium">{getActionLabel(item)}</span>
-                            {item.isManualEntry && <span className="ml-2 text-xs text-muted-foreground">(Manuel)</span>}
-                            {item.type === 'part_change' && item.removedPartSerialNumber && (
-                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-                                Çıkan: {item.removedPartStokAdi || item.stokAdi} ({item.removedPartSerialNumber})
-                              </p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {item.type === 'part_change' ? (
-                            <span className="font-mono text-xs">{item.stokKodu || '-'}</span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {item.type === 'part_change' ? (
-                            <span className="font-mono text-xs">{item.serialNumber || '-'}</span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => removeActionRow(item.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-
-            {/* Save Buttons */}
-            <div className="flex justify-end gap-3 pt-4">
-              <Button variant="outline" onClick={handleSaveDraft} disabled={isSavingDraft || isSaving}>
-                {isSavingDraft ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <PauseCircle className="h-4 w-4 mr-2" />}
-                Ara Kayıt
-              </Button>
-              <Button onClick={startSaveProcess} disabled={isSaving || actions.length === 0}>
-                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                  Kaydet
-              </Button>
-            </div>
-        </div>
+        {/* Wizard Form Body */}
+        <WizardFormShell
+          headings={wizardHeadings}
+          renderDetail={renderWizardDetail}
+          renderSaveConfirm={renderWizardSaveConfirm}
+          onSaveDraft={handleSaveDraft}
+          onSave={startSaveProcess}
+          isSaving={isSaving}
+          isSavingDraft={isSavingDraft}
+          saveDisabled={isSaving || actions.length === 0}
+          useGrid={true}
+        />
       </div>
 
 
