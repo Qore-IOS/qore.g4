@@ -1,0 +1,646 @@
+/* Wizard Form Shell - Animations & Styles */
+
+/* ============= HEADING LIST ============= */
+.wizard-content-area {
+  background: #000000;
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  min-height: 400px;
+}
+
+.wizard-heading-list {
+  padding: 8px 0;
+}
+
+.wizard-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 24px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  position: relative;
+}
+
+.wizard-heading-row:last-child {
+  border-bottom: none;
+}
+
+.wizard-heading-row:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wizard-heading-row-inline {
+  display: inline-flex;
+  padding: 16px 24px;
+  border-bottom: none;
+}
+
+.wizard-heading-label {
+  font-size: 28px;
+  font-weight: 700;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  flex: 1;
+}
+
+.wizard-heading-label-small {
+  font-size: 18px;
+}
+
+.wizard-heading-sublabel {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 4px;
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* ============= CHECKMARK ============= */
+.wizard-checkmark {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wizard-checkmark svg {
+  width: 24px;
+  height: 24px;
+  color: #4CAF50;
+  animation: wizard-check-bounce 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes wizard-check-bounce {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ============= INLINE HEADINGS (İŞLEM TİPİ / İŞLEM TÜRÜ) ============= */
+.wizard-inline-row {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.wizard-inline-row .wizard-heading-row {
+  flex: 1;
+  border-bottom: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wizard-inline-row .wizard-heading-row:last-child {
+  border-right: none;
+}
+
+/* ============= DETAIL SCREEN ============= */
+.wizard-detail-screen {
+  padding: 0;
+}
+
+.wizard-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.wizard-back-button {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+  border-radius: 8px;
+  transition: background-color 0.15s ease;
+}
+
+.wizard-back-button:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.wizard-detail-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.wizard-detail-body {
+  padding: 16px 24px;
+}
+
+/* Sub tabs (e.g., ŞAHSİ STOK / HAVUZ STOK) */
+.wizard-sub-tabs {
+  display: flex;
+  gap: 24px;
+  padding: 12px 24px 0;
+}
+
+.wizard-sub-tab {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: color 0.15s ease;
+  border-bottom: 2px solid transparent;
+}
+
+.wizard-sub-tab:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.wizard-sub-tab.active {
+  color: #FFFFFF;
+  border-bottom-color: #FFFFFF;
+}
+
+/* Option list inside detail */
+.wizard-option-list {
+  padding: 8px 0;
+}
+
+.wizard-option-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 18px 24px;
+  font-size: 24px;
+  font-weight: 600;
+  color: #FFFFFF;
+  cursor: pointer;
+  border: none;
+  background: none;
+  transition: background-color 0.15s ease;
+  position: relative;
+}
+
+.wizard-option-item:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wizard-option-item.selected {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.wizard-option-item.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: #FFFFFF;
+  border-radius: 0 2px 2px 0;
+}
+
+/* ============= FORM INPUTS INSIDE WIZARD (dark theme overrides) ============= */
+.wizard-detail-body input[type="date"],
+.wizard-detail-body input[type="time"],
+.wizard-detail-body input[type="text"],
+.wizard-detail-body textarea {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 16px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.wizard-detail-body input:focus,
+.wizard-detail-body textarea:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.wizard-detail-body input::placeholder,
+.wizard-detail-body textarea::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.wizard-detail-body label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-weight: 500;
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* ============= BOTTOM BUTTONS ============= */
+.wizard-bottom-buttons {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 24px;
+  gap: 12px;
+}
+
+.wizard-btn {
+  padding: 14px 32px;
+  font-size: 15px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: none;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wizard-btn-secondary {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.wizard-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #FFFFFF;
+}
+
+.wizard-btn-primary {
+  background: #FFFFFF;
+  color: #000000;
+}
+
+.wizard-btn-primary:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.wizard-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ============= ANIMATIONS ============= */
+
+/* Heading list → Detail transition */
+.wizard-heading-exit {
+  animation: wizard-heading-slide-out 0.28s ease-out forwards;
+}
+
+@keyframes wizard-heading-slide-out {
+  0% { transform: translateX(0) scale(1); opacity: 1; }
+  100% { transform: translateX(-100%) scale(1.05); opacity: 0; }
+}
+
+.wizard-detail-enter {
+  animation: wizard-detail-slide-in 0.28s ease-out forwards;
+}
+
+@keyframes wizard-detail-slide-in {
+  0% { transform: translateY(30px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Detail → Heading list transition */
+.wizard-detail-exit {
+  animation: wizard-detail-slide-out 0.25s ease-in forwards;
+}
+
+@keyframes wizard-detail-slide-out {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(30px); opacity: 0; }
+}
+
+.wizard-heading-enter {
+  animation: wizard-heading-slide-in 0.28s ease-out forwards;
+}
+
+@keyframes wizard-heading-slide-in {
+  0% { transform: translateX(-80%) scale(1.05); opacity: 0; }
+  100% { transform: translateX(0) scale(1); opacity: 1; }
+}
+
+/* Staggered entry for list items */
+.wizard-stagger-item {
+  animation: wizard-stagger-in 0.3s ease-out both;
+}
+
+@keyframes wizard-stagger-in {
+  0% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.wizard-stagger-item:nth-child(1) { animation-delay: 0ms; }
+.wizard-stagger-item:nth-child(2) { animation-delay: 50ms; }
+.wizard-stagger-item:nth-child(3) { animation-delay: 100ms; }
+.wizard-stagger-item:nth-child(4) { animation-delay: 150ms; }
+.wizard-stagger-item:nth-child(5) { animation-delay: 200ms; }
+.wizard-stagger-item:nth-child(6) { animation-delay: 250ms; }
+.wizard-stagger-item:nth-child(7) { animation-delay: 300ms; }
+.wizard-stagger-item:nth-child(8) { animation-delay: 350ms; }
+.wizard-stagger-item:nth-child(9) { animation-delay: 400ms; }
+.wizard-stagger-item:nth-child(10) { animation-delay: 450ms; }
+
+/* ============= TABLET GRID ============= */
+@media (min-width: 768px) {
+  .wizard-heading-list.wizard-grid-mode {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    padding: 0;
+  }
+
+  .wizard-heading-list.wizard-grid-mode .wizard-heading-row {
+    border-bottom: none;
+    background: #000000;
+    padding: 28px 24px;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .wizard-heading-list.wizard-grid-mode .wizard-heading-row .wizard-checkmark {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+  }
+
+  .wizard-heading-list.wizard-grid-mode .wizard-inline-row {
+    grid-column: span 2;
+    display: flex;
+    background: #000000;
+  }
+
+  .wizard-heading-label {
+    font-size: 32px;
+  }
+
+  .wizard-option-item {
+    font-size: 28px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .wizard-heading-list.wizard-grid-mode {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .wizard-heading-list.wizard-grid-mode .wizard-inline-row {
+    grid-column: span 3;
+  }
+
+  .wizard-heading-label {
+    font-size: 36px;
+  }
+}
+
+/* ============= SAVE CONFIRM SCREEN ============= */
+.wizard-save-summary {
+  padding: 24px;
+  color: #FFFFFF;
+}
+
+.wizard-save-summary h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.wizard-save-summary-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+}
+
+.wizard-save-summary-item .label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.wizard-save-summary-item .value {
+  color: #FFFFFF;
+  font-weight: 500;
+}
+
+/* ============= REDUCED MOTION ============= */
+@media (prefers-reduced-motion: reduce) {
+  .wizard-heading-exit,
+  .wizard-detail-enter,
+  .wizard-detail-exit,
+  .wizard-heading-enter,
+  .wizard-stagger-item,
+  .wizard-checkmark svg {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
+
+/* ============= SIGNATURE AREA (dark) ============= */
+.wizard-signature-area {
+  background: #000000;
+  border-radius: 12px;
+  padding: 16px;
+  min-height: 200px;
+}
+
+.wizard-signature-area canvas {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+/* ============= DARK OVERRIDES for ShadCN components inside wizard ============= */
+.wizard-detail-body .wizard-dark-select {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+}
+
+/* Scrollbar in wizard */
+.wizard-content-area ::-webkit-scrollbar {
+  width: 4px;
+}
+
+.wizard-content-area ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wizard-content-area ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+/* Action items list inside wizard */
+.wizard-action-list {
+  padding: 0;
+}
+
+.wizard-action-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #FFFFFF;
+}
+
+.wizard-action-item:last-child {
+  border-bottom: none;
+}
+
+.wizard-action-item-label {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.wizard-action-item-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 2px;
+}
+
+.wizard-action-item-delete {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.wizard-action-item-delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Add button inside detail */
+.wizard-add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 16px;
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  background: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 12px;
+}
+
+.wizard-add-button:hover {
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Empty state */
+.wizard-empty-state {
+  text-align: center;
+  padding: 40px 24px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+}
+
+/* Date/time grid in wizard */
+.wizard-datetime-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.wizard-datetime-grid label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 6px;
+}
+
+/* Checkbox/table overrides for dark theme in wizard */
+.wizard-detail-body table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wizard-detail-body table th {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.wizard-detail-body table td {
+  color: #FFFFFF;
+  font-size: 14px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wizard-detail-body table tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Fault section inside wizard */
+.wizard-fault-section {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  margin-top: 16px;
+}
+
+.wizard-fault-section label {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Tags/chips in wizard */
+.wizard-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.wizard-chip-delete {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+}
+
+.wizard-chip-delete:hover {
+  color: #FFFFFF;
+}
