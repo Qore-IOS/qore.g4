@@ -148,6 +148,20 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isShipped",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "miad",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

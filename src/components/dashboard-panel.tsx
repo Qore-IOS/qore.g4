@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -23,9 +23,10 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getCountFromServer, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
+import { useQuery } from '@tanstack/react-query';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -83,6 +84,25 @@ export default function DashboardPanel({
     };
   }, []);
 
+  // Server-side query: count of products expiring within 45 days across all depots
+  const { data: expiringProductCount = 0 } = useQuery({
+    queryKey: ['expiringProductCount45'],
+    queryFn: async () => {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
+      const q = query(
+        collection(db, 'depoStok'),
+        where('isShipped', '==', false),
+        where('miad', '<=', Timestamp.fromDate(cutoff)),
+        where('miad', '>=', Timestamp.fromDate(now))
+      );
+      const snapshot = await getCountFromServer(q);
+      return snapshot.data().count;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
     if (report.status === 'atama_bekliyor') acc.atamaBekleyen += 1;
     if (report.status === 'mudahale_bekliyor') acc.mudahaleBekleyen += 1;
@@ -130,6 +150,19 @@ export default function DashboardPanel({
     ];
 
     return { timelineItems };
+  }, [purchasingTasks, currentUserProfile?.uid]);
+
+  const todayTasks = useMemo(() => {
+    if (!currentUserProfile?.uid) return [];
+    const todayKey = format(new Date(), 'yyyy-MM-dd');
+    return purchasingTasks
+      .filter((task) => {
+        if (task.date !== todayKey) return false;
+        return task.createdByUid === currentUserProfile.uid
+          || task.assignedPersonnel?.some((p) => p.uid === currentUserProfile.uid)
+          || task.accompanyingPersonnel?.some((p) => p.uid === currentUserProfile.uid);
+      })
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
   }, [purchasingTasks, currentUserProfile?.uid]);
 
   useEffect(() => {
@@ -334,10 +367,10 @@ export default function DashboardPanel({
 
   return (
     <>
-      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-12 sm:pt-16")}>
+      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-4 sm:pt-6")}>
 
         <h1 className={cn(
-          "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-6 sm:mt-10",
+          "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-2 sm:mt-4",
           theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-slate-800'
         )}>
           {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
@@ -398,9 +431,10 @@ export default function DashboardPanel({
             </Card>
           </motion.div>
           
-          <motion.div {...motionProps}>
-            <Card className="glass-card h-full flex flex-col">
-              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3">
+          {/* Fault KPIs (top) + Expiring Products (bottom) */}
+          <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
+            <Card className="glass-card flex flex-col">
+              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {faultStatusCards.map((item) => {
                   const Icon = item.icon;
                   const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
@@ -421,15 +455,26 @@ export default function DashboardPanel({
                 })}
               </CardContent>
             </Card>
+            <Card className="glass-card flex-1 flex flex-col">
+              <CardContent className="flex flex-col items-center justify-center py-4 gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-orange-500" />
+                  <p className="text-xs font-semibold text-orange-600">Miadı Yaklaşan Ürünler</p>
+                </div>
+                <p className="text-3xl font-bold text-slate-700">{expiringProductCount}</p>
+                <p className="text-[10px] text-muted-foreground">Tüm depolarda 45 gün ve altı</p>
+              </CardContent>
+            </Card>
           </motion.div>
 
-          <motion.div {...motionProps}>
-            <Link href="/satin-alma/analiz-planlama" className="block h-full">
-              <Card className="glass-card h-full flex flex-col cursor-pointer">
-                <CardContent className="pt-6">
+          {/* Calendar (top) + Today's Tasks (bottom) */}
+          <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
+            <Link href="/satin-alma/analiz-planlama" className="block">
+              <Card className="glass-card flex flex-col cursor-pointer">
+                <CardContent className="pt-4">
                   <div
                     ref={calendarScrollRef}
-                    className="h-[252px] space-y-2 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    className="h-[110px] space-y-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   >
                     {personalCalendarKpi.timelineItems.length === 0 ? (
                       <p className="text-xs text-muted-foreground">Takvim kaydı bulunmuyor.</p>
@@ -439,8 +484,8 @@ export default function DashboardPanel({
                           key={item.id}
                           data-today={item.type === 'today'}
                           className={cn(
-                            'dashboard-timeline-row px-3 py-2',
-                            item.type === 'today' && 'dashboard-timeline-row-active text-center text-base font-semibold text-slate-700',
+                            'dashboard-timeline-row px-3 py-1.5',
+                            item.type === 'today' && 'dashboard-timeline-row-active text-center text-sm font-semibold text-slate-700',
                             item.type === 'past' && 'text-xs text-slate-500 line-through',
                             item.type === 'future' && 'text-xs text-slate-500'
                           )}
@@ -453,6 +498,31 @@ export default function DashboardPanel({
                 </CardContent>
               </Card>
             </Link>
+            <Card className="glass-card flex-1 flex flex-col">
+              <CardContent className="pt-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <p className="text-xs font-semibold text-slate-600">Bugünün Görevleri</p>
+                </div>
+                <div className="h-[100px] space-y-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {todayTasks.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Bugün için görev bulunmuyor.</p>
+                  ) : (
+                    todayTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className={cn(
+                          'dashboard-timeline-row px-3 py-1.5 text-xs',
+                          task.completed ? 'text-slate-400 line-through' : 'text-slate-600'
+                        )}
+                      >
+                        {task.startTime} • {task.title}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </motion.div>
         </div>
 
