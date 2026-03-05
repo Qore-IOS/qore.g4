@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CheckCircle2, DollarSign, Wallet, BarChart3 } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -23,10 +23,11 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query, where, getCountFromServer, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getCountFromServer, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { useQuery } from '@tanstack/react-query';
+import type { DepoStokItem } from '@/lib/types';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -100,6 +101,84 @@ export default function DashboardPanel({
       return snapshot.data().count;
     },
     staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Total stock cost (all depots + labs)
+  const { data: totalStockCost = 0 } = useQuery({
+    queryKey: ['dashboardTotalStockCost'],
+    queryFn: async () => {
+      const [stokSnap, productSnap] = await Promise.all([
+        getDocs(collection(db, 'depoStok')),
+        getDocs(collection(db, 'productCodes')),
+      ]);
+      const priceMap = new Map<string, number>();
+      productSnap.docs.forEach(d => {
+        const data = d.data();
+        if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
+      });
+      let total = 0;
+      stokSnap.docs.forEach(d => {
+        const data = d.data();
+        const price = priceMap.get(data.stokKodu) ?? 0;
+        total += price;
+      });
+      return total;
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Yesterday's consumption cost
+  const { data: yesterdayConsumptionCost = 0 } = useQuery({
+    queryKey: ['dashboardYesterdayConsumptionCost'],
+    queryFn: async () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+      const [consumptionSnap, productSnap] = await Promise.all([
+        getDocs(query(
+          collection(db, 'tuketimKayitlari'),
+          where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
+          where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
+        )),
+        getDocs(collection(db, 'productCodes')),
+      ]);
+      const priceMap = new Map<string, number>();
+      productSnap.docs.forEach(d => {
+        const data = d.data();
+        if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
+      });
+      let total = 0;
+      consumptionSnap.docs.forEach(d => {
+        const data = d.data();
+        const price = priceMap.get(data.stokKodu) ?? 0;
+        total += price;
+      });
+      return total;
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Average efficiency from totalEfficiencyRecords
+  const { data: avgEfficiency } = useQuery<number | null>({
+    queryKey: ['dashboardAvgEfficiency'],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+      const efficiencies: number[] = [];
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
+        if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
+          efficiencies.push(genelVerimlilik);
+        }
+      });
+      if (efficiencies.length === 0) return null;
+      return efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length;
+    },
+    staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
 
@@ -377,7 +456,8 @@ export default function DashboardPanel({
         </h1>
 
         {/* Main KPI Grid - Mobile Responsive */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
+          {/* Tüketim Trendi */}
           <motion.div {...motionProps} className="xl:col-span-2">
             <Card className="glass-card h-full flex flex-col">
               <CardHeader className="space-y-2 sm:space-y-3">
@@ -427,6 +507,47 @@ export default function DashboardPanel({
                     <Area type="monotone" dataKey="Tüketim" stroke="hsl(var(--chart-3))" fillOpacity={0.4} fill="url(#neonGradient)" strokeWidth={2} />
                   </AreaChart>
                 </ChartContainer>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* Maliyet Kartı */}
+          <motion.div {...motionProps}>
+            <Card className="glass-card h-full flex flex-col">
+              <CardContent className="flex-1 flex flex-col divide-y divide-border/50">
+                {/* Anlık Stok Maliyeti */}
+                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <Wallet className="h-4 w-4 text-blue-500" />
+                    <p className="text-xs font-semibold text-blue-600">Anlık Stok Maliyeti</p>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-700">
+                    {totalStockCost > 0 ? `€${totalStockCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Tüm depolar + laboratuvarlar</p>
+                </div>
+                {/* Dünün Tüketim Maliyeti */}
+                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <DollarSign className="h-4 w-4 text-emerald-500" />
+                    <p className="text-xs font-semibold text-emerald-600">Dünün Tüketim Maliyeti</p>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-700">
+                    {yesterdayConsumptionCost > 0 ? `€${yesterdayConsumptionCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Tüm laboratuvar tüketimi</p>
+                </div>
+                {/* Ortalama Verimlilik */}
+                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <BarChart3 className="h-4 w-4 text-violet-500" />
+                    <p className="text-xs font-semibold text-violet-600">Ort. Verimlilik</p>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-700">
+                    {avgEfficiency != null ? `%${avgEfficiency.toFixed(1)}` : '—'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Tüm havuzların ortalaması</p>
+                </div>
               </CardContent>
             </Card>
           </motion.div>
