@@ -183,11 +183,16 @@
   overflow: hidden;
   position: relative;
   flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ============= HEADING LIST ============= */
 .wizard-heading-list {
   padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 .wizard-heading-row {
@@ -428,15 +433,14 @@
 /* ============= BOTTOM BUTTONS ============= */
 .wizard-bottom-buttons {
   display: flex;
-  justify-content: center;
-  padding: 20px 24px 24px;
+  padding: 16px 24px 24px;
   gap: 12px;
+  margin-top: auto;
 }
 
 .wizard-btn {
   flex: 1;
-  max-width: 220px;
-  padding: 14px 24px;
+  padding: 16px 24px;
   font-size: 15px;
   font-weight: 600;
   text-transform: uppercase;
@@ -538,6 +542,7 @@
   .wizard-heading-list.wizard-grid-mode {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: auto auto auto 1fr;
     gap: 1px;
     background: var(--wz-border);
     padding: 0;
@@ -547,6 +552,10 @@
   .wizard-heading-list.wizard-grid-mode > .wizard-inline-row,
   .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons {
     background: var(--wz-bg);
+  }
+
+  .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons {
+    align-self: end;
   }
 
   .wizard-heading-list.wizard-grid-mode .wizard-heading-row {
@@ -807,4 +816,180 @@
 
 .wizard-chip-delete:hover {
   color: var(--wz-text);
+}
+
+/* ============= WIZARD MODAL OVERRIDES ============= */
+/* Applied to DialogContent to match wizard theme */
+.wizard-modal {
+  background: var(--wz-bg) !important;
+  color: var(--wz-text) !important;
+  border: 1px solid var(--wz-border) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  max-width: min(90vw, 480px) !important;
+  left: 50% !important;
+  transform: translateX(-50%) translateY(-50%) !important;
+}
+
+.wizard-modal::before,
+.wizard-modal::after {
+  display: none !important;
+}
+
+.wizard-modal .wizard-modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--wz-text);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.wizard-modal label,
+.wizard-modal .wizard-modal-label {
+  color: var(--wz-text);
+  font-weight: 500;
+}
+
+.wizard-modal .wizard-modal-sublabel {
+  color: var(--wz-text-secondary);
+  font-size: 13px;
+}
+
+.wizard-modal input[type="text"],
+.wizard-modal input[type="search"],
+.wizard-modal textarea {
+  background: var(--wz-input-bg);
+  border: 1px solid var(--wz-input-border);
+  color: var(--wz-text);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 15px;
+  width: 100%;
+  outline: none;
+}
+
+.wizard-modal input::placeholder,
+.wizard-modal textarea::placeholder {
+  color: var(--wz-text-secondary);
+}
+
+.wizard-modal input:focus,
+.wizard-modal textarea:focus {
+  border-color: var(--wz-accent);
+}
+
+/* Radio group in wizard modal */
+.wizard-modal [role="radiogroup"] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wizard-modal [role="radiogroup"] > div {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--wz-border);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.wizard-modal [role="radiogroup"] > div:hover {
+  background: var(--wz-hover);
+}
+
+.wizard-modal [role="radiogroup"] > div:has([data-state="checked"]) {
+  background: var(--wz-selected-bg);
+  border-color: var(--wz-accent);
+}
+
+/* Personel list in wizard modal */
+.wizard-modal .wizard-personel-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--wz-border);
+  border-radius: 12px;
+}
+
+.wizard-modal .wizard-personel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--wz-table-border);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wizard-modal .wizard-personel-item:last-child {
+  border-bottom: none;
+}
+
+.wizard-modal .wizard-personel-item:hover {
+  background: var(--wz-hover);
+}
+
+.wizard-modal .wizard-personel-item.selected {
+  background: var(--wz-selected-bg);
+}
+
+/* Signature area in wizard modal */
+.wizard-modal .wizard-sig-area {
+  border: 1px solid var(--wz-border);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  background: var(--wz-input-bg);
+}
+
+.wizard-modal .wizard-sig-area canvas {
+  width: 100%;
+  display: block;
+}
+
+/* Modal footer buttons */
+.wizard-modal-footer {
+  display: flex;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--wz-border);
+  margin-top: 16px;
+}
+
+.wizard-modal-footer .wizard-modal-btn {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.wizard-modal-footer .wizard-modal-btn-ghost {
+  background: transparent;
+  color: var(--wz-text-secondary);
+  border: 1px solid var(--wz-border);
+}
+
+.wizard-modal-footer .wizard-modal-btn-ghost:hover {
+  background: var(--wz-hover);
+  color: var(--wz-text);
+}
+
+.wizard-modal-footer .wizard-modal-btn-primary {
+  background: var(--wz-accent);
+  color: #FFFFFF;
+}
+
+.wizard-modal-footer .wizard-modal-btn-primary:hover {
+  opacity: 0.9;
+}
+
+.wizard-modal-footer .wizard-modal-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
