@@ -433,8 +433,8 @@ export default function DashboardPanel({
           
           {/* Fault KPIs (top) + Expiring Products (bottom) */}
           <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
-            <Card className="glass-card flex flex-col">
-              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Card className="glass-card flex-1 flex flex-col">
+              <CardContent className="flex-1 grid grid-cols-1 gap-3 sm:grid-cols-3 items-center justify-center">
                 {faultStatusCards.map((item) => {
                   const Icon = item.icon;
                   const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
@@ -456,28 +456,28 @@ export default function DashboardPanel({
               </CardContent>
             </Card>
             <Card className="glass-card flex-1 flex flex-col">
-              <CardContent className="flex flex-col items-center justify-center py-4 gap-2">
+              <CardContent className="flex-1 flex flex-col items-center justify-center py-4 gap-3">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-orange-500" />
-                  <p className="text-xs font-semibold text-orange-600">Miadı Yaklaşan Ürünler</p>
+                  <AlertTriangle className="h-5 w-5 text-orange-500" />
+                  <p className="text-sm font-semibold text-orange-600">Miadı Yaklaşan Ürünler</p>
                 </div>
-                <p className="text-3xl font-bold text-slate-700">{expiringProductCount}</p>
-                <p className="text-[10px] text-muted-foreground">Tüm depolarda 45 gün ve altı</p>
+                <p className="text-5xl font-bold text-slate-700">{expiringProductCount}</p>
+                <p className="text-xs text-muted-foreground">Tüm depolarda 45 gün ve altı</p>
               </CardContent>
             </Card>
           </motion.div>
 
           {/* Calendar (top) + Today's Tasks (bottom) */}
           <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
-            <Link href="/satin-alma/analiz-planlama" className="block">
-              <Card className="glass-card flex flex-col cursor-pointer">
-                <CardContent className="pt-4">
+            <Link href="/satin-alma/analiz-planlama" className="flex-1 flex flex-col">
+              <Card className="glass-card flex-1 flex flex-col cursor-pointer">
+                <CardContent className="flex-1 flex flex-col justify-center pt-4">
                   <div
                     ref={calendarScrollRef}
-                    className="h-[110px] space-y-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    className="max-h-[140px] space-y-1.5 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   >
                     {personalCalendarKpi.timelineItems.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Takvim kaydı bulunmuyor.</p>
+                      <p className="text-xs text-muted-foreground text-center">Takvim kaydı bulunmuyor.</p>
                     ) : (
                       personalCalendarKpi.timelineItems.map((item) => (
                         <div
@@ -499,28 +499,34 @@ export default function DashboardPanel({
               </Card>
             </Link>
             <Card className="glass-card flex-1 flex flex-col">
-              <CardContent className="pt-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  <p className="text-xs font-semibold text-slate-600">Bugünün Görevleri</p>
+              <CardContent className="flex-1 flex flex-col items-center justify-center py-4 gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                  <p className="text-sm font-semibold text-slate-600">Bugünün Görevleri</p>
                 </div>
-                <div className="h-[100px] space-y-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {todayTasks.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Bugün için görev bulunmuyor.</p>
-                  ) : (
-                    todayTasks.map((task) => (
+                {todayTasks.length === 0 ? (
+                  <p className="text-4xl font-bold text-slate-400">0</p>
+                ) : (
+                  <p className="text-5xl font-bold text-slate-700">{todayTasks.length}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {todayTasks.length === 0 ? 'Bugün için görev bulunmuyor' : `${todayTasks.length} görev planlandı`}
+                </p>
+                {todayTasks.length > 0 && (
+                  <div className="w-full max-h-[60px] space-y-1 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {todayTasks.map((task) => (
                       <div
                         key={task.id}
                         className={cn(
-                          'dashboard-timeline-row px-3 py-1.5 text-xs',
+                          'dashboard-timeline-row px-3 py-1 text-xs text-center',
                           task.completed ? 'text-slate-400 line-through' : 'text-slate-600'
                         )}
                       >
                         {task.startTime} • {task.title}
                       </div>
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </motion.div>
