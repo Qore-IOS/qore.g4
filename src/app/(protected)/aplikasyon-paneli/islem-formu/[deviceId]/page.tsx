@@ -1821,25 +1821,7 @@ export default function AplikasyonIslemFormuPage() {
     setActions(prev => prev.map(a => a.id === id ? { ...a, quantity } : a));
   };
 
-  if (loading) {
-    return (
-      <div className="cihaz-shell flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
-          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor...</p>
-        </div>
-      </div>
-    );
-  }
-  if (!device) {
-    return (
-      <div className="cihaz-shell flex items-center justify-center min-h-screen">
-        <p className="text-[var(--dashboard-muted)]">Cihaz bilgileri yüklenemedi.</p>
-      </div>
-    );
-  }
-
-  // Wizard heading definitions with completion tracking
+  // Wizard heading definitions with completion tracking (must be before conditional returns)
   const wizardHeadings: WizardHeading[] = useMemo(() => [
     {
       id: 'islem_turu',
@@ -1876,6 +1858,24 @@ export default function AplikasyonIslemFormuPage() {
       completedSublabel: aciklama.trim() ? (aciklama.trim().length > 40 ? aciklama.trim().substring(0, 40) + '...' : aciklama.trim()) : undefined,
     },
   ], [islemTuru, baslangicTarihi, baslangicSaati, bitisTarihi, bitisSaati, actions, aciklama]);
+
+  if (loading) {
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor...</p>
+        </div>
+      </div>
+    );
+  }
+  if (!device) {
+    return (
+      <div className="cihaz-shell flex items-center justify-center min-h-screen">
+        <p className="text-[var(--dashboard-muted)]">Cihaz bilgileri yüklenemedi.</p>
+      </div>
+    );
+  }
 
   // Render wizard detail content for each heading
   const renderWizardDetail = (headingId: string, goBack: () => void) => {
