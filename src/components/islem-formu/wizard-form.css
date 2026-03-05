@@ -436,6 +436,8 @@
   padding: 16px 24px 24px;
   gap: 12px;
   margin-top: auto;
+  flex: 1;
+  align-items: flex-end;
 }
 
 .wizard-btn {
@@ -555,7 +557,13 @@
   }
 
   .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons {
-    align-self: end;
+    align-self: stretch;
+    display: flex;
+    align-items: stretch;
+  }
+
+  .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons .wizard-btn {
+    align-items: center;
   }
 
   .wizard-heading-list.wizard-grid-mode .wizard-heading-row {
@@ -820,7 +828,21 @@
 
 /* ============= WIZARD MODAL OVERRIDES ============= */
 /* Applied to DialogContent to match wizard theme */
+/* Variables are defined directly here since the modal renders via portal outside .wizard-page-wrapper */
 .wizard-modal {
+  --wz-bg: var(--dashboard-bg, #E9E7E3);
+  --wz-surface: var(--dashboard-surface, #F3F2EF);
+  --wz-text: var(--dashboard-text, #2B2F33);
+  --wz-text-secondary: var(--dashboard-muted, #6C727A);
+  --wz-border: rgba(0, 0, 0, 0.08);
+  --wz-hover: rgba(0, 0, 0, 0.04);
+  --wz-active: rgba(0, 0, 0, 0.06);
+  --wz-accent: var(--dashboard-accent, #F2994A);
+  --wz-input-bg: rgba(0, 0, 0, 0.04);
+  --wz-input-border: rgba(0, 0, 0, 0.12);
+  --wz-selected-bg: rgba(0, 0, 0, 0.05);
+  --wz-table-border: rgba(0, 0, 0, 0.06);
+
   background: var(--wz-bg) !important;
   color: var(--wz-text) !important;
   border: 1px solid var(--wz-border) !important;
@@ -831,6 +853,21 @@
   max-width: min(90vw, 480px) !important;
   left: 50% !important;
   transform: translateX(-50%) translateY(-50%) !important;
+}
+
+.dark .wizard-modal {
+  --wz-bg: #000000;
+  --wz-surface: #000000;
+  --wz-text: #FFFFFF;
+  --wz-text-secondary: rgba(255, 255, 255, 0.5);
+  --wz-border: rgba(255, 255, 255, 0.12);
+  --wz-hover: rgba(255, 255, 255, 0.04);
+  --wz-active: rgba(255, 255, 255, 0.06);
+  --wz-accent: var(--dashboard-accent, #F2994A);
+  --wz-input-bg: rgba(255, 255, 255, 0.08);
+  --wz-input-border: rgba(255, 255, 255, 0.15);
+  --wz-selected-bg: rgba(255, 255, 255, 0.08);
+  --wz-table-border: rgba(255, 255, 255, 0.06);
 }
 
 .wizard-modal::before,
