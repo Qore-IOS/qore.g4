@@ -2751,113 +2751,106 @@ export default function IslemFormuPage() {
 
       {/* Pre-Signature & Signature Modal */}
       <Dialog open={isSignatureModalOpen} onOpenChange={setIsSignatureModalOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>
-              {signatureStep === 'pre_questions' ? 'Form Bilgileri' : 'İmza'}
-            </DialogTitle>
-          </DialogHeader>
+        <DialogContent className="wizard-modal">
+          <div className="wizard-modal-title">
+            {signatureStep === 'pre_questions' ? 'Form Bilgileri' : 'İmza'}
+          </div>
 
           {/* Pre-Signature Questions */}
           {signatureStep === 'pre_questions' && (
-            <div className="space-y-6 py-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               {/* Cihaz Durumu */}
-              <div className="space-y-3">
-                <Label className="text-base font-medium text-[var(--dashboard-text)]">
-                  Cihaz Durumu <span className="text-red-500">*</span>
-                </Label>
+              <div>
+                <label className="wizard-modal-label" style={{ display: 'block', marginBottom: '10px', fontSize: '15px' }}>
+                  Cihaz Durumu <span style={{ color: '#ef4444' }}>*</span>
+                </label>
                 <RadioGroup value={cihazDurumu} onValueChange={(v) => setCihazDurumu(v as CihazDurumu)}>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="calisiyor" id="calisiyor" />
-                    <Label htmlFor="calisiyor">Çalışıyor</Label>
+                    <Label htmlFor="calisiyor" style={{ color: 'var(--wz-text)' }}>Çalışıyor</Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="arizali" id="arizali" />
-                    <Label htmlFor="arizali">Arızalı</Label>
+                    <Label htmlFor="arizali" style={{ color: 'var(--wz-text)' }}>Arızalı</Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="denemede" id="denemede" />
-                    <Label htmlFor="denemede">Denemede</Label>
+                    <Label htmlFor="denemede" style={{ color: 'var(--wz-text)' }}>Denemede</Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="diger" id="diger" />
-                    <Label htmlFor="diger">Diğer</Label>
+                    <Label htmlFor="diger" style={{ color: 'var(--wz-text)' }}>Diğer</Label>
                   </div>
                 </RadioGroup>
                 {cihazDurumu === 'diger' && (
-                  <Input
+                  <input
+                    type="text"
                     placeholder="Açıklama (zorunlu)"
                     value={cihazDurumuAciklama}
                     onChange={(e) => setCihazDurumuAciklama(e.target.value)}
-                    className={!cihazDurumuAciklama ? 'border-destructive' : ''}
+                    style={{ marginTop: '8px' }}
                   />
                 )}
               </div>
 
               {/* Eşlik Eden Personel */}
-              <div className="space-y-3">
-                <Label className="text-base font-medium text-[var(--dashboard-text)]">
-                  Kurum Ziyaretinde Eşlik Eden Personel
-                  <span className="text-[var(--dashboard-muted)] text-sm font-normal ml-2">(Opsiyonel)</span>
-                </Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
+              <div>
+                <label className="wizard-modal-label" style={{ display: 'block', marginBottom: '6px', fontSize: '15px' }}>
+                  Eşlik Eden Personel <span className="wizard-modal-sublabel">(Opsiyonel)</span>
+                </label>
+                <div style={{ position: 'relative', marginBottom: '8px' }}>
+                  <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                  <input
+                    type="text"
                     placeholder="Personel ara..."
                     value={personelSearchQuery}
                     onChange={(e) => setPersonelSearchQuery(e.target.value)}
-                    className="pl-10"
+                    style={{ paddingLeft: '36px' }}
                   />
                 </div>
-                <ScrollArea className="h-40 rounded-xl border border-[var(--dashboard-stroke)]">
-                  <div className="p-2 space-y-1">
-                    {filteredUsers.map(user => (
-                      <button
-                        key={user.uid}
-                        onClick={() => toggleEslikEdenPersonel(user)}
-                        className={`w-full text-left p-2 rounded-xl transition-colors flex items-center justify-between ${
-                          eslikEdenPersonel.find(p => p.uid === user.uid)
-                            ? 'bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/40'
-                            : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'
-                        }`}
-                      >
-                        <div>
-                          <p className="font-medium text-[var(--dashboard-text)]">{user.name || user.email}</p>
-                          <p className="text-xs text-[var(--dashboard-muted)] capitalize">{user.role?.replace('_', ' ')}</p>
-                        </div>
-                        {eslikEdenPersonel.find(p => p.uid === user.uid) && (
-                          <span className="text-[var(--dashboard-accent)] text-xs font-medium">Seçildi</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </ScrollArea>
+                <div className="wizard-personel-list">
+                  {filteredUsers.map(user => (
+                    <div
+                      key={user.uid}
+                      className={`wizard-personel-item ${eslikEdenPersonel.find(p => p.uid === user.uid) ? 'selected' : ''}`}
+                      onClick={() => toggleEslikEdenPersonel(user)}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{user.name || user.email}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', textTransform: 'capitalize' }}>{user.role?.replace('_', ' ')}</div>
+                      </div>
+                      {eslikEdenPersonel.find(p => p.uid === user.uid) && (
+                        <span style={{ color: 'var(--wz-accent)', fontSize: '12px', fontWeight: 600 }}>Seçildi</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
                 {eslikEdenPersonel.length > 0 && (
-                  <p className="text-sm text-[var(--dashboard-muted)]">
+                  <p style={{ fontSize: '13px', color: 'var(--wz-text-secondary)', marginTop: '8px' }}>
                     Seçilen: {eslikEdenPersonel.map(p => p.name).join(', ')}
                   </p>
                 )}
               </div>
 
-              <DialogFooter className="gap-2">
-                <button onClick={() => setIsSignatureModalOpen(false)} className="cihaz-tool-item px-4 py-2.5 text-sm font-medium">İptal</button>
-                <button onClick={proceedToSignature} className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white">
-                  İmzaya Geç
-                </button>
-              </DialogFooter>
+              <div className="wizard-modal-footer">
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => setIsSignatureModalOpen(false)}>İptal</button>
+                <button className="wizard-modal-btn wizard-modal-btn-primary" onClick={proceedToSignature}>İmzaya Geç</button>
+              </div>
             </div>
           )}
 
           {/* Personnel Signature */}
           {signatureStep === 'personnel' && (
             <div>
-              <p className="mb-2 text-sm text-[var(--dashboard-muted)]">İşlemi Yapan Personel</p>
-              <SignaturePad ref={personnelSignatureRef} />
-              <DialogFooter className="mt-4 gap-2">
-                <button onClick={() => { personnelSignatureRef.current?.clear(); }} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Temizle</button>
-                <button onClick={() => setSignatureStep('pre_questions')} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Geri</button>
-                <button onClick={() => handleSaveSignaturesAndFinish({})} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Atla</button>
-                <button onClick={() => {
+              <p style={{ marginBottom: '8px', fontSize: '14px', color: 'var(--wz-text-secondary)' }}>İşlemi Yapan Personel</p>
+              <div className="wizard-sig-area">
+                <SignaturePad ref={personnelSignatureRef} />
+              </div>
+              <div className="wizard-modal-footer">
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => { personnelSignatureRef.current?.clear(); }}>Temizle</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => setSignatureStep('pre_questions')}>Geri</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => handleSaveSignaturesAndFinish({})}>Atla</button>
+                <button className="wizard-modal-btn wizard-modal-btn-primary" onClick={() => {
                   const sig = personnelSignatureRef.current?.getSignature();
                   if (sig) {
                     setSignatures({ personnel: sig });
@@ -2865,40 +2858,38 @@ export default function IslemFormuPage() {
                   } else {
                     setSignatureStep('technician');
                   }
-                }} className="cihaz-tool-item px-3 py-2 text-sm font-medium bg-[var(--dashboard-accent)] text-white">
-                  Devam Et
-                </button>
-              </DialogFooter>
+                }}>Devam Et</button>
+              </div>
             </div>
           )}
 
           {/* Technician Signature */}
           {signatureStep === 'technician' && (
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="text-sm font-medium mb-2 block text-[var(--dashboard-text)]">Teknisyen Adı Soyadı</label>
-                <Input
+                <label className="wizard-modal-label" style={{ display: 'block', marginBottom: '6px', fontSize: '14px' }}>Teknisyen Adı Soyadı</label>
+                <input
+                  type="text"
                   value={technicianName}
                   onChange={(e) => setTechnicianName(e.target.value)}
                   placeholder="Ad Soyad giriniz..."
-                  className="mb-4"
                 />
               </div>
               <div>
-                <p className="mb-2 text-sm text-[var(--dashboard-muted)]">İmza</p>
-                <SignaturePad ref={technicianSignatureRef} />
+                <p style={{ marginBottom: '8px', fontSize: '14px', color: 'var(--wz-text-secondary)' }}>İmza</p>
+                <div className="wizard-sig-area">
+                  <SignaturePad ref={technicianSignatureRef} />
+                </div>
               </div>
-              <DialogFooter className="mt-4 gap-2">
-                <button onClick={() => { technicianSignatureRef.current?.clear(); }} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Temizle</button>
-                <button onClick={() => handleSaveSignaturesAndFinish(signatures, technicianName)} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Bu Adımı Atla</button>
-                <button onClick={() => setSignatureStep('personnel')} className="cihaz-tool-item px-3 py-2 text-sm font-medium">Geri</button>
-                <button onClick={() => {
+              <div className="wizard-modal-footer">
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => { technicianSignatureRef.current?.clear(); }}>Temizle</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => setSignatureStep('personnel')}>Geri</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => handleSaveSignaturesAndFinish(signatures, technicianName)}>Atla</button>
+                <button className="wizard-modal-btn wizard-modal-btn-primary" onClick={() => {
                   const techSig = technicianSignatureRef.current?.getSignature();
                   handleSaveSignaturesAndFinish({ ...signatures, technician: techSig }, technicianName);
-                }} className="cihaz-tool-item px-3 py-2 text-sm font-medium bg-[var(--dashboard-accent)] text-white">
-                  Tamamla ve Kaydet
-                </button>
-              </DialogFooter>
+                }}>Tamamla ve Kaydet</button>
+              </div>
             </div>
           )}
         </DialogContent>
