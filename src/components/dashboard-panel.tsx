@@ -23,11 +23,10 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query, where, getCountFromServer, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getCountFromServer, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { useQuery } from '@tanstack/react-query';
-import type { DepoStokItem } from '@/lib/types';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -104,32 +103,34 @@ export default function DashboardPanel({
     gcTime: 30 * 60 * 1000,
   });
 
-  // Server-side: Total stock cost (all depots + labs)
+  // Server-side: Total stock cost using getCountFromServer per stokKodu (no document downloads)
   const { data: totalStockCost = 0 } = useQuery({
     queryKey: ['dashboardTotalStockCost'],
     queryFn: async () => {
-      const [stokSnap, productSnap] = await Promise.all([
-        getDocs(collection(db, 'depoStok')),
-        getDocs(collection(db, 'productCodes')),
-      ]);
-      const priceMap = new Map<string, number>();
+      // Only fetch small productCodes collection
+      const productSnap = await getDocs(collection(db, 'productCodes'));
+      const pricedProducts: { stokKodu: string; cost: number }[] = [];
       productSnap.docs.forEach(d => {
         const data = d.data();
-        if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
+        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
       });
-      let total = 0;
-      stokSnap.docs.forEach(d => {
-        const data = d.data();
-        const price = priceMap.get(data.stokKodu) ?? 0;
-        total += price;
-      });
-      return total;
+      if (pricedProducts.length === 0) return 0;
+      // Count stock items per stokKodu server-side (no document data transfer)
+      const counts = await Promise.all(
+        pricedProducts.map(async (p) => {
+          const snap = await getCountFromServer(
+            query(collection(db, 'depoStok'), where('stokKodu', '==', p.stokKodu))
+          );
+          return snap.data().count * p.cost;
+        })
+      );
+      return counts.reduce((sum, v) => sum + v, 0);
     },
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
 
-  // Server-side: Yesterday's consumption cost
+  // Server-side: Yesterday's consumption cost using getCountFromServer per stokKodu
   const { data: yesterdayConsumptionCost = 0 } = useQuery({
     queryKey: ['dashboardYesterdayConsumptionCost'],
     queryFn: async () => {
@@ -137,26 +138,27 @@ export default function DashboardPanel({
       yesterday.setDate(yesterday.getDate() - 1);
       const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
       const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
-      const [consumptionSnap, productSnap] = await Promise.all([
-        getDocs(query(
-          collection(db, 'tuketimKayitlari'),
-          where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
-          where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
-        )),
-        getDocs(collection(db, 'productCodes')),
-      ]);
-      const priceMap = new Map<string, number>();
+      const productSnap = await getDocs(collection(db, 'productCodes'));
+      const pricedProducts: { stokKodu: string; cost: number }[] = [];
       productSnap.docs.forEach(d => {
         const data = d.data();
-        if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
+        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
       });
-      let total = 0;
-      consumptionSnap.docs.forEach(d => {
-        const data = d.data();
-        const price = priceMap.get(data.stokKodu) ?? 0;
-        total += price;
-      });
-      return total;
+      if (pricedProducts.length === 0) return 0;
+      const counts = await Promise.all(
+        pricedProducts.map(async (p) => {
+          const snap = await getCountFromServer(
+            query(
+              collection(db, 'tuketimKayitlari'),
+              where('stokKodu', '==', p.stokKodu),
+              where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
+              where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
+            )
+          );
+          return snap.data().count * p.cost;
+        })
+      );
+      return counts.reduce((sum, v) => sum + v, 0);
     },
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
