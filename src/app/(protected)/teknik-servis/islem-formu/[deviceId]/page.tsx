@@ -2145,9 +2145,90 @@ export default function IslemFormuPage() {
               )}
             </div>
 
-            {/* Add part button - opens the existing part modal */}
+            {/* Inline stock list */}
+            <div style={{ padding: '12px 0 0' }}>
+              <div style={{ position: 'relative', marginBottom: '8px' }}>
+                <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                <input
+                  type="text"
+                  placeholder={stockSourceTab === 'personal' ? 'Şahsi stokta ara...' : 'Havuz stokta ara...'}
+                  value={partSearchQuery}
+                  onChange={(e) => setPartSearchQuery(e.target.value)}
+                  style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }}
+                />
+              </div>
+              {stockSourceTab === 'personal' ? (
+                <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                  {filteredStock.length === 0 ? (
+                    <div style={{ padding: '24px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
+                      {personalStock.length === 0 ? 'Şahsi stokunuzda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                    </div>
+                  ) : filteredStock.map(item => (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedStockItem(item);
+                        setSelectedPoolStockItem(null);
+                        setManualPartCode(''); setManualPartName(''); setManualSerialNumber('');
+                        setPartQuantity(1); setShowManualEntry(false);
+                        setRemovedPartStokKodu(''); setRemovedPartStokAdi(''); setRemovedPartSerialNumber('');
+                        setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+                        setIsPartModalOpen(true);
+                      }}
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer', transition: 'background 0.15s' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--wz-hover)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--wz-text-secondary)' }}>{item.source === 'depot' ? 'Depodan' : 'Cihazdan'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                  {filteredPoolStock.length === 0 ? (
+                    <div style={{ padding: '24px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
+                      {poolStockItems.length === 0 ? 'Havuz depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                    </div>
+                  ) : filteredPoolStock.map(item => (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedPoolStockItem(item);
+                        setSelectedStockItem(null);
+                        setManualPartCode(''); setManualPartName(''); setManualSerialNumber('');
+                        setPartQuantity(1); setShowManualEntry(false);
+                        setRemovedPartStokKodu(''); setRemovedPartStokAdi(''); setRemovedPartSerialNumber('');
+                        setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+                        setIsPartModalOpen(true);
+                      }}
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer', transition: 'background 0.15s' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--wz-hover)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber || '—'}</div>
+                        <div style={{ fontSize: '11px', color: '#a855f7', fontWeight: 500 }}>{item.poolWarehouseName}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Manual entry button */}
             <button className="wizard-add-button" onClick={openPartModal}>
-              <Plus className="h-4 w-4" /> Parça Ekle
+              <Plus className="h-4 w-4" /> Stokta yok, manuel ekle
             </button>
           </div>
         );
