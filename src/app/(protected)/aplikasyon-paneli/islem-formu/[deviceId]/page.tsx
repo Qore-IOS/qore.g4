@@ -13,11 +13,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import WizardFormShell from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
-import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { format } from 'date-fns';
@@ -2243,30 +2242,34 @@ export default function AplikasyonIslemFormuPage() {
       <div className="wizard-page-wrapper">
         {/* Compact Device Info Header */}
         <header className="wizard-compact-header sticky top-0 z-30">
-          <BackButton fallback={`/aplikasyon-paneli/${device.hospitalId}`} />
+          <button
+            className="wizard-icon-btn"
+            onClick={() => { if (window.history.length > 2) router.back(); else router.push(`/aplikasyon-paneli/${device.hospitalId}`); }}
+            aria-label="Geri Dön"
+          >
+            <ChevronLeft size={18} />
+          </button>
           {device.imageUrl && (
             <div className="wizard-header-image">
-              <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={48} height={48} />
+              <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={40} height={40} />
             </div>
           )}
           <div className="wizard-header-info">
             <div className="wizard-header-title">Aplikasyon İşlem Formu</div>
-            <div className="wizard-header-device">{device.cihazAdi} <span style={{ fontSize: '11px', color: 'var(--dashboard-muted)', fontFamily: 'monospace' }}>Seri No: {device.seriNumarasi}</span></div>
+            <div className="wizard-header-device">{device.cihazAdi} <span style={{ fontSize: '11px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>Seri No: {device.seriNumarasi}</span></div>
             <div className="wizard-header-meta">
               <span><strong>Lab:</strong> {hospital?.name || '-'}</span>
-              <span><strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
-              <span><strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
+              <span> · <strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
+              <span> · <strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
             </div>
           </div>
-          <div className="wizard-header-actions">
-            <button
-              onClick={() => router.push(`/aplikasyon-paneli/gecmis/${deviceId}`)}
-              className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium"
-            >
-              <History className="h-4 w-4" />
-              <span>Geçmiş</span>
-            </button>
-          </div>
+          <button
+            className="wizard-icon-btn"
+            onClick={() => router.push(`/aplikasyon-paneli/gecmis/${deviceId}`)}
+            aria-label="Geçmiş"
+          >
+            <History size={16} />
+          </button>
         </header>
 
         {/* Wizard Form Body */}
