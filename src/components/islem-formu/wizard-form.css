@@ -192,7 +192,7 @@
   padding: 8px 0;
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  flex: 1;
 }
 
 .wizard-heading-row {
@@ -542,24 +542,34 @@
 /* ============= TABLET GRID ============= */
 @media (min-width: 768px) {
   .wizard-heading-list.wizard-grid-mode {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: auto auto auto 1fr;
-    gap: 1px;
-    background: var(--wz-border);
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
     padding: 0;
+    border-bottom: 1px solid var(--wz-border);
   }
 
-  .wizard-heading-list.wizard-grid-mode > .wizard-heading-row,
-  .wizard-heading-list.wizard-grid-mode > .wizard-inline-row,
-  .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons {
-    background: var(--wz-bg);
+  .wizard-heading-list.wizard-grid-mode > .wizard-heading-row {
+    width: 50%;
+    border-bottom: 1px solid var(--wz-border);
+    border-right: 1px solid var(--wz-border);
+  }
+
+  .wizard-heading-list.wizard-grid-mode > .wizard-heading-row:nth-child(2n) {
+    border-right: none;
+  }
+
+  .wizard-heading-list.wizard-grid-mode > .wizard-inline-row {
+    width: 100%;
+    border-bottom: 1px solid var(--wz-border);
   }
 
   .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons {
-    align-self: stretch;
+    width: 100%;
+    flex: 1;
     display: flex;
     align-items: stretch;
+    border-bottom: none;
   }
 
   .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons .wizard-btn {
