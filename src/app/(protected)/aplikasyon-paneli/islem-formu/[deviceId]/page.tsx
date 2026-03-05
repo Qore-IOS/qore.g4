@@ -565,10 +565,9 @@ export default function AplikasyonIslemFormuPage() {
   }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem, selectedPoolStockItem]);
 
   useEffect(() => {
-    if (!isPartModalOpen) return;
     setRemovedPartStokKodu(installedPartDefaults.stokKodu);
     setRemovedPartStokAdi(installedPartDefaults.stokAdi);
-  }, [isPartModalOpen, installedPartDefaults]);
+  }, [installedPartDefaults]);
 
   // Calculate maintenance status with remaining days
   const maintenanceTasksWithStatus = useMemo(() => {
@@ -1126,6 +1125,13 @@ export default function AplikasyonIslemFormuPage() {
     }
     setPendingPeriodicPartChangeId(null);
     setSelectedPoolStockItem(null);
+    setSelectedStockItem(null);
+    setShowManualEntry(false);
+    setManualPartCode(''); setManualPartName(''); setManualSerialNumber('');
+    setRemovedPartSerialNumber('');
+    setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+    setUsedPartImageFile(null); setUsedPartImagePreview(null);
+    setPartSearchQuery('');
     setIsPartModalOpen(false);
   };
 
@@ -2075,8 +2081,9 @@ export default function AplikasyonIslemFormuPage() {
       case 'degisen_parca':
         return (
           <div>
-            {actions.filter(a => a.type === 'part_change').length > 0 ? (
-              <div className="wizard-action-list">
+            {/* Existing part changes list */}
+            {actions.filter(a => a.type === 'part_change').length > 0 && (
+              <div className="wizard-action-list" style={{ marginBottom: '16px' }}>
                 {actions.filter(a => a.type === 'part_change').map(item => (
                   <div key={item.id} className="wizard-action-item">
                     <div>
@@ -2093,112 +2100,246 @@ export default function AplikasyonIslemFormuPage() {
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="wizard-empty-state">Henüz değişen parça eklenmedi.</div>
             )}
 
-            <div className="wizard-sub-tabs" style={{ paddingLeft: 0 }}>
-              <button
-                className={`wizard-sub-tab ${stockSourceTab === 'personal' ? 'active' : ''}`}
-                onClick={() => { setStockSourceTab('personal'); }}
-              >
-                ŞAHSİ STOK
-              </button>
-              {poolStockItems.length > 0 && (
+            {/* 1. Part Selection */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>
+                1. Parça Seçin
+              </label>
+
+              {/* Stock source tabs */}
+              <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
                 <button
-                  className={`wizard-sub-tab ${stockSourceTab === 'pool' ? 'active' : ''}`}
-                  onClick={() => { setStockSourceTab('pool'); }}
+                  className={`wizard-sub-tab ${!showManualEntry && stockSourceTab === 'personal' ? 'active' : ''}`}
+                  onClick={() => { setStockSourceTab('personal'); setShowManualEntry(false); }}
                 >
-                  HAVUZ STOK
+                  ŞAHSİ STOK
                 </button>
-              )}
-            </div>
-
-            {/* Inline stock list */}
-            <div style={{ padding: '12px 0 0' }}>
-              <div style={{ position: 'relative', marginBottom: '8px' }}>
-                <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
-                <input
-                  type="text"
-                  placeholder={stockSourceTab === 'personal' ? 'Şahsi stokta ara...' : 'Havuz stokta ara...'}
-                  value={partSearchQuery}
-                  onChange={(e) => setPartSearchQuery(e.target.value)}
-                  style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }}
-                />
+                {poolStockItems.length > 0 && (
+                  <button
+                    className={`wizard-sub-tab ${!showManualEntry && stockSourceTab === 'pool' ? 'active' : ''}`}
+                    onClick={() => { setStockSourceTab('pool'); setShowManualEntry(false); }}
+                  >
+                    HAVUZ STOK
+                  </button>
+                )}
               </div>
-              {stockSourceTab === 'personal' ? (
-                <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
-                  {filteredStock.length === 0 ? (
-                    <div style={{ padding: '24px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
-                      {personalStock.length === 0 ? 'Şahsi stokunuzda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+
+              {!showManualEntry ? (
+                <>
+                  <div style={{ position: 'relative', marginBottom: '8px' }}>
+                    <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                    <input
+                      type="text"
+                      placeholder={stockSourceTab === 'personal' ? 'Şahsi stokta ara...' : 'Havuz stokta ara...'}
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }}
+                    />
+                  </div>
+                  {stockSourceTab === 'personal' ? (
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                      {filteredStock.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
+                          {personalStock.length === 0 ? 'Şahsi stokunuzda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                        </div>
+                      ) : filteredStock.map(item => (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedStockItem(item); setSelectedPoolStockItem(null);
+                            setRemovedPartSerialNumber('');
+                            setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+                            setUsedPartImageFile(null); setUsedPartImagePreview(null);
+                          }}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                            padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
+                            background: selectedStockItem?.id === item.id ? 'var(--wz-selected-bg)' : 'transparent',
+                            borderLeft: selectedStockItem?.id === item.id ? '3px solid var(--wz-accent)' : '3px solid transparent',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--wz-text-secondary)' }}>{item.source === 'depot' ? 'Depodan' : 'Cihazdan'}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ) : filteredStock.map(item => (
-                    <div
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedStockItem(item);
-                        setSelectedPoolStockItem(null);
-                        setManualPartCode(''); setManualPartName(''); setManualSerialNumber('');
-                        setPartQuantity(1); setShowManualEntry(false);
-                        setRemovedPartStokKodu(''); setRemovedPartStokAdi(''); setRemovedPartSerialNumber('');
-                        setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
-                        setIsPartModalOpen(true);
-                      }}
-                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer', transition: 'background 0.15s' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--wz-hover)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--wz-text-secondary)' }}>{item.source === 'depot' ? 'Depodan' : 'Cihazdan'}</div>
-                      </div>
+                  ) : (
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                      {filteredPoolStock.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
+                          {poolStockItems.length === 0 ? 'Havuz depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                        </div>
+                      ) : filteredPoolStock.map(item => (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedPoolStockItem(item); setSelectedStockItem(null);
+                            setRemovedPartSerialNumber('');
+                            setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+                            setUsedPartImageFile(null); setUsedPartImagePreview(null);
+                          }}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                            padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
+                            background: selectedPoolStockItem?.id === item.id ? 'var(--wz-selected-bg)' : 'transparent',
+                            borderLeft: selectedPoolStockItem?.id === item.id ? '3px solid #a855f7' : '3px solid transparent',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber || '—'}</div>
+                            <div style={{ fontSize: '11px', color: '#a855f7', fontWeight: 500 }}>{item.poolWarehouseName}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                  <button
+                    onClick={() => { setShowManualEntry(true); setSelectedStockItem(null); setSelectedPoolStockItem(null); }}
+                    style={{ width: '100%', marginTop: '8px', padding: '10px', fontSize: '13px', fontWeight: 500, color: 'var(--wz-accent)', background: 'none', border: '1px dashed var(--wz-border)', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                  >
+                    <Plus size={14} /> Stokta yok, manuel ekle
+                  </button>
+                </>
               ) : (
-                <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
-                  {filteredPoolStock.length === 0 ? (
-                    <div style={{ padding: '24px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
-                      {poolStockItems.length === 0 ? 'Havuz depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                /* Manual entry form */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Kodu <span style={{ color: '#ef4444' }}>*</span></label>
+                      <input type="text" placeholder="Kod..." value={manualPartCode} onChange={(e) => setManualPartCode(e.target.value)} />
                     </div>
-                  ) : filteredPoolStock.map(item => (
-                    <div
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedPoolStockItem(item);
-                        setSelectedStockItem(null);
-                        setManualPartCode(''); setManualPartName(''); setManualSerialNumber('');
-                        setPartQuantity(1); setShowManualEntry(false);
-                        setRemovedPartStokKodu(''); setRemovedPartStokAdi(''); setRemovedPartSerialNumber('');
-                        setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
-                        setIsPartModalOpen(true);
-                      }}
-                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer', transition: 'background 0.15s' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--wz-hover)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber || '—'}</div>
-                        <div style={{ fontSize: '11px', color: '#a855f7', fontWeight: 500 }}>{item.poolWarehouseName}</div>
-                      </div>
+                    <div>
+                      <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                        Seri No {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking) && <span style={{ color: '#ef4444' }}>*</span>}
+                      </label>
+                      <input type="text" placeholder="Seri No..." value={manualSerialNumber} onChange={(e) => setManualSerialNumber(e.target.value)} />
                     </div>
-                  ))}
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Adı <span style={{ color: '#ef4444' }}>*</span></label>
+                    <input type="text" placeholder="Parça adını girin..." value={manualPartName} onChange={(e) => setManualPartName(e.target.value)} />
+                  </div>
+                  <button
+                    onClick={() => setShowManualEntry(false)}
+                    style={{ fontSize: '13px', color: 'var(--wz-accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', textAlign: 'left', fontWeight: 500 }}
+                  >
+                    Stoktan seç
+                  </button>
                 </div>
               )}
             </div>
 
-            {/* Manual entry button */}
-            <button className="wizard-add-button" onClick={openPartModal}>
-              <Plus className="h-4 w-4" /> Stokta yok, manuel ekle
-            </button>
+            {/* 2. Removed part info (auto-filled) */}
+            {(selectedStockItem || selectedPoolStockItem || showManualEntry) && (
+              <div style={{ marginBottom: '20px', padding: '16px', borderRadius: '12px', border: '1px solid var(--wz-border)', background: 'var(--wz-input-bg)' }}>
+                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>
+                  2. Cihazdan Çıkan Parça Bilgisi
+                  <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--wz-text-secondary)', marginLeft: '8px' }}>
+                    {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? '(zorunlu)' : '(opsiyonel)'}
+                  </span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Kodu</label>
+                    <input type="text" value={removedPartStokKodu} readOnly style={{ opacity: 0.7, cursor: 'default' }} />
+                    <p style={{ fontSize: '11px', color: 'var(--wz-text-secondary)', marginTop: '2px' }}>Takılan parçanın kodundan otomatik alınır.</p>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Seri No (Opsiyonel)</label>
+                    <input type="text" placeholder="Çıkan parça seri no..." value={removedPartSerialNumber} onChange={(e) => setRemovedPartSerialNumber(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Adı</label>
+                  <input type="text" value={removedPartStokAdi} readOnly style={{ opacity: 0.7, cursor: 'default' }} />
+                  <p style={{ fontSize: '11px', color: 'var(--wz-text-secondary)', marginTop: '2px' }}>Takılan parçanın adından otomatik alınır.</p>
+                </div>
+
+                {/* Photo uploads */}
+                <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--wz-border)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Removed part image */}
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                      <Camera size={12} /> Çıkan Parça Fotoğrafı (Opsiyonel)
+                    </label>
+                    <input type="file" accept="image/*" ref={removedPartImageInputRef} onChange={handleRemovedPartImageSelect} className="hidden" />
+                    {removedPartImagePreview ? (
+                      <div style={{ position: 'relative' }}>
+                        <img src={removedPartImagePreview} alt="Çıkan parça" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--wz-border)' }} />
+                        <button
+                          onClick={() => { setRemovedPartImageFile(null); setRemovedPartImagePreview(null); if (removedPartImageInputRef.current) removedPartImageInputRef.current.value = ''; }}
+                          style={{ position: 'absolute', top: '4px', right: '4px', width: '24px', height: '24px', borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => removedPartImageInputRef.current?.click()}
+                        style={{ width: '100%', height: '56px', border: '1px dashed var(--wz-border)', borderRadius: '12px', background: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--wz-text-secondary)', fontSize: '12px' }}
+                      >
+                        <ImageIcon size={18} />
+                        Çıkan parça fotoğrafı
+                      </button>
+                    )}
+                  </div>
+                  {/* Used/installed part image */}
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                      <Camera size={12} /> Takılan Parça Fotoğrafı (Opsiyonel)
+                    </label>
+                    <input type="file" accept="image/*" ref={usedPartImageInputRef} onChange={handleUsedPartImageSelect} className="hidden" />
+                    {usedPartImagePreview ? (
+                      <div style={{ position: 'relative' }}>
+                        <img src={usedPartImagePreview} alt="Takılan parça" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--wz-border)' }} />
+                        <button
+                          onClick={() => { setUsedPartImageFile(null); setUsedPartImagePreview(null); if (usedPartImageInputRef.current) usedPartImageInputRef.current.value = ''; }}
+                          style={{ position: 'absolute', top: '4px', right: '4px', width: '24px', height: '24px', borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => usedPartImageInputRef.current?.click()}
+                        style={{ width: '100%', height: '56px', border: '1px dashed var(--wz-border)', borderRadius: '12px', background: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--wz-text-secondary)', fontSize: '12px' }}
+                      >
+                        <ImageIcon size={18} />
+                        Takılan parça fotoğrafı
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Add button */}
+            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualPartName)) && (
+              <button
+                onClick={addSelectedPart}
+                disabled={isUploadingImage}
+                style={{
+                  width: '100%', padding: '14px', fontSize: '15px', fontWeight: 600,
+                  background: 'var(--wz-accent)', color: '#fff', border: 'none', borderRadius: '12px',
+                  cursor: isUploadingImage ? 'not-allowed' : 'pointer', opacity: isUploadingImage ? 0.5 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                }}
+              >
+                {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin" />Yükleniyor...</> : 'EKLE'}
+              </button>
+            )}
           </div>
         );
 
