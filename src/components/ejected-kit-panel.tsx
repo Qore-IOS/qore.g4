@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 import {
     Card,
     CardContent,
@@ -557,7 +558,7 @@ export default function EjectedKitPanel() {
                                                         <div className="flex items-center gap-2">
                                                             {record.deviceImageUrl && (
                                                                 <Image
-                                                                    src={`/${record.deviceImageUrl}`}
+                                                                    src={resolveImageSrc(record.deviceImageUrl)}
                                                                     alt={record.deviceModel}
                                                                     width={32}
                                                                     height={32}
@@ -709,7 +710,7 @@ export default function EjectedKitPanel() {
                                     <CardContent className="p-4 flex flex-col items-center gap-2">
                                         {device.imageUrl ? (
                                             <Image
-                                                src={`/${device.imageUrl}`}
+                                                src={resolveImageSrc(device.imageUrl)}
                                                 alt={device.model || ''}
                                                 width={80}
                                                 height={80}

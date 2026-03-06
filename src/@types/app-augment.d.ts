@@ -748,6 +748,7 @@ declare module "@/lib/types" {
     deviceImageUrl: string;
     stokKodu: string;
     stokAdi: string;
+    address?: string;
     cihazGrubu?: string;
     quantityType: 'kutu' | 'test';
     testCount: number;
@@ -827,6 +828,7 @@ declare module "@/lib/types" {
     productCodeId: string;
     stokKodu: string;
     stokAdi: string;
+    address?: string;
     serialNumber?: string;
     source: PersonalStockSource;
     sourceDeviceId?: string;
@@ -882,6 +884,7 @@ declare module "@/lib/types" {
     productCodeId: string;
     stokKodu: string;
     stokAdi: string;
+    address?: string;
     serialNumber?: string;
     source?: PersonalStockSource;
     sourceDeviceId?: string;
@@ -911,6 +914,7 @@ declare module "@/lib/types" {
     productCodeId: string;
     stokKodu: string;
     stokAdi: string;
+    address?: string;
     serialNumber?: string;
     quantity: number;
     cihazGrubu?: string;
@@ -932,6 +936,7 @@ declare module "@/lib/types" {
     productCodeId: string;
     stokKodu: string;
     stokAdi: string;
+    address?: string;
     cihazGrubu?: string;
     serialNumber?: string;
     quantity: number;

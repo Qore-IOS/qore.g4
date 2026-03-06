@@ -4,23 +4,13 @@ import { onDocumentCreated, FirestoreEvent, QueryDocumentSnapshot } from 'fireba
 import { logger } from 'firebase-functions';
 import type { SendResponse } from 'firebase-admin/messaging';
 import * as functions from 'firebase-functions';
-import type { NotificationDoc, Audience } from './lib/notifications';
+import type { NotificationDoc } from './lib/notifications';
 import fetch from 'node-fetch';
 import { sendFaultReportToQorEngine } from '../../services/qorEngineService';
-import * as nodemailer from 'nodemailer';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-const transporter = nodemailer.createTransport({
-    host: "smtp.hostinger.com",
-    port: 465,
-    secure: true, 
-    auth: {
-        user: functions.config().smtp?.email || "batuhan@qorengine.com", 
-        pass: functions.config().smtp?.password,
-    },
-});
 
 export { revokeUserSessions } from './revokeUserSessions';
 export { createCustomTokenForNfcUser } from './createCustomTokenForNfcUser';
@@ -189,87 +179,5 @@ export const sendFaultReportEmail = functions
             logger.error(`Error triggering webhook for report ${docId}:`, error);
         }
 
-        const {
-            labName, model, faultType, openedByName, description, title,
-        } = faultData;
-
-        let recipients: string[];
-        if (faultType === 'teknik_servis') {
-            recipients = ['ysahan@nukleus.com.tr', 'dkilic@nukleus.com.tr', 'bbasar@nukleus.com.tr', 'aturhan@nukleus.com.tr', 'bkahraman@nukleus.com.tr'];
-        } else if (faultType === 'aplikasyon') {
-            recipients = ['iertugrul@nukleus.com.tr', 'ehoscanli@nukleus.com.tr', 'helkoca@nukleus.com.tr', 'bbasar@nukleus.com.tr'];
-        } else {
-            recipients = ['bbasar@nukleus.com.tr', 'btubasar@gmail.com'];
-        }
-        
-        if (recipients.length === 0) {
-            logger.log('No recipients found for fault report email.');
-            return;
-        }
-
-        const dateStr = new Date().toLocaleDateString("tr-TR", {
-            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
-        });
-        
-        const viewUrl = `https://qorengine.com/ariza-yonetimi/${docId}`;
-
-        const htmlContent = `
-          <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
-            <div style="background-color: #d9534f; padding: 20px; text-align: center;">
-              <h2 style="color: #ffffff; margin: 0; font-size: 24px;">🚨 Yeni Arıza Kaydı</h2>
-            </div>
-            <div style="padding: 25px;">
-              <p style="font-size: 16px; line-height: 1.5;">Sayın Yetkili,</p>
-              <p style="font-size: 15px; line-height: 1.5;">Sisteme yeni bir teknik servis talebi oluşturuldu. Detaylar aşağıdadır:</p>
-              
-              <table style="width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px;">
-                <tr style="background-color: #f8f9fa;">
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd; font-weight: bold; width: 35%;">Kayıt ID</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd;">#${docId}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd; font-weight: bold;">Cihaz / Konu</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd;">${model || title || "Belirtilmemiş"}</td>
-                </tr>
-                <tr style="background-color: #f8f9fa;">
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd; font-weight: bold;">Açıklama</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd;">${description || "-"}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd; font-weight: bold;">Arıza Tipi</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd;">${faultType || 'Belirtilmemiş'}</td>
-                </tr>
-                <tr style="background-color: #f8f9fa;">
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd; font-weight: bold;">Bildiren Kişi</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd;">${openedByName || "Sistem"}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd; font-weight: bold;">Tarih</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #ddd;">${dateStr}</td>
-                </tr>
-              </table>
-    
-              <div style="margin-top: 30px; text-align: center;">
-                <a href="${viewUrl}" style="background-color: #333; color: #fff; text-decoration: none; padding: 12px 25px; border-radius: 5px; font-weight: bold; font-size: 14px;">Arızayı Görüntüle</a>
-              </div>
-            </div>
-            <div style="background-color: #f1f1f1; padding: 15px; text-align: center; font-size: 12px; color: #888;">
-              © 2025 Qore Yazılım Sistemleri. Bu e-posta otomatiktir.
-            </div>
-          </div>
-        `;
-
-        const mailOptions = {
-            from: `"Qore Arıza Sistemi" <batuhan@qorengine.com>`,
-            to: recipients.join(', '),
-            subject: `🔧 Yeni Arıza: ${model || title || "Bilinmeyen Cihaz"} (#${docId.substring(0, 6)})`,
-            html: htmlContent,
-        };
-
-        try {
-            await transporter.sendMail(mailOptions);
-            logger.info(`✅ Mail başarıyla gönderildi! ID: ${docId}`);
-        } catch (error) {
-            logger.error("❌ Mail gönderilirken hata oluştu:", error);
-        }
+        logger.info(`Skipping automatic email for fault report ${docId}; push and in-app notifications are used.`);
     });

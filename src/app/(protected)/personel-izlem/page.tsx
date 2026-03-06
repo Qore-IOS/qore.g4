@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Users, TrendingUp, TrendingDown, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Package, Timer, Filter, X, UserCircle, ArrowUp, ArrowDown, Minus, GitCompare, FileDown, HeartHandshake } from 'lucide-react';
+import { Loader2, Users, TrendingUp, Clock, Phone, Building, Wrench, FlaskConical, AlertTriangle, CheckCircle, Calendar, Timer, Filter, X, UserCircle, ArrowUp, ArrowDown, Minus, GitCompare, FileDown, HeartHandshake, ListFilter } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import {
   calculateAllPerformances,
@@ -100,6 +100,7 @@ function MetricItem({
   subValue,
   score,
   tooltip,
+  emphasize = false,
 }: {
   icon: React.ElementType;
   label: string;
@@ -107,6 +108,7 @@ function MetricItem({
   subValue?: string;
   score: number;
   tooltip?: string;
+  emphasize?: boolean;
 }) {
   const isNegative = score < 0;
 
@@ -114,21 +116,22 @@ function MetricItem({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-help">
-            <Icon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          <div className={cn(
+            "flex items-center gap-2 p-2 rounded-lg border border-border/70 bg-muted/20 hover:bg-muted/40 transition-colors cursor-help",
+            emphasize && "border-red-300 bg-red-50/50 dark:bg-red-950/20"
+          )}>
+            <Icon className={cn("h-4 w-4 flex-shrink-0", emphasize ? "text-red-500" : "text-muted-foreground")} />
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground truncate">{label}</p>
-              <p className="text-sm font-medium truncate">{value}</p>
+              <p className="text-sm font-semibold truncate">{value}</p>
               {subValue && <p className="text-xs text-muted-foreground">{subValue}</p>}
             </div>
             <Badge
               variant={isNegative ? 'destructive' : 'secondary'}
               className={cn(
                 "text-xs flex-shrink-0",
-                score >= 10 && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-                score >= 5 && score < 10 && "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-                score > 0 && score < 5 && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-                score === 0 && "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                !isNegative && score > 0 && "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+                score === 0 && "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
               )}
             >
               {isNegative ? score : `+${score.toFixed(1)}`}
@@ -252,6 +255,7 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
                   subValue="7 gün içinde"
                   score={metrics.recurrencePenalty}
                   tooltip="Çözümden sonra 7 gün içinde aynı cihazda tekrar arıza. Her tekrar -2 puan ceza."
+                  emphasize
                 />
               )}
               {(metrics.overdueMaintenanceTasks > 0 || metrics.overduePeriodicParts > 0) && (
@@ -268,8 +272,22 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
           </div>
 
           {/* Right side: Score circle */}
-          <div className="flex-shrink-0">
-            <ScoreCircle score={metrics.totalScore} />
+          <div className="flex-shrink-0 text-center space-y-1">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="cursor-help">
+                    <ScoreCircle score={metrics.totalScore} />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs max-w-xs">Skor bileşenleri: Arıza üstlenme, müdahale, çözüm, kurum ziyareti, kurumda müdahale, bakım katkısı, destek (+) ve tekrar/g gecikme cezaları (-).</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <Badge variant="outline" className="text-xs">
+              {metrics.totalScore >= 60 ? 'İyi' : metrics.totalScore >= 40 ? 'Orta' : 'Riskli'}
+            </Badge>
           </div>
         </div>
       </CardContent>
@@ -863,6 +881,12 @@ export default function PersonelIzlemPage() {
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [comparePersonnelId, setComparePersonnelId] = useState<string>('');
 
+  // View/sort states
+  const [roleFilter, setRoleFilter] = useState<'all' | 'teknik_servis' | 'aplikasyon'>('all');
+  const [scoreRange, setScoreRange] = useState<'all' | 'low' | 'mid' | 'high'>('all');
+  const [sortBy, setSortBy] = useState<'score' | 'resolution' | 'recurrence' | 'intervention'>('score');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
   // Selected personnel objects
   const selectedPersonnel = useMemo(() => {
     if (!selectedPersonnelId || selectedPersonnelId === 'all') return null;
@@ -936,14 +960,41 @@ export default function PersonelIzlemPage() {
 
   const hasActiveFilters = startDate || endDate || (selectedLabId && selectedLabId !== 'all') || (selectedPersonnelId && selectedPersonnelId !== 'all');
 
+  const applyQuickDate = (days: number) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - days + 1);
+    setStartDate(start.toISOString().slice(0, 10));
+    setEndDate(end.toISOString().slice(0, 10));
+  };
+
+  const displayedPerformances = useMemo(() => {
+    const filtered = performances.filter((p) => {
+      if (roleFilter !== 'all' && p.user.role !== roleFilter) return false;
+      if (scoreRange === 'low' && p.metrics.totalScore >= 40) return false;
+      if (scoreRange === 'mid' && (p.metrics.totalScore < 40 || p.metrics.totalScore >= 60)) return false;
+      if (scoreRange === 'high' && p.metrics.totalScore < 60) return false;
+      return true;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortBy === 'score') return b.metrics.totalScore - a.metrics.totalScore;
+      if (sortBy === 'resolution') return a.metrics.avgResolutionTimeMinutes - b.metrics.avgResolutionTimeMinutes;
+      if (sortBy === 'intervention') return a.metrics.avgInterventionStartTimeMinutes - b.metrics.avgInterventionStartTimeMinutes;
+      return b.metrics.recurrenceCount - a.metrics.recurrenceCount;
+    });
+
+    return sorted;
+  }, [performances, roleFilter, scoreRange, sortBy]);
+
   const handleExportPersonnelPdf = async () => {
-    if (performances.length === 0) {
+    if (displayedPerformances.length === 0) {
       toast({ title: 'Veri Yok', description: 'Dışa aktarılacak personel verisi yok.', variant: 'default' });
       return;
     }
     setExportLoading(true);
     try {
-      const personnelData = performances.map(p => ({
+      const personnelData = displayedPerformances.map(p => ({
         name: p.user.name || p.user.email,
         role: p.user.role === 'aplikasyon' ? 'Aplikasyon' : 'Teknik Servis',
         totalScore: Math.round(p.metrics.totalScore),
@@ -1032,12 +1083,12 @@ export default function PersonelIzlemPage() {
   }
 
   // Calculate averages
-  const avgScore = performances.length > 0
-    ? performances.reduce((sum, p) => sum + p.metrics.totalScore, 0) / performances.length
+  const avgScore = displayedPerformances.length > 0
+    ? displayedPerformances.reduce((sum, p) => sum + p.metrics.totalScore, 0) / displayedPerformances.length
     : 0;
 
-  const teknikPersonel = performances.filter(p => p.user.role === 'teknik_servis');
-  const aplikasyonPersonel = performances.filter(p => p.user.role === 'aplikasyon');
+  const teknikPersonel = displayedPerformances.filter(p => p.user.role === 'teknik_servis');
+  const aplikasyonPersonel = displayedPerformances.filter(p => p.user.role === 'aplikasyon');
 
   return (
     <div className="device-module-page p-4 space-y-6">
@@ -1058,7 +1109,7 @@ export default function PersonelIzlemPage() {
             <Button
               variant="secondary"
               onClick={handleExportPersonnelPdf}
-              disabled={exportLoading || performances.length === 0}
+              disabled={exportLoading || displayedPerformances.length === 0}
             >
               {exportLoading ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1183,6 +1234,25 @@ export default function PersonelIzlemPage() {
               </div>
             </div>
 
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
+              <Badge variant="outline" className="text-xs">Hızlı Filtre</Badge>
+              <Button size="sm" variant="outline" onClick={() => applyQuickDate(7)}>Son 7 gün</Button>
+              <Button size="sm" variant="outline" onClick={() => applyQuickDate(30)}>Son 30 gün</Button>
+              <Button size="sm" variant="outline" onClick={() => {
+                const now = new Date();
+                const first = new Date(now.getFullYear(), now.getMonth(), 1);
+                setStartDate(first.toISOString().slice(0, 10));
+                setEndDate(now.toISOString().slice(0, 10));
+              }}>Bu ay</Button>
+              <Button size="sm" variant={roleFilter === 'teknik_servis' ? 'default' : 'outline'} onClick={() => setRoleFilter('teknik_servis')}>Teknik Servis</Button>
+              <Button size="sm" variant={roleFilter === 'aplikasyon' ? 'default' : 'outline'} onClick={() => setRoleFilter('aplikasyon')}>Aplikasyon</Button>
+              <Button size="sm" variant={roleFilter === 'all' ? 'default' : 'outline'} onClick={() => setRoleFilter('all')}>Rol: Tümü</Button>
+              <Button size="sm" variant={scoreRange === 'low' ? 'default' : 'outline'} onClick={() => setScoreRange('low')}>Skor 0-40</Button>
+              <Button size="sm" variant={scoreRange === 'mid' ? 'default' : 'outline'} onClick={() => setScoreRange('mid')}>40-60</Button>
+              <Button size="sm" variant={scoreRange === 'high' ? 'default' : 'outline'} onClick={() => setScoreRange('high')}>60+</Button>
+              <Button size="sm" variant={scoreRange === 'all' ? 'default' : 'outline'} onClick={() => setScoreRange('all')}>Skor: Tümü</Button>
+            </div>
+
             {/* Compare mode selector */}
             {selectedPersonnel && isCompareMode && (
               <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
@@ -1240,28 +1310,54 @@ export default function PersonelIzlemPage() {
 
           {/* Summary stats - only show when no single personnel selected */}
           {!selectedPersonnel && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div className="p-4 rounded-lg bg-muted/50 text-center">
-                <p className="text-3xl font-bold">{performances.length}</p>
-                <p className="text-sm text-muted-foreground">Toplam Personel</p>
+            <>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <ListFilter className="h-4 w-4" />
+                  Liste Kontrolleri
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select value={sortBy} onValueChange={(v) => setSortBy(v as 'score' | 'resolution' | 'recurrence' | 'intervention')}>
+                    <SelectTrigger className="h-9 w-[210px]"><SelectValue placeholder="Sıralama" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="score">Skora göre (azalan)</SelectItem>
+                      <SelectItem value="resolution">Çözüm süresi (hızlı)</SelectItem>
+                      <SelectItem value="intervention">Müdahale başlatma (hızlı)</SelectItem>
+                      <SelectItem value="recurrence">Tekrar arıza (yüksek)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'outline'} onClick={() => setViewMode('grid')}>Grid</Button>
+                  <Button size="sm" variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')}>Liste</Button>
+                </div>
               </div>
-              <div className="p-4 rounded-lg bg-muted/50 text-center">
-                <p className="text-3xl font-bold">{avgScore.toFixed(1)}</p>
-                <p className="text-sm text-muted-foreground">Ortalama Puan</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6">
+                <div className="p-3 rounded-lg bg-muted/40 text-center">
+                  <p className="text-2xl font-bold">{displayedPerformances.length}</p>
+                  <p className="text-xs text-muted-foreground">Toplam Personel</p>
+                </div>
+                <div className="p-3 rounded-lg bg-muted/40 text-center">
+                  <p className="text-2xl font-bold">{avgScore.toFixed(1)}</p>
+                  <p className="text-xs text-muted-foreground">Ortalama Puan</p>
+                </div>
+                <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 text-center">
+                  <p className="text-2xl font-bold text-blue-600">{teknikPersonel.length}</p>
+                  <p className="text-xs text-muted-foreground">Teknik Servis</p>
+                </div>
+                <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-950/30 text-center">
+                  <p className="text-2xl font-bold text-purple-600">{aplikasyonPersonel.length}</p>
+                  <p className="text-xs text-muted-foreground">Aplikasyon</p>
+                </div>
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-center">
+                  <p className="text-2xl font-bold text-amber-700">{displayedPerformances.length ? (displayedPerformances.reduce((sum, p) => sum + p.metrics.recurrenceCount, 0) / displayedPerformances.length).toFixed(1) : '0.0'}</p>
+                  <p className="text-xs text-muted-foreground">Ortalama Tekrar Arıza</p>
+                </div>
               </div>
-              <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/30 text-center">
-                <p className="text-3xl font-bold text-blue-600">{teknikPersonel.length}</p>
-                <p className="text-sm text-muted-foreground">Teknik Servis</p>
-              </div>
-              <div className="p-4 rounded-lg bg-purple-50 dark:bg-purple-950/30 text-center">
-                <p className="text-3xl font-bold text-purple-600">{aplikasyonPersonel.length}</p>
-                <p className="text-sm text-muted-foreground">Aplikasyon</p>
-              </div>
-            </div>
+            </>
           )}
 
           {/* Content area - changes based on selection */}
-          {performances.length === 0 ? (
+          {displayedPerformances.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Users className="h-12 w-12 mx-auto mb-4 opacity-20" />
               <p>Henüz personel verisi bulunamadı.</p>
@@ -1285,8 +1381,11 @@ export default function PersonelIzlemPage() {
             />
           ) : (
             // All personnel grid view
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {performances.map((performance) => (
+            <div className={cn(
+              "gap-4",
+              viewMode === 'grid' ? "grid grid-cols-1 xl:grid-cols-2" : "flex flex-col"
+            )}>
+              {displayedPerformances.map((performance) => (
                 <PersonnelCard key={performance.user.uid} performance={performance} />
               ))}
             </div>

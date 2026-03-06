@@ -10,12 +10,12 @@ export const maxDuration = 60; // 60 seconds timeout
 export async function POST(request: NextRequest) {
   try {
     // Check API key first - use validated check from config
-    if (!process.env.ANTHROPIC_API_KEY) {
-      aiLogger.error('ANTHROPIC_API_KEY is not set');
+    if (!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY)) {
+      aiLogger.error('Gemini API key is not set');
       return NextResponse.json(
         {
           error: 'API anahtarı ayarlanmamış',
-          message: 'ANTHROPIC_API_KEY environment variable eksik. Lütfen .env.local dosyasına ekleyin.'
+          message: 'GEMINI_API_KEY (veya GOOGLE_API_KEY) environment variable eksik. Lütfen .env.local dosyasına ekleyin.'
         },
         { status: 500 }
       );
@@ -23,11 +23,11 @@ export async function POST(request: NextRequest) {
 
     // Check if API key format is valid
     if (!isApiKeyValid) {
-      aiLogger.error('ANTHROPIC_API_KEY format is invalid');
+      aiLogger.error('Gemini API key format is invalid');
       return NextResponse.json(
         {
           error: 'Geçersiz API anahtarı formatı',
-          message: 'API anahtarı geçersiz formatta. Anthropic API anahtarları "sk-ant-" ile başlamalıdır. Lütfen console.anthropic.com adresinden doğru anahtarı alın.'
+          message: "API anahtarı geçersiz formatta. Gemini API anahtarınızı kontrol edin. Lütfen Google AI Studio'dan doğru anahtarı alın."
         },
         { status: 500 }
       );

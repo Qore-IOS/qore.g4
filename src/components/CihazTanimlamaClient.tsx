@@ -20,9 +20,10 @@ import {
 import BackButton from '@/components/BackButton';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -30,6 +31,7 @@ import { cn, exportDevicesToPdf } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
+import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 
 // Periyot birimi etiketleri
 const PERIOD_UNIT_LABELS: Record<MaintenancePeriodUnit, string> = {
@@ -53,6 +55,7 @@ type NewPeriodicPartRow = {
   stokKodu: string;
   stokAdi: string;
   nextDueDate: string; // YYYY-MM-DD format
+  periodDays: string; // Gün bazlı periyot (string input)
   responsibilityType: PeriodicPartResponsibility;
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
@@ -67,6 +70,7 @@ type BulkPeriodicPartRow = {
   stokKodu: string;
   stokAdi: string;
   nextDueDate: string; // YYYY-MM-DD format
+  periodDays: string; // Gün bazlı periyot (string input)
   responsibilityType: PeriodicPartResponsibility;
   requiresOutgoingPartInfo: boolean;
   requiresSerialTracking: boolean;
@@ -87,6 +91,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [customPath, setCustomPath] = useState('');
   const { toast } = useToast();
   const { currentUserProfile } = useAuth();
+  const router = useRouter();
+
+  // Cihaz Laboratuvar Gruplandırma State
+  const [deviceLabPoolModalOpen, setDeviceLabPoolModalOpen] = useState(false);
 
   // Periyodik Bakım Planı State'leri
   const [maintenanceModalOpen, setMaintenanceModalOpen] = useState(false);
@@ -114,10 +122,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [bulkShowPeriodicParts, setBulkShowPeriodicParts] = useState(false);
   const [isSavingBulk, setIsSavingBulk] = useState(false);
 
-  // Laboratuvar seçimi state'leri
+  // Laboratuvar ve cihaz seçimi state'leri
   const [labSelectionModalOpen, setLabSelectionModalOpen] = useState(false);
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([]);
   const [labsWithDevices, setLabsWithDevices] = useState<Hospital[]>([]);
+  const [selectionMode, setSelectionMode] = useState<'lab' | 'device'>('lab');
+  const [deviceSearchQuery, setDeviceSearchQuery] = useState('');
 
   const fetchDevices = async () => {
     setLoading(true);
@@ -265,6 +276,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       stokKodu: '',
       stokAdi: '',
       nextDueDate: '',
+      periodDays: '',
       responsibilityType: 'teknik_servis',
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
@@ -351,6 +363,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       stokKodu: '',
       stokAdi: '',
       nextDueDate: '',
+      periodDays: '',
       responsibilityType: 'teknik_servis',
       requiresOutgoingPartInfo: false,
       requiresSerialTracking: true,
@@ -389,9 +402,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       return;
     }
 
-    const invalidPartRow = bulkPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate);
+    const invalidPartRow = bulkPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate || !r.periodDays || Number(r.periodDays) <= 0);
     if (invalidPartRow) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün ve tarih seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün, tarih ve geçerli gün periyodu girin.', variant: 'destructive' });
       return;
     }
 
@@ -405,21 +418,30 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const filteredLabs = hospitals.filter(h => labIdsWithDevices.has(h.id));
     setLabsWithDevices(filteredLabs);
     setSelectedLabIds([]);
+    setSelectedDeviceIds([]);
+    setSelectionMode('lab');
+    setDeviceSearchQuery('');
     setLabSelectionModalOpen(true);
   };
 
-  // Toplu bakım planı kaydetme - 2. adım: seçilen laboratuvarlara kaydet
+  // Toplu bakım planı kaydetme - 2. adım: seçilen laboratuvar veya cihazlara kaydet
   const saveBulkMaintenancePlans = async () => {
-    if (selectedLabIds.length === 0) {
+    if (selectionMode === 'lab' && selectedLabIds.length === 0) {
       toast({ title: 'Laboratuvar Seçin', description: 'Lütfen en az bir laboratuvar seçin.', variant: 'destructive' });
+      return;
+    }
+    if (selectionMode === 'device' && selectedDeviceIds.length === 0) {
+      toast({ title: 'Cihaz Seçin', description: 'Lütfen en az bir cihaz seçin.', variant: 'destructive' });
       return;
     }
 
     setIsSavingBulk(true);
 
     try {
-      // Seçilen laboratuvarlardaki cihazları bul
-      const targetDevices = devices.filter(d => selectedLabIds.includes(d.hospitalId || ''));
+      // Seçilen laboratuvarlardaki veya doğrudan seçilen cihazları bul
+      const targetDevices = selectionMode === 'lab'
+        ? devices.filter(d => selectedLabIds.includes(d.hospitalId || ''))
+        : devices.filter(d => selectedDeviceIds.includes(d.id));
 
       if (targetDevices.length === 0) {
         toast({ title: 'Cihaz Bulunamadı', description: 'Seçilen laboratuvarlarda cihaz bulunamadı.', variant: 'destructive' });
@@ -459,6 +481,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             stokAdi: row.stokAdi,
             periodValue: 1,
             periodUnit: 'ay',
+            periodDays: Number(row.periodDays),
             nextDueDate: row.nextDueDate ? Timestamp.fromDate(new Date(row.nextDueDate + 'T00:00:00')) : null,
             responsibilityType: row.responsibilityType,
             requiresOutgoingPartInfo: row.requiresOutgoingPartInfo,
@@ -499,6 +522,30 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const toggleDeviceSelection = (deviceId: string) => {
+    setSelectedDeviceIds(prev =>
+      prev.includes(deviceId) ? prev.filter(id => id !== deviceId) : [...prev, deviceId]
+    );
+  };
+
+  const toggleAllDevices = () => {
+    const filteredDevices = deviceSearchQuery.trim()
+      ? devices.filter(d => {
+          const q = deviceSearchQuery.toLowerCase();
+          const hospitalName = hospitals.find(h => h.id === d.hospitalId)?.name || '';
+          return (d.cihazAdi || d.model || '').toLowerCase().includes(q) ||
+            (d.brand || '').toLowerCase().includes(q) ||
+            (d.seriNumarasi || '').toLowerCase().includes(q) ||
+            hospitalName.toLowerCase().includes(q);
+        })
+      : devices;
+    if (selectedDeviceIds.length === filteredDevices.length) {
+      setSelectedDeviceIds([]);
+    } else {
+      setSelectedDeviceIds(filteredDevices.map(d => d.id));
+    }
+  };
+
   const saveMaintenancePlans = async () => {
     if (!maintenanceDevice) return;
 
@@ -515,9 +562,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
 
     // Validate periodic part change rows
-    const invalidPartRow = newPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate);
+    const invalidPartRow = newPeriodicPartRows.find(r => !r.productCodeId || !r.nextDueDate || !r.periodDays || Number(r.periodDays) <= 0);
     if (invalidPartRow) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün ve tarih seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen tüm periyodik parça değişimlerinde ürün, tarih ve geçerli gün periyodu girin.', variant: 'destructive' });
       return;
     }
 
@@ -552,6 +599,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           stokAdi: row.stokAdi,
           periodValue: 1,
           periodUnit: 'ay',
+          periodDays: Number(row.periodDays),
           nextDueDate: row.nextDueDate ? Timestamp.fromDate(new Date(row.nextDueDate + 'T00:00:00')) : null,
           responsibilityType: row.responsibilityType,
           requiresOutgoingPartInfo: row.requiresOutgoingPartInfo,
@@ -615,7 +663,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           periodicParts: deviceParts.map(p => ({
             partName: p.stokAdi,
             partCode: p.stokKodu,
-            period: p.nextDueDate?.toDate ? `Her ayın ${new Date(p.nextDueDate.toDate()).getDate()}'i` : `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
+            period: p.periodDays ? `${p.periodDays} gün` : (p.nextDueDate?.toDate ? new Date(p.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`),
             responsibility: RESPONSIBILITY_LABELS[p.responsibilityType],
           })),
         };
@@ -638,6 +686,20 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-headline">Cihaz Tanımlamaları</h1>
         <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setDeviceLabPoolModalOpen(true)}
+          >
+            <Server className="h-4 w-4 mr-2" />
+            Gruplandırma
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => router.push('/cihaz-tanimlamalari/periyodik-bakim-yonetimi')}
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Periyodik Bakım Yönetimi
+          </Button>
           <Button
             variant="secondary"
             onClick={openBulkModal}
@@ -994,7 +1056,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                           <p className="text-xs text-muted-foreground font-mono">{part.stokKodu}</p>
                           <div className="flex gap-2 mt-1">
                             <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                              {part.nextDueDate?.toDate ? new Date(part.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${part.periodValue} ${PERIOD_UNIT_LABELS[part.periodUnit]}`}
+                              {part.periodDays ? `${part.periodDays} gün` : (part.nextDueDate?.toDate ? new Date(part.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${part.periodValue} ${PERIOD_UNIT_LABELS[part.periodUnit]}`)}
                             </span>
                             <span className="text-xs bg-secondary px-1.5 py-0.5 rounded">
                               {RESPONSIBILITY_LABELS[part.responsibilityType]}
@@ -1082,6 +1144,18 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                             className="w-40"
                             placeholder="Tarih seçin"
                           />
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={row.periodDays}
+                              onChange={(e) => updatePeriodicPartRow(row.id, 'periodDays', e.target.value.replace(/[^0-9]/g, ''))}
+                              className="w-24"
+                              placeholder="Gün"
+                            />
+                            <span className="text-xs text-muted-foreground">gün</span>
+                          </div>
                           <Button variant="ghost" size="icon" onClick={() => removePeriodicPartRow(row.id)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
@@ -1357,11 +1431,23 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                           onChange={(e) => updateBulkPeriodicPartRow(row.id, 'nextDueDate', e.target.value)}
                           className="w-40"
                         />
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={row.periodDays}
+                            onChange={(e) => updateBulkPeriodicPartRow(row.id, 'periodDays', e.target.value.replace(/[^0-9]/g, ''))}
+                            className="w-24"
+                            placeholder="Gün"
+                          />
+                          <span className="text-xs text-muted-foreground">gün</span>
+                        </div>
                       </div>
 
                       {row.nextDueDate && (
                         <p className="text-xs text-muted-foreground italic">
-                          Her ayın {new Date(row.nextDueDate + 'T00:00:00').getDate()}'inde değişmeli
+                          {new Date(row.nextDueDate + 'T00:00:00').toLocaleDateString('tr-TR')} tarihinden itibaren her {row.periodDays || '?'} günde bir değişmeli
                         </p>
                       )}
 
@@ -1433,80 +1519,194 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         </DialogContent>
       </Dialog>
 
-      {/* Laboratuvar Seçimi Modal */}
+      {/* Laboratuvar / Cihaz Seçimi Modal */}
       <Dialog open={labSelectionModalOpen} onOpenChange={setLabSelectionModalOpen}>
         <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5" />
-              Laboratuvar Seçimi
+              Hedef Seçimi
             </DialogTitle>
           </DialogHeader>
 
-          <p className="text-sm text-muted-foreground">
-            Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir.
-          </p>
-
-          <div className="flex items-center gap-2 border-b pb-3 mb-3">
-            <Checkbox
-              id="select-all-labs"
-              checked={selectedLabIds.length === labsWithDevices.length && labsWithDevices.length > 0}
-              onCheckedChange={toggleAllLabs}
-            />
-            <Label htmlFor="select-all-labs" className="text-sm font-medium cursor-pointer">
-              Tümünü Seç ({labsWithDevices.length} laboratuvar)
-            </Label>
+          {/* Selection Mode Toggle */}
+          <div className="flex gap-2 border-b pb-3">
+            <Button
+              variant={selectionMode === 'lab' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => { setSelectionMode('lab'); setSelectedDeviceIds([]); }}
+            >
+              <Building2 className="h-4 w-4 mr-1" />
+              Laboratuvar Seçimi
+            </Button>
+            <Button
+              variant={selectionMode === 'device' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => { setSelectionMode('device'); setSelectedLabIds([]); }}
+            >
+              <Wrench className="h-4 w-4 mr-1" />
+              Cihaz Seçimi
+            </Button>
           </div>
 
-          <ScrollArea className="max-h-[40vh]">
-            <div className="space-y-2">
-              {labsWithDevices.map(lab => {
-                const deviceCount = devices.filter(d => d.hospitalId === lab.id).length;
-                return (
-                  <div
-                    key={lab.id}
-                    className={cn(
-                      "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors",
-                      selectedLabIds.includes(lab.id) ? "bg-primary/10 border-primary" : "hover:bg-muted/50"
-                    )}
-                    onClick={() => toggleLabSelection(lab.id)}
-                  >
-                    <Checkbox
-                      checked={selectedLabIds.includes(lab.id)}
-                      onCheckedChange={() => toggleLabSelection(lab.id)}
-                    />
-                    <div className="flex-1">
-                      <p className="font-medium text-sm">{lab.name}</p>
-                      <p className="text-xs text-muted-foreground">{deviceCount} cihaz</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </ScrollArea>
-
-          {selectedLabIds.length > 0 && (
-            <div className="bg-muted/50 rounded-md p-3 text-sm">
-              <p className="font-medium">Özet:</p>
-              <p className="text-muted-foreground">
-                {selectedLabIds.length} laboratuvar seçildi &middot;{' '}
-                {devices.filter(d => selectedLabIds.includes(d.hospitalId || '')).length} cihaza uygulanacak
+          {selectionMode === 'lab' ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir.
               </p>
-            </div>
+
+              <div className="flex items-center gap-2 border-b pb-3 mb-3">
+                <Checkbox
+                  id="select-all-labs"
+                  checked={selectedLabIds.length === labsWithDevices.length && labsWithDevices.length > 0}
+                  onCheckedChange={toggleAllLabs}
+                />
+                <Label htmlFor="select-all-labs" className="text-sm font-medium cursor-pointer">
+                  Tümünü Seç ({labsWithDevices.length} laboratuvar)
+                </Label>
+              </div>
+
+              <ScrollArea className="max-h-[40vh]">
+                <div className="space-y-2">
+                  {labsWithDevices.map(lab => {
+                    const deviceCount = devices.filter(d => d.hospitalId === lab.id).length;
+                    return (
+                      <div
+                        key={lab.id}
+                        className={cn(
+                          "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors",
+                          selectedLabIds.includes(lab.id) ? "bg-primary/10 border-primary" : "hover:bg-muted/50"
+                        )}
+                        onClick={() => toggleLabSelection(lab.id)}
+                      >
+                        <Checkbox
+                          checked={selectedLabIds.includes(lab.id)}
+                          onCheckedChange={() => toggleLabSelection(lab.id)}
+                        />
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">{lab.name}</p>
+                          <p className="text-xs text-muted-foreground">{deviceCount} cihaz</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+
+              {selectedLabIds.length > 0 && (
+                <div className="bg-muted/50 rounded-md p-3 text-sm">
+                  <p className="font-medium">Özet:</p>
+                  <p className="text-muted-foreground">
+                    {selectedLabIds.length} laboratuvar seçildi &middot;{' '}
+                    {devices.filter(d => selectedLabIds.includes(d.hospitalId || '')).length} cihaza uygulanacak
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Bakım planının atanacağı cihazları tek tek seçin.
+              </p>
+
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Cihaz adı, marka, seri no veya lab ara..."
+                  value={deviceSearchQuery}
+                  onChange={(e) => setDeviceSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 border-b pb-3 mb-3">
+                <Checkbox
+                  id="select-all-devices"
+                  checked={selectedDeviceIds.length === (deviceSearchQuery.trim() ? devices.filter(d => {
+                    const q = deviceSearchQuery.toLowerCase();
+                    const hospitalName = hospitals.find(h => h.id === d.hospitalId)?.name || '';
+                    return (d.cihazAdi || d.model || '').toLowerCase().includes(q) ||
+                      (d.brand || '').toLowerCase().includes(q) ||
+                      (d.seriNumarasi || '').toLowerCase().includes(q) ||
+                      hospitalName.toLowerCase().includes(q);
+                  }).length : devices.length) && devices.length > 0}
+                  onCheckedChange={toggleAllDevices}
+                />
+                <Label htmlFor="select-all-devices" className="text-sm font-medium cursor-pointer">
+                  Tümünü Seç ({devices.length} cihaz)
+                </Label>
+              </div>
+
+              <ScrollArea className="max-h-[40vh]">
+                <div className="space-y-2">
+                  {devices
+                    .filter(d => {
+                      if (!deviceSearchQuery.trim()) return true;
+                      const q = deviceSearchQuery.toLowerCase();
+                      const hospitalName = hospitals.find(h => h.id === d.hospitalId)?.name || '';
+                      return (d.cihazAdi || d.model || '').toLowerCase().includes(q) ||
+                        (d.brand || '').toLowerCase().includes(q) ||
+                        (d.seriNumarasi || '').toLowerCase().includes(q) ||
+                        hospitalName.toLowerCase().includes(q);
+                    })
+                    .map(device => {
+                      const hospitalName = hospitals.find(h => h.id === device.hospitalId)?.name || '';
+                      return (
+                        <div
+                          key={device.id}
+                          className={cn(
+                            "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors",
+                            selectedDeviceIds.includes(device.id) ? "bg-primary/10 border-primary" : "hover:bg-muted/50"
+                          )}
+                          onClick={() => toggleDeviceSelection(device.id)}
+                        >
+                          <Checkbox
+                            checked={selectedDeviceIds.includes(device.id)}
+                            onCheckedChange={() => toggleDeviceSelection(device.id)}
+                          />
+                          <div className="flex-1">
+                            <p className="font-medium text-sm">{device.cihazAdi || device.model || `${device.brand} ${device.model}`}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {hospitalName} &middot; SN: {device.seriNumarasi || '-'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </ScrollArea>
+
+              {selectedDeviceIds.length > 0 && (
+                <div className="bg-muted/50 rounded-md p-3 text-sm">
+                  <p className="font-medium">Özet:</p>
+                  <p className="text-muted-foreground">
+                    {selectedDeviceIds.length} cihaz seçildi
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
           <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setLabSelectionModalOpen(false)}>Geri</Button>
             <Button
               onClick={saveBulkMaintenancePlans}
-              disabled={isSavingBulk || selectedLabIds.length === 0}
+              disabled={isSavingBulk || (selectionMode === 'lab' ? selectedLabIds.length === 0 : selectedDeviceIds.length === 0)}
             >
               {isSavingBulk ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Kaydet ({selectedLabIds.length} laboratuvar)
+              Kaydet ({selectionMode === 'lab' ? `${selectedLabIds.length} laboratuvar` : `${selectedDeviceIds.length} cihaz`})
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cihaz Laboratuvar Gruplandırma Modal */}
+      <DeviceLabPoolModal
+        open={deviceLabPoolModalOpen}
+        onOpenChange={setDeviceLabPoolModalOpen}
+        hospitals={hospitals}
+        devices={devices}
+      />
     </div>
   );
 }

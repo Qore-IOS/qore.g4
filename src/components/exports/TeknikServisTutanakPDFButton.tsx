@@ -275,7 +275,9 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
           ['Laboratuvar:', txt(hospital?.name, useTurkish)],
           ['Cihaz:', txt(`${device.cihazAdi} (SN: ${device.seriNumarasi})`, useTurkish)],
           [txt('İşlemi Yapan:', useTurkish), personnelStr],
-          ['Tarih / Saat:', format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy HH:mm')]
+          ['Tarih / Saat:', actionRecord.baslangicTarihi && actionRecord.baslangicSaati
+            ? `${actionRecord.baslangicTarihi.split('-').reverse().join('.')} ${actionRecord.baslangicSaati}`
+            : format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy HH:mm')]
       ];
 
       autoTable(doc, {

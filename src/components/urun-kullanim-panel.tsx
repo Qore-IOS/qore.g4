@@ -1034,6 +1034,7 @@ export default function UrunKullanimPanel() {
         openedByUid: currentUser?.uid || '',
         openedByName: currentUserProfile?.name || '',
         openDescription: customFaultDescription,
+        title: customFaultTitle.trim(),
         faultDefinitionId: undefined,
         faultName: customFaultTitle.trim(),
         deviceImageUrl: selectedDevice.imageUrl || undefined,
