@@ -102,6 +102,8 @@ function normalizeStatus(status: string): DeviceFaultStatus {
 
 type FaultDoc = DeviceFaultReport;
 
+type StockSourceTab = 'personal' | 'pool';
+
 
 type AiSuggestion = {
   summary?: string;
@@ -182,6 +184,8 @@ export default function FaultDetailPage() {
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
   const [partSearchQuery, setPartSearchQuery] = useState('');
   const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
+  const [stockSourceTab, setStockSourceTab] = useState<StockSourceTab>('personal');
+  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PersonalStockItem | null>(null);
   const [manualPartCode, setManualPartCode] = useState('');
   const [manualPartName, setManualPartName] = useState('');
   const [manualSerialNumber, setManualSerialNumber] = useState('');
@@ -677,16 +681,6 @@ export default function FaultDetailPage() {
   // Backward-compat alias: bazı eski bundle'larda dependency adı poolStockItems olarak kalabiliyor.
   const poolStockItems = personalStock;
   const filteredStock = useMemo(() => {
-    if (!partSearchQuery) return poolStockItems;
-    const q = partSearchQuery.toLowerCase();
-    return poolStockItems.filter(p =>
-      p.stokKodu?.toLowerCase().includes(q) ||
-      p.stokAdi?.toLowerCase().includes(q) ||
-      p.serialNumber?.toLowerCase().includes(q)
-    );
-  }, [poolStockItems, partSearchQuery]);
-
-  const filteredPoolStock = useMemo(() => {
     if (!partSearchQuery) return poolStockItems;
     const q = partSearchQuery.toLowerCase();
     return poolStockItems.filter(p =>
