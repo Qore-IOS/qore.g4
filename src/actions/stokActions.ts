@@ -246,14 +246,14 @@ export async function getPaginatedDepotStock(params: {
     return { rows: [], totalRows: 0, totalPages: 0, currentPage: 1, columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] } };
   }
 
-  // Query all items for this depot (single where to avoid composite index requirement)
+  // Composite query: depotId + isShipped (requires Firestore composite index)
   const stockQuery = query(
     collection(db, 'depoStok'),
-    where('depotId', '==', depotId)
+    where('depotId', '==', depotId),
+    where('isShipped', '==', false)
   );
   const snapshot = await getDocs(stockQuery);
-  // Filter isShipped on the server side
-  const allItems = snapshot.docs.map(processDoc).filter(item => !item.isShipped);
+  const allItems = snapshot.docs.map(processDoc);
 
   // Group by (stokKodu, lotNumarasi, miad)
   const grouped: Record<string, GroupedStockRow> = {};
@@ -343,8 +343,11 @@ export async function getPaginatedDepotStock(params: {
  */
 export async function getExpiringProductsCount(thresholdDays: number = 45): Promise<number> {
   try {
-    // Query all items, filter isShipped in code to avoid composite index requirement
-    const stockQuery = query(collection(db, 'depoStok'));
+    // Composite query: isShipped (requires Firestore index)
+    const stockQuery = query(
+      collection(db, 'depoStok'),
+      where('isShipped', '==', false)
+    );
     const snapshot = await getDocs(stockQuery);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -354,7 +357,6 @@ export async function getExpiringProductsCount(thresholdDays: number = 45): Prom
 
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
-      if (data.isShipped) continue;
       const miadStr = typeof data.miad === 'string' ? data.miad : '';
       if (!miadStr) continue;
       const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
