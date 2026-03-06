@@ -41,7 +41,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Label } from '@/components/ui/label';
 
 // Icons
-import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download } from 'lucide-react';
 
 // Firebase
 import { db } from '@/lib/firebase';
@@ -49,7 +49,9 @@ import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapsh
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
-import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
+import { parseAnyBarcode, resolveProductFromParsed, decodeBulkSerialQrPayload, encodeBulkSerialQrPayload } from '@/lib/barcode';
+import QRCode from 'qrcode';
+import jsPDF from 'jspdf';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 
 // Logging & Validation
@@ -104,38 +106,8 @@ type ScanRow = ScannedItem & {
   key?: string;
   /** Child items for grouped rows */
   items?: ScannedItem[];
-};
-
-/**
- * QR transfer item structure
- */
-type QrItem = {
-  /** Product stock code */
-  k: string;
-  /** Product name */
-  a: string;
-  /** Lot number */
-  l?: string;
-  /** Expiry date */
-  m?: string;
-  /** Serial number */
-  s?: string;
-  /** Quantity */
-  q: number;
-};
-
-/**
- * QR transfer payload structure
- */
-type QrPayload = {
-  t: 'transfer';
-  v: number;
-  id: string;
-  d: string;
-  src: string;
-  dst: string;
-  cmp: string;
-  items: QrItem[];
+  /** Whether item already included in a bulk serial QR assignment */
+  bulkQrAssigned?: boolean;
 };
 
 /**
@@ -168,19 +140,6 @@ type MalKabulHeader = {
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
-
-/**
- * Decode URL-safe base64 string
- * @param b64url - URL-safe base64 encoded string
- * @returns Decoded string
- */
-function fromB64Url(b64url: string): string {
-  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
-  const bin = typeof window !== 'undefined' ? atob(b64) : Buffer.from(b64, 'base64').toString('binary');
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
-}
 
 /**
  * Convert a Date or unknown value to Firestore Timestamp
@@ -276,6 +235,7 @@ function upsertGroupedRow(
       adet: delta,
       isGroup: true,
       key: key,
+      bulkQrAssigned: false,
     };
     return [row, ...prev];
   });
@@ -383,6 +343,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
   const [showManualInline, setShowManualInline] = useState(false);
   
@@ -488,20 +449,67 @@ export default function AnaPanel(props: AnaPanelProps) {
     return () => unsub();
   }, [activeSession]);
 
-  const processScan = useCallback(async (barcodeData: string, source = 'barcode') => {
+  const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
+    const scanCorrelationId = createCorrelationId();
+    const trimmedData = (barcodeData || '').trim();
+    if (!trimmedData) {
+      malKabulLogger.warn('Scan ignored: empty payload', { source, isBulkScanMode }, { correlationId: scanCorrelationId });
+      return;
+    }
+
+    const isBulkItem = source === 'bulk_item';
+    malKabulLogger.info('Scan received', {
+      source,
+      isBulkItem,
+      isBulkScanMode,
+      payloadLength: trimmedData.length,
+      hasBulkHeader: trimmedData.includes('QORE_SERIAL_BULK_V1|'),
+      payloadPreview: trimmedData.slice(0, 120),
+    }, { correlationId: scanCorrelationId });
+
+    const bulkBarcodes = decodeBulkSerialQrPayload(trimmedData);
+    malKabulLogger.info('Bulk decode result', {
+      source,
+      isBulkMode: isBulkScanMode,
+      decodedCount: bulkBarcodes?.length || 0,
+      decodedPreview: (bulkBarcodes || []).slice(0, 5),
+    }, { correlationId: scanCorrelationId });
+
+    if (bulkBarcodes) {
+      for (const serialBarcode of bulkBarcodes) {
+        await processScan(serialBarcode, 'bulk_item');
+      }
+      setIsBulkScanMode(false);
+      malKabulLogger.info('Bulk scan processed successfully', {
+        itemCount: bulkBarcodes.length,
+      }, { correlationId: scanCorrelationId });
+      toast({ title: 'Toplu barkod okundu', description: `${bulkBarcodes.length} ürün tek seferde işlendi.` });
+      return;
+    }
+
+    if (isBulkScanMode && !isBulkItem) {
+      malKabulLogger.warn('Bulk mode reject: payload is not recognized as bulk format', {
+        payloadLength: trimmedData.length,
+        payloadPreview: trimmedData.slice(0, 160),
+      }, { correlationId: scanCorrelationId });
+      toast({
+        title: 'Toplu barkod bekleniyor',
+        description: 'Bu modda sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar okutulabilir.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsProcessingScan(true);
     try {
-        if (barcodeData.includes('/qr/transfer?d=')) {
-            const url = new URL(barcodeData);
-            const dataParam = url.searchParams.get('d');
-            if (dataParam) {
-                const json = fromB64Url(dataParam);
-                const payload = JSON.parse(json) as QrPayload;
-            }
+        const parsed: ParsedGeneric | null = parseAnyBarcode(trimmedData, barcodeFormats);
+        if (!parsed) {
+          malKabulLogger.warn('Single barcode parse failed', {
+            source,
+            payloadPreview: trimmedData.slice(0, 160),
+          }, { correlationId: scanCorrelationId });
+          throw new Error('Barkod tanımlı formatlarla eşleşmiyor.');
         }
-
-        const parsed: ParsedGeneric | null = parseAnyBarcode(barcodeData, barcodeFormats);
-        if (!parsed) throw new Error('Barkod tanımlı formatlarla eşleşmiyor.');
 
         const resolved = resolveProductFromParsed(parsed, productCodes as any);
         if (!resolved.product) throw new Error(`Barkod numarası/referans herhangi bir ürünle eşleşmedi.`);
@@ -541,10 +549,10 @@ export default function AnaPanel(props: AnaPanelProps) {
             }
 
             const newItem: ScanRow = {
-              id: generateId(), barkod: barcodeData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
+              id: generateId(), barkod: trimmedData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
               rafAdresi: '', irsaliyeNumarasi: '', isSelected: false, timestamp: new Date(), isProcessed: false,
-              adet: 1, isGroup: false
+              adet: 1, isGroup: false, bulkQrAssigned: false
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
             // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi>
@@ -559,7 +567,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           // It's a lot-based or quantity-based item
           upsertGroupedRow(
             setScannedItems,
-            { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: barcodeData },
+            { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: trimmedData },
             (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === (lotNumarasi || '') && r.miad === (miadFormatted || '')),
             1
           );
@@ -577,6 +585,11 @@ export default function AnaPanel(props: AnaPanelProps) {
         }
 
     } catch (err: any) {
+      malKabulLogger.error('Scan processing failed', err, {
+        source,
+        isBulkMode: isBulkScanMode,
+        payloadPreview: trimmedData.slice(0, 160),
+      }, { correlationId: scanCorrelationId });
       playFeedback(true);
       toast({ title: 'Ayrıştırma Hatası', description: err.message || 'Barkod işlenemedi.', variant: 'destructive' });
       if (source === 'barcode') {
@@ -586,7 +599,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     } finally {
       setIsProcessingScan(false);
     }
-  }, [toast, productCodes, barcodeFormats, existingDepotSerials]);
+  }, [toast, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
 
   useHidScanner({
     enabled: !isPreCheckModalOpen && !isProcessingScan && !isCameraScannerOpen && !showManualInline,
@@ -707,12 +720,32 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [addressAssignmentInput, setAddressAssignmentInput] = useState<string>('');
   const [irsaliyeNoInput, setIrsaliyeNoInput] = useState<string>('');
   const [malKabulIsLoading, setMalKabulIsLoading] = useState(false);
+  const [isGeneratingBulkQr, setIsGeneratingBulkQr] = useState(false);
 
   const selectedItemsCount = useMemo(() => {
     return scannedItems.filter(i => i.isSelected && !i.isProcessed).length;
   }, [scannedItems]);
   
   const unprocessedScannedItems = scannedItems.filter(i => !i.isProcessed).length;
+
+  const selectedItemsForBulkQr = useMemo(() => {
+    return scannedItems.filter(i => i.isSelected && !i.isProcessed);
+  }, [scannedItems]);
+
+  const selectedItemsAreSerialTracked = useMemo(() => {
+    if (selectedItemsForBulkQr.length === 0) return false;
+    return selectedItemsForBulkQr.every(i => {
+      const stokKodu = i.stokKodu || '';
+      const trackingMode = (stokKodu && productTracking[stokKodu]) || resolveDefaultTrackingMode({ stokAdi: i.stokAdi } as any);
+      return trackingMode === 'serial';
+    });
+  }, [selectedItemsForBulkQr, productTracking]);
+
+  const selectedSerialItemsForBulkQr = useMemo(() => {
+    return selectedItemsForBulkQr.filter(i => !i.bulkQrAssigned && !!i.seriNumarasi && !!i.barkod);
+  }, [selectedItemsForBulkQr]);
+
+  const canAssignBulkQr = selectedItemsAreSerialTracked && selectedSerialItemsForBulkQr.length > 0;
   
   const getBrandFor = (stockCode: string, name: string) => {
     const p = productCodes.find(p => p.stokKodu === stockCode) as any;
@@ -847,6 +880,72 @@ export default function AnaPanel(props: AnaPanelProps) {
     toast({ title: 'Başarılı', description: `Seçili ürünlere "${irsaliyeNoInput.trim()}" irsaliye no atandı.` });
     setIrsaliyeNoInput('');
     setIsIrsaliyeModalOpen(false);
+  };
+
+  const handleAssignBulkSerialQr = async () => {
+    if (selectedItemsForBulkQr.length === 0) {
+      toast({ title: 'Uyarı', description: 'Lütfen barkod atanacak ürünleri seçin.' });
+      return;
+    }
+
+    if (!canAssignBulkQr) {
+      toast({
+        title: 'Geçersiz seçim',
+        description: 'Toplu barkod atama için tüm seçim seri takipli olmalı ve en az bir ürüne daha önce barkod atanmamış olmalıdır.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const barcodeValues = selectedSerialItemsForBulkQr.map(item => (item.barkod || '').trim()).filter(Boolean);
+    if (barcodeValues.length === 0) {
+      toast({ title: 'Hata', description: 'Seçili ürünlerde barkod bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    setIsGeneratingBulkQr(true);
+    try {
+      const encodedUrl = encodeBulkSerialQrPayload(barcodeValues);
+      malKabulLogger.info('Bulk QR payload generated', {
+        barcodeCount: barcodeValues.length,
+        encodedLength: encodedUrl.length,
+        encodedPreview: encodedUrl.slice(0, 180),
+      });
+      const qrDataUrl = await QRCode.toDataURL(encodedUrl, {
+        errorCorrectionLevel: 'M',
+        width: 512,
+        margin: 1,
+      });
+
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      pdf.setFontSize(14);
+      pdf.text('Toplu Seri Barkod', 15, 18);
+      pdf.setFontSize(10);
+      pdf.text(`Toplam ürün: ${barcodeValues.length}`, 15, 24);
+      pdf.text(`Tarih: ${new Date().toLocaleString('tr-TR')}`, 15, 29);
+      pdf.addImage(qrDataUrl, 'PNG', 15, 35, 80, 80);
+      pdf.setFontSize(8);
+      const previewLines = barcodeValues.slice(0, 25).map((barcode, index) => `${index + 1}. ${barcode}`);
+      pdf.text(previewLines, 100, 40);
+      if (barcodeValues.length > 25) {
+        pdf.text(`... (+${barcodeValues.length - 25} barkod)`, 100, 40 + (25 * 4));
+      }
+      const fileName = `toplu-seri-barkod-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.pdf`;
+      pdf.save(fileName);
+
+      const selectedIds = new Set(selectedSerialItemsForBulkQr.map(i => i.id));
+      setScannedItems(prev => prev.map(item =>
+        selectedIds.has(item.id)
+          ? { ...item, bulkQrAssigned: true, isSelected: false }
+          : item
+      ));
+
+      toast({ title: 'Başarılı', description: `${barcodeValues.length} ürün için toplu barkod oluşturuldu ve PDF indirildi.` });
+    } catch (error: any) {
+      toast({ title: 'Barkod üretilemedi', description: safeStr(error?.message) || 'Toplu barkod oluşturulurken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsGeneratingBulkQr(false);
+    }
   };
 
   const performGoodsReceipt = async (itemsToProcess: ScanRow[]) => {
@@ -1295,6 +1394,15 @@ export default function AnaPanel(props: AnaPanelProps) {
               İrsaliye Ata
             </button>
             <button
+              onClick={handleAssignBulkSerialQr}
+              disabled={malKabulIsLoading || isGeneratingBulkQr || !canAssignBulkQr}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-xs sm:text-sm font-medium transition-colors disabled:opacity-50"
+              title={!canAssignBulkQr ? 'Yalnızca seri takipli seçimlerde, barkod atanmamış ürünler için kullanılabilir' : undefined}
+            >
+              {isGeneratingBulkQr ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
+              Barkod Ata ({selectedSerialItemsForBulkQr.length})
+            </button>
+            <button
               onClick={() => setScannedItems(prev => prev.map(item => ({ ...item, isSelected: false })))}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-xs sm:text-sm font-medium transition-colors"
             >
@@ -1332,6 +1440,28 @@ export default function AnaPanel(props: AnaPanelProps) {
                 <CheckSquare className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Seç ({unprocessedScannedItems})</span>
                 <span className="sm:hidden">{unprocessedScannedItems}</span>
+              </button>
+              <button
+                onClick={() => {
+                  const next = !isBulkScanMode;
+                  setIsBulkScanMode(next);
+                  toast({
+                    title: next ? 'Toplu barkod modu açık' : 'Toplu barkod modu kapalı',
+                    description: next
+                      ? 'Sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar kabul edilecek.'
+                      : 'Normal barkod okuma moduna dönüldü.',
+                  });
+                }}
+                disabled={malKabulIsLoading}
+                className={cn(
+                  "cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed",
+                  isBulkScanMode && "bg-[var(--dashboard-accent)] text-white"
+                )}
+                title="Sadece toplu barkod okutma modunu aç/kapat"
+              >
+                <QrCode className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Toplu Barkod Oku</span>
+                <span className="sm:hidden">Toplu</span>
               </button>
               <button
                 onClick={clearAllScannedItems}
@@ -1416,7 +1546,15 @@ export default function AnaPanel(props: AnaPanelProps) {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                        <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                          {group.bulkQrAssigned && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
+                              <Download className="h-2.5 w-2.5" />
+                              Barkod atandı
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <p className="text-xs text-[var(--dashboard-text)] truncate">{group.lotNumarasi || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
                       <p className="text-xs text-[var(--dashboard-text)] truncate">{group.miad || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
@@ -1475,7 +1613,15 @@ export default function AnaPanel(props: AnaPanelProps) {
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                              <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                                {group.bulkQrAssigned && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
+                                    <Download className="h-2.5 w-2.5" />
+                                    Barkod atandı
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
                               {hasSerials ? (
