@@ -199,11 +199,6 @@ export default function FaultDetailPage() {
   const [faultPartChanges, setFaultPartChanges] = useState<FaultPartChange[]>([]);
   const [isSavingPart, setIsSavingPart] = useState(false);
 
-  // Pool stock state
-  const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
-  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
-  const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool'>('personal');
-
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -1185,14 +1180,8 @@ export default function FaultDetailPage() {
             
 
           <div className="space-y-3 pt-4 border-t">
-            <div>
-              <p className="font-medium">Arıza Başlığı</p>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.title || fault.faultName || '-'}</p>
-            </div>
-            <div>
-              <p className="font-medium">Açıklama</p>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
-            </div>
+            <p className="font-medium">Açıklama</p>
+            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
           </div>
 
           <div className="space-y-3 pt-4 border-t">
