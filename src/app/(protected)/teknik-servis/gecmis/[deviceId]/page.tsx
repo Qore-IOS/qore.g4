@@ -71,6 +71,8 @@ type ActionFormRecord = {
   personnelSignature?: string;
   technicianSignature?: string;
   selectedMaintenanceTasks?: { id: string; taskName: string }[];
+  baslangicTarihi?: string;
+  baslangicSaati?: string;
 };
 
 const OPERATION_LABELS: Record<OperationType, string> = {
@@ -341,7 +343,9 @@ export default function TeknikServisGecmisPage() {
                               )}
                             </TableCell>
                             <TableCell className="text-sm">
-                              {format(rec.createdAt.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr })}
+                              {rec.baslangicTarihi && rec.baslangicSaati
+                                ? `${rec.baslangicTarihi.split('-').reverse().join('.')} ${rec.baslangicSaati}`
+                                : format(rec.createdAt.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr })}
                             </TableCell>
                             <TableCell>{rec.createdByName}</TableCell>
                             <TableCell className="text-sm">
