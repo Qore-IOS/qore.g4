@@ -18,6 +18,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose
 } from '@/components/ui/dialog';
 import BackButton from '@/components/BackButton';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
@@ -688,7 +689,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                 <TableCell>
                   {dev.imageUrl ? (
                   <Image
-                    src={`/${dev.imageUrl}`}
+                    src={resolveImageSrc(dev.imageUrl)}
                     alt={`${dev.brand} ${dev.model}`}
                     width={100}
                     height={100}
@@ -768,7 +769,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             {effectiveImageUrl && (
               <div className="flex justify-center">
                  <Image
-                    src={`/${effectiveImageUrl}`}
+                    src={resolveImageSrc(effectiveImageUrl)}
                     alt="Preview"
                     width={200}
                     height={200}
