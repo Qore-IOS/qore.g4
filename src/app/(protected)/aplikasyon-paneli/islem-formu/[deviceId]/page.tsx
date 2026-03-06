@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
-import WizardFormShell from '@/components/islem-formu/WizardFormShell';
+import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
