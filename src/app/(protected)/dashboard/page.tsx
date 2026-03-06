@@ -11,6 +11,7 @@ export default function DashboardPage() {
         productCodes,
         tuketimKayitlari,
         efficiencyHistoryRecords,
+        isLoading
     } = useDashboardData();
 
     if (isLoading) {
