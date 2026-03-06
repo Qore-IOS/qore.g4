@@ -2510,12 +2510,14 @@ export default function IslemFormuPage() {
             </div>
           )}
           <div className="wizard-header-info">
-            <div className="wizard-header-title">Teknik Servis İşlem Formu</div>
-            <div className="wizard-header-device">{device.cihazAdi} <span style={{ fontSize: '11px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>Seri No: {device.seriNumarasi}</span></div>
+            <div className="wizard-header-title-row">
+              <div className="wizard-header-title">Teknik Servis İşlem Formu</div>
+            </div>
+            <div className="wizard-header-device">{device.cihazAdi} <span className="wizard-header-sn">Seri No: {device.seriNumarasi}</span></div>
             <div className="wizard-header-meta">
-              <span><strong>Lab:</strong> {hospital?.name || '-'}</span>
-              <span> · <strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
-              <span> · <strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
+              <span className="wizard-header-meta-tag"><strong>Lab:</strong> {hospital?.name || '-'}</span>
+              <span className="wizard-header-meta-tag"><strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
+              <span className="wizard-header-meta-tag"><strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
             </div>
           </div>
           <button
