@@ -674,15 +674,17 @@ export default function FaultDetailPage() {
   };
 
   // Yedek parça değişim fonksiyonları
+  // Backward-compat alias: bazı eski bundle'larda dependency adı poolStockItems olarak kalabiliyor.
+  const poolStockItems = personalStock;
   const filteredStock = useMemo(() => {
-    if (!partSearchQuery) return personalStock;
+    if (!partSearchQuery) return poolStockItems;
     const q = partSearchQuery.toLowerCase();
-    return personalStock.filter(p =>
+    return poolStockItems.filter(p =>
       p.stokKodu?.toLowerCase().includes(q) ||
       p.stokAdi?.toLowerCase().includes(q) ||
       p.serialNumber?.toLowerCase().includes(q)
     );
-  }, [personalStock, partSearchQuery]);
+  }, [poolStockItems, partSearchQuery]);
 
   const filteredPoolStock = useMemo(() => {
     if (!partSearchQuery) return poolStockItems;
