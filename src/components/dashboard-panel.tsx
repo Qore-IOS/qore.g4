@@ -594,10 +594,10 @@ export default function DashboardPanel({
           <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
             <Link href="/satin-alma/analiz-planlama" className="flex-1 flex flex-col">
               <Card className="glass-card flex-1 flex flex-col cursor-pointer">
-                <CardContent className="flex-1 flex flex-col justify-center pt-4">
+                <CardContent className="flex-1 flex flex-col justify-center pt-4 px-2">
                   <div
                     ref={calendarScrollRef}
-                    className="max-h-[140px] space-y-1.5 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    className="max-h-[140px] space-y-1 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   >
                     {personalCalendarKpi.timelineItems.length === 0 ? (
                       <p className="text-xs text-muted-foreground text-center">Takvim kaydı bulunmuyor.</p>
@@ -607,7 +607,7 @@ export default function DashboardPanel({
                           key={item.id}
                           data-today={item.type === 'today'}
                           className={cn(
-                            'dashboard-timeline-row px-3 py-1.5',
+                            'dashboard-timeline-row px-4 py-2 w-full',
                             item.type === 'today' && 'dashboard-timeline-row-active text-center text-sm font-semibold text-slate-700',
                             item.type === 'past' && 'text-xs text-slate-500 line-through',
                             item.type === 'future' && 'text-xs text-slate-500'
@@ -656,11 +656,7 @@ export default function DashboardPanel({
         </div>
 
         <Card className="glass-card">
-          <CardHeader>
-            <CardTitle>Paneller</CardTitle>
-            <CardDescription>Yetkiniz dahilinde erişebileceğiniz modüller</CardDescription>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12">
               {visiblePanels.map((panel) => {
                 const Icon = panel.icon;
