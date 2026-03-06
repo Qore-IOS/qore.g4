@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft, Settings2, CalendarDays } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
@@ -55,6 +55,15 @@ interface PersonnelVisitDetail {
   institutionName: string;
   visitCount: number;
   visitType: 'teknik_servis' | 'aplikasyon';
+  records: PersonnelVisitRecord[];
+}
+
+interface PersonnelVisitRecord {
+  id: string;
+  institutionName: string;
+  visitType: 'teknik_servis' | 'aplikasyon';
+  date: Date | null;
+  source: 'form' | 'fault';
 }
 
 export default function KurumZiyaretAnaliziPage() {
@@ -79,6 +88,7 @@ export default function KurumZiyaretAnaliziPage() {
   const [workStartTime, setWorkStartTime] = useState('09:00');
   const [workEndTime, setWorkEndTime] = useState('18:00');
   const [workSettingsOpen, setWorkSettingsOpen] = useState(false);
+  const [selectedVisitDetail, setSelectedVisitDetail] = useState<PersonnelVisitDetail | null>(null);
 
   const toDateValue = (value: unknown): Date | null => {
     if (!value) return null;
@@ -126,6 +136,38 @@ export default function KurumZiyaretAnaliziPage() {
     const inShift = isWithinWorkHours(date);
     return shiftFilter === 'inside' ? inShift : !inShift;
   };
+
+  const formatDateTime = (date: Date | null) => {
+    if (!date) return '-';
+    return new Intl.DateTimeFormat('tr-TR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  };
+
+  useEffect(() => {
+    const fetchWorkHours = async () => {
+      try {
+        const settingsRef = doc(db, 'appSettings', 'kurumZiyaretAnalizi');
+        const settingsSnap = await getDoc(settingsRef);
+        if (!settingsSnap.exists()) return;
+        const data = settingsSnap.data();
+        if (typeof data.workStartTime === 'string') {
+          setWorkStartTime(data.workStartTime);
+        }
+        if (typeof data.workEndTime === 'string') {
+          setWorkEndTime(data.workEndTime);
+        }
+      } catch (error) {
+        console.error('Mesai saati ayarları alınamadı:', error);
+      }
+    };
+
+    fetchWorkHours();
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -360,27 +402,69 @@ export default function KurumZiyaretAnaliziPage() {
     if (!selectedChartPersonnelUid) return [] as PersonnelVisitDetail[];
 
     const detailsMap = new Map<string, PersonnelVisitDetail>();
-    const addDetail = (institutionName: string, visitType: 'teknik_servis' | 'aplikasyon') => {
+    const addDetail = (
+      institutionName: string,
+      visitType: 'teknik_servis' | 'aplikasyon',
+      record: Omit<PersonnelVisitRecord, 'institutionName' | 'visitType'>,
+    ) => {
       const normalizedName = institutionName || 'Bilinmeyen Kurum';
       const detailKey = `${visitType}_${normalizedName}`;
-      const current = detailsMap.get(detailKey) || { institutionName: normalizedName, visitType, visitCount: 0 };
+      const current = detailsMap.get(detailKey) || { institutionName: normalizedName, visitType, visitCount: 0, records: [] };
       current.visitCount += 1;
+      current.records.push({
+        ...record,
+        institutionName: normalizedName,
+        visitType,
+      });
       detailsMap.set(detailKey, current);
     };
 
     filteredData.filteredTeknik
       .filter((f) => f.createdByUid === selectedChartPersonnelUid)
-      .forEach((f) => addDetail(f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), 'teknik_servis'));
+      .forEach((f) => addDetail(
+        f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
+        'teknik_servis',
+        {
+          id: f.id,
+          date: f.createdAt,
+          source: 'form',
+        },
+      ));
 
     filteredData.filteredApp
       .filter((f) => f.createdByUid === selectedChartPersonnelUid)
-      .forEach((f) => addDetail(f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), 'aplikasyon'));
+      .forEach((f) => addDetail(
+        f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
+        'aplikasyon',
+        {
+          id: f.id,
+          date: f.createdAt,
+          source: 'form',
+        },
+      ));
 
     filteredData.filteredFaults
       .filter((f) => f.interventionType === 'kurum_ziyaret' && f.assignedToUid === selectedChartPersonnelUid)
-      .forEach((f) => addDetail(f.labName || (f.labId ? hospitalNamesMap.get(f.labId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'), f.faultType));
+      .forEach((f) => addDetail(
+        f.labName || (f.labId ? hospitalNamesMap.get(f.labId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
+        f.faultType,
+        {
+          id: f.id,
+          date: f.closedAt,
+          source: 'fault',
+        },
+      ));
 
-    return Array.from(detailsMap.values()).sort((a, b) => b.visitCount - a.visitCount || a.institutionName.localeCompare(b.institutionName, 'tr'));
+    return Array.from(detailsMap.values())
+      .map((detail) => ({
+        ...detail,
+        records: detail.records.sort((a, b) => {
+          const first = a.date ? a.date.getTime() : 0;
+          const second = b.date ? b.date.getTime() : 0;
+          return second - first;
+        }),
+      }))
+      .sort((a, b) => b.visitCount - a.visitCount || a.institutionName.localeCompare(b.institutionName, 'tr'));
   }, [selectedChartPersonnelUid, filteredData, hospitalNamesMap]);
 
   const selectedChartPersonnel = useMemo(() => {
@@ -667,7 +751,12 @@ export default function KurumZiyaretAnaliziPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={Boolean(selectedChartPersonnelUid)} onOpenChange={(open) => !open && setSelectedChartPersonnelUid(null)}>
+      <Dialog open={Boolean(selectedChartPersonnelUid)} onOpenChange={(open) => {
+        if (!open) {
+          setSelectedChartPersonnelUid(null);
+          setSelectedVisitDetail(null);
+        }
+      }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>
@@ -694,7 +783,16 @@ export default function KurumZiyaretAnaliziPage() {
                     <TableCell className="text-center">
                       <Badge className={cn('text-xs', getRoleBadgeColor(detail.visitType))}>{getRoleLabel(detail.visitType)}</Badge>
                     </TableCell>
-                    <TableCell className="text-center font-semibold">{detail.visitCount}</TableCell>
+                    <TableCell className="text-center font-semibold">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-auto p-0 font-semibold text-primary hover:text-primary"
+                        onClick={() => setSelectedVisitDetail(detail)}
+                      >
+                        {detail.visitCount}
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
                 {selectedPersonnelVisitDetails.length === 0 && (
@@ -731,7 +829,68 @@ export default function KurumZiyaretAnaliziPage() {
             </div>
           </div>
           <div className="flex justify-end">
-            <Button onClick={() => setWorkSettingsOpen(false)}>Kaydet</Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await setDoc(doc(db, 'appSettings', 'kurumZiyaretAnalizi'), {
+                    workStartTime,
+                    workEndTime,
+                    updatedAt: serverTimestamp(),
+                  }, { merge: true });
+                } catch (error) {
+                  console.error('Mesai ayarı kaydedilemedi:', error);
+                } finally {
+                  setWorkSettingsOpen(false);
+                }
+              }}
+            >
+              Kaydet
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedVisitDetail)} onOpenChange={(open) => !open && setSelectedVisitDetail(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedVisitDetail?.institutionName || 'Kurum'} - İşlem Detayları
+            </DialogTitle>
+            <DialogDescription>
+              Seçilen ziyaret kaydına ait işlem tarihleri ve bitiş saatleri.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[420px] overflow-auto border rounded-md">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-14">#</TableHead>
+                  <TableHead>Tür</TableHead>
+                  <TableHead>Kaynak</TableHead>
+                  <TableHead className="text-right">Tarih / Bitiş Saati</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {selectedVisitDetail?.records.map((record, index) => (
+                  <TableRow key={`${record.source}-${record.id}-${index}`}>
+                    <TableCell>{index + 1}</TableCell>
+                    <TableCell>
+                      <Badge className={cn('text-xs', getRoleBadgeColor(record.visitType))}>{getRoleLabel(record.visitType)}</Badge>
+                    </TableCell>
+                    <TableCell>{record.source === 'fault' ? 'Arıza Kapanış' : 'Form Kaydı'}</TableCell>
+                    <TableCell className="text-right font-medium">{formatDateTime(record.date)}</TableCell>
+                  </TableRow>
+                ))}
+                {!selectedVisitDetail?.records.length && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground py-6">
+                      Detay kayıt bulunamadı.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
           </div>
         </DialogContent>
       </Dialog>
