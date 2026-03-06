@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CheckCircle2, DollarSign, Wallet, BarChart3 } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -26,7 +26,7 @@ import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query, where, getCountFromServer, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
-import { useQuery } from '@tanstack/react-query';
+import { getExpiringProductsCount } from '@/actions/stokActions';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -51,11 +51,17 @@ export default function DashboardPanel({
   const { theme } = useTheme();
   const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
   const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
+  const [expiringProductsCount, setExpiringProductsCount] = useState<number | null>(null);
 
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
 
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Fetch expiring products count (server-side)
+  useEffect(() => {
+    getExpiringProductsCount(45).then(setExpiringProductsCount).catch(() => setExpiringProductsCount(0));
+  }, []);
 
   useEffect(() => {
     const faultQuery = query(collection(db, 'deviceFaultReports'));
@@ -224,13 +230,17 @@ export default function DashboardPanel({
       .filter((task) => task.date > todayKey)
       .map((task) => ({ id: task.id, label: task.label, type: 'future' as const }));
 
+    const todayTasks = sortedTasks
+      .filter((task) => task.date === todayKey && !task.completed)
+      .map((task) => ({ id: task.id, label: task.label, type: 'today-task' as const }));
+
     const timelineItems = [
       ...pastCompleted,
       { id: 'today-marker', label: format(currentDate, "dd MMMM yyyy", { locale: tr }) + " • Bugün", type: 'today' as const },
       ...futureTasks,
     ];
 
-    return { timelineItems };
+    return { timelineItems, todayTasks };
   }, [purchasingTasks, currentUserProfile?.uid]);
 
   const todayTasks = useMemo(() => {
@@ -448,10 +458,10 @@ export default function DashboardPanel({
 
   return (
     <>
-      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-4 sm:pt-6")}>
+      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-6 sm:pt-8")}>
 
         <h1 className={cn(
-          "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-2 sm:mt-4",
+          "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-2 sm:mt-3",
           theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-slate-800'
         )}>
           {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
@@ -512,52 +522,11 @@ export default function DashboardPanel({
               </CardContent>
             </Card>
           </motion.div>
-
-          {/* Maliyet Kartı */}
-          <motion.div {...motionProps}>
-            <Card className="glass-card h-full flex flex-col">
-              <CardContent className="flex-1 flex flex-col divide-y divide-border/50">
-                {/* Anlık Stok Maliyeti */}
-                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
-                  <div className="flex items-center gap-1.5">
-                    <Wallet className="h-4 w-4 text-blue-500" />
-                    <p className="text-xs font-semibold text-blue-600">Anlık Stok Maliyeti</p>
-                  </div>
-                  <p className="text-2xl font-bold text-slate-700">
-                    {totalStockCost > 0 ? `€${totalStockCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Tüm depolar + laboratuvarlar</p>
-                </div>
-                {/* Dünün Tüketim Maliyeti */}
-                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
-                  <div className="flex items-center gap-1.5">
-                    <DollarSign className="h-4 w-4 text-emerald-500" />
-                    <p className="text-xs font-semibold text-emerald-600">Dünün Tüketim Maliyeti</p>
-                  </div>
-                  <p className="text-2xl font-bold text-slate-700">
-                    {yesterdayConsumptionCost > 0 ? `€${yesterdayConsumptionCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Tüm laboratuvar tüketimi</p>
-                </div>
-                {/* Ortalama Verimlilik */}
-                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
-                  <div className="flex items-center gap-1.5">
-                    <BarChart3 className="h-4 w-4 text-violet-500" />
-                    <p className="text-xs font-semibold text-violet-600">Ort. Verimlilik</p>
-                  </div>
-                  <p className="text-2xl font-bold text-slate-700">
-                    {avgEfficiency != null ? `%${avgEfficiency.toFixed(1)}` : '—'}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Tüm havuzların ortalaması</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
           
-          {/* Fault KPIs (top) + Expiring Products (bottom) */}
           <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
+            {/* Cihaz Arızaları - Üst yarı */}
             <Card className="glass-card flex-1 flex flex-col">
-              <CardContent className="flex-1 grid grid-cols-1 gap-3 sm:grid-cols-3 items-center justify-center">
+              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3">
                 {faultStatusCards.map((item) => {
                   const Icon = item.icon;
                   const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
@@ -578,26 +547,33 @@ export default function DashboardPanel({
                 })}
               </CardContent>
             </Card>
-            <Card className="glass-card flex-1 flex flex-col">
-              <CardContent className="flex-1 flex flex-col items-center justify-center py-4 gap-3">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-orange-500" />
-                  <p className="text-sm font-semibold text-orange-600">Miadı Yaklaşan Ürünler</p>
-                </div>
-                <p className="text-5xl font-bold text-slate-700">{expiringProductCount}</p>
-                <p className="text-xs text-muted-foreground">Tüm depolarda 45 gün ve altı</p>
-              </CardContent>
-            </Card>
+            {/* Miad Yaklaşan Ürünler - Alt yarı */}
+            <Link href="/stok-yonetimi">
+              <Card className="glass-card cursor-pointer">
+                <CardContent className="pt-4 pb-4 flex items-center gap-3">
+                  <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-3 h-14 w-14 shrink-0">
+                    <AlertTriangle className="h-6 w-6 text-amber-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold text-amber-600 uppercase tracking-wider">Miad ≤ 45 Gün</p>
+                    <p className="text-2xl font-bold text-slate-700 mt-0.5">
+                      {expiringProductsCount !== null ? expiringProductsCount : '…'}
+                    </p>
+                    <p className="text-[10px] text-slate-500">Tüm depolarda yaklaşan ürün sayısı</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
           </motion.div>
 
-          {/* Calendar (top) + Today's Tasks (bottom) */}
           <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
-            <Link href="/satin-alma/analiz-planlama" className="flex-1 flex flex-col">
+            {/* Takvim - Üst yarı */}
+            <Link href="/satin-alma/analiz-planlama" className="block">
               <Card className="glass-card flex-1 flex flex-col cursor-pointer">
-                <CardContent className="flex-1 flex flex-col justify-center pt-4 px-2">
+                <CardContent className="pt-4 pb-3">
                   <div
                     ref={calendarScrollRef}
-                    className="max-h-[140px] space-y-1 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    className="h-[120px] space-y-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   >
                     {personalCalendarKpi.timelineItems.length === 0 ? (
                       <p className="text-xs text-muted-foreground text-center">Takvim kaydı bulunmuyor.</p>
@@ -607,10 +583,10 @@ export default function DashboardPanel({
                           key={item.id}
                           data-today={item.type === 'today'}
                           className={cn(
-                            'dashboard-timeline-row px-4 py-2 w-full',
+                            'dashboard-timeline-row px-3 py-1.5',
                             item.type === 'today' && 'dashboard-timeline-row-active text-center text-sm font-semibold text-slate-700',
-                            item.type === 'past' && 'text-xs text-slate-500 line-through',
-                            item.type === 'future' && 'text-xs text-slate-500'
+                            item.type === 'past' && 'text-[11px] text-slate-500 line-through',
+                            item.type === 'future' && 'text-[11px] text-slate-500'
                           )}
                         >
                           {item.label}
@@ -621,35 +597,24 @@ export default function DashboardPanel({
                 </CardContent>
               </Card>
             </Link>
+            {/* Bugünün Görevleri - Alt yarı */}
             <Card className="glass-card flex-1 flex flex-col">
-              <CardContent className="flex-1 flex flex-col items-center justify-center py-4 gap-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                  <p className="text-sm font-semibold text-slate-600">Bugünün Görevleri</p>
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <CalendarCheck className="h-4 w-4 text-emerald-600" />
+                  <p className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">Bugünün Görevleri</p>
                 </div>
-                {todayTasks.length === 0 ? (
-                  <p className="text-4xl font-bold text-slate-400">0</p>
-                ) : (
-                  <p className="text-5xl font-bold text-slate-700">{todayTasks.length}</p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  {todayTasks.length === 0 ? 'Bugün için görev bulunmuyor' : `${todayTasks.length} görev planlandı`}
-                </p>
-                {todayTasks.length > 0 && (
-                  <div className="w-full max-h-[60px] space-y-1 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {todayTasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className={cn(
-                          'dashboard-timeline-row px-3 py-1 text-xs text-center',
-                          task.completed ? 'text-slate-400 line-through' : 'text-slate-600'
-                        )}
-                      >
-                        {task.startTime} • {task.title}
+                <div className="space-y-1.5 max-h-[100px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {personalCalendarKpi.todayTasks.length === 0 ? (
+                    <p className="text-xs text-slate-400 py-2">Bugün için planlanmış görev yok.</p>
+                  ) : (
+                    personalCalendarKpi.todayTasks.map((task) => (
+                      <div key={task.id} className="dashboard-timeline-row px-3 py-1.5 text-[11px] text-slate-600">
+                        {task.label}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ))
+                  )}
+                </div>
               </CardContent>
             </Card>
           </motion.div>

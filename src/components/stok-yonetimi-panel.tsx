@@ -1,35 +1,19 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, ChangeEvent } from 'react';
-import dynamic from 'next/dynamic';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   Depot,
   ProductCode,
   DepoStokItem,
   MinMaxRule,
-  AddressDefinition,
-  ConsumptionRecord,
   Hospital,
 } from '@/lib/types';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,39 +24,29 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, where, writeBatch, doc, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, where, writeBatch, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { AlertTriangle, PackageSearch, Search, Warehouse, Trash2, FileSpreadsheet, Loader2, Map as MapIcon, SlidersHorizontal, X, Building, ShoppingCart, Truck, ChevronUp, ChevronDown, History, Pencil, Save, XCircle, Filter, Nfc, ListChecks, Undo } from 'lucide-react';
+import {
+  PackageSearch, Warehouse, FileSpreadsheet, Loader2,
+  SlidersHorizontal, X, Filter, Nfc, ChevronUp, ChevronDown,
+  ChevronLeft, ChevronRight, MoreHorizontal, Eye,
+  FileDown, ListChecks, BarChart3, ChevronsUpDown
+} from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
-import { differenceInDays, parse, compareAsc, isValid } from 'date-fns';
-import BorcDepotPanel from './BorcDepotPanel';
-import debounce from 'lodash.debounce';
+import { differenceInDays, parse, isValid } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
-import { filterOperationalSourceDepots } from '@/lib/depot-access';
-import { saveManualChangeSnapshot } from '@/lib/depotCountHistory';
 import { Badge } from './ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from './ui/scroll-area';
-import MinMaxSettingsPanel from './MinMaxSettingsPanel';
-import MapDefinitionModal from './MapDefinitionModal';
 import NfcStockQueryModal from './NfcStockQueryModal';
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { generateId } from '@/lib/utils';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { getPaginatedDepotStock, type GroupedStockRow, type PaginatedStockResult } from '@/actions/stokActions';
 
-interface GroupedStock {
-  [key: string]: {
-    stokAdi: string;
-    stokKodu: string;
-    lotNumarasi: string;
-    miad: string;
-    anaBirim: string;
-    rafAdresi: string;
-    items: DepoStokItem[];
-  };
-}
-
-interface Filter {
+/* ────────────────────────────────────────────
+   Filter Dialog (kept for marka/urunGrubu filters)
+   ──────────────────────────────────────────── */
+interface FilterSpec {
   group: 'marka' | 'urunGrubu';
   value: string;
 }
@@ -81,9 +55,9 @@ const FiltreDialog: React.FC<{
   isOpen: boolean;
   onClose: () => void;
   availableGroups: Record<string, string[]>;
-  onApply: (filters: Filter[]) => void;
+  onApply: (filters: FilterSpec[]) => void;
 }> = ({ isOpen, onClose, availableGroups, onApply }) => {
-  const [selectedFilters, setSelectedFilters] = useState<Filter[]>([]);
+  const [selectedFilters, setSelectedFilters] = useState<FilterSpec[]>([]);
 
   const handleDragStart = (e: React.DragEvent, group: 'marka' | 'urunGrubu', value: string) => {
     e.dataTransfer.setData('application/json', JSON.stringify({ group, value }));
@@ -91,7 +65,7 @@ const FiltreDialog: React.FC<{
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const data = JSON.parse(e.dataTransfer.getData('application/json')) as Filter;
+    const data = JSON.parse(e.dataTransfer.getData('application/json')) as FilterSpec;
     if (!selectedFilters.some(f => f.group === data.group && f.value === data.value)) {
       setSelectedFilters(prev => [...prev, data]);
     }
@@ -99,698 +73,758 @@ const FiltreDialog: React.FC<{
 
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
 
-  const removeFilter = (filterToRemove: Filter) => {
+  const removeFilter = (filterToRemove: FilterSpec) => {
     setSelectedFilters(prev => prev.filter(f => !(f.group === filterToRemove.group && f.value === filterToRemove.value)));
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-3xl">
-            <DialogHeader>
-                <DialogTitle className="text-xl font-headline">Stoğu Filtrele</DialogTitle>
-                <DialogDescription>Filtrelemek istediğiniz değerleri sağdaki alandan soldaki "Seçilen Filtreler" kutusuna sürükleyin.</DialogDescription>
-            </DialogHeader>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
-                <div
-                    className="border-2 border-dashed border-muted rounded-lg p-4 min-h-[250px] flex flex-col gap-2"
-                    onDrop={handleDrop}
-                    onDragOver={handleDragOver}
-                >
-                    <h3 className="font-semibold">Seçilen Filtreler</h3>
-                    {selectedFilters.length === 0 ? (
-                        <div className="flex-1 flex items-center justify-center">
-                            <p className="text-sm text-muted-foreground">Filtreleri buraya sürükleyin</p>
-                        </div>
-                    ) : (
-                        <div className="flex flex-wrap gap-2">
-                            {selectedFilters.map(f => (
-                                <div key={`${f.group}-${f.value}`} className="flex items-center bg-primary/10 text-primary-foreground px-3 py-1.5 rounded-full text-sm font-medium">
-                                    <span>{f.value}</span>
-                                    <button onClick={() => removeFilter(f)} className="ml-2 rounded-full hover:bg-primary/20 p-0.5">
-                                        <X className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-headline">Stoğu Filtrele</DialogTitle>
+          <DialogDescription>Filtrelemek istediğiniz değerleri sağdaki alandan soldaki kutusuna sürükleyin.</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+          <div className="border-2 border-dashed border-muted rounded-lg p-4 min-h-[250px] flex flex-col gap-2" onDrop={handleDrop} onDragOver={handleDragOver}>
+            <h3 className="font-semibold">Seçilen Filtreler</h3>
+            {selectedFilters.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-sm text-muted-foreground">Filtreleri buraya sürükleyin</p>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {selectedFilters.map(f => (
+                  <div key={`${f.group}-${f.value}`} className="flex items-center bg-primary/10 text-primary-foreground px-3 py-1.5 rounded-full text-sm font-medium">
+                    <span>{f.value}</span>
+                    <button onClick={() => removeFilter(f)} className="ml-2 rounded-full hover:bg-primary/20 p-0.5"><X className="h-4 w-4" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="space-y-4 max-h-[300px] overflow-y-auto p-1 glass-scroll">
+            {Object.entries(availableGroups).map(([group, items]: [string, string[]]) => (
+              <div key={group}>
+                <h3 className="font-semibold mb-2">{group === 'marka' ? 'Marka' : 'Ürün Grubu'}</h3>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {items.map((item: string) => (
+                    <div key={item} draggable onDragStart={e => handleDragStart(e, group as 'marka' | 'urunGrubu', item)} className="px-3 py-1 bg-background border rounded-md cursor-move text-sm shadow-sm hover:bg-accent hover:text-accent-foreground">{item}</div>
+                  ))}
                 </div>
-                <div className="space-y-4 max-h-[300px] overflow-y-auto p-1 glass-scroll">
-                    {Object.entries(availableGroups).map(([group, items]) => (
-                        <div key={group}>
-                          <h3 className="font-semibold mb-2">{group === 'marka' ? 'Marka' : 'Ürün Grubu'}</h3>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                              {items.map(item => (
-                                  <div
-                                      key={item}
-                                      draggable
-                                      onDragStart={e => handleDragStart(e, group as 'marka' | 'urunGrubu', item)}
-                                      className="px-3 py-1 bg-background border rounded-md cursor-move text-sm shadow-sm hover:bg-accent hover:text-accent-foreground"
-                                  >
-                                      {item}
-                                  </div>
-                              ))}
-                          </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-            <DialogFooter>
-                <Button variant="outline" onClick={onClose}>İptal</Button>
-                <Button onClick={() => { onApply(selectedFilters); onClose(); }}>Filtreleri Uygula</Button>
-            </DialogFooter>
-        </DialogContent>
+              </div>
+            ))}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>İptal</Button>
+          <Button onClick={() => { onApply(selectedFilters); onClose(); }}>Filtreleri Uygula</Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 };
 
+/* ────────────────────────────────────────────
+   Excel-Like Column Filter Popover
+   ──────────────────────────────────────────── */
+function ColumnFilterPopover({
+  column,
+  label,
+  uniqueValues,
+  selectedValues,
+  onApply,
+  sortField,
+  sortDirection,
+  onSort,
+}: {
+  column: string;
+  label: string;
+  uniqueValues: string[];
+  selectedValues: string[];
+  onApply: (column: string, values: string[]) => void;
+  sortField: string;
+  sortDirection: 'asc' | 'desc';
+  onSort: (field: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [localSelected, setLocalSelected] = useState<string[]>(selectedValues);
+  const [filterText, setFilterText] = useState('');
+  const isActive = selectedValues.length > 0;
+  const isSorted = sortField === column;
 
+  useEffect(() => {
+    if (open) setLocalSelected(selectedValues);
+  }, [open, selectedValues]);
+
+  const filteredValues = filterText
+    ? uniqueValues.filter(v => v.toLowerCase().includes(filterText.toLowerCase()))
+    : uniqueValues;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className={cn(
+          "flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider transition-colors group",
+          isActive ? "text-orange-600" : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+        )}>
+          {label}
+          <span className="flex flex-col items-center ml-0.5">
+            {isSorted ? (
+              sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronsUpDown className="h-3 w-3 opacity-40 group-hover:opacity-100" />
+            )}
+          </span>
+          {isActive && (
+            <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">{selectedValues.length}</span>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-0" align="start">
+        {/* Sort buttons */}
+        <div className="flex border-b">
+          <button
+            className={cn("flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs hover:bg-[var(--dashboard-surface-2)]", isSorted && sortDirection === 'asc' && "bg-[var(--dashboard-surface-2)] font-bold")}
+            onClick={() => { onSort(column); setOpen(false); }}
+          >
+            <ChevronUp className="h-3 w-3" /> A→Z
+          </button>
+          <button
+            className={cn("flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs hover:bg-[var(--dashboard-surface-2)]", isSorted && sortDirection === 'desc' && "bg-[var(--dashboard-surface-2)] font-bold")}
+            onClick={() => { onSort(column); setOpen(false); }}
+          >
+            <ChevronDown className="h-3 w-3" /> Z→A
+          </button>
+        </div>
+        {/* Filter search */}
+        <div className="p-2 border-b">
+          <Input
+            placeholder="Filtrele..."
+            value={filterText}
+            onChange={e => setFilterText(e.target.value)}
+            className="h-7 text-xs"
+          />
+        </div>
+        {/* Select all / Clear */}
+        <div className="flex items-center justify-between px-3 py-1.5 border-b">
+          <button className="text-[10px] text-blue-600 hover:underline" onClick={() => setLocalSelected(uniqueValues)}>Tümünü Seç</button>
+          <button className="text-[10px] text-red-500 hover:underline" onClick={() => setLocalSelected([])}>Temizle</button>
+        </div>
+        {/* Values list */}
+        <ScrollArea className="max-h-48">
+          <div className="p-1">
+            {filteredValues.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">Sonuç yok</p>
+            ) : (
+              filteredValues.map(val => (
+                <label key={val} className="flex items-center gap-2 px-2 py-1 text-xs rounded hover:bg-[var(--dashboard-surface-2)] cursor-pointer">
+                  <Checkbox
+                    checked={localSelected.includes(val)}
+                    onCheckedChange={(checked) => {
+                      setLocalSelected(prev => checked ? [...prev, val] : prev.filter(v => v !== val));
+                    }}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="truncate">{val || '(Boş)'}</span>
+                </label>
+              ))
+            )}
+          </div>
+        </ScrollArea>
+        {/* Apply */}
+        <div className="border-t p-2 flex gap-2">
+          <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={() => { onApply(column, []); setOpen(false); }}>Sıfırla</Button>
+          <Button size="sm" className="flex-1 h-7 text-xs" onClick={() => { onApply(column, localSelected); setOpen(false); }}>Uygula</Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/* ────────────────────────────────────────────
+   Stok Yonetimi Panel – Main Component
+   ──────────────────────────────────────────── */
 export default function StokYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
   const { currentUserProfile } = useAuth();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
-  const [selectedDepotId, setSelectedDepotId] = useState<string>('');
+
+  // Master data
   const [depots, setDepots] = useState<Depot[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isStockLoading, setIsStockLoading] = useState(false);
-  const [depotStock, setDepotStock] = useState<DepoStokItem[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
-  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<Filter[]>([]);
-  const [sortBy, setSortBy] = useState<keyof DepoStokItem>('miad');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Server-side pagination state
+  const [paginatedResult, setPaginatedResult] = useState<PaginatedStockResult | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
-  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
-  const [editingQuantity, setEditingQuantity] = useState<number | string>('');
-  const [colorFilter, setColorFilter] = useState<'none' | 'nearMin' | 'expiringSoon' | 'expiringVerySoon'>('none');
+  const [sortField, setSortField] = useState('miad');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [isPending, startTransition] = useTransition();
+
+  // Dialogs
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
   const [isNfcQueryModalOpen, setIsNfcQueryModalOpen] = useState(false);
   const [isLabCountModalOpen, setIsLabCountModalOpen] = useState(false);
   const [selectedLabsForReport, setSelectedLabsForReport] = useState<string[]>([]);
+  const [activeFilters, setActiveFilters] = useState<FilterSpec[]>([]);
 
-  const debouncedSearch = useCallback(debounce((term) => setDebouncedSearchTerm(term), 300), []);
-  useEffect(() => { debouncedSearch(searchTerm); }, [searchTerm, debouncedSearch]);
+  // For NFC modal & exports we may need raw stock
+  const [rawDepotStock, setRawDepotStock] = useState<DepoStokItem[]>([]);
 
-  // Fetch master data (depots, products, addresses, hospitals) - runs once
-  const fetchMasterData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [depotsSnap, productsSnap, addressesSnap, hospitalsSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'addressDefinitions')),
-        getDocs(collection(db, 'hospitals')),
-      ]);
-      const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-      const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
-      setDepots(filteredDepots);
-      setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setAddressDefinitions(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
-      setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-
-      if (filteredDepots.length > 0 && !selectedDepotId && filteredDepots[0]?.id) {
-        setSelectedDepotId(filteredDepots[0].id);
-      }
-    } catch (e) {
-      toast({ title: 'Veri Yükleme Hatası', description: 'Gerekli ana veriler yüklenemedi.', variant: 'destructive' });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [toast, selectedDepotId, currentUserProfile]);
-
+  /* ─── Fetch master data ─── */
   useEffect(() => {
-    fetchMasterData();
-  }, [fetchMasterData]);
+    (async () => {
+      setIsLoading(true);
+      try {
+        const [depotsSnap, productsSnap, hospitalsSnap] = await Promise.all([
+          getDocs(collection(db, 'depots')),
+          getDocs(collection(db, 'productCodes')),
+          getDocs(collection(db, 'hospitals')),
+        ]);
+        const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
+        setDepots(depotList);
+        setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+        setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
 
-  /**
-   * Fetch depot stock with server-side filtering
-   * Uses composite index: depotId + isShipped
-   */
-  const fetchDepotStock = useCallback(async (depotId: string) => {
-    if (!depotId) {
-      setDepotStock([]);
-      return;
-    }
-    setIsStockLoading(true);
-    try {
-      // Server-side query: only fetch unshipped items for selected depot
-      const stockQuery = query(
-        collection(db, 'depoStok'),
-        where('depotId', '==', depotId),
-        where('isShipped', '==', false)
-      );
-      const snapshot = await getDocs(stockQuery);
-      const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
-      setDepotStock(items);
-    } catch (e) {
-      console.error('Depo stoğu yüklenemedi:', e);
-      toast({ title: 'Hata', description: 'Depo stoğu yüklenemedi.', variant: 'destructive' });
-      setDepotStock([]);
-    } finally {
-      setIsStockLoading(false);
-    }
+        if (depotList.length > 0 && depotList[0]?.id) {
+          setSelectedDepotId(depotList[0].id);
+        }
+      } catch (e) {
+        toast({ title: 'Veri Yükleme Hatası', description: 'Ana veriler yüklenemedi.', variant: 'destructive' });
+      } finally {
+        setIsLoading(false);
+      }
+    })();
   }, [toast]);
 
-  // Fetch depot stock when depot changes
-  useEffect(() => {
-    if (selectedDepotId) {
-      fetchDepotStock(selectedDepotId);
-    }
-  }, [selectedDepotId, fetchDepotStock]);
-
+  /* ─── Fetch min/max rules when depot changes ─── */
   useEffect(() => {
     if (!selectedDepotId) return;
-    const fetchRules = async () => {
-      const rules: Record<string, MinMaxRule> = {};
+    (async () => {
       try {
         const rulesRef = collection(db, "depots", selectedDepotId, "minMaxRules");
         const snapshot = await getDocs(rulesRef);
-        snapshot.forEach(doc => {
-          const rule = doc.data() as MinMaxRule;
+        const rules: Record<string, MinMaxRule> = {};
+        snapshot.forEach(d => {
+          const rule = d.data() as MinMaxRule;
           if (rule.stokKodu) rules[rule.stokKodu] = rule;
         });
         setMinMaxRules(rules);
-      } catch (e) { console.error("Error fetching depot min-max rules:", e); }
-    };
-    fetchRules();
+      } catch (e) { console.error("Error fetching min-max rules:", e); }
+    })();
   }, [selectedDepotId]);
 
-  const handleStartEditing = (group: (typeof sortedAndGroupedStock)[0]) => {
-    setEditingRowKey(group.key);
-    setEditingQuantity(group.items.length);
-  };
+  /* ─── Fetch paginated stock (server action) ─── */
+  const fetchPage = useCallback(async (page: number) => {
+    if (!selectedDepotId) return;
+    startTransition(async () => {
+      try {
+        const result = await getPaginatedDepotStock({
+          depotId: selectedDepotId,
+          page,
+          pageSize: rowsPerPage,
+          sortField,
+          sortDirection,
+          columnFilters: Object.fromEntries(
+            Object.entries(columnFilters).filter(([, v]: [string, string[]]) => v.length > 0)
+          ) as Record<string, string[]>,
+        });
+        setPaginatedResult(result);
+      } catch (e) {
+        console.error('Paginated stock error:', e);
+        toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
+      }
+    });
+  }, [selectedDepotId, rowsPerPage, sortField, sortDirection, columnFilters, toast]);
 
-  const handleCancelEditing = () => {
-    setEditingRowKey(null);
-    setEditingQuantity('');
-  };
+  useEffect(() => {
+    setCurrentPage(1);
+    fetchPage(1);
+  }, [fetchPage]);
+
+  useEffect(() => {
+    fetchPage(currentPage);
+  }, [currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
+  const rows = paginatedResult?.rows ?? [];
+  const totalRows = paginatedResult?.totalRows ?? 0;
+  const totalPages = paginatedResult?.totalPages ?? 1;
+  const colValues = paginatedResult?.columnValues ?? { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] };
 
-  const handleQuantityChange = async (group: (typeof sortedAndGroupedStock)[0]) => {
-    const newQuantity = typeof editingQuantity === 'string' ? parseInt(editingQuantity, 10) : editingQuantity;
-    if (newQuantity < 0 || !Number.isInteger(newQuantity)) {
-      toast({ title: "Hata", description: "Geçersiz adet.", variant: "destructive" });
-      return;
-    }
-    const currentQuantity = group.items.length;
-    const diff = newQuantity - currentQuantity;
-    if (diff === 0) {
-      handleCancelEditing();
-      return;
-    }
-    setIsLoading(true);
-    const batch = writeBatch(db);
-    try {
-      if (diff > 0) { // Add items
-        const newItemTemplate: Omit<DepoStokItem, 'id'> = {
-          depotId: selectedDepotId,
-          depotName: depotName,
-          stokKodu: group.stokKodu,
-          stokAdi: group.stokAdi,
-          lotNumarasi: group.lotNumarasi,
-          miad: group.miad,
-          rafAdresi: group.rafAdresi,
-          seriNumarasi: '',
-          eklenmeTarihi: new Date(),
-          irsaliyeNumarasi: group.items[0]?.irsaliyeNumarasi || `MANUEL_EKLEME_${new Date().toISOString()}`,
-          isShipped: false,
-        };
-        for (let i = 0; i < diff; i++) {
-          const newDocRef = doc(collection(db, 'depoStok'));
-          batch.set(newDocRef, { ...newItemTemplate, seriNumarasi: `MANUEL-${generateId()}` });
-        }
-      } else { // Remove items
-        const itemsToRemove = group.items.slice(0, Math.abs(diff));
-        itemsToRemove.forEach(item => {
-          if (item.id) {
-            batch.delete(doc(db, 'depoStok', item.id));
-          }
-        });
-      }
-      await batch.commit();
-
-      await saveManualChangeSnapshot({
-        depotId: selectedDepotId,
-        depotName,
-        user: { id: currentUserProfile?.uid || 'system', name: currentUserProfile?.name || 'Sistem' },
-        item: {
-          stokKodu: group.stokKodu,
-          stokAdi: group.stokAdi,
-          lotNumarasi: group.lotNumarasi,
-          miad: group.miad,
-          previousQuantity: currentQuantity,
-          newQuantity,
-        }
-      });
-      toast({ title: 'Başarılı', description: `${group.stokAdi} adedi güncellendi.` });
-      await fetchDepotStock(selectedDepotId); // Refetch to get the latest state
-    } catch (error) {
-      toast({ title: "Hata", description: "Adet güncellenirken hata oluştu.", variant: "destructive" });
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-      handleCancelEditing();
-    }
-  };
-
-
-  const handleSort = (column: keyof DepoStokItem) => {
-    if (sortBy === column) {
-      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+  /* ─── Sorting handler ─── */
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
-      setSortBy(column);
-      setSortOrder('asc');
+      setSortField(field);
+      setSortDirection('asc');
     }
   };
 
+  /* ─── Column filter handler ─── */
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => {
+      const next = { ...prev };
+      if (values.length === 0) {
+        delete next[column];
+      } else {
+        next[column] = values;
+      }
+      return next;
+    });
+    setCurrentPage(1);
+  };
+
+  /* ─── Clear all column filters ─── */
+  const clearAllFilters = () => {
+    setColumnFilters({});
+    setCurrentPage(1);
+  };
+
+  const hasActiveColumnFilters = Object.values(columnFilters).some((v: string[]) => v.length > 0);
+
+  /* ─── Miad severity helpers ─── */
+  const getMiadInfo = (miadStr: string) => {
+    if (!miadStr) return { days: Infinity, severity: 'normal' as const };
+    const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+    if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' as const };
+    const days = differenceInDays(miadDate, new Date());
+    if (days < 0) return { days, severity: 'expired' as const };
+    if (days <= 3) return { days, severity: 'critical' as const };
+    if (days <= 10) return { days, severity: 'warning' as const };
+    if (days < 45) return { days, severity: 'caution' as const };
+    if (days < 60) return { days, severity: 'notice' as const };
+    return { days, severity: 'normal' as const };
+  };
+
+  /* ─── Coverage days calculation ─── */
+  const getCoverageInfo = (stokKodu: string): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown' } => {
+    const rule = minMaxRules[stokKodu];
+    if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown' };
+    const totalProductStock = rows.reduce((acc, r) => r.stokKodu === stokKodu ? acc + r.quantity : acc, 0);
+    const periodDays = Math.floor(rule.maxGun);
+    if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown' };
+    const dailyNeed = rule.max / periodDays;
+    if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown' };
+    const coverageDays = Math.floor(totalProductStock / dailyNeed);
+    if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical' };
+    if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning' };
+    return { label: `${coverageDays} gün yeter`, severity: 'good' };
+  };
+
+  /* ─── Row color strip ─── */
+  const getRowStripeColor = (row: GroupedStockRow): string => {
+    const miadInfo = getMiadInfo(row.miad);
+    if (miadInfo.severity === 'expired' || miadInfo.severity === 'critical') return 'bg-red-500';
+    if (miadInfo.severity === 'warning' || miadInfo.severity === 'caution') return 'bg-amber-500';
+    if (miadInfo.severity === 'notice') return 'bg-yellow-400';
+    const rule = minMaxRules[row.stokKodu];
+    if (rule && rule.min !== undefined && row.quantity <= rule.min) return 'bg-slate-400';
+    return 'bg-transparent';
+  };
+
+  /* ─── Available filter groups for marka/urunGrubu ─── */
   const availableFilterGroups = useMemo(() => {
     const markaSet = new Set<string>();
     const urunGrubuSet = new Set<'kit' | 'sarf'>();
     productCodes.forEach(p => {
-        if(p.marka) markaSet.add(p.marka);
-        if(p.urunGrubu) urunGrubuSet.add(p.urunGrubu);
+      if (p.marka) markaSet.add(p.marka);
+      if (p.urunGrubu) urunGrubuSet.add(p.urunGrubu);
     });
     return {
-        marka: Array.from(markaSet).sort(),
-        urunGrubu: Array.from(urunGrubuSet).sort()
+      marka: Array.from(markaSet).sort(),
+      urunGrubu: Array.from(urunGrubuSet).sort()
     };
   }, [productCodes]);
 
-  const filteredStock = useMemo(() => {
-    // depotStock is already filtered by depotId and isShipped on server-side
-    let items = depotStock;
-    if (activeFilters.length > 0) {
-      const productCodeMap = new Map<string, ProductCode>(
-        productCodes
-          .filter(p => p.stokKodu !== undefined)
-          .map(p => [p.stokKodu!, p] as const)
-      );
-      items = items.filter(item => {
-        if (!item.stokKodu) return false;
-        const product = productCodeMap.get(item.stokKodu);
-        if (!product) return false;
-        return activeFilters.every(filter => {
-          if (filter.group === 'marka') return product.marka === filter.value;
-          if (filter.group === 'urunGrubu') return product.urunGrubu === filter.value;
-          return true;
-        });
-      });
-    }
-    if (debouncedSearchTerm) {
-      const term = debouncedSearchTerm.toLowerCase();
-      items = items.filter(item =>
-        item.stokKodu?.toLowerCase().includes(term) ||
-        item.stokAdi?.toLowerCase().includes(term) ||
-        item.rafAdresi?.toLowerCase().includes(term) ||
-        item.lotNumarasi?.toLowerCase().includes(term) ||
-        item.seriNumarasi?.toLowerCase().includes(term)
-      );
-    }
-    return items;
-  }, [depotStock, activeFilters, debouncedSearchTerm, productCodes]);
-
-  const sortedStock = useMemo(() => {
-    return [...filteredStock].sort((a, b) => {
-      const aIsEmpty = !a.lotNumarasi && !a.miad;
-      const bIsEmpty = !b.lotNumarasi && !b.miad;
-      if (aIsEmpty && !bIsEmpty) return 1;
-      if (!aIsEmpty && bIsEmpty) return -1;
-      const valA = a[sortBy] ?? '';
-      const valB = b[sortBy] ?? '';
-      if (sortBy === 'miad') {
-        try {
-          const dateA = parse(String(valA), 'dd.MM.yyyy', new Date());
-          const dateB = parse(String(valB), 'dd.MM.yyyy', new Date());
-          if (isValid(dateA) && isValid(dateB)) {
-            return sortOrder === 'asc' ? compareAsc(dateA, dateB) : compareAsc(dateB, dateA);
-          }
-        } catch { /* fallback to string compare */ }
-      }
-      return sortOrder === 'asc' ? String(valA).localeCompare(String(valB)) : String(valB).localeCompare(String(valA));
-    });
-  }, [filteredStock, sortBy, sortOrder]);
-
-  const groupedStock = useMemo(() => {
-    return sortedStock.reduce((acc: GroupedStock, item) => {
-      const key = `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
-      if (!acc[key]) {
-        const productInfo = productCodes.find(p => p.stokKodu === item.stokKodu);
-        acc[key] = {
-          stokKodu: item.stokKodu || '',
-          stokAdi: item.stokAdi || '',
-          lotNumarasi: item.lotNumarasi || '',
-          miad: (item.miad as string) || '',
-          anaBirim: productInfo?.anaBirim || 'Kutu',
-          rafAdresi: item.rafAdresi || '',
-          items: [],
-        };
-      }
-      acc[key].items.push(item);
-      return acc;
-    }, {});
-  }, [sortedStock, productCodes]);
-
-  const totalStockByProductCode = useMemo(() => {
-    return depotStock.reduce<Record<string, number>>((acc, item) => {
-      if (!item.stokKodu) return acc;
-      acc[item.stokKodu] = (acc[item.stokKodu] || 0) + 1;
-      return acc;
-    }, {});
-  }, [depotStock]);
-
-  const getCoverageDaysLabel = useCallback((stokKodu: string): string => {
-    const rule = minMaxRules[stokKodu];
-    if (!rule || !rule.max || !rule.maxGun) return '-';
-
-    const totalProductStock = totalStockByProductCode[stokKodu] || 0;
-    const periodDays = Math.floor(rule.maxGun);
-    if (periodDays <= 0) return '-';
-
-    const today = new Date();
-    const businessDays = Array.from({ length: periodDays }, (_, index) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() + index + 1);
-      const day = date.getDay();
-      return day !== 0 && day !== 6;
-    }).filter(Boolean).length;
-
-    if (businessDays <= 0) return '-';
-
-    const dailyNeed = rule.max / businessDays;
-    if (dailyNeed <= 0) return '-';
-
-    const coverageDays = Math.floor(totalProductStock / dailyNeed);
-    return `${coverageDays} gün`;
-  }, [minMaxRules, totalStockByProductCode]);
-
-  const sortedAndGroupedStock = useMemo(() => {
-    let baseList = Object.values(groupedStock).map(g => ({ ...g, key: `${g.stokKodu}-${g.lotNumarasi}-${g.miad}` }));
-    if (colorFilter !== 'none') {
-      baseList = baseList.filter(group => {
-        const rule = minMaxRules[group.stokKodu];
-        const miadDate = parse(group.miad || '', 'dd.MM.yyyy', new Date());
-        const days = isValid(miadDate) ? differenceInDays(miadDate, new Date()) : Infinity;
-        const nearMin = rule && rule.min !== undefined && group.items.length <= rule.min;
-        if (colorFilter === 'nearMin' && nearMin) return true;
-        if (colorFilter === 'expiringSoon' && days >= 45 && days < 60) return true;
-        if (colorFilter === 'expiringVerySoon' && days < 45) return true;
-        return false;
-      });
-    }
-    return baseList;
-  }, [groupedStock, colorFilter, minMaxRules]);
-
-  const totalPages = Math.ceil(sortedAndGroupedStock.length / rowsPerPage);
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return sortedAndGroupedStock.slice(start, start + rowsPerPage);
-  }, [sortedAndGroupedStock, currentPage, rowsPerPage]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [rowsPerPage, debouncedSearchTerm, activeFilters, sortBy, sortOrder]);
-  
-  const handleLabCountExport = async () => {
-    if (selectedLabsForReport.length === 0) {
-      toast({ title: 'Laboratuvar Seçilmedi', description: 'Lütfen rapor için en az bir laboratuvar seçin.', variant: "default" });
-      return;
-    }
-
-    const labNames = hospitals
-      .filter(h => h.id && selectedLabsForReport.includes(h.id))
-      .map(h => h.name)
-      .filter((name): name is string => name !== undefined);
-
-    // Fetch shipped stock for selected labs (server-side query)
-    let stockForSelectedLabs: DepoStokItem[] = [];
+  /* ─── Export functions ─── */
+  const handleExport = async (detailed: boolean) => {
+    // Fetch all stock for export
     try {
-      const shippedQuery = query(
+      const stockQuery = query(
         collection(db, 'depoStok'),
-        where('isShipped', '==', true)
+        where('depotId', '==', selectedDepotId),
+        where('isShipped', '==', false)
       );
-      const shippedSnap = await getDocs(shippedQuery);
-      stockForSelectedLabs = shippedSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
-        .filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
-    } catch (e) {
-      toast({ title: 'Hata', description: 'Laboratuvar stoğu yüklenemedi.', variant: 'destructive' });
-      return;
-    }
-    const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
+      const snapshot = await getDocs(stockQuery);
+      const allItems = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+      const fileName = `${depotName}_Stok_Raporu_${detailed ? 'Detayli' : 'Ozet'}`;
+      const productCodeMap = new Map<string, ProductCode>(
+        productCodes.filter(p => p.stokKodu !== undefined).map(p => [p.stokKodu!, p] as const)
+      );
 
-    stockForSelectedLabs.forEach(item => {
-      const stokKodu = item.stokKodu;
-      if (!stokKodu) return;
-      if (!stockSummary[stokKodu]) {
-        stockSummary[stokKodu] = {
-          stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi || '',
-          quantity: 0
-        };
-      }
-      stockSummary[stokKodu].quantity += 1;
-    });
-  
-    const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
-      'Stok Kodu': stokKodu,
-      'Stok Adı': data.stokAdi,
-      'Toplam Adet': data.quantity
-    })).sort((a,b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
-  
-    if (dataToExport.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Seçilen laboratuvarlar için stok bulunamadı.', variant: "default" });
-      return;
-    }
-  
-    exportDataToExcel(dataToExport, `Secili_Lab_Stok_Raporu`, "LabStokRaporu", toast);
-    setIsLabCountModalOpen(false);
-  };
-  
-  const handleExport = (detailed: boolean) => {
-    const dataToExportSource = Object.values(groupedStock);
-    if (dataToExportSource.length === 0) {
-      toast({ title: "Veri Yok", description: "Dışa aktarılacak stok verisi bulunamadı.", variant: "default" });
-      return;
-    }
-    const fileName = `${depotName}_Stok_Raporu_${detailed ? 'Detayli' : 'Ozet'}`;
-    const productCodeMap = new Map<string, ProductCode>(
-      productCodes
-        .filter(p => p.stokKodu !== undefined)
-        .map(p => [p.stokKodu!, p] as const)
-    );
-    if (detailed) {
-      const dataToExport = dataToExportSource.flatMap(group => group.items)
-        .map(item => ({
+      if (detailed) {
+        const dataToExport = allItems.map(item => ({
           'Stok Kodu': item.stokKodu || '',
           'Stok Adı': item.stokAdi || '',
           'Lot Numarası': item.lotNumarasi || '',
           'Miad': item.miad || '',
           'Seri Numarası': item.seriNumarasi || '',
           'Raf Adresi': item.rafAdresi || '',
-        }))
-        .sort((a, b) => (a['Stok Adı'] || '').localeCompare(b['Stok Adı'] || ''));
-      exportDataToExcel(dataToExport, fileName, "StokRaporu", toast);
-    } else {
-      const sheets: Record<string, any[]> = {};
-      dataToExportSource.forEach(group => {
-        const product = productCodeMap.get(group.stokKodu);
-        const brand = product?.marka || 'Diğer';
-        if (!sheets[brand]) {
-          sheets[brand] = [];
-        }
-        sheets[brand].push({
-          'Stok Kodu': group.stokKodu,
-          'Stok Adı': group.stokAdi,
-          'Lot Numarası': group.lotNumarasi,
-          'Miad': group.miad,
-          'Miktar': group.items.length,
-          'Birim': group.anaBirim,
+        })).sort((a, b) => (a['Stok Adı'] || '').localeCompare(b['Stok Adı'] || ''));
+        exportDataToExcel(dataToExport, fileName, "StokRaporu", toast);
+      } else {
+        const grouped: Record<string, any[]> = {};
+        const groupedItems: Record<string, { stokKodu: string; stokAdi: string; lot: string; miad: string; count: number; birim: string }> = {};
+        allItems.forEach(item => {
+          const key = `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
+          if (!groupedItems[key]) {
+            groupedItems[key] = { stokKodu: item.stokKodu || '', stokAdi: item.stokAdi || '', lot: item.lotNumarasi || '', miad: String(item.miad || ''), count: 0, birim: productCodeMap.get(item.stokKodu || '')?.anaBirim || 'Kutu' };
+          }
+          groupedItems[key].count++;
         });
-      });
-      for (const brand in sheets) {
-        sheets[brand].sort((a, b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+        Object.values(groupedItems).forEach(g => {
+          const product = productCodeMap.get(g.stokKodu);
+          const brand = product?.marka || 'Diğer';
+          if (!grouped[brand]) grouped[brand] = [];
+          grouped[brand].push({
+            'Stok Kodu': g.stokKodu,
+            'Stok Adı': g.stokAdi,
+            'Lot Numarası': g.lot,
+            'Miad': g.miad,
+            'Miktar': g.count,
+            'Birim': g.birim,
+          });
+        });
+        for (const brand in grouped) {
+          grouped[brand].sort((a, b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+        }
+        exportDataToExcel(grouped, fileName, toast);
       }
-      exportDataToExcel(sheets, fileName, toast);
+    } catch {
+      toast({ title: 'Hata', description: 'Rapor oluşturulamadı.', variant: 'destructive' });
     }
   };
 
-  const getRowClass = (group: (typeof sortedAndGroupedStock)[0]): string => {
-    const rule = minMaxRules[group.stokKodu];
-    const miadDate = parse(group.miad || '', 'dd.MM.yyyy', new Date());
-    if (!isValid(miadDate)) return '';
-    const days = differenceInDays(miadDate, new Date());
-    if (days < 45) return 'bg-red-500/10 text-red-700 dark:text-red-300';
-    if (days < 60) return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400';
-    if (rule && rule.min !== undefined && group.items.length <= rule.min) return 'bg-gray-500/10 text-gray-600 dark:text-gray-400';
-    return '';
+  /* ─── Lab count export ─── */
+  const handleLabCountExport = async () => {
+    if (selectedLabsForReport.length === 0) {
+      toast({ title: 'Laboratuvar Seçilmedi', description: 'Lütfen en az bir laboratuvar seçin.', variant: "default" });
+      return;
+    }
+    const labNames = hospitals.filter(h => h.id && selectedLabsForReport.includes(h.id)).map(h => h.name).filter((n): n is string => !!n);
+    try {
+      const shippedQuery = query(collection(db, 'depoStok'), where('isShipped', '==', true));
+      const shippedSnap = await getDocs(shippedQuery);
+      const stockForSelectedLabs = shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)).filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
+      const stockSummary: Record<string, { stokAdi: string; quantity: number }> = {};
+      stockForSelectedLabs.forEach(item => {
+        if (!item.stokKodu) return;
+        if (!stockSummary[item.stokKodu]) stockSummary[item.stokKodu] = { stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi || '', quantity: 0 };
+        stockSummary[item.stokKodu].quantity += 1;
+      });
+      const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({ 'Stok Kodu': stokKodu, 'Stok Adı': data.stokAdi, 'Toplam Adet': data.quantity })).sort((a, b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+      if (dataToExport.length === 0) { toast({ title: 'Veri Yok', description: 'Seçilen laboratuvarlar için stok bulunamadı.', variant: "default" }); return; }
+      exportDataToExcel(dataToExport, `Secili_Lab_Stok_Raporu`, "LabStokRaporu", toast);
+      setIsLabCountModalOpen(false);
+    } catch {
+      toast({ title: 'Hata', description: 'Laboratuvar stoğu yüklenemedi.', variant: 'destructive' });
+    }
   };
 
-  const ColorLegend = () => (
-    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-      <div onClick={() => setColorFilter(colorFilter === 'expiringVerySoon' ? 'none' : 'expiringVerySoon')} className={cn("flex items-center gap-1 cursor-pointer", colorFilter === 'expiringVerySoon' && 'font-bold text-foreground')}>
-        <div className="w-3 h-3 rounded-full bg-red-300/50 border border-red-500" /> Miad &lt; 45 gün
-      </div>
-      <div onClick={() => setColorFilter(colorFilter === 'expiringSoon' ? 'none' : 'expiringSoon')} className={cn("flex items-center gap-1 cursor-pointer", colorFilter === 'expiringSoon' && 'font-bold text-foreground')}>
-        <div className="w-3 h-3 rounded-full bg-yellow-300/50 border border-yellow-500" /> Miad &lt; 60 gün
-      </div>
-      <div onClick={() => setColorFilter(colorFilter === 'nearMin' ? 'none' : 'nearMin')} className={cn("flex items-center gap-1 cursor-pointer", colorFilter === 'nearMin' && 'font-bold text-foreground')}>
-        <div className="w-3 h-3 rounded-full bg-gray-300/50 border border-gray-500" /> Min. Stok Yakın
-      </div>
-      {colorFilter !== 'none' && <Button variant="ghost" size="sm" onClick={() => setColorFilter('none')} className="text-xs h-auto py-0">Filtreyi Temizle</Button>}
-    </div>
-  );
-
+  /* ═════════════════════════ RENDER ═════════════════════════ */
   return (
-    <>
-      <Card className="shadow-lg">
-        <CardHeader className="flex flex-col sm:flex-row justify-between sm:items-center">
-          <div>
-            <CardTitle className="text-xl font-headline flex items-center"><PackageSearch className="mr-2 h-7 w-7 text-primary" />Depo Stoğu ({depotName})</CardTitle>
-            <CardDescription>Depodaki tüm sevk edilmemiş ürünler.</CardDescription>
-          </div>
-          <div className="flex gap-2 mt-2 sm:mt-0">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline"><SlidersHorizontal className="mr-2 h-4 w-4" />İşlemler</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onSelect={() => setIsFilterDialogOpen(true)}>Filtrele</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => router.push('/depo-sayim')}>Marka Sayımı Yap</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setIsLabCountModalOpen(true)}>Laboratuvar Sayımı İndir</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Rapor İndir</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => handleExport(false)}>Özet Rapor</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleExport(true)}>Detaylı (Seri No) Rapor</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button variant="outline" size="icon" onClick={() => setIsNfcQueryModalOpen(true)}><Nfc className="h-4 w-4" /></Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid md:grid-cols-2 gap-4 items-end mb-4">
-            <div>
-              <Label>Ara</Label>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="search"
-                  placeholder="Stok adı, kodu, raf, lot veya seri no ile ara..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
-            </div>
-            <div className="flex items-end justify-between">
-              <ColorLegend />
-            </div>
-          </div>
+    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 min-h-screen">
+      {/* ── HEADER ── */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+            <PackageSearch className="h-5 w-5 text-orange-500" />
+            Depo Stoğu
+          </h1>
+          <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+            {depotName || 'Depo seçin'} · Depodaki tüm sevk edilmemiş ürünler
+          </p>
+        </div>
 
-          {(isLoading || isStockLoading) ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <Loader2 className="h-10 w-10 animate-spin mb-2" />
-              <p>{isLoading ? 'Veriler yükleniyor...' : 'Depo stoğu yükleniyor...'}</p>
+        <div className="flex items-center gap-2">
+          {/* Rapor İndir - quick action */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="cihaz-tool-item flex items-center justify-center gap-1.5 px-3 h-9 sm:h-10 text-xs font-medium text-[var(--dashboard-muted)]">
+                <FileDown className="h-4 w-4" /> <span className="hidden sm:inline">Rapor</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => handleExport(false)}>
+                <BarChart3 className="h-4 w-4 mr-2" /> Özet Rapor
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleExport(true)}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" /> Detaylı (Seri No) Rapor
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* İşlemler menu - grouped */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="cihaz-tool-item flex items-center justify-center gap-1.5 px-3 h-9 sm:h-10 text-xs font-medium text-[var(--dashboard-muted)]">
+                <SlidersHorizontal className="h-4 w-4" /> <span className="hidden sm:inline">İşlemler</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Filtre</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setIsFilterDialogOpen(true)}>
+                <Filter className="h-4 w-4 mr-2" /> Marka / Ürün Grubu Filtrele
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Operasyon / Sayım</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => router.push('/depo-sayim')}>
+                <ListChecks className="h-4 w-4 mr-2" /> Marka Sayımı Başlat
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setIsLabCountModalOpen(true)}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" /> Laboratuvar Sayım Raporu İndir
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Araçlar</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setIsNfcQueryModalOpen(true)}>
+                <Nfc className="h-4 w-4 mr-2" /> NFC Stok Sorgula
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {/* ── ACTIVE FILTER CHIPS ── */}
+      {(hasActiveColumnFilters || activeFilters.length > 0) && (
+        <div className="cihaz-card flex flex-wrap items-center gap-2 px-3 py-2">
+          {Object.entries(columnFilters).map(([col, vals]: [string, string[]]) =>
+            vals.map((v: string) => (
+              <span key={`${col}-${v}`} className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-[11px] font-medium">
+                {v}
+                <button onClick={() => handleColumnFilter(col, vals.filter((x: string) => x !== v))} className="hover:bg-orange-200 rounded-full p-0.5"><X className="h-3 w-3" /></button>
+              </span>
+            ))
+          )}
+          {activeFilters.map(f => (
+            <span key={`${f.group}-${f.value}`} className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-[11px] font-medium">
+              {f.value}
+            </span>
+          ))}
+          <button onClick={clearAllFilters} className="text-[11px] text-red-500 hover:underline ml-auto">Temizle ✕</button>
+        </div>
+      )}
+
+      {/* ── TABLE CARD ── */}
+      <div className="cihaz-card-strong overflow-hidden">
+        {/* Sticky toolbar with summary */}
+        <div className="sticky top-0 z-20 bg-[var(--dashboard-surface)] border-b border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-xs text-[var(--dashboard-muted)]">
+            <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{totalRows}</span> kayıt</span>
+            {totalPages > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{paginatedResult?.currentPage ?? 1}</span>/{totalPages}</span>}
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Miad legend */}
+            <div className="hidden sm:flex items-center gap-3 text-[10px] text-[var(--dashboard-muted)]">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> &lt;45 gün</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> &lt;60 gün</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" /> Min. Stok</span>
             </div>
-          ) : (
-            <div className="q-table">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Stok Adı</TableHead>
-                    <TableHead>Lot</TableHead>
-                    <TableHead>Miad</TableHead>
-                    <TableHead>Adet</TableHead>
-                    <TableHead>Raf Adresi</TableHead>
-                    <TableHead>Stok Yeterlilik</TableHead>
-                    <TableHead className="text-right">İşlemler</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedData.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-10">
-                        Sonuç bulunamadı.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    paginatedData.map((g) => (
-                      <TableRow key={g.key} className={getRowClass(g)}>
-                        <TableCell data-label="Stok Adı" data-primary="true">
-                          {g.stokAdi}
-                          <span className="block text-xs text-muted-foreground font-mono">
-                            ({g.stokKodu})
-                          </span>
-                        </TableCell>
-                        <TableCell data-label="Lot">{g.lotNumarasi}</TableCell>
-                        <TableCell data-label="Miad">{g.miad}</TableCell>
-                        <TableCell data-label="Adet">
-                          {editingRowKey === g.key ? (
-                            <Input
-                              type="number"
-                              value={editingQuantity}
-                              onChange={(e) => setEditingQuantity(e.target.value)}
-                              onClick={(e) => e.stopPropagation()}
-                              className="w-20 h-8"
-                            />
-                          ) : (
-                            <Badge variant="outline" className="font-bold text-foreground dark:text-white bg-background">{g.items.length} {g.anaBirim}</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell data-label="Raf">{g.rafAdresi}</TableCell>
-                        <TableCell data-label="Stok Yeterlilik">{getCoverageDaysLabel(g.stokKodu)}</TableCell>
-                        <TableCell data-label="İşlemler" className="text-right">
-                          <div className="flex gap-1 justify-end">
-                            {editingRowKey === g.key ? (
-                              <>
-                                <Button size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleQuantityChange(g); }}>
-                                  <Save className="h-4 w-4" />
-                                </Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleCancelEditing(); }}>
-                                  <XCircle className="h-4 w-4" />
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); router.push(`/stok-yonetimi/${selectedDepotId}/${encodeURIComponent(g.stokKodu)}/${encodeURIComponent(g.lotNumarasi || '')}`); }}>
-                                  Detay
-                                </Button>
-                                <Button size="icon" className="h-8 w-8" variant="ghost" onClick={(e) => { e.stopPropagation(); handleStartEditing(g); }}>
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                              </>
+          </div>
+        </div>
+
+        {/* Table */}
+        {(isLoading || isPending) ? (
+          <div className="flex flex-col items-center justify-center py-16 text-[var(--dashboard-muted)]">
+            <Loader2 className="h-8 w-8 animate-spin mb-3 text-orange-400" />
+            <p className="text-sm">{isLoading ? 'Veriler yükleniyor...' : 'Stok yükleniyor...'}</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-[49px] z-10">
+                <tr className="bg-[var(--dashboard-surface-2)]">
+                  {/* Color strip spacer */}
+                  <th className="w-1.5" />
+                  <th className="text-left px-3 py-2.5 sticky left-0 z-20 bg-[var(--dashboard-surface-2)]">
+                    <ColumnFilterPopover
+                      column="stokAdi" label="Stok Adı" uniqueValues={colValues.stokAdi}
+                      selectedValues={columnFilters['stokAdi'] ?? []} onApply={handleColumnFilter}
+                      sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
+                    />
+                  </th>
+                  <th className="text-left px-3 py-2.5">
+                    <ColumnFilterPopover
+                      column="lotNumarasi" label="Lot" uniqueValues={colValues.lotNumarasi}
+                      selectedValues={columnFilters['lotNumarasi'] ?? []} onApply={handleColumnFilter}
+                      sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
+                    />
+                  </th>
+                  <th className="text-left px-3 py-2.5">
+                    <ColumnFilterPopover
+                      column="miad" label="Miad" uniqueValues={colValues.miad}
+                      selectedValues={columnFilters['miad'] ?? []} onApply={handleColumnFilter}
+                      sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
+                    />
+                  </th>
+                  <th className="text-center px-3 py-2.5">
+                    <button
+                      className="text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1 mx-auto"
+                      onClick={() => handleSort('quantity')}
+                    >
+                      Adet
+                      {sortField === 'quantity' ? (
+                        sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+                      ) : (
+                        <ChevronsUpDown className="h-3 w-3 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="text-left px-3 py-2.5">
+                    <ColumnFilterPopover
+                      column="rafAdresi" label="Raf" uniqueValues={colValues.rafAdresi}
+                      selectedValues={columnFilters['rafAdresi'] ?? []} onApply={handleColumnFilter}
+                      sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
+                    />
+                  </th>
+                  <th className="text-left px-3 py-2.5">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Yeterlilik</span>
+                  </th>
+                  <th className="text-right px-3 py-2.5 sticky right-0 z-20 bg-[var(--dashboard-surface-2)]">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">İşlem</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-16 text-[var(--dashboard-muted)]">
+                      <PackageSearch className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p>Sonuç bulunamadı.</p>
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((row) => {
+                    const miadInfo = getMiadInfo(row.miad);
+                    const coverageInfo = getCoverageInfo(row.stokKodu);
+                    const stripeColor = getRowStripeColor(row);
+
+                    return (
+                      <tr
+                        key={row.key}
+                        className={cn(
+                          "border-b border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]/50 transition-colors",
+                          miadInfo.severity === 'critical' || miadInfo.severity === 'expired' ? 'bg-red-500/[0.04]' : '',
+                          miadInfo.severity === 'caution' ? 'bg-amber-500/[0.04]' : '',
+                        )}
+                      >
+                        {/* Color strip */}
+                        <td className="w-1.5 p-0">
+                          <div className={cn("w-1 h-full min-h-[56px] rounded-r", stripeColor)} />
+                        </td>
+
+                        {/* Stok Adı - primary */}
+                        <td className="px-3 py-3 sticky left-0 bg-inherit z-10">
+                          <div className="font-medium text-[var(--dashboard-text)] leading-tight">{row.stokAdi}</div>
+                          <span className="text-[10px] text-[var(--dashboard-muted)] font-mono">({row.stokKodu})</span>
+                        </td>
+
+                        {/* Lot - secondary */}
+                        <td className="px-3 py-3 text-[var(--dashboard-muted)] text-xs">{row.lotNumarasi}</td>
+
+                        {/* Miad with badge */}
+                        <td className="px-3 py-3">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs text-[var(--dashboard-text)]">{row.miad}</span>
+                            {miadInfo.severity !== 'normal' && miadInfo.days !== Infinity && (
+                              <span className={cn(
+                                "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold w-fit",
+                                miadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
+                                miadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
+                                miadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
+                                miadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
+                                miadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
+                              )}>
+                                {miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}
+                              </span>
                             )}
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-        <CardFooter className="flex justify-between items-center">
-          <div className="flex items-center space-x-2 text-sm">
+                        </td>
+
+                        {/* Adet - chip/badge */}
+                        <td className="px-3 py-3 text-center">
+                          <span className="inline-flex items-center justify-center min-w-[48px] px-2 py-1 rounded-lg bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] shadow-sm text-xs font-bold text-[var(--dashboard-text)]">
+                            {row.quantity} {row.anaBirim}
+                          </span>
+                        </td>
+
+                        {/* Raf */}
+                        <td className="px-3 py-3 text-xs text-[var(--dashboard-muted)]">{row.rafAdresi}</td>
+
+                        {/* Stok Yeterlilik - colored badge */}
+                        <td className="px-3 py-3">
+                          <span className={cn(
+                            "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                            coverageInfo.severity === 'good' && 'bg-emerald-100 text-emerald-700',
+                            coverageInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
+                            coverageInfo.severity === 'critical' && 'bg-red-100 text-red-700',
+                            coverageInfo.severity === 'unknown' && 'bg-slate-100 text-slate-500',
+                          )}>
+                            {coverageInfo.label}
+                          </span>
+                        </td>
+
+                        {/* İşlemler - sticky right */}
+                        <td className="px-3 py-3 text-right sticky right-0 bg-inherit z-10">
+                          <button
+                            className="cihaz-tool-item inline-flex items-center justify-center gap-1 px-2.5 h-8 text-[11px] font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+                            onClick={() => router.push(`/stok-yonetimi/${selectedDepotId}/${encodeURIComponent(row.stokKodu)}/${encodeURIComponent(row.lotNumarasi || '')}`)}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            <span className="hidden md:inline">Detay</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── PAGINATION BAR ── */}
+        {totalRows > 0 && (
+          <div className="sticky bottom-0 bg-[var(--dashboard-surface)] border-t border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-[var(--dashboard-muted)]">
               <span>Sayfa başına:</span>
-              <Select value={String(rowsPerPage)} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1);}}>
-                  <SelectTrigger className="w-20"><SelectValue/></SelectTrigger>
-                  <SelectContent>{rowsPerPageOptions.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
+              <Select value={String(rowsPerPage)} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
+                <SelectTrigger className="w-16 h-7 text-xs bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
+                <SelectContent>{rowsPerPageOptions.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
               </Select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
+                onClick={() => setCurrentPage(p => p - 1)}
+                disabled={currentPage <= 1 || isPending}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="text-xs text-[var(--dashboard-muted)] px-2">
+                <span className="text-[var(--dashboard-text)] font-bold">{paginatedResult?.currentPage ?? 1}</span> / {totalPages}
+              </span>
+              <button
+                className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
+                onClick={() => setCurrentPage(p => p + 1)}
+                disabled={currentPage >= totalPages || isPending}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center space-x-2">
-              <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage <= 1}>Önceki</Button>
-              <span className="text-sm">Sayfa {currentPage} / {totalPages}</span>
-              <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage >= totalPages}>Sonraki</Button>
-          </div>
-        </CardFooter>
-      </Card>
-      
-      <FiltreDialog 
+        )}
+      </div>
+
+      {/* ── DIALOGS ── */}
+      <FiltreDialog
         isOpen={isFilterDialogOpen}
         onClose={() => setIsFilterDialogOpen(false)}
         availableGroups={availableFilterGroups}
@@ -801,15 +835,13 @@ export default function StokYonetimiPanel() {
         onClose={() => setIsNfcQueryModalOpen(false)}
         productCodes={productCodes}
         deviceGroups={[]}
-        allStock={depotStock}
+        allStock={rawDepotStock}
       />
-       <Dialog open={isLabCountModalOpen} onOpenChange={setIsLabCountModalOpen}>
+      <Dialog open={isLabCountModalOpen} onOpenChange={setIsLabCountModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Laboratuvar Sayım Raporu</DialogTitle>
-            <DialogDescription>
-              Stoklarını birleşik olarak görmek istediğiniz laboratuvarları seçin.
-            </DialogDescription>
+            <DialogDescription>Stoklarını birleşik olarak görmek istediğiniz laboratuvarları seçin.</DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <ScrollArea className="h-64 border rounded-md p-2">
@@ -820,9 +852,7 @@ export default function StokYonetimiPanel() {
                     checked={lab.id ? selectedLabsForReport.includes(lab.id) : false}
                     onCheckedChange={(checked) => {
                       if (!lab.id) return;
-                      setSelectedLabsForReport(prev =>
-                        checked ? [...prev, lab.id!] : prev.filter(id => id !== lab.id)
-                      );
+                      setSelectedLabsForReport(prev => checked ? [...prev, lab.id!] : prev.filter(id => id !== lab.id));
                     }}
                   />
                   <Label htmlFor={`lab-select-${lab.id}`}>{lab.name}</Label>
@@ -832,12 +862,10 @@ export default function StokYonetimiPanel() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsLabCountModalOpen(false)}>İptal</Button>
-            <Button onClick={handleLabCountExport} disabled={selectedLabsForReport.length === 0}>
-              Rapor Oluştur
-            </Button>
+            <Button onClick={handleLabCountExport} disabled={selectedLabsForReport.length === 0}>Rapor Oluştur</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }
