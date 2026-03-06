@@ -8,7 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { LoadingProvider } from "@/contexts/loading-context";
 import MobileResponsiveFix from "@/components/responsive/MobileResponsiveFix";
 import React from "react";
-import AppBackground from "@/components/AppBackground";
+
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -50,7 +50,6 @@ export default function RootLayout({
             <LoadingProvider>
               <QueryProvider>
                 <MobileResponsiveFix />
-                <AppBackground />
                 {children}
                 <Toaster />
               </QueryProvider>
