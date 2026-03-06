@@ -66,7 +66,7 @@
   z-index: 41;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-bottom: 120px; /* space for mobile dock */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* ============= COMPACT HEADER ============= */
@@ -222,7 +222,8 @@
 /* ============= CONTENT AREA ============= */
 .wizard-content-area {
   background: var(--wz-bg);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   position: relative;
   flex: 1;
   display: flex;

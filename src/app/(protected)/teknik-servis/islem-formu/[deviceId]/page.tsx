@@ -1077,12 +1077,6 @@ export default function IslemFormuPage() {
         });
       }
     } else if (selectedStockItem) {
-      // Check if this stock item is already in the actions list
-      if (actions.some(a => a.personalStockId === selectedStockItem.id)) {
-        toast({ title: 'Uyarı', description: 'Bu parça zaten listeye eklendi.', variant: 'default' });
-        return;
-      }
-
       // Check if this matches a periodic part change
       const matchingPeriodic = pendingPeriodicPartChangeId
         ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
@@ -1116,12 +1110,6 @@ export default function IslemFormuPage() {
         });
       }
     } else if (selectedPoolStockItem) {
-      // Check if this pool stock item is already in the actions list
-      if (actions.some(a => a.poolStockId === selectedPoolStockItem.id)) {
-        toast({ title: 'Uyarı', description: 'Bu parça zaten listeye eklendi.', variant: 'default' });
-        return;
-      }
-
       const matchingPeriodic = pendingPeriodicPartChangeId
         ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
         : periodicPartChanges.find(p => p.stokKodu === selectedPoolStockItem.stokKodu);
