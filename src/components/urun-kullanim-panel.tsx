@@ -25,6 +25,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useLoading } from '@/contexts/loading-context';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import Image from 'next/image';
@@ -1373,7 +1374,7 @@ export default function UrunKullanimPanel() {
                   {lastScannedDeviceGroupImage && (
                     <div className="flex-shrink-0">
                       <Image
-                        src={`/${lastScannedDeviceGroupImage}`}
+                        src={resolveImageSrc(lastScannedDeviceGroupImage)}
                         alt="Cihaz Grubu"
                         width={120}
                         height={120}
@@ -1463,7 +1464,7 @@ export default function UrunKullanimPanel() {
                         {/* Device image */}
                         <div className="relative w-full aspect-square flex items-center justify-center">
                           <Image
-                            src={c.imageUrl ? (c.imageUrl.startsWith('/') ? c.imageUrl : `/${c.imageUrl}`) : '/lab_diorama.png'}
+                            src={resolveImageSrc(c.imageUrl)}
                             alt={c.cihazAdi || c.model || 'Device'}
                             fill
                             className="object-contain"
@@ -1785,7 +1786,7 @@ export default function UrunKullanimPanel() {
                           : "border-border group-hover:border-primary/30"
                       )}>
                         <Image
-                          src={device.imageUrl ? (device.imageUrl.startsWith('/') ? device.imageUrl : `/${device.imageUrl}`) : '/lab_diorama.png'}
+                          src={resolveImageSrc(device.imageUrl)}
                           alt={device.cihazAdi || device.model || 'Device'}
                           fill
                           className="object-contain p-1"
