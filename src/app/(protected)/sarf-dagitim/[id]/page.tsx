@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Package, Search, ArrowLeft, ClipboardPlus } from 'lucide-react';
 import { collection, getDocs, doc, getDoc, query, addDoc, serverTimestamp, setDoc } from 'firebase/firestore';
@@ -117,7 +118,7 @@ export default function SarfDagilimDetayPage() {
       .map(p => {
         const deviceGroup = deviceGroups.find(dg => dg.name === p.cihazGrubu);
         const dgData = deviceGroup as (DeviceGroup & { imageUrl?: string }) | undefined;
-        return { ...p, deviceGroupImageUrl: dgData?.imageUrl ? `/${dgData.imageUrl}` : undefined };
+        return { ...p, deviceGroupImageUrl: dgData?.imageUrl ? resolveImageSrc(dgData.imageUrl) : undefined };
       })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || ''));
   }, [minMaxRules, allProducts, deviceGroups]);

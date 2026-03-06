@@ -13,6 +13,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption, TransferTemplate } from '@/lib/types';
 import type { BarcodeFormat, ParsedGeneric } from '@/lib/barcode';
+import { decodeBulkSerialQrPayload } from '@/lib/barcode';
 
 // Type imports from direkt-transfer module
 import type { TransferRow, FefoViolation, ScanSource } from '@/lib/direkt-transfer/types';
@@ -39,7 +40,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useDepoStokByDepot, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search } from 'lucide-react';
+import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
@@ -73,6 +74,7 @@ import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tuta
 import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -249,6 +251,7 @@ export default function DirektTransferPanel() {
 
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
+  const [isBulkScanMode, setIsBulkScanMode] = useState(false);
   const [showManualInline, setShowManualInline] = useState(false);
   const [showTemplateSelector, setShowTemplateSelector] = useState(false);
   const [templates, setTemplates] = useState<TransferTemplate[]>([]);
@@ -296,13 +299,14 @@ export default function DirektTransferPanel() {
       ]);
 
       const depotList = depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-      setDepots(depotList);
+      const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
+      setDepots(filteredDepots);
       setProducts(productSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setHospitals(hospitalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setBorcDepots(borcSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
 
-      if (depotList.length > 0 && !selectedDepotId) {
-          setSelectedDepotId(depotList[0].id);
+      if (filteredDepots.length > 0 && !selectedDepotId) {
+          setSelectedDepotId(filteredDepots[0].id);
       }
 
     } catch (e: any) {
@@ -313,7 +317,7 @@ export default function DirektTransferPanel() {
     } finally {
       setPrereqsLoading(false);
     }
-  }, [selectedDepotId, toast]);
+  }, [selectedDepotId, toast, currentUserProfile]);
 
   useEffect(() => {
     fetchPrerequisites();
@@ -413,16 +417,35 @@ export default function DirektTransferPanel() {
   }, [directTransferItems]);
   
   const handleScan = useCallback(
-    async (raw: string, source: 'hid' | 'camera' | 'manual' = 'hid') => {
+    async (raw: string, source: 'hid' | 'camera' | 'manual' | 'bulk_item' = 'hid') => {
       if (!raw) return;
+
+      const trimmedRaw = raw.trim();
+      if (!trimmedRaw) return;
+
+      const decodedBulk = decodeBulkSerialQrPayload(trimmedRaw);
+      if (decodedBulk) {
+        for (const serial of decodedBulk) {
+          await handleScan(serial, 'bulk_item');
+        }
+        setIsBulkScanMode(false);
+        toast({ title: 'Toplu barkod okundu', description: `${decodedBulk.length} barkod transfer listesine işlendi.` });
+        return;
+      }
+
+      if (isBulkScanMode && source !== 'bulk_item') {
+        playFeedback(true);
+        toast({ title: 'Toplu barkod bekleniyor', description: 'Bu modda sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar okunabilir.', variant: 'destructive' });
+        return;
+      }
       
       let parsed: ParsedGeneric | null = null;
       if (selectedFormatId && selectedFormatId !== '__auto__') {
           const fmt = barcodeFormats.find(f => f.id === selectedFormatId);
-          if (fmt) parsed = parseAnyBarcode(raw, [fmt]);
+          if (fmt) parsed = parseAnyBarcode(trimmedRaw, [fmt]);
       }
       if (!parsed) {
-          parsed = parseAnyBarcode(raw, barcodeFormats);
+          parsed = parseAnyBarcode(trimmedRaw, barcodeFormats);
       }
 
       if (!parsed) {
@@ -529,7 +552,7 @@ export default function DirektTransferPanel() {
       setLastScannedProduct({ stokKodu, stokAdi });
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, directTransferItems]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, directTransferItems, isBulkScanMode]
   );
   
   useHidScanner({
@@ -1216,6 +1239,26 @@ export default function DirektTransferPanel() {
                   <span className="text-xs font-semibold text-[var(--dashboard-text)]">Seri Tara</span>
                 </button>
               </div>
+              <button
+                onClick={() => {
+                  const next = !isBulkScanMode;
+                  setIsBulkScanMode(next);
+                  toast({
+                    title: next ? 'Toplu barkod modu açık' : 'Toplu barkod modu kapalı',
+                    description: next
+                      ? 'Sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar kabul edilecek.'
+                      : 'Normal barkod okuma moduna dönüldü.',
+                  });
+                }}
+                disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                className={cn(
+                  "cihaz-tool-item w-full flex items-center justify-center gap-2 py-2.5 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none",
+                  isBulkScanMode && "bg-[var(--dashboard-accent)] text-white"
+                )}
+              >
+                <QrCode className="h-4 w-4" />
+                Toplu Barkod Oku
+              </button>
 
               {/* Secondary add methods */}
               <div className="grid grid-cols-3 gap-2">

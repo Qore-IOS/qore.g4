@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card,
@@ -7,14 +7,13 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  CardFooter,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, Trash2, History, ListChecks, Check, Search, Plus, PackagePlus, AlertTriangle, Pencil } from 'lucide-react';
+import { Loader2, History, ListChecks, Check, Search, Plus, PackagePlus, AlertTriangle, Pencil, Eye, CircleCheck, CircleAlert, ArrowUpCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, writeBatch, doc, addDoc, serverTimestamp, setDoc, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, Timestamp, setDoc, serverTimestamp, addDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Depot, ProductCode, DepoStokItem, ConsumptionRecord, DepotStockCountSession } from '@/lib/types';
 import type { MalKabulHeader, MalKabulLine } from '@/lib/mal-kabul/types';
@@ -26,7 +25,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
+
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -78,6 +78,7 @@ export default function DepoSayimPage() {
     const [brandCountItems, setBrandCountItems] = useState<CountGroup[]>([]);
     const [isCounting, setIsCounting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showOnlyOpen, setShowOnlyOpen] = useState(true);
 
     // Yeni ürün ekleme dialog state'leri
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -95,6 +96,44 @@ export default function DepoSayimPage() {
     const [isManualEditOpen, setIsManualEditOpen] = useState(false);
     const [manualEditGroupId, setManualEditGroupId] = useState<string | null>(null);
     const [manualEditAdet, setManualEditAdet] = useState<number>(0);
+
+    const [draftSessionId, setDraftSessionId] = useState<string | null>(null);
+
+    const serializeCountGroups = useCallback((groups: CountGroup[]) => {
+        return groups.map(group => ({
+            id: group.id,
+            stokKodu: group.stokKodu,
+            stokAdi: group.stokAdi,
+            lotNumarasi: group.lotNumarasi,
+            miad: group.miad,
+            trackingMode: group.trackingMode,
+            expectedSerials: group.expectedSerials,
+            expectedAdet: group.expectedAdet,
+            scannedSerials: Array.from(group.scannedSerials),
+            scannedAdet: group.scannedAdet,
+            isNewFound: !!group.isNewFound,
+        }));
+    }, []);
+
+    const saveDraftSession = useCallback(async (groups: CountGroup[]) => {
+        if (!draftSessionId || !selectedDepotId || !brandForCount || !currentUserProfile) return;
+        try {
+            await setDoc(doc(db, 'depotBrandCountSessions', draftSessionId), {
+                depotId: selectedDepotId,
+                depotName: depots.find(d => d.id === selectedDepotId)?.name || '',
+                brand: brandForCount,
+                category: categoryForCount || null,
+                status: 'draft',
+                createdBy: currentUserProfile.uid,
+                createdByName: currentUserProfile.name || '',
+                startedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                draftItems: serializeCountGroups(groups),
+            }, { merge: true });
+        } catch (error) {
+            console.error('saveDraftSession error:', error);
+        }
+    }, [brandForCount, categoryForCount, currentUserProfile, depots, draftSessionId, selectedDepotId, serializeCountGroups]);
 
     const availableBrands = useMemo(() => {
         const brands = new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]);
@@ -115,25 +154,35 @@ export default function DepoSayimPage() {
                 getDocs(collection(db, 'depoStok')),
             ]);
             const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
-            setDepots(depotList);
+            const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
+            setDepots(filteredDepots);
             setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
             setFullDepotStok(stockSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)));
 
-            if(depotList.length > 0 && depotList[0].id && !selectedDepotId) {
-                setSelectedDepotId(depotList[0].id);
+            if(filteredDepots.length > 0 && filteredDepots[0].id && !selectedDepotId) {
+                setSelectedDepotId(filteredDepots[0].id);
             }
         } catch (e) {
             toast({ title: 'Veri Yükleme Hatası', description: 'Gerekli ana veriler yüklenemedi.', variant: 'destructive' });
         } finally {
             setIsLoading(false);
         }
-    }, [toast, selectedDepotId]);
+    }, [toast, selectedDepotId, currentUserProfile]);
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
 
-    const startBrandCount = () => {
+    useEffect(() => {
+        if (!isCounting || !draftSessionId) return;
+        const timeout = setTimeout(() => {
+            saveDraftSession(brandCountItems);
+        }, 1500);
+
+        return () => clearTimeout(timeout);
+    }, [brandCountItems, draftSessionId, isCounting, saveDraftSession]);
+
+    const startBrandCount = async () => {
         if (!brandForCount || !selectedDepotId) {
           toast({ title: 'Eksik Seçim', description: 'Lütfen sayım yapılacak depo ve markayı seçin.', variant: 'destructive' });
           return;
@@ -172,8 +221,12 @@ export default function DepoSayimPage() {
           return acc;
         }, {} as Record<string, CountGroup>);
         
-        setBrandCountItems(Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi)));
+        const groupedItems = Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi));
+        const nextDraftId = draftSessionId || doc(collection(db, 'depotBrandCountSessions')).id;
+        setDraftSessionId(nextDraftId);
+        setBrandCountItems(groupedItems);
         setIsCounting(true);
+        await saveDraftSession(groupedItems);
     };
     
     // Yeni ürün ekleme dialog'unu aç
@@ -457,12 +510,9 @@ export default function DepoSayimPage() {
     const finishBrandCount = async () => {
         if (!currentUserProfile) return;
 
-        // Mevcut ürünlerdeki farklar
         const existingChanges: { group: CountGroup; diff: number }[] = [];
-        // Yeni bulunan ürünler (mal kabul kaydı için)
         const newFoundItems: CountGroup[] = [];
 
-        // Sayım istatistikleri
         let totalExpected = 0;
         let totalScanned = 0;
 
@@ -474,15 +524,12 @@ export default function DepoSayimPage() {
             totalScanned += scanned;
 
             if (group.isNewFound && scanned > 0) {
-                // Yeni bulunan ve sayılan ürünler
                 newFoundItems.push(group);
             } else if (diff !== 0) {
-                // Mevcut ürünlerdeki fark
                 existingChanges.push({ group, diff });
             }
         });
 
-        // Özet oluştur
         const existingChangeSummary = existingChanges.map(c =>
             `${c.group.stokAdi} (${c.group.lotNumarasi}): ${c.diff > 0 ? `+${c.diff}` : c.diff}`
         ).join('\n');
@@ -493,79 +540,74 @@ export default function DepoSayimPage() {
         }).join('\n');
 
         const fullSummary = [existingChangeSummary, newFoundSummary].filter(Boolean).join('\n');
-
-        // Hiç fark yoksa bile sayım oturumu kaydedilmeli
         const hasChanges = existingChanges.length > 0 || newFoundItems.length > 0;
 
         if (!hasChanges) {
-            // Fark yok ama yine de sayım oturumu kaydedelim
             const confirmNoChange = confirm('Tüm ürünler doğrulandı, stokta değişiklik yok. Sayım kaydedilsin mi?');
-            if (!confirmNoChange) {
-                setIsCounting(false);
-                setBrandCountItems([]);
-                return;
-            }
+            if (!confirmNoChange) return;
         } else {
             const confirmMsg = newFoundItems.length > 0
-                ? `Aşağıdaki stok değişiklikleri uygulanacak:\n\n${fullSummary}\n\n⚠️ Yeni bulunan ürünler için mal kabul kaydı oluşturulacak.\n\nOnaylıyor musunuz?`
-                : `Aşağıdaki stok değişiklikleri uygulanacak:\n\n${fullSummary}\n\nOnaylıyor musunuz?`;
+                ? `Aşağıdaki stok değişiklikleri uygulanacak:
 
+${fullSummary}
+
+⚠️ Yeni bulunan ürünler için mal kabul kaydı oluşturulacak.
+
+Devam edilsin mi?`
+                : `Aşağıdaki stok değişiklikleri uygulanacak:
+
+${fullSummary}
+
+Devam edilsin mi?`;
             if (!confirm(confirmMsg)) return;
+            if (!confirm('Bu işlem geri alınamaz. Kesin olarak farkları kaydetmek istiyor musunuz?')) return;
         }
 
         setIsLoading(true);
-        const batch = writeBatch(db);
         const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
+        let malKabulTransactionId: string | null = null;
+        const sessionRef = doc(collection(db, 'depotBrandCountSessions'));
+        const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
 
-        // 1. Mevcut ürünlerdeki farkları işle
         for (const { group, diff } of existingChanges) {
-            if (diff < 0) { // Items are missing - Stoktan düşür
+            if (diff < 0) {
                 const itemsToDelete = group.trackingMode === 'serial'
-                    ? group.items.filter(item => !group.scannedSerials.has(item.seriNumarasi!))
+                    ? group.items.filter(item => !group.scannedSerials.has(item.seriNumarasi || ''))
                     : group.items.slice(0, Math.abs(diff));
 
                 itemsToDelete.forEach(item => {
-                    batch.delete(doc(db, 'depoStok', item.id!));
-                    // Düşüş log kaydı
+                    operations.push((batch) => batch.delete(doc(db, 'depoStok', item.id!)));
                     const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
                         stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi ?? '',
                         miad: item.miad as string, seriNumarasi: item.seriNumarasi ?? '', consumptionTimestamp: new Date(),
                         consumptionType: 'sayimdan_dusum', userId: currentUserProfile.uid, userName: currentUserProfile.name || '',
                         laboratoryName: depotName, laboratoryId: selectedDepotId,
                     };
-                    batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+                    operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord));
                 });
-            } else { // Items are extra - Stoğa ekle
+            } else {
                 for (let i = 0; i < diff; i++) {
-                    const newDocRef = doc(collection(db, 'depoStok'));
+                    const generatedSerial = `FAZLA-${nanoid(6)}`;
                     const newEntry: Omit<DepoStokItem, 'id'> = {
                         depotId: selectedDepotId, depotName, stokKodu: group.stokKodu, stokAdi: group.stokAdi,
                         lotNumarasi: group.lotNumarasi, miad: group.miad, eklenmeTarihi: new Date(), isShipped: false,
-                        irsaliyeNumarasi: 'SAYIMDAN_FAZLA', createdByName: currentUserProfile.name, seriNumarasi: `FAZLA-${nanoid(6)}`,
+                        irsaliyeNumarasi: 'SAYIMDAN_FAZLA', createdByName: currentUserProfile.name, seriNumarasi: generatedSerial,
                     };
-                    batch.set(newDocRef, newEntry);
-
-                    // Artış log kaydı
                     const additionRecord: Omit<ConsumptionRecord, 'id'> = {
                         stokKodu: group.stokKodu, stokAdi: group.stokAdi, lotNumarasi: group.lotNumarasi,
-                        miad: group.miad, seriNumarasi: `FAZLA-${nanoid(6)}`, consumptionTimestamp: new Date(),
+                        miad: group.miad, seriNumarasi: generatedSerial, consumptionTimestamp: new Date(),
                         consumptionType: 'sayimdan_fazla', userId: currentUserProfile.uid, userName: currentUserProfile.name || '',
                         laboratoryName: depotName, laboratoryId: selectedDepotId,
                     };
-                    batch.set(doc(collection(db, 'tuketimKayitlari')), additionRecord);
+                    operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), newEntry));
+                    operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), additionRecord));
                 }
             }
         }
 
-        // 2. Yeni bulunan ürünler için mal kabul kaydı ve stok oluştur
-        let malKabulTransactionId: string | null = null;
-
         if (newFoundItems.length > 0) {
-            // Mal kabul transaction ID oluştur
             malKabulTransactionId = `MK-SAYIM-${nanoid(8)}`;
             const malKabulRef = doc(collection(db, 'malKabulTransactions'));
-
-            // Mal kabul header
             const malKabulHeader: MalKabulHeader = {
                 transactionId: malKabulTransactionId,
                 depotId: selectedDepotId,
@@ -573,20 +615,16 @@ export default function DepoSayimPage() {
                 userId: currentUserProfile.uid,
                 userName: currentUserProfile.name || '',
                 timestamp: Timestamp.now(),
-                itemCount: newFoundItems.reduce((sum, g) =>
-                    sum + (g.trackingMode === 'serial' ? g.scannedSerials.size : g.scannedAdet), 0),
-                brands: [...new Set(newFoundItems.map(g => brandForCount))],
+                itemCount: newFoundItems.reduce((sum, g) => sum + (g.trackingMode === 'serial' ? g.scannedSerials.size : g.scannedAdet), 0),
+                brands: [...new Set(newFoundItems.map(() => brandForCount))],
                 mode: 'unverified',
             };
+            operations.push((batch) => batch.set(malKabulRef, malKabulHeader));
 
-            batch.set(malKabulRef, malKabulHeader);
-
-            // Her yeni ürün için mal kabul line ve stok kayıtları
             for (const group of newFoundItems) {
                 const adet = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
                 const serials = group.trackingMode === 'serial' ? Array.from(group.scannedSerials) : [];
 
-                // Mal kabul line
                 const lineRef = doc(collection(db, 'malKabulTransactions', malKabulRef.id, 'lines'));
                 const malKabulLine: MalKabulLine = {
                     stokKodu: group.stokKodu,
@@ -596,13 +634,10 @@ export default function DepoSayimPage() {
                     adet,
                     serials,
                 };
-                batch.set(lineRef, malKabulLine);
+                operations.push((batch) => batch.set(lineRef, malKabulLine));
 
-                // Stok kayıtları oluştur
                 if (group.trackingMode === 'serial') {
-                    // Seri takipli - her seri için ayrı kayıt
                     for (const seri of serials) {
-                        const stockRef = doc(collection(db, 'depoStok'));
                         const stockEntry: Omit<DepoStokItem, 'id'> = {
                             depotId: selectedDepotId,
                             depotName,
@@ -616,12 +651,10 @@ export default function DepoSayimPage() {
                             irsaliyeNumarasi: malKabulTransactionId,
                             createdByName: currentUserProfile.name,
                         };
-                        batch.set(stockRef, stockEntry);
+                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), stockEntry));
                     }
                 } else {
-                    // Lot/Adet takipli - adet kadar kayıt
                     for (let i = 0; i < adet; i++) {
-                        const stockRef = doc(collection(db, 'depoStok'));
                         const stockEntry: Omit<DepoStokItem, 'id'> = {
                             depotId: selectedDepotId,
                             depotName,
@@ -635,11 +668,10 @@ export default function DepoSayimPage() {
                             irsaliyeNumarasi: malKabulTransactionId,
                             createdByName: currentUserProfile.name,
                         };
-                        batch.set(stockRef, stockEntry);
+                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), stockEntry));
                     }
                 }
 
-                // Yeni bulunan ürünler için de log kaydı
                 const newFoundRecord: Omit<ConsumptionRecord, 'id'> = {
                     stokKodu: group.stokKodu, stokAdi: group.stokAdi, lotNumarasi: group.lotNumarasi,
                     miad: group.miad, seriNumarasi: serials.join(', ') || '', consumptionTimestamp: new Date(),
@@ -647,12 +679,10 @@ export default function DepoSayimPage() {
                     laboratoryName: depotName, laboratoryId: selectedDepotId,
                     irsaliyeNumarasi: malKabulTransactionId || undefined,
                 };
-                batch.set(doc(collection(db, 'tuketimKayitlari')), newFoundRecord);
+                operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), newFoundRecord));
             }
         }
 
-        // 3. Sayım oturumu kaydı oluştur
-        const sessionRef = doc(collection(db, 'depotBrandCountSessions'));
         const missingCount = existingChanges.filter(c => c.diff < 0).reduce((sum, c) => sum + Math.abs(c.diff), 0);
         const extraCount = existingChanges.filter(c => c.diff > 0).reduce((sum, c) => sum + c.diff, 0);
         const newFoundCount = newFoundItems.reduce((sum, g) => sum + (g.trackingMode === 'serial' ? g.scannedSerials.size : g.scannedAdet), 0);
@@ -668,23 +698,80 @@ export default function DepoSayimPage() {
             status: 'completed',
             itemCount: totalExpected,
             scannedCount: totalScanned,
-            missingCount: missingCount,
+            missingCount,
             category: categoryForCount || undefined,
-            extraCount: extraCount,
-            newFoundCount: newFoundCount,
+            extraCount,
+            newFoundCount,
         };
-        batch.set(sessionRef, sessionData);
+        operations.push((batch) => batch.set(sessionRef, sessionData));
 
         try {
-            await batch.commit();
-            const message = malKabulTransactionId
-                ? `Stok farkları kaydedildi. Mal Kabul No: ${malKabulTransactionId}`
-                : hasChanges
-                    ? 'Stok farkları başarıyla kaydedildi.'
-                    : 'Sayım başarıyla kaydedildi.';
-            toast({ title: 'Başarılı', description: message });
+            const chunkSize = 450;
+            for (let i = 0; i < operations.length; i += chunkSize) {
+                const batch = writeBatch(db);
+                operations.slice(i, i + chunkSize).forEach(op => op(batch));
+                await batch.commit();
+            }
+
+            const scopedQuery = query(
+                collection(db, 'depoStok'),
+                where('depotId', '==', selectedDepotId)
+            );
+            const scopedSnap = await getDocs(scopedQuery);
+            const expectedByGroup = new Map<string, number>();
+
+            brandCountItems.forEach(group => {
+                const product = productCodes.find(p => p.stokKodu === group.stokKodu);
+                if (!product || product.marka !== brandForCount) return;
+                if (categoryForCount && product.urunGrubu !== categoryForCount) return;
+                const counted = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
+                expectedByGroup.set(group.id, counted);
+            });
+
+            const actualByGroup = new Map<string, number>();
+            scopedSnap.docs.forEach(stockDoc => {
+                const item = stockDoc.data() as DepoStokItem;
+                if (item.isShipped) return;
+                const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+                if (!product || product.marka !== brandForCount) return;
+                if (categoryForCount && product.urunGrubu !== categoryForCount) return;
+                const key = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
+                actualByGroup.set(key, (actualByGroup.get(key) || 0) + 1);
+            });
+
+            const mismatches = Array.from(expectedByGroup.entries())
+                .map(([key, expected]) => ({ key, expected, actual: actualByGroup.get(key) || 0 }))
+                .filter(m => m.expected !== m.actual);
+
+            await addDoc(collection(db, 'depotBrandCountValidationLogs'), {
+                sessionId: sessionRef.id,
+                depotId: selectedDepotId,
+                brand: brandForCount,
+                category: categoryForCount || null,
+                expectedTotal: Array.from(expectedByGroup.values()).reduce((sum, v) => sum + v, 0),
+                actualTotal: Array.from(actualByGroup.values()).reduce((sum, v) => sum + v, 0),
+                mismatchCount: mismatches.length,
+                mismatches,
+                operationCount: operations.length,
+                createdAt: serverTimestamp(),
+                createdBy: currentUserProfile.uid,
+            });
+
+            if (mismatches.length > 0) {
+                toast({ title: 'Uyarı', description: `Sayım kaydedildi fakat ${mismatches.length} satırda doğrulama farkı var. Loglara işlendi.`, variant: 'destructive' });
+            } else {
+                const message = malKabulTransactionId
+                    ? `Stok farkları kaydedildi ve doğrulandı. Mal Kabul No: ${malKabulTransactionId}`
+                    : hasChanges
+                        ? 'Stok farkları başarıyla kaydedildi ve doğrulandı.'
+                        : 'Sayım başarıyla kaydedildi ve doğrulandı.';
+                toast({ title: 'Başarılı', description: message });
+            }
+
+            await setDoc(doc(db, 'depotBrandCountSessions', sessionRef.id), { validationCompletedAt: serverTimestamp(), mismatchCount: mismatches.length }, { merge: true });
             await fetchData();
-        } catch(e) {
+            setDraftSessionId(null);
+        } catch (e) {
             toast({ title: 'Hata', description: 'Stok güncellenirken bir hata oluştu.', variant: 'destructive' });
             console.error('finishBrandCount error:', e);
         } finally {
@@ -693,17 +780,81 @@ export default function DepoSayimPage() {
             setBrandCountItems([]);
         }
     };
-    
+
     const filteredBrandCountItems = useMemo(() => {
-        if (!searchTerm) return brandCountItems;
+        let items = brandCountItems;
+
+        if (showOnlyOpen) {
+            items = items.filter((group) => {
+                if (group.isNewFound) return true;
+                const scanned = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
+                return scanned !== group.expectedAdet;
+            });
+        }
+
+        if (!searchTerm) return items;
         const lowerSearch = searchTerm.toLowerCase();
-        return brandCountItems.filter(item => 
+        return items.filter(item => 
             item.stokAdi.toLowerCase().includes(lowerSearch) ||
             item.stokKodu.toLowerCase().includes(lowerSearch) ||
             item.lotNumarasi.toLowerCase().includes(lowerSearch)
         );
-    }, [brandCountItems, searchTerm]);
+    }, [brandCountItems, searchTerm, showOnlyOpen]);
 
+    const countSummary = useMemo(() => {
+        return brandCountItems.reduce((acc, group) => {
+            const scanned = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
+            acc.total += 1;
+
+            if (group.isNewFound) {
+                acc.extra += 1;
+                acc.open += 1;
+                return acc;
+            }
+
+            if (scanned === group.expectedAdet) {
+                acc.completed += 1;
+            } else if (scanned > group.expectedAdet) {
+                acc.extra += 1;
+                acc.open += 1;
+            } else {
+                acc.missing += 1;
+                acc.open += 1;
+            }
+            return acc;
+        }, { total: 0, completed: 0, open: 0, missing: 0, extra: 0 });
+    }, [brandCountItems]);
+
+    const getGroupStatus = (group: CountGroup, scannedCount: number) => {
+        if (group.isNewFound) return { label: 'Fazla', style: 'text-amber-700 bg-amber-50 border-amber-200', Icon: ArrowUpCircle };
+        if (scannedCount === group.expectedAdet) return { label: 'Tam', style: 'text-emerald-700 bg-emerald-50 border-emerald-200', Icon: CircleCheck };
+        if (scannedCount > group.expectedAdet) return { label: 'Fazla', style: 'text-amber-700 bg-amber-50 border-amber-200', Icon: ArrowUpCircle };
+        return { label: 'Eksik', style: 'text-rose-700 bg-rose-50 border-rose-200', Icon: CircleAlert };
+    };
+
+
+
+    const handleScopeChangeWithConfirm = async (field: 'depot' | 'brand' | 'category', value: string) => {
+        if (!isCounting) {
+            if (field === 'depot') setSelectedDepotId(value);
+            if (field === 'brand') setBrandForCount(value);
+            if (field === 'category') setCategoryForCount((value === '__all__' ? '' : value) as 'kit' | 'sarf' | '');
+            return;
+        }
+
+        const shouldSaveDraft = confirm('Sayım kapsamı değişiyor. Mevcut taslak kaydedilip sayımdan çıkılsın mı?');
+        if (!shouldSaveDraft) return;
+
+        await saveDraftSession(brandCountItems);
+        setIsCounting(false);
+        setBrandCountItems([]);
+
+        if (field === 'depot') setSelectedDepotId(value);
+        if (field === 'brand') setBrandForCount(value);
+        if (field === 'category') setCategoryForCount((value === '__all__' ? '' : value) as 'kit' | 'sarf' | '');
+
+        toast({ title: 'Taslak Kaydedildi', description: 'Mevcut sayım taslağı kaydedildi. Yeni kapsamı başlatabilirsiniz.' });
+    };
 
     if (isLoading && depots.length === 0) {
         return (
@@ -733,18 +884,18 @@ export default function DepoSayimPage() {
                         Belirli bir markaya ve opsiyonel olarak ürün kategorisine (Kit/Sarf) ait ürünlerin depo sayımını yapmak için depo, marka ve kategori seçin.
                     </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <Label>Depo</Label>
-                            <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isCounting}>
+                            <Select value={selectedDepotId} onValueChange={(v) => void handleScopeChangeWithConfirm('depot', v)}>
                                 <SelectTrigger><SelectValue placeholder="Depo Seçin..." /></SelectTrigger>
                                 <SelectContent>{depots.map(d => <SelectItem key={d.id} value={d.id!}>{d.name}</SelectItem>)}</SelectContent>
                             </Select>
                         </div>
                         <div>
                             <Label>Marka</Label>
-                            <Select value={brandForCount} onValueChange={setBrandForCount} disabled={isCounting}>
+                            <Select value={brandForCount} onValueChange={(v) => void handleScopeChangeWithConfirm('brand', v)}>
                                 <SelectTrigger><SelectValue placeholder="Marka Seçin..." /></SelectTrigger>
                                 <SelectContent>{availableBrands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
                             </Select>
@@ -753,8 +904,7 @@ export default function DepoSayimPage() {
                             <Label>Ürün Kategorisi</Label>
                             <Select
                                 value={categoryForCount || '__all__'}
-                                onValueChange={(v) => setCategoryForCount(v === '__all__' ? '' : v as 'kit' | 'sarf')}
-                                disabled={isCounting}
+                                onValueChange={(v) => void handleScopeChangeWithConfirm('category', v)}
                             >
                                 <SelectTrigger><SelectValue placeholder="Kategori Seçin (Opsiyonel)..." /></SelectTrigger>
                                 <SelectContent>
@@ -766,75 +916,108 @@ export default function DepoSayimPage() {
                             </Select>
                         </div>
                     </div>
-                </CardContent>
-                <CardFooter>
-                    {isCounting ? (
-                        <div className="flex gap-2">
-                            <Button onClick={finishBrandCount} variant="destructive">Sayımı Bitir ve Farkları Kaydet</Button>
-                            <Button onClick={() => { setIsCounting(false); setBrandCountItems([]); }} variant="ghost">Sayımdan Çık</Button>
+                    {isCounting && (
+                        <div className="flex flex-wrap gap-2 text-sm">
+                            <Badge variant="secondary">Toplam ürün: {countSummary.total}</Badge>
+                            <Badge variant="secondary">Açık ürün: {countSummary.open}</Badge>
+                            <Badge variant="secondary">Tamamlanan: {countSummary.completed}</Badge>
                         </div>
-                    ) : (
-                        <Button onClick={startBrandCount} disabled={!selectedDepotId || !brandForCount}>Sayımı Başlat</Button>
                     )}
-                </CardFooter>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+                        <Button onClick={startBrandCount} disabled={isCounting || !selectedDepotId || !brandForCount}>Sayımı Başlat</Button>
+                        {isCounting && (
+                            <div className="flex flex-wrap gap-2">
+                                <Button onClick={finishBrandCount} variant="destructive">Bitir & Farkları Kaydet</Button>
+                                <Button onClick={() => { setIsCounting(false); setBrandCountItems([]); }} variant="outline">Sayımı Askıya Al / Çık</Button>
+                            </div>
+                        )}
+                    </div>
+                </CardContent>
             </Card>
 
             {isCounting && (
                  <Card className="shadow-lg">
                   <CardHeader>
                     <CardTitle>Sayım: {brandForCount}{categoryForCount ? ` - ${categoryForCount === 'kit' ? 'Kit' : 'Sarf'}` : ''}</CardTitle>
-                    <CardDescription>Okutulan ürünler yeşil, kalanlar kırmızı ile gösterilir. Tümünü doğrulamak için satır yanındaki tik butonunu kullanın.</CardDescription>
+                    <CardDescription>Sayım odak ekranı: açık ürünleri filtreleyin, barkod okutup durumu doğrulayın, satır bazlı düzeltme ve onay verin.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
-                        placeholder="Ürün adı, kodu veya lot ile ara..."
+                        placeholder="Ürün adı / stok kodu / lot / seri ara..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="pl-9"
                       />
                     </div>
+                    <div className="mb-3 flex items-center justify-between">
+                      <Button variant={showOnlyOpen ? 'default' : 'outline'} size="sm" onClick={() => setShowOnlyOpen(prev => !prev)}>
+                        {showOnlyOpen ? 'Sadece Açıklar' : 'Tüm Satırlar'}
+                      </Button>
+                      <p className="text-xs text-muted-foreground">Açık: {countSummary.open} • Tam: {countSummary.completed}</p>
+                    </div>
                     <ScrollArea className="h-[60vh]">
                       <Accordion type="multiple" defaultValue={filteredBrandCountItems.map(g => g.id)}>
                         {filteredBrandCountItems.map((group) => {
                           const scannedCount = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
-                          const isComplete = scannedCount >= group.expectedAdet;
                           const isNewFound = group.isNewFound;
+                          const status = getGroupStatus(group, scannedCount);
+                          const progress = group.expectedAdet > 0 ? Math.min(100, Math.round((scannedCount / group.expectedAdet) * 100)) : 100;
                           return (
                             <AccordionItem key={group.id} value={group.id} className={cn(
-                              "border-b",
-                              isNewFound && 'bg-blue-500/10 border-blue-300',
-                              !isNewFound && isComplete && 'bg-green-500/10'
+                              "border-b border-l-4",
+                              status.label === 'Tam' && 'border-l-emerald-400',
+                              status.label === 'Eksik' && 'border-l-rose-400',
+                              status.label === 'Fazla' && 'border-l-amber-400'
                             )}>
-                              <AccordionTrigger>
-                                <div className="flex-1 text-left flex items-center gap-2">
-                                  {group.stokAdi} ({group.stokKodu}) - Lot: {group.lotNumarasi}
-                                  {isNewFound && (
-                                    <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
-                                      <PackagePlus className="h-3 w-3 mr-1" />
-                                      YENİ
+                              <AccordionTrigger className="hover:no-underline">
+                                <div className="flex-1 text-left space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{group.stokAdi} ({group.stokKodu}) - Lot: {group.lotNumarasi || '-'}</span>
+                                    <Badge variant="outline" className={cn('text-xs', status.style)}>
+                                      <status.Icon className="h-3.5 w-3.5 mr-1" />
+                                      {status.label}
                                     </Badge>
+                                    {group.trackingMode === 'serial' ? (
+                                      <Badge variant="secondary" className="text-xs">Seri Takipli</Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-xs">Adet Takipli</Badge>
+                                    )}
+                                    {isNewFound && (
+                                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
+                                        <PackagePlus className="h-3 w-3 mr-1" />
+                                        YENİ
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {!isNewFound && (
+                                    <div className="space-y-1 pr-6">
+                                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                        <div className={cn('h-full rounded-full', status.label === 'Tam' ? 'bg-emerald-500' : status.label === 'Eksik' ? 'bg-rose-500' : 'bg-amber-500')} style={{ width: `${progress}%` }} />
+                                      </div>
+                                      <p className="text-xs text-muted-foreground">Okutulan {scannedCount} / Beklenen {group.expectedAdet}</p>
+                                    </div>
                                   )}
                                 </div>
-                                <div className="text-right font-bold pr-4">
-                                  {isNewFound ? `+${scannedCount}` : `${scannedCount} / ${group.expectedAdet}`}
-                                </div>
-                                {/* Manuel düzenleme butonu */}
-                                <Button
+                                <div className="ml-2 flex items-center gap-2">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Detay">
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                  <Button
                                     variant="ghost"
                                     size="icon"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       openManualEdit(group);
                                     }}
-                                    className="h-8 w-8 ml-2 hover:bg-blue-500/20"
-                                    title="Manuel düzenle"
-                                >
+                                    className="h-8 w-8 hover:bg-blue-500/20"
+                                    title="Düzelt"
+                                  >
                                     <Pencil className="h-4 w-4 text-blue-600" />
-                                </Button>
-                                {!isNewFound && (
-                                  <Button
+                                  </Button>
+                                  {!isNewFound && (
+                                    <Button
                                       variant="ghost"
                                       size="icon"
                                       onClick={(e) => {
@@ -842,11 +1025,12 @@ export default function DepoSayimPage() {
                                         handleManualVerifyGroup(group.id);
                                       }}
                                       className="h-8 w-8 hover:bg-green-500/20"
-                                      title="Tümünü doğrula"
-                                  >
+                                      title="Onayla"
+                                    >
                                       <Check className="h-5 w-5 text-green-600" />
-                                  </Button>
-                                )}
+                                    </Button>
+                                  )}
+                                </div>
                               </AccordionTrigger>
                               <AccordionContent>
                                 {isNewFound ? (
@@ -866,15 +1050,18 @@ export default function DepoSayimPage() {
                                     )}
                                   </div>
                                 ) : group.trackingMode === 'serial' ? (
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-2">
-                                    {group.expectedSerials.map((serial: any) => (
-                                        <div key={serial} className={cn("p-1 text-xs rounded font-mono", group.scannedSerials.has(serial) ? 'bg-green-200' : 'bg-red-200')}>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
+                                    {group.expectedSerials.map((serial: string, index: number) => (
+                                        <div key={`${serial}-${index}`} className={cn("p-1.5 text-xs rounded font-mono border", group.scannedSerials.has(serial) ? 'border-emerald-300 text-emerald-700' : 'border-rose-300 text-rose-700')}>
                                         {serial}
                                         </div>
                                     ))}
                                     </div>
                                 ) : (
-                                    <p className="text-sm text-muted-foreground p-2">Bu ürün adet ile takip ediliyor.</p>
+                                    <div className="p-2 text-sm text-muted-foreground space-y-2">
+                                      <p>Bu ürün adet ile takip ediliyor.</p>
+                                      <p className="text-xs">Hızlı düzeltme için düzenle butonundan okutulan adedi +1 / -1 mantığında güncelleyebilirsiniz.</p>
+                                    </div>
                                 )}
                               </AccordionContent>
                             </AccordionItem>

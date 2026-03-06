@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CheckCircle2, DollarSign, Wallet, BarChart3 } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -23,9 +23,10 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getCountFromServer, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
+import { useQuery } from '@tanstack/react-query';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -83,6 +84,106 @@ export default function DashboardPanel({
     };
   }, []);
 
+  // Server-side query: count of products expiring within 45 days across all depots
+  const { data: expiringProductCount = 0 } = useQuery({
+    queryKey: ['expiringProductCount45'],
+    queryFn: async () => {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
+      const q = query(
+        collection(db, 'depoStok'),
+        where('isShipped', '==', false),
+        where('miad', '<=', Timestamp.fromDate(cutoff)),
+        where('miad', '>=', Timestamp.fromDate(now))
+      );
+      const snapshot = await getCountFromServer(q);
+      return snapshot.data().count;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Total stock cost using getCountFromServer per stokKodu (no document downloads)
+  const { data: totalStockCost = 0 } = useQuery({
+    queryKey: ['dashboardTotalStockCost'],
+    queryFn: async () => {
+      // Only fetch small productCodes collection
+      const productSnap = await getDocs(collection(db, 'productCodes'));
+      const pricedProducts: { stokKodu: string; cost: number }[] = [];
+      productSnap.docs.forEach(d => {
+        const data = d.data();
+        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+      });
+      if (pricedProducts.length === 0) return 0;
+      // Count stock items per stokKodu server-side (no document data transfer)
+      const counts = await Promise.all(
+        pricedProducts.map(async (p) => {
+          const snap = await getCountFromServer(
+            query(collection(db, 'depoStok'), where('stokKodu', '==', p.stokKodu))
+          );
+          return snap.data().count * p.cost;
+        })
+      );
+      return counts.reduce((sum, v) => sum + v, 0);
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Yesterday's consumption cost using getCountFromServer per stokKodu
+  const { data: yesterdayConsumptionCost = 0 } = useQuery({
+    queryKey: ['dashboardYesterdayConsumptionCost'],
+    queryFn: async () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+      const productSnap = await getDocs(collection(db, 'productCodes'));
+      const pricedProducts: { stokKodu: string; cost: number }[] = [];
+      productSnap.docs.forEach(d => {
+        const data = d.data();
+        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+      });
+      if (pricedProducts.length === 0) return 0;
+      const counts = await Promise.all(
+        pricedProducts.map(async (p) => {
+          const snap = await getCountFromServer(
+            query(
+              collection(db, 'tuketimKayitlari'),
+              where('stokKodu', '==', p.stokKodu),
+              where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
+              where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
+            )
+          );
+          return snap.data().count * p.cost;
+        })
+      );
+      return counts.reduce((sum, v) => sum + v, 0);
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Average efficiency from totalEfficiencyRecords
+  const { data: avgEfficiency } = useQuery<number | null>({
+    queryKey: ['dashboardAvgEfficiency'],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+      const efficiencies: number[] = [];
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
+        if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
+          efficiencies.push(genelVerimlilik);
+        }
+      });
+      if (efficiencies.length === 0) return null;
+      return efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length;
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
     if (report.status === 'atama_bekliyor') acc.atamaBekleyen += 1;
     if (report.status === 'mudahale_bekliyor') acc.mudahaleBekleyen += 1;
@@ -130,6 +231,19 @@ export default function DashboardPanel({
     ];
 
     return { timelineItems };
+  }, [purchasingTasks, currentUserProfile?.uid]);
+
+  const todayTasks = useMemo(() => {
+    if (!currentUserProfile?.uid) return [];
+    const todayKey = format(new Date(), 'yyyy-MM-dd');
+    return purchasingTasks
+      .filter((task) => {
+        if (task.date !== todayKey) return false;
+        return task.createdByUid === currentUserProfile.uid
+          || task.assignedPersonnel?.some((p) => p.uid === currentUserProfile.uid)
+          || task.accompanyingPersonnel?.some((p) => p.uid === currentUserProfile.uid);
+      })
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
   }, [purchasingTasks, currentUserProfile?.uid]);
 
   useEffect(() => {
@@ -334,17 +448,18 @@ export default function DashboardPanel({
 
   return (
     <>
-      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-12 sm:pt-16")}>
+      <div className={cn("dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-4 sm:pt-6")}>
 
         <h1 className={cn(
-          "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-6 sm:mt-10",
+          "text-2xl sm:text-3xl md:text-4xl font-bold tracking-wide mt-2 sm:mt-4",
           theme === 'qore-dark' ? 'text-gradient-bronze' : 'text-slate-800'
         )}>
           {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
         </h1>
 
         {/* Main KPI Grid - Mobile Responsive */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
+          {/* Tüketim Trendi */}
           <motion.div {...motionProps} className="xl:col-span-2">
             <Card className="glass-card h-full flex flex-col">
               <CardHeader className="space-y-2 sm:space-y-3">
@@ -397,10 +512,52 @@ export default function DashboardPanel({
               </CardContent>
             </Card>
           </motion.div>
-          
+
+          {/* Maliyet Kartı */}
           <motion.div {...motionProps}>
             <Card className="glass-card h-full flex flex-col">
-              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3">
+              <CardContent className="flex-1 flex flex-col divide-y divide-border/50">
+                {/* Anlık Stok Maliyeti */}
+                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <Wallet className="h-4 w-4 text-blue-500" />
+                    <p className="text-xs font-semibold text-blue-600">Anlık Stok Maliyeti</p>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-700">
+                    {totalStockCost > 0 ? `€${totalStockCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Tüm depolar + laboratuvarlar</p>
+                </div>
+                {/* Dünün Tüketim Maliyeti */}
+                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <DollarSign className="h-4 w-4 text-emerald-500" />
+                    <p className="text-xs font-semibold text-emerald-600">Dünün Tüketim Maliyeti</p>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-700">
+                    {yesterdayConsumptionCost > 0 ? `€${yesterdayConsumptionCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Tüm laboratuvar tüketimi</p>
+                </div>
+                {/* Ortalama Verimlilik */}
+                <div className="flex-1 flex flex-col items-center justify-center py-3 gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <BarChart3 className="h-4 w-4 text-violet-500" />
+                    <p className="text-xs font-semibold text-violet-600">Ort. Verimlilik</p>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-700">
+                    {avgEfficiency != null ? `%${avgEfficiency.toFixed(1)}` : '—'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Tüm havuzların ortalaması</p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+          
+          {/* Fault KPIs (top) + Expiring Products (bottom) */}
+          <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
+            <Card className="glass-card flex-1 flex flex-col">
+              <CardContent className="flex-1 grid grid-cols-1 gap-3 sm:grid-cols-3 items-center justify-center">
                 {faultStatusCards.map((item) => {
                   const Icon = item.icon;
                   const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
@@ -421,26 +578,37 @@ export default function DashboardPanel({
                 })}
               </CardContent>
             </Card>
+            <Card className="glass-card flex-1 flex flex-col">
+              <CardContent className="flex-1 flex flex-col items-center justify-center py-4 gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-orange-500" />
+                  <p className="text-sm font-semibold text-orange-600">Miadı Yaklaşan Ürünler</p>
+                </div>
+                <p className="text-5xl font-bold text-slate-700">{expiringProductCount}</p>
+                <p className="text-xs text-muted-foreground">Tüm depolarda 45 gün ve altı</p>
+              </CardContent>
+            </Card>
           </motion.div>
 
-          <motion.div {...motionProps}>
-            <Link href="/satin-alma/analiz-planlama" className="block h-full">
-              <Card className="glass-card h-full flex flex-col cursor-pointer">
-                <CardContent className="pt-6">
+          {/* Calendar (top) + Today's Tasks (bottom) */}
+          <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
+            <Link href="/satin-alma/analiz-planlama" className="flex-1 flex flex-col">
+              <Card className="glass-card flex-1 flex flex-col cursor-pointer">
+                <CardContent className="flex-1 flex flex-col justify-center pt-4 px-2">
                   <div
                     ref={calendarScrollRef}
-                    className="h-[252px] space-y-2 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    className="max-h-[140px] space-y-1 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   >
                     {personalCalendarKpi.timelineItems.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Takvim kaydı bulunmuyor.</p>
+                      <p className="text-xs text-muted-foreground text-center">Takvim kaydı bulunmuyor.</p>
                     ) : (
                       personalCalendarKpi.timelineItems.map((item) => (
                         <div
                           key={item.id}
                           data-today={item.type === 'today'}
                           className={cn(
-                            'dashboard-timeline-row px-3 py-2',
-                            item.type === 'today' && 'dashboard-timeline-row-active text-center text-base font-semibold text-slate-700',
+                            'dashboard-timeline-row px-4 py-2 w-full',
+                            item.type === 'today' && 'dashboard-timeline-row-active text-center text-sm font-semibold text-slate-700',
                             item.type === 'past' && 'text-xs text-slate-500 line-through',
                             item.type === 'future' && 'text-xs text-slate-500'
                           )}
@@ -453,15 +621,42 @@ export default function DashboardPanel({
                 </CardContent>
               </Card>
             </Link>
+            <Card className="glass-card flex-1 flex flex-col">
+              <CardContent className="flex-1 flex flex-col items-center justify-center py-4 gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                  <p className="text-sm font-semibold text-slate-600">Bugünün Görevleri</p>
+                </div>
+                {todayTasks.length === 0 ? (
+                  <p className="text-4xl font-bold text-slate-400">0</p>
+                ) : (
+                  <p className="text-5xl font-bold text-slate-700">{todayTasks.length}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {todayTasks.length === 0 ? 'Bugün için görev bulunmuyor' : `${todayTasks.length} görev planlandı`}
+                </p>
+                {todayTasks.length > 0 && (
+                  <div className="w-full max-h-[60px] space-y-1 overflow-y-auto rounded-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {todayTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className={cn(
+                          'dashboard-timeline-row px-3 py-1 text-xs text-center',
+                          task.completed ? 'text-slate-400 line-through' : 'text-slate-600'
+                        )}
+                      >
+                        {task.startTime} • {task.title}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </motion.div>
         </div>
 
         <Card className="glass-card">
-          <CardHeader>
-            <CardTitle>Paneller</CardTitle>
-            <CardDescription>Yetkiniz dahilinde erişebileceğiniz modüller</CardDescription>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12">
               {visiblePanels.map((panel) => {
                 const Icon = panel.icon;

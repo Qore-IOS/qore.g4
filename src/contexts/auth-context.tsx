@@ -30,6 +30,7 @@ interface AuthContextType {
   currentUserProfile: User | null;
   isLoadingAuth: boolean;
   isAdmin: boolean;
+  isAdminDeveloper: boolean;
   permissions: AppView[];
   isOrbAnimationEnabled: boolean;
   toggleOrbAnimation: () => void;
@@ -58,6 +59,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUserProfile, setCurrentUserProfile] = useState<User | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdminDeveloper, setIsAdminDeveloper] = useState(false);
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
@@ -146,8 +148,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             createdAt: new Date(),
           };
           setCurrentUserProfile(anonymousProfile);
-          setIsAdmin(false); // Anonymous users are never admins
-          setPermissions([]); // They can't access anything by default
+          setIsAdmin(false);
+          setIsAdminDeveloper(false);
+          setPermissions([]);
         } else {
             const userDocRef = doc(db, "users", user.uid);
             const userDocSnap = await getDoc(userDocRef);
@@ -157,9 +160,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               if (!userPermissions.includes('arama')) {
                   userPermissions.push('arama');
               }
+              if (!userPermissions.includes('kullanici-talepleri')) {
+                  userPermissions.push('kullanici-talepleri');
+              }
 
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
-              setIsAdmin(userData.role === 'admin' || user.uid === ADMIN_USER_UID);
+              setIsAdmin(userData.role === 'admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
+              setIsAdminDeveloper(userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
               setPermissions(userPermissions);
 
               // Force dark mode for 'user' role, otherwise apply user's preference
@@ -183,7 +190,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 createdAt: new Date(),
               };
               setCurrentUserProfile(defaultProfile);
-              setIsAdmin(defaultRole === 'admin');
+              setIsAdmin(defaultRole === 'admin' || defaultRole === 'admin_developer');
+              setIsAdminDeveloper(defaultRole === 'admin_developer');
               setPermissions(defaultViews);
               // Force dark mode for 'user' role
               if (defaultRole === 'user') {
@@ -201,6 +209,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setCurrentUser(null);
         setCurrentUserProfile(null);
         setIsAdmin(false);
+        setIsAdminDeveloper(false);
         setPermissions([]);
       }
       setIsLoadingAuth(false);
@@ -387,6 +396,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     currentUserProfile,
     isLoadingAuth,
     isAdmin,
+    isAdminDeveloper,
     permissions,
     isOrbAnimationEnabled,
     toggleOrbAnimation,

@@ -527,8 +527,8 @@
 :root:not(.dark) .dashboard-timeline-row {
   border-radius: 999px;
   background: var(--dashboard-surface);
-  border: 1px solid var(--dashboard-stroke);
-  box-shadow: var(--dashboard-raised-soft);
+  border: none;
+  box-shadow: none;
   transition: transform .14s ease, box-shadow .14s ease;
 }
 

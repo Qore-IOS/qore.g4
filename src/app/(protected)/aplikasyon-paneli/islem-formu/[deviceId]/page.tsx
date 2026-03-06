@@ -1,9 +1,9 @@
 'use client';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
-import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition } from '@/lib/types';
+import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
+import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -11,11 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
-import BackButton from '@/components/BackButton';
+import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
+import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import Image from 'next/image';
+import { resolveImageSrc } from '@/lib/image-utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -63,6 +66,9 @@ type ActionItem = {
   isManualEntry?: boolean;
   // Personal stock info for part changes
   personalStockId?: string;
+  poolStockId?: string;
+  poolWarehouseId?: string;
+  poolWarehouseName?: string;
   serialNumber?: string;
   // Removed/replaced part info (from device)
   removedPartStokKodu?: string;
@@ -123,6 +129,8 @@ export default function AplikasyonIslemFormuPage() {
   const params = useParams();
   const deviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const draftIdFromUrl = searchParams?.get('draftId') || null;
   const { currentUserProfile } = useAuth();
   const { toast } = useToast();
 
@@ -131,6 +139,9 @@ export default function AplikasyonIslemFormuPage() {
   const [loading, setLoading] = useState(true);
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [draftActionLogs, setDraftActionLogs] = useState<DraftActionLog[]>([]);
   const [aciklama, setAciklama] = useState('');
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
 
@@ -163,6 +174,9 @@ export default function AplikasyonIslemFormuPage() {
   // Part selection modal - now using personal stock
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
+  const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
+  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
+  const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool'>('personal');
   const [partSearchQuery, setPartSearchQuery] = useState('');
   const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
   const [manualPartCode, setManualPartCode] = useState('');
@@ -194,6 +208,9 @@ export default function AplikasyonIslemFormuPage() {
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
   const [pendingPeriodicPartChangeId, setPendingPeriodicPartChangeId] = useState<string | null>(null);
+  const [isAutoStockConfirmOpen, setIsAutoStockConfirmOpen] = useState(false);
+  const [autoStockPendingPartId, setAutoStockPendingPartId] = useState<string | null>(null);
+  const [isAutoStockCreating, setIsAutoStockCreating] = useState(false);
 
   // Fault definitions for arıza işlem türü
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
@@ -234,6 +251,45 @@ export default function AplikasyonIslemFormuPage() {
     })();
   }, [deviceId, router, toast]);
 
+  // Load draft if draftId is in URL
+  useEffect(() => {
+    if (!draftIdFromUrl || !deviceId) return;
+    (async () => {
+      try {
+        const draftSnap = await getDoc(doc(db, 'draftActionForms', draftIdFromUrl));
+        if (draftSnap.exists()) {
+          const draftData = draftSnap.data();
+          setCurrentDraftId(draftIdFromUrl);
+          if (draftData.actions) setActions(draftData.actions);
+          if (draftData.islemTuru) setIslemTuru(draftData.islemTuru as IslemTuru);
+          if (draftData.aciklama) setAciklama(draftData.aciklama);
+          if (draftData.baslangicSaati) setBaslangicSaati(draftData.baslangicSaati);
+          if (draftData.bitisSaati) setBitisSaati(draftData.bitisSaati);
+          if (draftData.baslangicTarihi) setBaslangicTarihi(draftData.baslangicTarihi);
+          if (draftData.bitisTarihi) setBitisTarihi(draftData.bitisTarihi);
+          if (draftData.selectedMaintenanceTasks) setSelectedMaintenanceTasks(draftData.selectedMaintenanceTasks);
+          if (draftData.selectedPeriodicParts) setSelectedPeriodicParts(draftData.selectedPeriodicParts);
+          if (draftData.selectedFaultId) setSelectedFaultId(draftData.selectedFaultId);
+          if (draftData.selectedTests) setSelectedTests(draftData.selectedTests);
+          if (draftData.actionLogs) setDraftActionLogs(draftData.actionLogs);
+
+          const continuationLog: DraftActionLog = {
+            personnelUid: currentUserProfile?.uid || '',
+            personnelName: currentUserProfile?.name || 'Bilinmeyen',
+            timestamp: new Date(),
+            logType: 'draft_continued',
+            description: `${currentUserProfile?.name || 'Bilinmeyen'} ara kayıttan devam etti (önceki kayıt: ${draftData.createdByName})`,
+          };
+          setDraftActionLogs(prev => [...prev, continuationLog]);
+
+          toast({ title: 'Ara Kayıt Yüklendi', description: `${draftData.createdByName} tarafından oluşturulan ara kayıt yüklendi.` });
+        }
+      } catch (err) {
+        console.error('Error loading draft:', err);
+      }
+    })();
+  }, [draftIdFromUrl, deviceId, currentUserProfile?.uid, currentUserProfile?.name, toast]);
+
   // Fetch personal stock for current user
   useEffect(() => {
     if (!currentUserProfile?.uid) return;
@@ -259,6 +315,61 @@ export default function AplikasyonIslemFormuPage() {
       }
     })();
   }, [currentUserProfile?.uid]);
+
+  // Fetch pool warehouse stock for lab groups connected to this device's hospital
+  useEffect(() => {
+    if (!deviceId) return;
+    (async () => {
+      try {
+        const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
+        if (!deviceSnap.exists()) return;
+        const deviceData = deviceSnap.data();
+        const hospitalId = deviceData.hospitalId;
+        if (!hospitalId) return;
+
+        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const matchingPoolIds: string[] = [];
+        poolsSnap.docs.forEach(d => {
+          const pool = d.data() as DeviceLabPool;
+          if (pool.memberIds?.includes(hospitalId)) {
+            matchingPoolIds.push(d.id);
+          }
+        });
+        if (matchingPoolIds.length === 0) return;
+
+        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const poolWarehouseIds: string[] = [];
+        depotsSnap.docs.forEach(d => {
+          const depot = d.data() as Depot;
+          if (depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some(id => matchingPoolIds.includes(id))) {
+            poolWarehouseIds.push(d.id);
+          }
+        });
+        if (poolWarehouseIds.length === 0) return;
+
+        const allPoolStock: PoolWarehouseStockItem[] = [];
+        for (const pwId of poolWarehouseIds) {
+          const stockQ = query(
+            collection(db, 'poolWarehouseStock'),
+            where('poolWarehouseId', '==', pwId),
+            where('status', '==', 'in_stock')
+          );
+          const stockSnap = await getDocs(stockQ);
+          stockSnap.docs.forEach(d => {
+            const data = d.data();
+            allPoolStock.push({
+              id: d.id,
+              ...data,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            } as PoolWarehouseStockItem);
+          });
+        }
+        setPoolStockItems(allPoolStock);
+      } catch (err) {
+        console.error("Error fetching pool stock:", err);
+      }
+    })();
+  }, [deviceId]);
 
   // Fetch users for accompanying personnel
   useEffect(() => {
@@ -438,16 +549,25 @@ export default function AplikasyonIslemFormuPage() {
     );
   }, [personalStock, partSearchQuery]);
 
+  const filteredPoolStock = useMemo(() => {
+    if (!partSearchQuery) return poolStockItems;
+    const q = partSearchQuery.toLowerCase();
+    return poolStockItems.filter(p =>
+      p.stokKodu.toLowerCase().includes(q) ||
+      p.stokAdi.toLowerCase().includes(q) ||
+      p.serialNumber.toLowerCase().includes(q)
+    );
+  }, [poolStockItems, partSearchQuery]);
+
   const installedPartDefaults = useMemo(() => ({
-    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || ''),
-    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || ''),
-  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem]);
+    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || ''),
+    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || ''),
+  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem, selectedPoolStockItem]);
 
   useEffect(() => {
-    if (!isPartModalOpen) return;
     setRemovedPartStokKodu(installedPartDefaults.stokKodu);
     setRemovedPartStokAdi(installedPartDefaults.stokAdi);
-  }, [isPartModalOpen, installedPartDefaults]);
+  }, [installedPartDefaults]);
 
   // Calculate maintenance status with remaining days
   const maintenanceTasksWithStatus = useMemo(() => {
@@ -517,14 +637,9 @@ export default function AplikasyonIslemFormuPage() {
         isOverdue = daysRemaining < 0;
       }
 
-      // Show date-based label if nextDueDate exists, otherwise legacy period label
-      let periodLabel: string;
-      if (nextDueDate) {
-        const day = nextDueDate.getDate();
-        periodLabel = `Her ayın ${day}'${day === 1 ? 'i' : day === 3 || day === 4 || day === 13 || day === 14 || day === 23 || day === 24 ? 'ü' : day === 6 || day === 16 || day === 26 ? 'sı' : day === 9 || day === 19 || day === 29 ? 'u' : day === 10 || day === 30 ? 'u' : day === 7 || day === 17 || day === 27 ? 'si' : day === 8 || day === 18 || day === 28 ? 'i' : 'i'}`;
-      } else {
-        periodLabel = `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
-      }
+      const periodLabel = partChange.periodDays
+        ? `${partChange.periodDays} gün`
+        : `${partChange.periodValue} ${periodUnitLabels[partChange.periodUnit] || partChange.periodUnit}`;
 
       return {
         partChange,
@@ -544,67 +659,157 @@ export default function AplikasyonIslemFormuPage() {
     );
   };
 
-  // Toggle periodic part selection and add to actions
-  const togglePeriodicPart = (partChangeId: string) => {
-    const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
 
-    if (isCurrentlySelected) {
-      // Deselecting
-      setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
-      setActions(prev => prev.filter(a => a.periodicPartChangeId !== partChangeId));
-      return;
-    }
+  const createAutoStockForPeriodicPart = async (partChange: PeriodicPartChange): Promise<PersonalStockItem | null> => {
+  if (!currentUserProfile?.uid) {
+    toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
+    return null;
+  }
 
-    // Selecting
-    const partChange = periodicPartChanges.find(p => p.id === partChangeId);
-    if (!partChange) return;
+  try {
+    const now = new Date();
+    const batch = writeBatch(db);
 
-    const alreadyInActions = actions.some(a =>
-      a.periodicPartChangeId === partChangeId ||
-      (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
-    );
+    const depotStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+    batch.set(depotStockRef, {
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      address: '',
+      cihazGrubu: '',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
 
-    // Always add to selected
-    setSelectedPeriodicParts(prev => [...prev, partChangeId]);
-    if (alreadyInActions) return;
+    const depoInLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoInLogRef, {
+      action: 'stok_giris',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      notes: `Periyodik parça değişimine istinaden otomatik stok girişi (${device?.cihazAdi || device?.model || ''})`,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
 
-    const matchingStockItem = personalStock.find(s => s.stokKodu === partChange.stokKodu);
+    batch.delete(depotStockRef);
 
-    // If no serial tracking and no outgoing part tracking needed, auto-save
+    const personalStockRef = doc(collection(db, 'personalStock'));
+    batch.set(personalStockRef, {
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: Timestamp.fromDate(now),
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    });
+
+    const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+    batch.set(transferLogRef, {
+      action: 'transfer_to_personnel',
+      personalStockId: personalStockRef.id,
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      toUid: currentUserProfile.uid,
+      toName: currentUserProfile.name || '',
+      quantity: 1,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+      notes: `Periyodik parça değişimine istinaden otomatik transfer (${device?.cihazAdi || device?.model || ''})`,
+    });
+
+    const depoOutLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+    batch.set(depoOutLogRef, {
+      action: 'transfer_cikis',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      quantity: 1,
+      relatedPersonnelUid: currentUserProfile.uid,
+      relatedPersonnelName: currentUserProfile.name || '',
+      notes: 'Periyodik parça değişimine istinaden otomatik transfer',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+    });
+
+    await batch.commit();
+
+    const createdStock: PersonalStockItem = {
+      id: personalStockRef.id,
+      ownerUid: currentUserProfile.uid,
+      ownerName: currentUserProfile.name || '',
+      productCodeId: partChange.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      serialNumber: '',
+      source: 'depot',
+      status: 'in_stock',
+      createdAt: now,
+      transferredByUid: currentUserProfile.uid,
+      transferredByName: currentUserProfile.name || '',
+    };
+
+    setPersonalStock(prev => [createdStock, ...prev]);
+    return createdStock;
+  } catch (err) {
+    console.error('Error creating automatic stock for periodic part:', err);
+    toast({ title: 'Hata', description: 'Otomatik stok girişi/transfer işlemi başarısız oldu.', variant: 'destructive' });
+    return null;
+  }
+  };
+
+  const findMatchingPersonalStockForPeriodicPart = (partChange: PeriodicPartChange): PersonalStockItem | undefined => {
+    const normalize = (value?: string) => (value || '').trim().toLowerCase();
+    const partCode = normalize(partChange.stokKodu);
+    const partName = normalize(partChange.stokAdi);
+
+    return personalStock.find(item => {
+      if (item.status !== 'in_stock') return false;
+      if (partChange.productCodeId && item.productCodeId && partChange.productCodeId === item.productCodeId) return true;
+      if (normalize(item.stokKodu) === partCode) return true;
+      return !!partName && normalize(item.stokAdi) === partName;
+    });
+  };
+
+  const applyPeriodicPartSelectionWithStock = (
+    partChangeId: string,
+    partChange: PeriodicPartChange,
+    matchingStockItem: PersonalStockItem
+  ) => {
     if (!partChange.requiresSerialTracking && !partChange.requiresOutgoingPartInfo) {
-      if (matchingStockItem) {
-        const newItem: ActionItem = {
-          id: crypto.randomUUID(),
-          type: 'part_change',
-          action: matchingStockItem.productCodeId,
-          stokKodu: matchingStockItem.stokKodu,
-          stokAdi: matchingStockItem.stokAdi,
-          serialNumber: matchingStockItem.serialNumber,
-          personalStockId: matchingStockItem.id,
-          quantity: 1,
-          periodicPartChangeId: partChangeId,
-          isPeriodicPartChange: true,
-        };
-        setActions(prev => [newItem, ...prev]);
-        toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
-      } else {
-        const newItem: ActionItem = {
-          id: crypto.randomUUID(),
-          type: 'part_change',
-          action: 'periodic_auto',
-          stokKodu: partChange.stokKodu,
-          stokAdi: partChange.stokAdi,
-          quantity: 1,
-          periodicPartChangeId: partChangeId,
-          isPeriodicPartChange: true,
-        };
-        setActions(prev => [newItem, ...prev]);
-        toast({ title: 'Periyodik Değişim Kaydedildi', description: `${partChange.stokAdi} periyodik değişimi kaydedildi.` });
-      }
+      const newItem: ActionItem = {
+        id: crypto.randomUUID(),
+        type: 'part_change',
+        action: matchingStockItem.productCodeId,
+        stokKodu: matchingStockItem.stokKodu,
+        stokAdi: matchingStockItem.stokAdi,
+        serialNumber: matchingStockItem.serialNumber,
+        personalStockId: matchingStockItem.id,
+        quantity: 1,
+        periodicPartChangeId: partChangeId,
+        isPeriodicPartChange: true,
+      };
+      setActions(prev => [newItem, ...prev]);
+      toast({ title: 'Parça Eklendi', description: `${matchingStockItem.stokAdi} değişen parçalar listesine otomatik eklendi.` });
       return;
     }
 
-    // Tracking needed - open part modal with pre-fill
     setPendingPeriodicPartChangeId(partChangeId);
     setPartSearchQuery('');
     setManualPartCode('');
@@ -618,19 +823,76 @@ export default function AplikasyonIslemFormuPage() {
     setRemovedPartImagePreview(null);
     setUsedPartImageFile(null);
     setUsedPartImagePreview(null);
+    setSelectedStockItem(matchingStockItem);
+    setShowManualEntry(false);
+    setPartSearchQuery(matchingStockItem.stokAdi);
+    setIsPartModalOpen(true);
+  };
 
-    if (matchingStockItem) {
-      setSelectedStockItem(matchingStockItem);
-      setShowManualEntry(false);
-      setPartSearchQuery(matchingStockItem.stokAdi);
-    } else {
-      setSelectedStockItem(null);
-      setShowManualEntry(true);
-      setManualPartCode(partChange.stokKodu);
-      setManualPartName(partChange.stokAdi);
+  const handleAutoStockConfirm = async (confirmCreate: boolean) => {
+    const pendingPartId = autoStockPendingPartId;
+    const pendingPart = pendingPartId ? periodicPartChanges.find(p => p.id === pendingPartId) : null;
+    if (!pendingPartId || !pendingPart) {
+      setIsAutoStockConfirmOpen(false);
+      setAutoStockPendingPartId(null);
+      return;
     }
 
-    setIsPartModalOpen(true);
+    if (!confirmCreate) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== pendingPartId));
+      setIsAutoStockConfirmOpen(false);
+      setAutoStockPendingPartId(null);
+      toast({ title: 'İptal Edildi', description: 'Periyodik parça değişimi için stok oluşturma iptal edildi.' });
+      return;
+    }
+
+    setIsAutoStockCreating(true);
+    const autoCreatedStock = await createAutoStockForPeriodicPart(pendingPart);
+    setIsAutoStockCreating(false);
+    setIsAutoStockConfirmOpen(false);
+    setAutoStockPendingPartId(null);
+
+    if (!autoCreatedStock) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== pendingPartId));
+      return;
+    }
+
+    toast({
+      title: 'Stok Otomatik Eklendi',
+      description: `${pendingPart.stokAdi} için depo giriş ve personel transfer kaydı otomatik oluşturuldu.`,
+    });
+    applyPeriodicPartSelectionWithStock(pendingPartId, pendingPart, autoCreatedStock);
+  };
+
+  // Toggle periodic part selection and add to actions
+  const togglePeriodicPart = async (partChangeId: string) => {
+    const isCurrentlySelected = selectedPeriodicParts.includes(partChangeId);
+
+    if (isCurrentlySelected) {
+      setSelectedPeriodicParts(prev => prev.filter(id => id !== partChangeId));
+      setActions(prev => prev.filter(a => a.periodicPartChangeId !== partChangeId));
+      return;
+    }
+
+    const partChange = periodicPartChanges.find(p => p.id === partChangeId);
+    if (!partChange) return;
+
+    const alreadyInActions = actions.some(a =>
+      a.periodicPartChangeId === partChangeId ||
+      (a.stokKodu === partChange.stokKodu && a.type === 'part_change')
+    );
+
+    setSelectedPeriodicParts(prev => [...prev, partChangeId]);
+    if (alreadyInActions) return;
+
+    const matchingStockItem = findMatchingPersonalStockForPeriodicPart(partChange);
+    if (matchingStockItem) {
+      applyPeriodicPartSelectionWithStock(partChangeId, partChange, matchingStockItem);
+      return;
+    }
+
+    setAutoStockPendingPartId(partChangeId);
+    setIsAutoStockConfirmOpen(true);
   };
 
   const openPartModal = () => {
@@ -781,12 +1043,6 @@ export default function AplikasyonIslemFormuPage() {
         });
       }
     } else if (selectedStockItem) {
-      // Check if this stock item is already in the actions list
-      if (actions.some(a => a.personalStockId === selectedStockItem.id)) {
-        toast({ title: 'Uyarı', description: 'Bu parça zaten listeye eklendi.', variant: 'default' });
-        return;
-      }
-
       // Check if this matches a periodic part change
       const matchingPeriodic = pendingPeriodicPartChangeId
         ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
@@ -819,11 +1075,52 @@ export default function AplikasyonIslemFormuPage() {
           description: `${matchingPeriodic.stokAdi} periyodik değişim olarak kaydedilecek.`,
         });
       }
+    } else if (selectedPoolStockItem) {
+      const matchingPeriodic = pendingPeriodicPartChangeId
+        ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
+        : periodicPartChanges.find(p => p.stokKodu === selectedPoolStockItem.stokKodu);
+
+      const newItem: ActionItem = {
+        id: crypto.randomUUID(),
+        type: 'part_change',
+        action: selectedPoolStockItem.productCodeId,
+        stokKodu: selectedPoolStockItem.stokKodu,
+        stokAdi: selectedPoolStockItem.stokAdi,
+        serialNumber: selectedPoolStockItem.serialNumber,
+        poolStockId: selectedPoolStockItem.id,
+        poolWarehouseId: selectedPoolStockItem.poolWarehouseId,
+        poolWarehouseName: selectedPoolStockItem.poolWarehouseName,
+        quantity: 1,
+        removedPartStokKodu: installedPartDefaults.stokKodu,
+        removedPartStokAdi: installedPartDefaults.stokAdi,
+        removedPartSerialNumber: removedPartSerialNumber.trim(),
+        removedPartImageUrl,
+        usedPartImageUrl,
+        periodicPartChangeId: matchingPeriodic?.id,
+        isPeriodicPartChange: !!matchingPeriodic,
+      };
+      setActions(prev => [newItem, ...prev]);
+
+      if (matchingPeriodic && !selectedPeriodicParts.includes(matchingPeriodic.id)) {
+        setSelectedPeriodicParts(prev => [...prev, matchingPeriodic.id]);
+        toast({
+          title: 'Periyodik Değişim Algılandı',
+          description: `${matchingPeriodic.stokAdi} periyodik değişim olarak kaydedilecek.`,
+        });
+      }
     } else {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen şahsi stokunuzdan bir parça seçin.', variant: 'destructive' });
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen stokunuzdan veya havuz stoktan bir parça seçin.', variant: 'destructive' });
       return;
     }
     setPendingPeriodicPartChangeId(null);
+    setSelectedPoolStockItem(null);
+    setSelectedStockItem(null);
+    setShowManualEntry(false);
+    setManualPartCode(''); setManualPartName(''); setManualSerialNumber('');
+    setRemovedPartSerialNumber('');
+    setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+    setUsedPartImageFile(null); setUsedPartImagePreview(null);
+    setPartSearchQuery('');
     setIsPartModalOpen(false);
   };
 
@@ -876,6 +1173,65 @@ export default function AplikasyonIslemFormuPage() {
 
   const removeActionRow = (id: string) => {
     setActions(prev => prev.filter(a => a.id !== id));
+  };
+
+  const handleSaveDraft = async () => {
+    setIsSavingDraft(true);
+    try {
+      const now = new Date();
+      const draftId = currentDraftId || doc(collection(db, 'draftActionForms')).id;
+
+      const newLog: DraftActionLog = {
+        personnelUid: currentUserProfile?.uid || '',
+        personnelName: currentUserProfile?.name || 'Bilinmeyen',
+        timestamp: now,
+        logType: 'draft_created',
+        description: `${currentUserProfile?.name || 'Bilinmeyen'} ara kayıt oluşturdu`,
+      };
+
+      const updatedLogs = [...draftActionLogs, newLog];
+
+      const draftData: any = {
+        deviceId,
+        hospitalId: device?.hospitalId || '',
+        formType: 'aplikasyon',
+        actions,
+        islemTuru,
+        aciklama: aciklama.trim(),
+        baslangicSaati,
+        bitisSaati,
+        baslangicTarihi,
+        bitisTarihi,
+        selectedMaintenanceTasks,
+        selectedPeriodicParts,
+        selectedFaultId,
+        selectedTests,
+        actionLogs: updatedLogs.map(log => ({
+          ...log,
+          timestamp: Timestamp.fromDate(log.timestamp instanceof Date ? log.timestamp : new Date(log.timestamp)),
+        })),
+        updatedAt: Timestamp.fromDate(now),
+        updatedByUid: currentUserProfile?.uid || '',
+        updatedByName: currentUserProfile?.name || '',
+      };
+
+      if (!currentDraftId) {
+        draftData.createdAt = Timestamp.fromDate(now);
+        draftData.createdByUid = currentUserProfile?.uid || '';
+        draftData.createdByName = currentUserProfile?.name || '';
+      }
+
+      await setDoc(doc(db, 'draftActionForms', draftId), draftData, { merge: true });
+      setCurrentDraftId(draftId);
+      setDraftActionLogs(updatedLogs);
+
+      toast({ title: 'Ara Kayıt Kaydedildi', description: 'Form ara kayıt olarak kaydedildi. Daha sonra devam edebilirsiniz.' });
+    } catch (err) {
+      console.error('Error saving draft:', err);
+      toast({ title: 'Hata', description: 'Ara kayıt kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
   const startSaveProcess = () => {
@@ -1000,6 +1356,12 @@ export default function AplikasyonIslemFormuPage() {
             faultName: resolvedFaultName,
             isCustomFault: isCustomFault || false,
             selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+            // Draft continuation logs (personnel attribution)
+            draftActionLogs: draftActionLogs.length > 0 ? draftActionLogs.map(log => ({
+              ...log,
+              timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
+            })) : null,
+            continuedFromDraft: !!currentDraftId,
         });
 
         // Mirror form to deviceActionForms for device history page
@@ -1116,7 +1478,31 @@ export default function AplikasyonIslemFormuPage() {
         }
 
         // Process part changes - update personal stock and create removed part entries
-        const partChanges = actions.filter(a => a.type === 'part_change');
+        // Deduplicate: if a periodic part was auto-added AND manually added, keep only the more detailed one
+        const allPartChanges = actions.filter(a => a.type === 'part_change');
+        const partChanges: typeof allPartChanges = [];
+        const processedPersonalStockIds = new Set<string>();
+        const processedPeriodicIds = new Set<string>();
+
+        for (const pc of allPartChanges) {
+          if (pc.personalStockId && processedPersonalStockIds.has(pc.personalStockId)) continue;
+          if (pc.periodicPartChangeId && processedPeriodicIds.has(pc.periodicPartChangeId)) {
+            const existingIdx = partChanges.findIndex(e => e.periodicPartChangeId === pc.periodicPartChangeId);
+            if (existingIdx >= 0) {
+              const existing = partChanges[existingIdx];
+              const pcHasDetails = !!(pc.personalStockId || pc.removedPartSerialNumber);
+              const existingHasDetails = !!(existing.personalStockId || existing.removedPartSerialNumber);
+              if (pcHasDetails && !existingHasDetails) {
+                partChanges[existingIdx] = pc;
+              }
+            }
+            continue;
+          }
+          partChanges.push(pc);
+          if (pc.personalStockId) processedPersonalStockIds.add(pc.personalStockId);
+          if (pc.periodicPartChangeId) processedPeriodicIds.add(pc.periodicPartChangeId);
+        }
+
         for (const partChange of partChanges) {
           let removedStockRefId: string | null = null;
 
@@ -1165,6 +1551,44 @@ export default function AplikasyonIslemFormuPage() {
               serialNumber: partChange.serialNumber,
               deviceId,
               deviceName: device?.cihazAdi || device?.model || '',
+              labName: hospital?.name || '',
+              formId: formRef.id,
+              formType: 'aplikasyon',
+              createdAt: Timestamp.fromDate(now),
+              createdByUid: currentUserProfile?.uid || '',
+              createdByName: currentUserProfile?.name || '',
+              usageImageUrl: partChange.usedPartImageUrl || null,
+            });
+          }
+
+          // If this is from pool stock, mark as used with user info
+          if (partChange.poolStockId) {
+            const poolStockRef = doc(db, 'poolWarehouseStock', partChange.poolStockId);
+            batch.update(poolStockRef, {
+              status: 'used',
+              usedAt: Timestamp.fromDate(now),
+              usedByUid: currentUserProfile?.uid || '',
+              usedByName: currentUserProfile?.name || '',
+              usedOnDeviceId: deviceId,
+              usedOnDeviceName: device?.cihazAdi || device?.model || '',
+              usedOnFormId: formRef.id,
+              usedOnFormType: 'aplikasyon',
+              usedOnLabId: device?.hospitalId || '',
+              usedOnLabName: hospital?.name || '',
+            });
+
+            const poolUseLogRef = doc(collection(db, 'sparePartTransferLogs'));
+            batch.set(poolUseLogRef, {
+              action: 'use_from_pool',
+              poolStockId: partChange.poolStockId,
+              poolWarehouseId: partChange.poolWarehouseId,
+              poolWarehouseName: partChange.poolWarehouseName,
+              stokKodu: partChange.stokKodu,
+              stokAdi: partChange.stokAdi,
+              serialNumber: partChange.serialNumber,
+              deviceId,
+              deviceName: device?.cihazAdi || device?.model || '',
+              labName: hospital?.name || '',
               formId: formRef.id,
               formType: 'aplikasyon',
               createdAt: Timestamp.fromDate(now),
@@ -1282,28 +1706,25 @@ export default function AplikasyonIslemFormuPage() {
         for (const periodicId of periodicPartChangeIds) {
           const periodic = periodicPartChanges.find(p => p.id === periodicId);
           if (periodic) {
-            // Calculate next due date: use nextDueDate-based monthly recurrence if available
-            let nextDueDate: Date;
-            if (periodic.nextDueDate) {
-              const initialDue = periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : new Date(periodic.nextDueDate);
-              const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
-              const baseDue = latestPeriodicLog?.nextDueDate ? (latestPeriodicLog.nextDueDate instanceof Date ? latestPeriodicLog.nextDueDate : latestPeriodicLog.nextDueDate.toDate()) : initialDue;
-              nextDueDate = new Date(baseDue);
-              nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-            } else {
-              nextDueDate = new Date(now);
-              switch (periodic.periodUnit) {
-                case 'hafta':
-                  nextDueDate.setDate(nextDueDate.getDate() + (periodic.periodValue * 7));
-                  break;
-                case 'ay':
-                  nextDueDate.setMonth(nextDueDate.getMonth() + periodic.periodValue);
-                  break;
-                case 'yil':
-                  nextDueDate.setFullYear(nextDueDate.getFullYear() + periodic.periodValue);
-                  break;
-              }
-            }
+            const periodicDays = periodic.periodDays && periodic.periodDays > 0 ? periodic.periodDays : null;
+            const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
+            const lastCompletedAt = latestPeriodicLog?.completedAt
+              ? (latestPeriodicLog.completedAt instanceof Date ? latestPeriodicLog.completedAt : latestPeriodicLog.completedAt.toDate())
+              : (periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : (periodic.nextDueDate ? new Date(periodic.nextDueDate) : now));
+
+            const effectivePeriodDays = periodicDays ?? Math.max(
+              1,
+              Math.round((periodic.periodUnit === 'hafta' ? periodic.periodValue * 7 : periodic.periodUnit === 'ay' ? periodic.periodValue * 30 : periodic.periodUnit === 'yil' ? periodic.periodValue * 365 : periodic.periodValue))
+            );
+
+            const actualDays = Math.max(
+              1,
+              Math.round((now.getTime() - lastCompletedAt.getTime()) / (1000 * 60 * 60 * 24))
+            );
+            const nextPeriodDays = actualDays < effectivePeriodDays ? actualDays : effectivePeriodDays;
+
+            const nextDueDate = new Date(now);
+            nextDueDate.setDate(nextDueDate.getDate() + nextPeriodDays);
 
             // Find the matching part change in actions
             const matchingPartChange = partChanges.find(p =>
@@ -1323,14 +1744,29 @@ export default function AplikasyonIslemFormuPage() {
               formId: formRef.id,
               formType: 'aplikasyon',
               installedPartSerialNumber: matchingPartChange?.serialNumber || null,
-              installedPartFromStock: !!matchingPartChange?.personalStockId,
+              installedPartFromStock: !!(matchingPartChange?.personalStockId || matchingPartChange?.poolStockId),
               removedPartSerialNumber: matchingPartChange?.removedPartSerialNumber || null,
               removedPartImageUrl: matchingPartChange?.removedPartImageUrl || null,
+              periodDaysUsed: nextPeriodDays,
+            });
+
+            await updateDoc(doc(db, 'periodicPartChanges', periodic.id), {
+              periodDays: nextPeriodDays,
             });
           }
         }
 
         await batch.commit();
+
+        // Delete draft if exists
+        if (currentDraftId) {
+          try {
+            await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
+          } catch (e) {
+            console.error('Error deleting draft:', e);
+          }
+          setCurrentDraftId(null);
+        }
 
         toast({title: 'Başarılı', description: `İşlem formu #${formRef.id.substring(0,6)}... kaydedildi.`});
         setActions([]);
@@ -1379,6 +1815,44 @@ export default function AplikasyonIslemFormuPage() {
     setActions(prev => prev.map(a => a.id === id ? { ...a, quantity } : a));
   };
 
+  // Wizard heading definitions with completion tracking (must be before conditional returns)
+  const wizardHeadings: WizardHeading[] = useMemo(() => [
+    {
+      id: 'islem_turu',
+      label: 'İŞLEM TÜRÜ',
+      isComplete: !!islemTuru,
+      completedSublabel: islemTuru ? ISLEM_TURU_LABELS[islemTuru] : undefined,
+    },
+    {
+      id: 'tarih_saat',
+      label: 'TARİH / SAAT',
+      isComplete: !!(baslangicTarihi && baslangicSaati && bitisTarihi && bitisSaati),
+      completedSublabel: baslangicSaati && bitisSaati ? `${baslangicSaati} - ${bitisSaati}` : undefined,
+    },
+    {
+      id: 'degisen_parca',
+      label: 'DEĞİŞEN PARÇA',
+      isComplete: actions.some(a => a.type === 'part_change'),
+      completedSublabel: actions.filter(a => a.type === 'part_change').length > 0
+        ? `${actions.filter(a => a.type === 'part_change').length} parça`
+        : undefined,
+    },
+    {
+      id: 'yapilan_islem',
+      label: 'YAPILAN İŞLEM',
+      isComplete: actions.some(a => a.type === 'operation'),
+      completedSublabel: actions.filter(a => a.type === 'operation').length > 0
+        ? `${actions.filter(a => a.type === 'operation').length} işlem`
+        : undefined,
+    },
+    {
+      id: 'aciklama',
+      label: 'AÇIKLAMA',
+      isComplete: !!aciklama.trim(),
+      completedSublabel: aciklama.trim() ? (aciklama.trim().length > 40 ? aciklama.trim().substring(0, 40) + '...' : aciklama.trim()) : undefined,
+    },
+  ], [islemTuru, baslangicTarihi, baslangicSaati, bitisTarihi, bitisSaati, actions, aciklama]);
+
   if (loading) {
     return (
       <div className="cihaz-shell flex items-center justify-center min-h-screen">
@@ -1397,422 +1871,669 @@ export default function AplikasyonIslemFormuPage() {
     );
   }
 
-  return (
-    <>
-      <div className="cihaz-shell px-4 py-6 sm:px-6 sm:py-8 space-y-6">
-        <BackButton fallback={`/aplikasyon-paneli/${device.hospitalId}`} />
+  // Render wizard detail content for each heading
+  const renderWizardDetail = (headingId: string, goBack: () => void) => {
+    switch (headingId) {
+      case 'islem_turu':
+        return (
+          <div className="wizard-option-list">
+            {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi'] as IslemTuru[]).map(tur => {
+              const hasSubFields = tur === 'ariza' || tur === 'periyodik_bakim';
+              return (
+                <React.Fragment key={tur}>
+                  <button
+                    className={`wizard-option-item ${islemTuru === tur ? 'selected' : ''}`}
+                    onClick={() => {
+                      setIslemTuru(tur);
+                      if (tur !== 'ariza') setSelectedFaultId('');
+                      if (!hasSubFields) goBack();
+                    }}
+                  >
+                    {ISLEM_TURU_LABELS[tur]}
+                  </button>
 
-        {/* Header */}
-        <header className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div className="flex flex-col sm:flex-row gap-4 items-start">
-              {device.imageUrl && (
-                <div className="w-28 h-28 flex-shrink-0 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2">
-                  <Image src={`/${device.imageUrl}`} alt={device.cihazAdi || ''} width={128} height={128} className="object-contain w-full h-full" />
-                </div>
-              )}
-              <div>
-                <h1 className="text-xl font-semibold tracking-tight text-[var(--dashboard-text)]">
-                  Aplikasyon İşlem Formu
-                </h1>
-                <p className="text-base font-medium text-[var(--dashboard-accent)]">{device.cihazAdi}</p>
-                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">Seri No: {device.seriNumarasi}</p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-[var(--dashboard-muted)]">
-                  <span><strong className="text-[var(--dashboard-text)]">Lab:</strong> {hospital?.name || '-'}</span>
-                  <span><strong className="text-[var(--dashboard-text)]">İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
-                  <span><strong className="text-[var(--dashboard-text)]">Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={() => router.push(`/aplikasyon-paneli/gecmis/${deviceId}`)}
-              className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium self-start"
-            >
-              <History className="h-4 w-4" />
-              <span>Geçmiş</span>
-            </button>
-          </div>
-        </header>
-
-        {/* Form Body */}
-        <div className="cihaz-card-strong px-5 py-5 sm:px-7 sm:py-6 space-y-6">
-            {/* İşlem Türü Seçici */}
-            <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-[var(--dashboard-text)]">
-                  <Cog className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                  İşlem Türü
-                </Label>
-                <Select value={islemTuru} onValueChange={(v) => {
-                  setIslemTuru(v as IslemTuru);
-                  if (v !== 'ariza') setSelectedFaultId('');
-                }}>
-                  <SelectTrigger className="w-full sm:w-64">
-                    <SelectValue placeholder="İşlem türü seçin (opsiyonel)..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="rutin_kurum_ziyareti">Rutin Kurum Ziyareti</SelectItem>
-                    <SelectItem value="periyodik_bakim">Periyodik Bakım</SelectItem>
-                    <SelectItem value="ariza">Arıza</SelectItem>
-                    <SelectItem value="alis">ALIS</SelectItem>
-                    <SelectItem value="roche_bilgisayar_arizasi">Roche Bilgisayar Arızası</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-[var(--dashboard-muted)]">
-                  İşlem türünü belirtmek opsiyoneldir.
-                </p>
-              </div>
-            </div>
-
-            {/* Arıza Seçimi - only when ariza selected */}
-            {islemTuru === 'ariza' && (
-              <div className="p-4 rounded-2xl bg-red-50/80 border border-red-200/60 space-y-4">
-                <div>
-                  <Label className="flex items-center gap-2 mb-4 text-[var(--dashboard-text)]">
-                    <AlertTriangle className="h-4 w-4 text-red-600" />
-                    Arıza Türü <span className="text-red-500">*</span>
-                  </Label>
-                  <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Tespit edilen arızayı seçin..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {faultDefinitions.map(fault => (
-                        <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
-                      ))}
-                      <SelectItem value="diger">Diğer (Özel Arıza)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {selectedFaultId === 'diger' && (
-                    <div className="mt-2">
-                      <Input
-                        placeholder="Arıza açıklamasını girin... (zorunlu)"
-                        value={customFaultName}
-                        onChange={(e) => setCustomFaultName(e.target.value)}
-                        className="border-red-300"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* İlişkili Test Seçimi */}
-                <div className="pt-3 border-t border-red-200/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="text-sm text-[var(--dashboard-text)]">İlişkili Testler (Opsiyonel)</Label>
-                    <button
-                      type="button"
-                      onClick={() => setIsTestModalOpen(true)}
-                      disabled={availableTests.length === 0}
-                      className="cihaz-tool-item flex items-center gap-1 px-3 py-1.5 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Test Seç
-                    </button>
-                  </div>
-                  {availableTests.length === 0 ? (
-                    <p className="text-xs text-[var(--dashboard-muted)]">
-                      Bu laboratuvara tanımlı test bulunamadı.
-                    </p>
-                  ) : selectedTests.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {selectedTests.map(test => (
-                        <span
-                          key={test}
-                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-100/80 text-red-800 text-xs rounded-full"
-                        >
-                          {test}
+                  {/* Arıza sub-fields shown inline below the arıza option */}
+                  {tur === 'ariza' && islemTuru === 'ariza' && (
+                    <div className="wizard-fault-section" style={{ margin: '8px 24px 16px' }}>
+                      <label style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500, display: 'block', marginBottom: '12px' }}>
+                        <AlertTriangle className="h-4 w-4 inline mr-2" style={{ color: '#ef4444' }} />
+                        Arıza Türü *
+                      </label>
+                      <Select value={selectedFaultId} onValueChange={(v) => { setSelectedFaultId(v); if (v !== 'diger') setCustomFaultName(''); }}>
+                        <SelectTrigger className="wizard-dark-select bg-white/10 border-white/20 text-white">
+                          <SelectValue placeholder="Tespit edilen arızayı seçin..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {faultDefinitions.map(fault => (
+                            <SelectItem key={fault.id} value={fault.id}>{fault.name}</SelectItem>
+                          ))}
+                          <SelectItem value="diger">Diğer (Özel Arıza)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {selectedFaultId === 'diger' && (
+                        <input
+                          type="text"
+                          placeholder="Arıza açıklamasını girin... (zorunlu)"
+                          value={customFaultName}
+                          onChange={(e) => setCustomFaultName(e.target.value)}
+                          style={{ marginTop: '8px' }}
+                        />
+                      )}
+                      {/* İlişkili Testler */}
+                      <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(239,68,68,0.2)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)' }}>İlişkili Testler (Opsiyonel)</label>
                           <button
                             type="button"
-                            onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}
-                            className="hover:text-red-600"
+                            onClick={() => setIsTestModalOpen(true)}
+                            disabled={availableTests.length === 0}
+                            className="wizard-add-button"
+                            style={{ width: 'auto', padding: '6px 12px', fontSize: '12px', marginTop: 0 }}
                           >
-                            <X className="h-3 w-3" />
+                            <Plus className="h-3 w-3" /> Test Seç
                           </button>
-                        </span>
+                        </div>
+                        {selectedTests.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {selectedTests.map(test => (
+                              <span key={test} className="wizard-chip">
+                                {test}
+                                <button className="wizard-chip-delete" onClick={() => setSelectedTests(prev => prev.filter(t => t !== test))}>
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Periyodik Bakım sub-fields shown inline below the periyodik_bakim option */}
+                  {tur === 'periyodik_bakim' && islemTuru === 'periyodik_bakim' && (
+                    <div style={{ margin: '8px 24px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {maintenanceTasksWithStatus.length > 0 && (
+                        <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th style={{ width: '36px' }}></th>
+                                <th>İş Adı</th>
+                                <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
+                                <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
+                                <tr key={plan.id} style={{ cursor: 'pointer' }} onClick={() => toggleMaintenanceTask(plan.id)}>
+                                  <td>
+                                    <Checkbox
+                                      checked={selectedMaintenanceTasks.includes(plan.id)}
+                                      onCheckedChange={() => toggleMaintenanceTask(plan.id)}
+                                    />
+                                  </td>
+                                  <td style={{ fontWeight: 500 }}>{plan.taskName}</td>
+                                  <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {daysRemaining === null ? (
+                                      <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz yapılmadı</span>
+                                    ) : isOverdue ? (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
+                                    ) : (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {periodicPartChangesWithStatus.length > 0 && (
+                        <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+                          <label style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '8px' }}>Periyodik Parça Değişimleri</label>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th style={{ width: '36px' }}></th>
+                                <th>Ürün</th>
+                                <th style={{ width: '80px', textAlign: 'center' }}>Periyot</th>
+                                <th style={{ width: '100px', textAlign: 'center' }}>Kalan Gün</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
+                                <tr key={partChange.id} style={{ cursor: 'pointer' }} onClick={() => togglePeriodicPart(partChange.id)}>
+                                  <td>
+                                    <Checkbox
+                                      checked={selectedPeriodicParts.includes(partChange.id)}
+                                      onCheckedChange={() => togglePeriodicPart(partChange.id)}
+                                    />
+                                  </td>
+                                  <td>
+                                    <div>
+                                      <p style={{ fontWeight: 500 }}>{partChange.stokAdi}</p>
+                                      <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{partChange.stokKodu}</p>
+                                    </div>
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontSize: '13px' }}>{periodLabel}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {daysRemaining === null ? (
+                                      <span style={{ fontSize: '12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.4)' }}>Henüz değişilmedi</span>
+                                    ) : isOverdue ? (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: '#ef4444' }}>{Math.abs(daysRemaining)} gün gecikmiş</span>
+                                    ) : (
+                                      <span style={{ fontSize: '12px', fontWeight: 500, color: daysRemaining <= 7 ? '#f59e0b' : '#22c55e' }}>{daysRemaining} gün kaldı</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        );
+
+      case 'tarih_saat':
+        return (
+          <div style={{ padding: '8px 0' }}>
+            <div className="wizard-datetime-grid">
+              <div>
+                <label>Başlangıç Tarihi *</label>
+                <input type="date" value={baslangicTarihi} onChange={(e) => setBaslangicTarihi(e.target.value)} />
+              </div>
+              <div>
+                <label>Başlangıç Saati *</label>
+                <input type="time" value={baslangicSaati} onChange={(e) => setBaslangicSaati(e.target.value)} />
+              </div>
+              <div>
+                <label>Bitiş Tarihi *</label>
+                <input type="date" value={bitisTarihi} onChange={(e) => setBitisTarihi(e.target.value)} />
+              </div>
+              <div>
+                <label>Bitiş Saati *</label>
+                <input type="time" value={bitisSaati} onChange={(e) => setBitisSaati(e.target.value)} />
+              </div>
+            </div>
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '12px' }}>
+              İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz.
+            </p>
+          </div>
+        );
+
+      case 'degisen_parca':
+        return (
+          <div>
+            {/* Existing part changes list */}
+            {actions.filter(a => a.type === 'part_change').length > 0 && (
+              <div className="wizard-action-list" style={{ marginBottom: '16px' }}>
+                {actions.filter(a => a.type === 'part_change').map(item => (
+                  <div key={item.id} className="wizard-action-item">
+                    <div>
+                      <div className="wizard-action-item-label">{item.stokAdi || item.action}</div>
+                      <div className="wizard-action-item-sub">
+                        {item.stokKodu} {item.serialNumber ? `/ SN: ${item.serialNumber}` : ''}
+                        {item.isManualEntry && ' (Manuel)'}
+                        {item.isPeriodicPartChange && ' (Periyodik)'}
+                      </div>
+                    </div>
+                    <button className="wizard-action-item-delete" onClick={() => removeActionRow(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 1. Part Selection */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>
+                1. Parça Seçin
+              </label>
+
+              {/* Stock source tabs */}
+              <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
+                <button
+                  className={`wizard-sub-tab ${!showManualEntry && stockSourceTab === 'personal' ? 'active' : ''}`}
+                  onClick={() => { setStockSourceTab('personal'); setShowManualEntry(false); }}
+                >
+                  ŞAHSİ STOK
+                </button>
+                {poolStockItems.length > 0 && (
+                  <button
+                    className={`wizard-sub-tab ${!showManualEntry && stockSourceTab === 'pool' ? 'active' : ''}`}
+                    onClick={() => { setStockSourceTab('pool'); setShowManualEntry(false); }}
+                  >
+                    HAVUZ STOK
+                  </button>
+                )}
+              </div>
+
+              {!showManualEntry ? (
+                <>
+                  <div style={{ position: 'relative', marginBottom: '8px' }}>
+                    <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                    <input
+                      type="text"
+                      placeholder={stockSourceTab === 'personal' ? 'Şahsi stokta ara...' : 'Havuz stokta ara...'}
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }}
+                    />
+                  </div>
+                  {stockSourceTab === 'personal' ? (
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                      {filteredStock.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
+                          {personalStock.length === 0 ? 'Şahsi stokunuzda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                        </div>
+                      ) : filteredStock.map(item => (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedStockItem(item); setSelectedPoolStockItem(null);
+                            setRemovedPartSerialNumber('');
+                            setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+                            setUsedPartImageFile(null); setUsedPartImagePreview(null);
+                          }}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                            padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
+                            background: selectedStockItem?.id === item.id ? 'var(--wz-selected-bg)' : 'transparent',
+                            borderLeft: selectedStockItem?.id === item.id ? '3px solid var(--wz-accent)' : '3px solid transparent',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--wz-text-secondary)' }}>{item.source === 'depot' ? 'Depodan' : 'Cihazdan'}</div>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-[var(--dashboard-muted)]">
-                      Arızayla ilişkili test seçilmedi.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Periyodik Bakım İş Listesi - only when periyodik_bakim selected */}
-            {islemTuru === 'periyodik_bakim' && (
-              <div className="p-4 border rounded-lg bg-muted/30">
-                <Label className="flex items-center gap-2 mb-4">
-                  <ClipboardList className="h-4 w-4" />
-                  Periyodik Bakım İş Listesi
-                </Label>
-                {maintenanceTasksWithStatus.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Bu cihaz için tanımlı aplikasyon periyodik bakım planı bulunmuyor.
-                    Cihaz tanımlama panelinden bakım planı ekleyebilirsiniz.
-                  </p>
-                ) : (
-                  <div className="border rounded-md">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-12"></TableHead>
-                          <TableHead>İş Adı</TableHead>
-                          <TableHead className="w-24 text-center">Periyot</TableHead>
-                          <TableHead className="w-32 text-center">Kalan Gün</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {maintenanceTasksWithStatus.map(({ plan, daysRemaining, isOverdue, periodLabel }) => (
-                          <TableRow key={plan.id} className="cursor-pointer hover:bg-muted/50" onClick={() => toggleMaintenanceTask(plan.id)}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedMaintenanceTasks.includes(plan.id)}
-                                onCheckedChange={() => toggleMaintenanceTask(plan.id)}
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">{plan.taskName}</TableCell>
-                            <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
-                            <TableCell className="text-center">
-                              {daysRemaining === null ? (
-                                <span className="text-xs text-muted-foreground italic">Henüz yapılmadı</span>
-                              ) : isOverdue ? (
-                                <span className="text-xs font-medium text-red-600 dark:text-red-400">
-                                  {Math.abs(daysRemaining)} gün gecikmiş
-                                </span>
-                              ) : (
-                                <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
-                                  {daysRemaining} gün
-                                </span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-                {selectedMaintenanceTasks.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {selectedMaintenanceTasks.length} bakım işi seçildi
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Periyodik Parça Değişimi Listesi - only when periyodik_bakim selected */}
-            {islemTuru === 'periyodik_bakim' && periodicPartChangesWithStatus.length > 0 && (
-              <div className="p-4 border rounded-lg bg-muted/30">
-                <Label className="flex items-center gap-2 mb-4">
-                  <Package className="h-4 w-4" />
-                  Periyodik Parça Değişimleri
-                </Label>
-                <div className="border rounded-md">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12"></TableHead>
-                        <TableHead>Ürün</TableHead>
-                        <TableHead className="w-24 text-center">Periyot</TableHead>
-                        <TableHead className="w-36 text-center">Kalan Gün</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {periodicPartChangesWithStatus.map(({ partChange, daysRemaining, isOverdue, periodLabel }) => (
-                        <TableRow
-                          key={partChange.id}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => togglePeriodicPart(partChange.id)}
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                      {filteredPoolStock.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
+                          {poolStockItems.length === 0 ? 'Havuz depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                        </div>
+                      ) : filteredPoolStock.map(item => (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedPoolStockItem(item); setSelectedStockItem(null);
+                            setRemovedPartSerialNumber('');
+                            setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
+                            setUsedPartImageFile(null); setUsedPartImagePreview(null);
+                          }}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                            padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
+                            background: selectedPoolStockItem?.id === item.id ? 'var(--wz-selected-bg)' : 'transparent',
+                            borderLeft: selectedPoolStockItem?.id === item.id ? '3px solid #a855f7' : '3px solid transparent',
+                          }}
                         >
-                          <TableCell>
-                            <Checkbox
-                              checked={selectedPeriodicParts.includes(partChange.id)}
-                              onCheckedChange={() => togglePeriodicPart(partChange.id)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{partChange.stokAdi}</p>
-                              <p className="text-xs text-muted-foreground font-mono">{partChange.stokKodu}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center text-sm text-muted-foreground">{periodLabel}</TableCell>
-                          <TableCell className="text-center">
-                            {daysRemaining === null ? (
-                              <span className="text-xs text-muted-foreground italic">Henüz değişilmedi</span>
-                            ) : isOverdue ? (
-                              <span className="text-xs font-medium text-red-600 dark:text-red-400 flex items-center justify-center gap-1">
-                                <AlertTriangle className="h-3 w-3" />
-                                {Math.abs(daysRemaining)} gün gecikmiş
-                              </span>
-                            ) : (
-                              <span className={`text-xs font-medium ${daysRemaining <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
-                                {daysRemaining} gün kaldı
-                              </span>
-                            )}
-                          </TableCell>
-                        </TableRow>
+                          <div>
+                            <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber || '—'}</div>
+                            <div style={{ fontSize: '11px', color: '#a855f7', fontWeight: 500 }}>{item.poolWarehouseName}</div>
+                          </div>
+                        </div>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { setShowManualEntry(true); setSelectedStockItem(null); setSelectedPoolStockItem(null); }}
+                    style={{ width: '100%', marginTop: '8px', padding: '10px', fontSize: '13px', fontWeight: 500, color: 'var(--wz-accent)', background: 'none', border: '1px dashed var(--wz-border)', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                  >
+                    <Plus size={14} /> Stokta yok, manuel ekle
+                  </button>
+                </>
+              ) : (
+                /* Manual entry form */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Kodu <span style={{ color: '#ef4444' }}>*</span></label>
+                      <input type="text" placeholder="Kod..." value={manualPartCode} onChange={(e) => setManualPartCode(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                        Seri No {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking) && <span style={{ color: '#ef4444' }}>*</span>}
+                      </label>
+                      <input type="text" placeholder="Seri No..." value={manualSerialNumber} onChange={(e) => setManualSerialNumber(e.target.value)} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Adı <span style={{ color: '#ef4444' }}>*</span></label>
+                    <input type="text" placeholder="Parça adını girin..." value={manualPartName} onChange={(e) => setManualPartName(e.target.value)} />
+                  </div>
+                  <button
+                    onClick={() => setShowManualEntry(false)}
+                    style={{ fontSize: '13px', color: 'var(--wz-accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', textAlign: 'left', fontWeight: 500 }}
+                  >
+                    Stoktan seç
+                  </button>
                 </div>
-                {selectedPeriodicParts.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {selectedPeriodicParts.length} periyodik parça değişimi seçildi (otomatik olarak değişen parçalar listesine eklendi)
-                  </p>
-                )}
+              )}
+            </div>
+
+            {/* 2. Removed part info (auto-filled) */}
+            {(selectedStockItem || selectedPoolStockItem || showManualEntry) && (
+              <div style={{ marginBottom: '20px', padding: '16px', borderRadius: '12px', border: '1px solid var(--wz-border)', background: 'var(--wz-input-bg)' }}>
+                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>
+                  2. Cihazdan Çıkan Parça Bilgisi
+                  <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--wz-text-secondary)', marginLeft: '8px' }}>
+                    {(!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresOutgoingPartInfo) ? '(zorunlu)' : '(opsiyonel)'}
+                  </span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Kodu</label>
+                    <input type="text" value={removedPartStokKodu} readOnly style={{ opacity: 0.7, cursor: 'default' }} />
+                    <p style={{ fontSize: '11px', color: 'var(--wz-text-secondary)', marginTop: '2px' }}>Takılan parçanın kodundan otomatik alınır.</p>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Seri No (Opsiyonel)</label>
+                    <input type="text" placeholder="Çıkan parça seri no..." value={removedPartSerialNumber} onChange={(e) => setRemovedPartSerialNumber(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '4px' }}>Parça Adı</label>
+                  <input type="text" value={removedPartStokAdi} readOnly style={{ opacity: 0.7, cursor: 'default' }} />
+                  <p style={{ fontSize: '11px', color: 'var(--wz-text-secondary)', marginTop: '2px' }}>Takılan parçanın adından otomatik alınır.</p>
+                </div>
+
+                {/* Photo uploads */}
+                <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--wz-border)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Removed part image */}
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                      <Camera size={12} /> Çıkan Parça Fotoğrafı (Opsiyonel)
+                    </label>
+                    <input type="file" accept="image/*" ref={removedPartImageInputRef} onChange={handleRemovedPartImageSelect} className="hidden" />
+                    {removedPartImagePreview ? (
+                      <div style={{ position: 'relative' }}>
+                        <img src={removedPartImagePreview} alt="Çıkan parça" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--wz-border)' }} />
+                        <button
+                          onClick={() => { setRemovedPartImageFile(null); setRemovedPartImagePreview(null); if (removedPartImageInputRef.current) removedPartImageInputRef.current.value = ''; }}
+                          style={{ position: 'absolute', top: '4px', right: '4px', width: '24px', height: '24px', borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => removedPartImageInputRef.current?.click()}
+                        style={{ width: '100%', height: '56px', border: '1px dashed var(--wz-border)', borderRadius: '12px', background: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--wz-text-secondary)', fontSize: '12px' }}
+                      >
+                        <ImageIcon size={18} />
+                        Çıkan parça fotoğrafı
+                      </button>
+                    )}
+                  </div>
+                  {/* Used/installed part image */}
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                      <Camera size={12} /> Takılan Parça Fotoğrafı (Opsiyonel)
+                    </label>
+                    <input type="file" accept="image/*" ref={usedPartImageInputRef} onChange={handleUsedPartImageSelect} className="hidden" />
+                    {usedPartImagePreview ? (
+                      <div style={{ position: 'relative' }}>
+                        <img src={usedPartImagePreview} alt="Takılan parça" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--wz-border)' }} />
+                        <button
+                          onClick={() => { setUsedPartImageFile(null); setUsedPartImagePreview(null); if (usedPartImageInputRef.current) usedPartImageInputRef.current.value = ''; }}
+                          style={{ position: 'absolute', top: '4px', right: '4px', width: '24px', height: '24px', borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => usedPartImageInputRef.current?.click()}
+                        style={{ width: '100%', height: '56px', border: '1px dashed var(--wz-border)', borderRadius: '12px', background: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--wz-text-secondary)', fontSize: '12px' }}
+                      >
+                        <ImageIcon size={18} />
+                        Takılan parça fotoğrafı
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* Başlangıç ve Bitiş Tarihleri/Saatleri (Zorunlu) */}
-            <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-              <Label className="flex items-center gap-2 mb-4">
-                <Clock className="h-4 w-4" />
-                İşlem Tarihi ve Saatleri <span className="text-destructive">*</span>
-              </Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="baslangicTarihi" className="text-sm">Başlangıç Tarihi <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="baslangicTarihi"
-                    type="date"
-                    value={baslangicTarihi}
-                    onChange={(e) => setBaslangicTarihi(e.target.value)}
-                    className={!baslangicTarihi ? 'border-amber-500/50' : ''}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="baslangicSaati" className="text-sm">Başlangıç Saati <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="baslangicSaati"
-                    type="time"
-                    value={baslangicSaati}
-                    onChange={(e) => setBaslangicSaati(e.target.value)}
-                    className={!baslangicSaati ? 'border-amber-500/50' : ''}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="bitisTarihi" className="text-sm">Bitiş Tarihi <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="bitisTarihi"
-                    type="date"
-                    value={bitisTarihi}
-                    onChange={(e) => setBitisTarihi(e.target.value)}
-                    className={!bitisTarihi ? 'border-amber-500/50' : ''}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="bitisSaati" className="text-sm">Bitiş Saati <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="bitisSaati"
-                    type="time"
-                    value={bitisSaati}
-                    onChange={(e) => setBitisSaati(e.target.value)}
-                    className={!bitisSaati ? 'border-amber-500/50' : ''}
-                  />
-                </div>
+            {/* Add button */}
+            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualPartName)) && (
+              <button
+                onClick={addSelectedPart}
+                disabled={isUploadingImage}
+                style={{
+                  width: '100%', padding: '14px', fontSize: '15px', fontWeight: 600,
+                  background: 'var(--wz-accent)', color: '#fff', border: 'none', borderRadius: '12px',
+                  cursor: isUploadingImage ? 'not-allowed' : 'pointer', opacity: isUploadingImage ? 0.5 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                }}
+              >
+                {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin" />Yükleniyor...</> : 'EKLE'}
+              </button>
+            )}
+          </div>
+        );
+
+      case 'yapilan_islem':
+        return (
+          <div>
+            {actions.filter(a => a.type === 'operation').length > 0 ? (
+              <div className="wizard-action-list">
+                {actions.filter(a => a.type === 'operation').map(item => (
+                  <div key={item.id} className="wizard-action-item">
+                    <div className="wizard-action-item-label">{getActionLabel(item)}</div>
+                    <button className="wizard-action-item-delete" onClick={() => removeActionRow(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz. Bu alanlar zorunludur.
-              </p>
-            </div>
+            ) : (
+              <div className="wizard-empty-state">Henüz işlem eklenmedi.</div>
+            )}
 
-            {/* Açıklama Alanı (Zorunlu) */}
-            <div className="p-4 border rounded-lg bg-muted/30">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Açıklama <span className="text-destructive">*</span>
-                </Label>
-                <Textarea
-                  placeholder="Yapılan işlem hakkında açıklama yazın... (zorunlu)"
-                  value={aciklama}
-                  onChange={(e) => setAciklama(e.target.value)}
-                  rows={3}
-                  className={!aciklama.trim() ? 'border-amber-500/50' : ''}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
-                </p>
-              </div>
+            <div className="wizard-option-list" style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
+              {ALL_OPERATIONS.map(op => {
+                const alreadyAdded = actions.some(a => a.type === 'operation' && a.action === op);
+                return (
+                  <button
+                    key={op}
+                    className={`wizard-option-item ${alreadyAdded ? 'selected' : ''}`}
+                    style={{ fontSize: '18px', padding: '14px 24px' }}
+                    onClick={() => {
+                      if (alreadyAdded) {
+                        setActions(prev => prev.filter(a => !(a.type === 'operation' && a.action === op)));
+                      } else {
+                        const newItem: ActionItem = {
+                          id: crypto.randomUUID(),
+                          type: 'operation',
+                          action: op,
+                          quantity: 1,
+                        };
+                        setActions(prev => [newItem, ...prev]);
+                      }
+                    }}
+                  >
+                    {alreadyAdded && (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width: '20px', height: '20px', marginRight: '12px', flexShrink: 0 }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                    {OPERATION_LABELS[op]}
+                    {op === 'diger' && alreadyAdded && (
+                      <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginLeft: '8px' }}>
+                        {digerAciklama ? `(${digerAciklama})` : ''}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
+          </div>
+        );
 
-            {/* Butonlar */}
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={openPartModal} variant="outline">
-                <Wrench className="mr-2 h-4 w-4" /> Değişen Parça Ekle
-              </Button>
-              <Button onClick={openOperationModal} variant="outline">
-                <ClipboardList className="mr-2 h-4 w-4" /> Yapılan İşlemi Seç
-              </Button>
-            </div>
-            <ScrollArea className="h-72 border rounded-md">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-20">Tür</TableHead>
-                    <TableHead>İşlem/Parça</TableHead>
-                    <TableHead className="w-28">Kod</TableHead>
-                    <TableHead className="w-28">Seri No</TableHead>
-                    <TableHead className="w-16"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {actions.length === 0 ? (
-                    <TableRow><TableCell colSpan={5} className="text-center h-24 text-muted-foreground">Henüz işlem eklenmedi. Yukarıdaki butonları kullanarak parça değişimi veya işlem ekleyin.</TableCell></TableRow>
-                  ) : (
-                    actions.map(item => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <span className={`text-xs font-medium px-2 py-1 rounded ${item.type === 'part_change' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'}`}>
-                            {item.type === 'part_change' ? 'Parça' : 'İşlem'}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <span className="font-medium">{getActionLabel(item)}</span>
-                            {item.isManualEntry && <span className="ml-2 text-xs text-muted-foreground">(Manuel)</span>}
-                            {item.type === 'part_change' && item.removedPartSerialNumber && (
-                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-                                Çıkan: {item.removedPartStokAdi || item.stokAdi} ({item.removedPartSerialNumber})
-                              </p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {item.type === 'part_change' ? (
-                            <span className="font-mono text-xs">{item.stokKodu || '-'}</span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {item.type === 'part_change' ? (
-                            <span className="font-mono text-xs">{item.serialNumber || '-'}</span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => removeActionRow(item.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+      case 'aciklama':
+        return (
+          <div style={{ padding: '8px 0' }}>
+            <label>Açıklama *</label>
+            <textarea
+              placeholder="Yapılan işlem hakkında açıklama yazın... (zorunlu)"
+              value={aciklama}
+              onChange={(e) => setAciklama(e.target.value)}
+              rows={5}
+              style={{ minHeight: '140px', resize: 'vertical' }}
+            />
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>
+              Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
+            </p>
+          </div>
+        );
 
-            {/* Save Button */}
-            <div className="flex justify-end pt-4">
-              <Button onClick={startSaveProcess} disabled={isSaving || actions.length === 0}>
-                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                  Kaydet
-              </Button>
-            </div>
-        </div>
+      default:
+        return null;
+    }
+  };
+
+  // Render save confirmation inside wizard
+  const renderWizardSaveConfirm = (goBack: () => void) => (
+    <div className="wizard-save-summary">
+      <h3>Form Özeti</h3>
+      <div className="wizard-save-summary-item">
+        <span className="label">İşlem Türü</span>
+        <span className="value">{islemTuru ? ISLEM_TURU_LABELS[islemTuru] : '—'}</span>
       </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Tarih / Saat</span>
+        <span className="value">{baslangicSaati && bitisSaati ? `${baslangicTarihi} ${baslangicSaati} — ${bitisTarihi} ${bitisSaati}` : '—'}</span>
+      </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Değişen Parça</span>
+        <span className="value">{actions.filter(a => a.type === 'part_change').length} parça</span>
+      </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Yapılan İşlem</span>
+        <span className="value">{actions.filter(a => a.type === 'operation').length} işlem</span>
+      </div>
+      <div className="wizard-save-summary-item">
+        <span className="label">Açıklama</span>
+        <span className="value">{aciklama.trim() ? (aciklama.trim().length > 60 ? aciklama.trim().substring(0, 60) + '...' : aciklama.trim()) : '—'}</span>
+      </div>
+      <div style={{ marginTop: '24px', display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+        <button className="wizard-btn wizard-btn-secondary" onClick={goBack}>Geri</button>
+        <button
+          className="wizard-btn wizard-btn-primary"
+          onClick={startSaveProcess}
+          disabled={isSaving || actions.length === 0}
+        >
+          {isSaving ? 'Kaydediliyor...' : 'Onayla ve Kaydet'}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="wizard-page-wrapper">
+        {/* Compact Device Info Header */}
+        <header className="wizard-compact-header sticky top-0 z-30">
+          <button
+            className="wizard-icon-btn"
+            onClick={() => { if (window.history.length > 2) router.back(); else router.push(`/aplikasyon-paneli/${device.hospitalId}`); }}
+            aria-label="Geri Dön"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          {device.imageUrl && (
+            <div className="wizard-header-image">
+              <Image src={resolveImageSrc(device.imageUrl)} alt={device.cihazAdi || ''} width={40} height={40} />
+            </div>
+          )}
+          <div className="wizard-header-info">
+            <div className="wizard-header-title-row">
+              <div className="wizard-header-title">Aplikasyon İşlem Formu</div>
+            </div>
+            <div className="wizard-header-device">{device.cihazAdi} <span className="wizard-header-sn">Seri No: {device.seriNumarasi}</span></div>
+            <div className="wizard-header-meta">
+              <span className="wizard-header-meta-tag"><strong>Lab:</strong> {hospital?.name || '-'}</span>
+              <span className="wizard-header-meta-tag"><strong>İşlemi Yapan:</strong> {currentUserProfile?.name || '-'}</span>
+              <span className="wizard-header-meta-tag"><strong>Tarih:</strong> {format(new Date(), 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
+            </div>
+          </div>
+          <button
+            className="wizard-icon-btn"
+            onClick={() => router.push(`/aplikasyon-paneli/gecmis/${deviceId}`)}
+            aria-label="Geçmiş"
+          >
+            <History size={16} />
+          </button>
+        </header>
+
+        {/* Wizard Form Body */}
+        <WizardFormShell
+          headings={wizardHeadings}
+          renderDetail={renderWizardDetail}
+          renderSaveConfirm={renderWizardSaveConfirm}
+          onSaveDraft={handleSaveDraft}
+          onSave={startSaveProcess}
+          isSaving={isSaving}
+          isSavingDraft={isSavingDraft}
+          saveDisabled={isSaving || actions.length === 0}
+          useGrid={true}
+        />
+      </div>
+
+
+      <Dialog open={isAutoStockConfirmOpen} onOpenChange={(open) => {
+        setIsAutoStockConfirmOpen(open);
+        if (!open && !isAutoStockCreating) {
+          setAutoStockPendingPartId(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Periyodik Parça İçin Otomatik Stok Oluştur</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Seçilen periyodik parça şahsi stoğunuzda bulunamadı. Bu parça için otomatik depo stok girişi,
+            personel transfer kaydı ve şahsi stok kaydı oluşturulsun mu?
+          </p>
+          <DialogFooter className="gap-2">
+            <button
+              onClick={() => handleAutoStockConfirm(false)}
+              disabled={isAutoStockCreating}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium"
+            >
+              İptal
+            </button>
+            <button
+              onClick={() => handleAutoStockConfirm(true)}
+              disabled={isAutoStockCreating}
+              className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50"
+            >
+              {isAutoStockCreating ? 'Oluşturuluyor...' : 'Otomatik Oluştur'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       {/* Operation Selection Modal */}
       <Dialog open={isOperationModalOpen} onOpenChange={setIsOperationModalOpen}>
@@ -1866,10 +2587,31 @@ export default function AplikasyonIslemFormuPage() {
             <DialogTitle className="text-lg font-semibold tracking-tight">Yedek Parça Değişimi</DialogTitle>
           </DialogHeader>
           <div className="flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto">
-            {/* Section 1: Select part from personal stock */}
+            {/* Section 1: Select part from personal stock or pool stock */}
             <div className="p-4 border border-border rounded-lg bg-background space-y-3">
-              <Label className="font-semibold text-sm">1. Şahsi Stokunuzdan Parça Seçin</Label>
-              {!showManualEntry ? (
+              <Label className="font-semibold text-sm">1. Parça Seçin</Label>
+
+              {/* Stock source tabs */}
+              {poolStockItems.length > 0 && !showManualEntry && (
+                <div className="flex gap-1 p-1 rounded-lg bg-muted/40 border border-border">
+                  <button
+                    onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'personal' ? 'bg-background shadow-sm' : ''}`}
+                  >
+                    <Package className="h-3 w-3 inline mr-1" />
+                    Şahsi Stok ({personalStock.length})
+                  </button>
+                  <button
+                    onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'pool' ? 'bg-background shadow-sm' : ''}`}
+                  >
+                    <Package className="h-3 w-3 inline mr-1" />
+                    Havuz Stok ({poolStockItems.length})
+                  </button>
+                </div>
+              )}
+
+              {!showManualEntry && stockSourceTab === 'personal' ? (
                 <>
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -1892,7 +2634,7 @@ export default function AplikasyonIslemFormuPage() {
                         {filteredStock.map(item => (
                           <button
                             key={item.id}
-                            onClick={() => setSelectedStockItem(item)}
+                            onClick={() => { setSelectedStockItem(item); setSelectedPoolStockItem(null); }}
                             className={`w-full text-left p-3 rounded-lg transition-colors ${
                               selectedStockItem?.id === item.id
                                 ? 'bg-primary/10 border border-primary/40'
@@ -1926,7 +2668,62 @@ export default function AplikasyonIslemFormuPage() {
                     Stokta yok, manuel ekle
                   </Button>
                 </>
-              ) : (
+              ) : !showManualEntry && stockSourceTab === 'pool' ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Havuz stokta ara..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-44 border border-border rounded-lg bg-background">
+                    {filteredPoolStock.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {poolStockItems.length === 0
+                          ? 'Havuz depoda yedek parça bulunmuyor.'
+                          : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredPoolStock.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => { setSelectedPoolStockItem(item); setSelectedStockItem(null); }}
+                            className={`w-full text-left p-3 rounded-lg transition-colors ${
+                              selectedPoolStockItem?.id === item.id
+                                ? 'bg-purple-500/10 border border-purple-500/40'
+                                : 'hover:bg-muted/60 border border-transparent'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.stokAdi}</p>
+                                <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono">{item.serialNumber || '—'}</p>
+                                <p className="text-xs text-purple-600 font-medium">{item.poolWarehouseName}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualEntry(true)}
+                    className="w-full text-xs"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Stokta yok, manuel ekle
+                  </Button>
+                </>
+              ) : showManualEntry ? (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
@@ -1966,7 +2763,7 @@ export default function AplikasyonIslemFormuPage() {
                     Stoktan seç
                   </Button>
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Section 2: Removed part info (from device) */}
@@ -2112,13 +2909,14 @@ export default function AplikasyonIslemFormuPage() {
             </div>
 
             {/* Selected item summary */}
-            {(selectedStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
-              <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg text-sm">
-                <p className="font-medium text-green-800 dark:text-green-200">
-                  Takılacak: {selectedStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || manualSerialNumber})
+            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
+              <div className={`p-3 rounded-lg text-sm ${selectedPoolStockItem ? 'bg-purple-50 dark:bg-purple-950/20' : 'bg-green-50 dark:bg-green-950/20'}`}>
+                <p className={`font-medium ${selectedPoolStockItem ? 'text-purple-800 dark:text-purple-200' : 'text-green-800 dark:text-green-200'}`}>
+                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber})
+                  {selectedPoolStockItem && <span className="ml-1 text-xs text-purple-600">(Havuz: {selectedPoolStockItem.poolWarehouseName})</span>}
                 </p>
-                <p className="text-green-700 dark:text-green-300">
-                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
+                <p className={selectedPoolStockItem ? 'text-purple-700 dark:text-purple-300' : 'text-green-700 dark:text-green-300'}>
+                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
                 </p>
               </div>
             )}
@@ -2129,7 +2927,7 @@ export default function AplikasyonIslemFormuPage() {
               className="w-full sm:w-auto"
               onClick={addSelectedPart}
               disabled={
-                (!selectedStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
+                (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName && (!pendingPeriodicPartChangeId || periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)?.requiresSerialTracking !== false ? manualSerialNumber : true)))
                 || isUploadingImage
               }
             >
@@ -2140,112 +2938,104 @@ export default function AplikasyonIslemFormuPage() {
       </Dialog>
 
 
-      {/* Signature Modal */}
+      {/* Pre-Signature & Signature Modal */}
       <Dialog open={isSignatureModalOpen} onOpenChange={setIsSignatureModalOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>
-              {signatureStep === 'pre_questions' ? 'Cihaz Durumu ve Eşlik Eden Personel' : 'İmza'}
-            </DialogTitle>
-          </DialogHeader>
+        <DialogContent className="wizard-modal">
+          <div className="wizard-modal-title">
+            {signatureStep === 'pre_questions' ? 'Form Bilgileri' : 'İmza'}
+          </div>
 
-          {/* Pre-questions step */}
+          {/* Pre-Signature Questions */}
           {signatureStep === 'pre_questions' && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Cihaz Durumu <span className="text-destructive">*</span></Label>
-                <RadioGroup
-                  value={cihazDurumu}
-                  onValueChange={(val) => setCihazDurumu(val as CihazDurumu)}
-                  className="grid grid-cols-2 gap-2"
-                >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Cihaz Durumu */}
+              <div>
+                <label className="wizard-modal-label" style={{ display: 'block', marginBottom: '10px', fontSize: '15px' }}>
+                  Cihaz Durumu <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <RadioGroup value={cihazDurumu} onValueChange={(v) => setCihazDurumu(v as CihazDurumu)}>
                   {(Object.keys(CIHAZ_DURUMU_LABELS) as CihazDurumu[])
                     .filter(k => k !== '')
                     .map(key => (
                       <div key={key} className="flex items-center space-x-2">
                         <RadioGroupItem value={key} id={`durumu-${key}`} />
-                        <Label htmlFor={`durumu-${key}`} className="cursor-pointer">
+                        <Label htmlFor={`durumu-${key}`} style={{ color: 'var(--wz-text)' }}>
                           {CIHAZ_DURUMU_LABELS[key]}
                         </Label>
                       </div>
                     ))}
                 </RadioGroup>
                 {cihazDurumu === 'diger' && (
-                  <Input
-                    placeholder="Diğer durumu açıklayın..."
+                  <input
+                    type="text"
+                    placeholder="Açıklama (zorunlu)"
                     value={cihazDurumuAciklama}
                     onChange={(e) => setCihazDurumuAciklama(e.target.value)}
-                    className="mt-2"
+                    style={{ marginTop: '8px' }}
                   />
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label>Eşlik Eden Personel (Opsiyonel)</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
+              {/* Eşlik Eden Personel */}
+              <div>
+                <label className="wizard-modal-label" style={{ display: 'block', marginBottom: '6px', fontSize: '15px' }}>
+                  Eşlik Eden Personel <span className="wizard-modal-sublabel">(Opsiyonel)</span>
+                </label>
+                <div style={{ position: 'relative', marginBottom: '8px' }}>
+                  <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                  <input
+                    type="text"
                     placeholder="Personel ara..."
                     value={personelSearchQuery}
                     onChange={(e) => setPersonelSearchQuery(e.target.value)}
-                    className="pl-10"
+                    style={{ paddingLeft: '36px' }}
                   />
                 </div>
-                <ScrollArea className="h-32 border rounded-md">
-                  <div className="p-2 space-y-1">
-                    {filteredUsers
-                      .filter(u => u.uid !== currentUserProfile?.uid)
-                      .map(user => (
-                        <button
-                          key={user.uid}
-                          onClick={() => toggleEslikEdenPersonel(user)}
-                          className={`w-full text-left p-2 rounded-md transition-colors flex justify-between items-center ${
-                            eslikEdenPersonel.find(p => p.uid === user.uid)
-                              ? 'bg-primary/10 border-primary border'
-                              : 'hover:bg-muted'
-                          }`}
-                        >
-                          <div>
-                            <p className="font-medium">{user.name || user.email}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {user.role === 'aplikasyon' ? 'Aplikasyon' : 'Teknik Servis'}
-                            </p>
-                          </div>
-                          {eslikEdenPersonel.find(p => p.uid === user.uid) && (
-                            <span className="text-primary text-sm">Seçildi</span>
-                          )}
-                        </button>
-                      ))}
-                  </div>
-                </ScrollArea>
-                {eslikEdenPersonel.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {eslikEdenPersonel.map(p => (
-                      <span key={p.uid} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
-                        {p.name}
-                      </span>
+                <div className="wizard-personel-list">
+                  {filteredUsers
+                    .filter(u => u.uid !== currentUserProfile?.uid)
+                    .map(user => (
+                      <div
+                        key={user.uid}
+                        className={`wizard-personel-item ${eslikEdenPersonel.find(p => p.uid === user.uid) ? 'selected' : ''}`}
+                        onClick={() => toggleEslikEdenPersonel(user)}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{user.name || user.email}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', textTransform: 'capitalize' }}>{user.role?.replace('_', ' ')}</div>
+                        </div>
+                        {eslikEdenPersonel.find(p => p.uid === user.uid) && (
+                          <span style={{ color: 'var(--wz-accent)', fontSize: '12px', fontWeight: 600 }}>Seçildi</span>
+                        )}
+                      </div>
                     ))}
-                  </div>
+                </div>
+                {eslikEdenPersonel.length > 0 && (
+                  <p style={{ fontSize: '13px', color: 'var(--wz-text-secondary)', marginTop: '8px' }}>
+                    Seçilen: {eslikEdenPersonel.map(p => p.name).join(', ')}
+                  </p>
                 )}
               </div>
 
-              <DialogFooter className="mt-4 gap-2">
-                <Button variant="outline" onClick={() => setIsSignatureModalOpen(false)}>İptal</Button>
-                <Button onClick={proceedToSignature}>Devam Et</Button>
-              </DialogFooter>
+              <div className="wizard-modal-footer">
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => setIsSignatureModalOpen(false)}>İptal</button>
+                <button className="wizard-modal-btn wizard-modal-btn-primary" onClick={proceedToSignature}>İmzaya Geç</button>
+              </div>
             </div>
           )}
 
-          {/* Personnel signature step */}
+          {/* Personnel Signature */}
           {signatureStep === 'personnel' && (
             <div>
-              <p className="mb-2 text-sm text-muted-foreground">İşlemi Yapan Personel</p>
-              <SignaturePad ref={personnelSignatureRef} />
-              <DialogFooter className="mt-4 gap-2">
-                <Button variant="outline" onClick={() => { personnelSignatureRef.current?.clear(); }}>Temizle</Button>
-                <Button variant="secondary" onClick={() => setSignatureStep('pre_questions')}>Geri</Button>
-                <Button onClick={() => handleSaveSignaturesAndFinish({})}>Atla</Button>
-                <Button onClick={() => {
+              <p style={{ marginBottom: '8px', fontSize: '14px', color: 'var(--wz-text-secondary)' }}>İşlemi Yapan Personel</p>
+              <div className="wizard-sig-area">
+                <SignaturePad ref={personnelSignatureRef} />
+              </div>
+              <div className="wizard-modal-footer">
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => { personnelSignatureRef.current?.clear(); }}>Temizle</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => setSignatureStep('pre_questions')}>Geri</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => handleSaveSignaturesAndFinish({})}>Atla</button>
+                <button className="wizard-modal-btn wizard-modal-btn-primary" onClick={() => {
                   const sig = personnelSignatureRef.current?.getSignature();
                   if (sig) {
                     setSignatures({ personnel: sig });
@@ -2253,40 +3043,38 @@ export default function AplikasyonIslemFormuPage() {
                   } else {
                     setSignatureStep('technician');
                   }
-                }}>
-                  Devam Et
-                </Button>
-              </DialogFooter>
+                }}>Devam Et</button>
+              </div>
             </div>
           )}
 
-          {/* Technician signature step */}
+          {/* Technician Signature */}
           {signatureStep === 'technician' && (
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="text-sm font-medium mb-2 block">Teknisyen Adı Soyadı</label>
-                <Input
+                <label className="wizard-modal-label" style={{ display: 'block', marginBottom: '6px', fontSize: '14px' }}>Teknisyen Adı Soyadı</label>
+                <input
+                  type="text"
                   value={technicianName}
                   onChange={(e) => setTechnicianName(e.target.value)}
                   placeholder="Ad Soyad giriniz..."
-                  className="mb-4"
                 />
               </div>
               <div>
-                <p className="mb-2 text-sm text-muted-foreground">İmza</p>
-                <SignaturePad ref={technicianSignatureRef} />
+                <p style={{ marginBottom: '8px', fontSize: '14px', color: 'var(--wz-text-secondary)' }}>İmza</p>
+                <div className="wizard-sig-area">
+                  <SignaturePad ref={technicianSignatureRef} />
+                </div>
               </div>
-              <DialogFooter className="mt-4 gap-2">
-                <Button variant="outline" onClick={() => { technicianSignatureRef.current?.clear(); }}>Temizle</Button>
-                <Button onClick={() => handleSaveSignaturesAndFinish(signatures, technicianName)}>Bu Adımı Atla</Button>
-                <Button variant="secondary" onClick={() => setSignatureStep('personnel')}>Geri</Button>
-                <Button onClick={() => {
+              <div className="wizard-modal-footer">
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => { technicianSignatureRef.current?.clear(); }}>Temizle</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => setSignatureStep('personnel')}>Geri</button>
+                <button className="wizard-modal-btn wizard-modal-btn-ghost" onClick={() => handleSaveSignaturesAndFinish(signatures, technicianName)}>Atla</button>
+                <button className="wizard-modal-btn wizard-modal-btn-primary" onClick={() => {
                   const techSig = technicianSignatureRef.current?.getSignature();
                   handleSaveSignaturesAndFinish({ ...signatures, technician: techSig }, technicianName);
-                }}>
-                  Tamamla ve Kaydet
-                </Button>
-              </DialogFooter>
+                }}>Tamamla ve Kaydet</button>
+              </div>
             </div>
           )}
         </DialogContent>
