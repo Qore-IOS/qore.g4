@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef, useTransition } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   Depot,
@@ -33,7 +33,7 @@ import {
   FileDown, ListChecks, BarChart3, ChevronsUpDown
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
-import { differenceInDays, parse, isValid } from 'date-fns';
+import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
 import { Badge } from './ui/badge';
 import { Label } from '@/components/ui/label';
@@ -41,7 +41,7 @@ import { cn } from '@/lib/utils';
 import { ScrollArea } from './ui/scroll-area';
 import NfcStockQueryModal from './NfcStockQueryModal';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { getPaginatedDepotStock, type GroupedStockRow, type PaginatedStockResult } from '@/actions/stokActions';
+import { type GroupedStockRow, type PaginatedStockResult } from '@/actions/stokActions';
 
 /* ────────────────────────────────────────────
    Filter Dialog (kept for marka/urunGrubu filters)
@@ -257,15 +257,16 @@ export default function StokYonetimiPanel() {
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isLoading, setIsLoading] = useState(true);
 
-  // Server-side pagination state
-  const [paginatedResult, setPaginatedResult] = useState<PaginatedStockResult | null>(null);
+  // Client-side pagination state
+  const [allGroupedRows, setAllGroupedRows] = useState<GroupedStockRow[]>([]);
+  const [columnUniqueValues, setColumnUniqueValues] = useState<PaginatedStockResult['columnValues']>({ stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] });
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
   const [sortField, setSortField] = useState('miad');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
-  const [isPending, startTransition] = useTransition();
+  const [isStockLoading, setIsStockLoading] = useState(false);
 
   // Dialogs
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
@@ -320,43 +321,114 @@ export default function StokYonetimiPanel() {
     })();
   }, [selectedDepotId]);
 
-  /* ─── Fetch paginated stock (server action) ─── */
-  const fetchPage = useCallback(async (page: number) => {
-    if (!selectedDepotId) return;
-    startTransition(async () => {
+  /* ─── Fetch depot stock (client-side, once per depot) ─── */
+  useEffect(() => {
+    if (!selectedDepotId) {
+      setAllGroupedRows([]);
+      setColumnUniqueValues({ stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] });
+      setRawDepotStock([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setIsStockLoading(true);
       try {
-        const result = await getPaginatedDepotStock({
-          depotId: selectedDepotId,
-          page,
-          pageSize: rowsPerPage,
-          sortField,
-          sortDirection,
-          columnFilters: Object.fromEntries(
-            Object.entries(columnFilters).filter(([, v]: [string, string[]]) => v.length > 0)
-          ) as Record<string, string[]>,
+        const stockQuery = query(
+          collection(db, 'depoStok'),
+          where('depotId', '==', selectedDepotId),
+          where('isShipped', '==', false)
+        );
+        const snapshot = await getDocs(stockQuery);
+        if (cancelled) return;
+        const allItems = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        setRawDepotStock(allItems);
+
+        // Group by (stokKodu, lotNumarasi, miad)
+        const grouped: Record<string, GroupedStockRow> = {};
+        for (const item of allItems) {
+          const lot = item.lotNumarasi || '';
+          const miad = typeof item.miad === 'string' ? item.miad : '';
+          const gKey = `${item.stokKodu}-${lot}-${miad}`;
+          if (!grouped[gKey]) {
+            grouped[gKey] = {
+              key: gKey,
+              stokKodu: item.stokKodu || '',
+              stokAdi: item.stokAdi || '',
+              lotNumarasi: lot,
+              miad,
+              anaBirim: 'Kutu',
+              rafAdresi: item.rafAdresi || '',
+              quantity: 0,
+              itemIds: [],
+            };
+          }
+          grouped[gKey].quantity += 1;
+          if (item.id) grouped[gKey].itemIds.push(item.id);
+        }
+
+        const rows = Object.values(grouped);
+        setAllGroupedRows(rows);
+        setColumnUniqueValues({
+          stokAdi: [...new Set(rows.map(r => r.stokAdi))].sort(),
+          lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
+          miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
+          rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
         });
-        setPaginatedResult(result);
+        setCurrentPage(1);
       } catch (e) {
-        console.error('Paginated stock error:', e);
+        console.error('Stock fetch error:', e);
         toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
+      } finally {
+        if (!cancelled) setIsStockLoading(false);
       }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDepotId, toast]);
+
+  /* ─── Client-side filtering, sorting, pagination ─── */
+  const { rows, totalRows, totalPages, colValues } = useMemo(() => {
+    let filtered = [...allGroupedRows];
+
+    // Apply column filters
+    for (const [col, values] of Object.entries(columnFilters) as [string, string[]][]) {
+      if (values.length === 0) continue;
+      filtered = filtered.filter(r => {
+        const fieldVal = (r as any)[col];
+        return values.includes(String(fieldVal ?? ''));
+      });
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      const aVal = (a as any)[sortField] ?? '';
+      const bVal = (b as any)[sortField] ?? '';
+
+      if (sortField === 'miad') {
+        const dateA = parse(String(aVal), 'dd.MM.yyyy', new Date());
+        const dateB = parse(String(bVal), 'dd.MM.yyyy', new Date());
+        if (isValid(dateA) && isValid(dateB)) {
+          return sortDirection === 'asc' ? compareAsc(dateA, dateB) : compareAsc(dateB, dateA);
+        }
+      }
+      if (sortField === 'quantity') {
+        return sortDirection === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
+      }
+      return sortDirection === 'asc'
+        ? String(aVal).localeCompare(String(bVal), 'tr')
+        : String(bVal).localeCompare(String(aVal), 'tr');
     });
-  }, [selectedDepotId, rowsPerPage, sortField, sortDirection, columnFilters, toast]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-    fetchPage(1);
-  }, [fetchPage]);
+    const total = filtered.length;
+    const pages = Math.max(1, Math.ceil(total / rowsPerPage));
+    const safePage = Math.min(Math.max(1, currentPage), pages);
+    const start = (safePage - 1) * rowsPerPage;
+    const pageRows = filtered.slice(start, start + rowsPerPage);
 
-  useEffect(() => {
-    fetchPage(currentPage);
-  }, [currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
+    return { rows: pageRows, totalRows: total, totalPages: pages, colValues: columnUniqueValues };
+  }, [allGroupedRows, columnFilters, sortField, sortDirection, currentPage, rowsPerPage, columnUniqueValues]);
 
   const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
-  const rows = paginatedResult?.rows ?? [];
-  const totalRows = paginatedResult?.totalRows ?? 0;
-  const totalPages = paginatedResult?.totalPages ?? 1;
-  const colValues = paginatedResult?.columnValues ?? { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] };
+  const isPending = isStockLoading;
 
   /* ─── Sorting handler ─── */
   const handleSort = (field: string) => {
@@ -618,7 +690,7 @@ export default function StokYonetimiPanel() {
         <div className="sticky top-0 z-20 bg-[var(--dashboard-surface)] border-b border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 text-xs text-[var(--dashboard-muted)]">
             <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{totalRows}</span> kayıt</span>
-            {totalPages > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{paginatedResult?.currentPage ?? 1}</span>/{totalPages}</span>}
+            {totalPages > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span>/{totalPages}</span>}
           </div>
           <div className="flex items-center gap-3">
             {/* Miad legend */}
@@ -809,7 +881,7 @@ export default function StokYonetimiPanel() {
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="text-xs text-[var(--dashboard-muted)] px-2">
-                <span className="text-[var(--dashboard-text)] font-bold">{paginatedResult?.currentPage ?? 1}</span> / {totalPages}
+                <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span> / {totalPages}
               </span>
               <button
                 className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
