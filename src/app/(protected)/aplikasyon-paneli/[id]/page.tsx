@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -80,6 +80,11 @@ export default function AplikasyonPaneliDetayPage() {
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [maintenanceData, setMaintenanceData] = useState<Record<string, { taskName: string; daysRemaining: number; type: 'maintenance' | 'part' }[]>>({});
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+
+  // Draft continuation state
+  const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
+  const [deviceDraft, setDeviceDraft] = useState<{ id: string; createdByName: string; createdAt: Date; updatedByName?: string; updatedAt?: Date } | null>(null);
+  const [draftCheckDevice, setDraftCheckDevice] = useState<Device | null>(null);
 
 
   // --- Fetch hospital once ---
@@ -287,6 +292,35 @@ export default function AplikasyonPaneliDetayPage() {
   };
 
   const handleDeviceClick = async (device: Device) => {
+    // Check for existing drafts for this device
+    try {
+      const draftQuery = query(
+        collection(db, 'draftActionForms'),
+        where('deviceId', '==', device.id),
+        where('formType', '==', 'aplikasyon')
+      );
+      const draftSnap = await getDocs(draftQuery);
+
+      if (!draftSnap.empty) {
+        const draftDoc = draftSnap.docs[0];
+        const draftData = draftDoc.data();
+        const createdAt = draftData.createdAt?.toDate?.() || new Date(draftData.createdAt);
+        const updatedAt = draftData.updatedAt?.toDate?.() || null;
+        setDeviceDraft({
+          id: draftDoc.id,
+          createdByName: draftData.createdByName || 'Bilinmeyen',
+          createdAt,
+          updatedByName: draftData.updatedByName || undefined,
+          updatedAt: updatedAt || undefined,
+        });
+        setDraftCheckDevice(device);
+        setIsDraftModalOpen(true);
+        return;
+      }
+    } catch (err) {
+      console.error('Error checking for drafts:', err);
+    }
+
     // For aplikasyon panel:
     // - If device has aplikasyon fault, show modal with options
     // - If device has teknik_servis fault, show info that it's a teknik servis fault (can't manage)
@@ -1007,6 +1041,65 @@ export default function AplikasyonPaneliDetayPage() {
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : null}
               Kaydet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Draft Continuation Modal */}
+      <Dialog open={isDraftModalOpen} onOpenChange={setIsDraftModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileEdit className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              Ara Kayıt Bulundu
+            </DialogTitle>
+            <DialogDescription>
+              Bu cihaz için bir ara kayıt bulunmaktadır. Devam etmek veya yeni form oluşturmak için seçim yapın.
+            </DialogDescription>
+          </DialogHeader>
+
+          {deviceDraft && (
+            <div className="rounded-xl bg-muted/50 p-4 space-y-1">
+              <p className="text-sm font-medium">
+                Ara Kaydı Oluşturan: <span className="text-primary">{deviceDraft.createdByName}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Tarih: {format(deviceDraft.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
+              </p>
+              {deviceDraft.updatedByName && deviceDraft.updatedAt && (
+                <p className="text-xs text-muted-foreground">
+                  Son Güncelleme: {deviceDraft.updatedByName} - {format(deviceDraft.updatedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                </p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2 pt-4">
+            <Button
+              onClick={() => {
+                if (draftCheckDevice && deviceDraft) {
+                  setIsDraftModalOpen(false);
+                  router.push(`/aplikasyon-paneli/islem-formu/${draftCheckDevice.id}?draftId=${deviceDraft.id}`);
+                }
+              }}
+              className="w-full"
+            >
+              <FileEdit className="h-4 w-4 mr-2" />
+              Ara Kayıttan Devam Et
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (draftCheckDevice) {
+                  setIsDraftModalOpen(false);
+                  router.push(`/aplikasyon-paneli/islem-formu/${draftCheckDevice.id}`);
+                }
+              }}
+              className="w-full"
+            >
+              <FilePlus className="h-4 w-4 mr-2" />
+              Yeni Form Oluştur
             </Button>
           </DialogFooter>
         </DialogContent>

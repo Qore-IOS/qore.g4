@@ -139,6 +139,64 @@ function buildKnowledgeSignature(masterDocText: string): string {
   return `master_doc_v1:${masterDocText.length}`;
 }
 
+
+function hasUsableAiSuggestion(ai: any): boolean {
+  if (!ai || typeof ai !== 'object') return false;
+  const hasSummary = typeof ai.summary === 'string' && ai.summary.trim().length > 0;
+  const hasCauses = Array.isArray(ai.probableCauses) && ai.probableCauses.length > 0;
+  const hasActions = Array.isArray(ai.suggestedActions) && ai.suggestedActions.length > 0;
+  const hasEvidence = typeof ai.evidenceBasedRecommendation === 'string' && ai.evidenceBasedRecommendation.trim().length > 0;
+  return hasSummary || hasCauses || hasActions || hasEvidence;
+}
+
+function buildDeterministicFallbackSuggestion(params: {
+  report: any;
+  sameFaultGroup: SimilarFaultSummary[];
+  closeNotes: Array<{ openedAt?: string | null; description?: string; closeDescription?: string; resolutionClass: 'kalici' | 'gecici' | 'belirsiz' }>;
+  resolutionStats: { kalici: number; gecici: number; belirsiz: number };
+  debug?: string;
+}) {
+  const { report, sameFaultGroup, closeNotes, resolutionStats, debug } = params;
+
+  const recent = sameFaultGroup.slice(0, 3).map((f) => f.openedAt).filter(Boolean) as string[];
+  const recentText = recent.length > 0
+    ? `Bu arıza aynı cihazda daha önce de görüldü (son kayıtlar: ${recent.join(', ')}).`
+    : 'Bu arıza için aynı cihazda birebir geçmiş eşleşme sınırlı.';
+
+  const topResolution = resolutionStats.gecici > resolutionStats.kalici
+    ? 'geçici çözümler ağırlıkta'
+    : resolutionStats.kalici > 0
+      ? 'kalıcı çözümler mevcut'
+      : 'çözüm tipi belirsiz';
+
+  const closeHints = closeNotes
+    .map((n) => (n.closeDescription || '').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+
+  const actions = [
+    'Aynı seri numaradaki geçmiş kapanış notlarında tekrar eden adımı doğrulayın ve sadece reset/temizlik ile kapatmayın.',
+    'Master teknik dokümandaki ilgili başlık için önerilen kontrol/check menüsünü eksiksiz uygulayın.',
+    'Geçmişte geçici kapanmış vakalarda ilgili parça değişimi veya mekanik sensör kontrolünü değerlendirin.',
+  ];
+
+  return {
+    summary: `${report.model || 'Cihaz'} (${report.serial || '-'}) için ${report.faultName || report.description || 'arıza'} analiz edildi. ${recentText}`,
+    probableCauses: [
+      'Geçmişte benzer semptomlarda kök neden adımı atlanmış olabilir.',
+      'Aynı seri geçmişinde tekrarlayan hata örüntüsü olabilir.',
+    ],
+    suggestedActions: actions,
+    chronicInsight: `Aynı seri geçmişine göre bu arıza için ${topResolution}.`,
+    resolutionAssessment: `Geçmiş kapanış dağılımı — Kalıcı: ${resolutionStats.kalici}, Geçici: ${resolutionStats.gecici}, Belirsiz: ${resolutionStats.belirsiz}.`,
+    evidenceBasedRecommendation: closeHints.length
+      ? `Geçmiş kapanış notu örnekleri: ${closeHints.join(' | ')}. Bu nedenle sadece yüzeysel müdahale yerine kök neden adımını tamamlayın.`
+      : 'Kapanış notu kanıtı sınırlı; bir sonraki müdahalede yapılan adımları detaylı kaydederek kalıcı/geçici etkiyi netleştirin.',
+    confidence: 62,
+    debug: debug ? `fallback_used:${debug}` : 'fallback_used:no_structured_ai',
+  };
+}
+
 async function requestGeminiSuggestion(context: any) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) return null;
@@ -337,8 +395,18 @@ export async function GET(request: NextRequest) {
     };
 
     const ai = await requestGeminiSuggestion(context);
+    const normalizedAi = hasUsableAiSuggestion(ai)
+      ? ai
+      : buildDeterministicFallbackSuggestion({
+          report,
+          sameFaultGroup,
+          closeNotes,
+          resolutionStats,
+          debug: ai?.debug,
+        });
+
     const suggestionPayload = {
-      ...ai,
+      ...normalizedAi,
       similarFaultStats: {
         total: otherFaultsOfSameDevice.length,
         sameModelCount: otherFaultsOfSameDevice.filter((f) => (f.model || null) === (report.model || null)).length,

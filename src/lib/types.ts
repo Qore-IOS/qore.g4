@@ -111,6 +111,9 @@ export interface Depot {
   lat?: number;
   lng?: number;
   address?: string;
+  // Havuz Depo alanları
+  isPoolWarehouse?: boolean; // true ise bu bir havuz depo
+  linkedDeviceLabPoolIds?: string[]; // Bağlı Cihaz Laboratuvar Grubu ID'leri
   [k: string]: any;
 }
 
@@ -581,6 +584,7 @@ export interface PeriodicPartChange {
   periodValue: number;           // Periyot değeri (legacy, varsayılan 1)
   periodUnit: MaintenancePeriodUnit; // Periyot birimi (legacy, varsayılan 'ay')
   nextDueDate?: any;             // İlk beklenen değişim tarihi (açık tarih - Firestore Timestamp)
+  periodDays?: number;           // Gün bazlı periyot (örn: 35)
   responsibilityType: PeriodicPartResponsibility; // Sorumluluk tipi
   requiresOutgoingPartInfo: boolean; // Cihazdan çıkan parça bilgisi gerekli mi
   requiresSerialTracking: boolean;   // Seri no takibi yapılacak mı
@@ -632,6 +636,8 @@ export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
 // Transfer log aksiyonları
 export type SparePartTransferAction =
   | 'transfer_to_personnel'  // Depodan personele transfer
+  | 'transfer_to_pool'       // Depodan havuz deposuna transfer
+  | 'use_from_pool'          // Havuz deposundan cihazda kullanıldı
   | 'use_on_device'          // Cihazda kullanıldı
   | 'return_to_depot'        // Depoya iade edildi (yeni parça)
   | 'submit_to_depot'        // Depoya teslim edildi (cihazdan çıkan)
@@ -662,6 +668,39 @@ export interface PersonalStockItem {
   replacedPartId?: string;     // Değişilen parça (cihazdan çıkan) ID
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
   usedPartImageUrl?: string;   // Cihaza takılan parça kullanım fotoğrafı URL
+}
+
+// ==========================================
+// Havuz Depo Stok Sistemi
+// ==========================================
+
+// Havuz deposundaki yedek parça durumu
+export type PoolStockStatus = 'in_stock' | 'used';
+
+// Havuz depo stok item
+export interface PoolWarehouseStockItem {
+  id: string;
+  poolWarehouseId: string;     // Hangi havuz deposuna ait
+  poolWarehouseName: string;
+  productCodeId: string;       // ProductCode referansı
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber: string;        // Seri numarası
+  status: PoolStockStatus;
+  createdAt: Date;
+  transferredByUid?: string;   // Transfer eden kişi (lojistik)
+  transferredByName?: string;
+  usedAt?: Date;               // Kullanıldığı tarih
+  usedByUid?: string;          // Kullanan personel UID
+  usedByName?: string;         // Kullanan personel adı
+  usedOnDeviceId?: string;     // Kullanıldığı cihaz
+  usedOnDeviceName?: string;
+  usedOnFormId?: string;       // Kullanıldığı form
+  usedOnFormType?: 'teknik_servis' | 'aplikasyon';
+  usedOnLabId?: string;        // Kullanıldığı laboratuvar
+  usedOnLabName?: string;
+  source: PersonalStockSource; // depot = yeni, device = cihazdan çıkan
+  cihazGrubu?: string;
 }
 
 // Transfer/kullanım/iade log kaydı
@@ -802,6 +841,50 @@ export interface SummaryRow {
 };
 
 
+// ============================================
+// ARA KAYIT (DRAFT FORM) SİSTEMİ
+// ============================================
+
+export interface DraftActionForm {
+  id: string;
+  deviceId: string;
+  hospitalId: string;
+  formType: 'teknik_servis' | 'aplikasyon';
+  // Form state data
+  actions: any[];
+  islemTipi?: string;
+  islemTuru?: string;
+  aciklama?: string;
+  baslangicSaati?: string;
+  bitisSaati?: string;
+  baslangicTarihi?: string;
+  bitisTarihi?: string;
+  selectedMaintenanceTasks?: string[];
+  selectedPeriodicParts?: string[];
+  selectedOperations?: string[];
+  selectedFaultId?: string;
+  customFaultName?: string;
+  selectedTests?: string[];
+  // Log entries from previous personnel
+  actionLogs?: DraftActionLog[];
+  // Draft metadata
+  createdAt: Date;
+  createdByUid: string;
+  createdByName: string;
+  updatedAt?: Date;
+  updatedByUid?: string;
+  updatedByName?: string;
+}
+
+export interface DraftActionLog {
+  personnelUid: string;
+  personnelName: string;
+  timestamp: Date;
+  logType: 'action_added' | 'action_removed' | 'field_changed' | 'draft_created' | 'draft_continued';
+  description: string;
+  details?: any;
+}
+
 export type ParseTarget = 'reference' | 'barcodeNumber';
 export type ExpiryPattern = 'YYMMDD' | 'YYYYMMDD' | 'DDMMYYYY' | 'MMYY' | 'MMYYYY' | 'text';
 export type PositionDef = { start: number; length: number };
@@ -862,6 +945,17 @@ export interface EfficiencyPool {
   name: string;
   memberIds: string[]; // Havuza dahil laboratuvar ID'leri
   centerLabId?: string; // Merkez laboratuvar ID'si - hak ediş hesaplamalarında kullanılır
+  active: boolean;
+  createdAt: any;
+  createdByUid: string;
+  createdByName: string;
+}
+
+// Cihaz Laboratuvar Havuzu - Cihaz tanımlamaları panelinde laboratuvar gruplandırması
+export interface DeviceLabPool {
+  id: string;
+  name: string;
+  memberIds: string[]; // Havuza dahil laboratuvar ID'leri
   active: boolean;
   createdAt: any;
   createdByUid: string;
@@ -1292,6 +1386,8 @@ export interface UserRequest {
   status: UserRequestStatus;
   createdBy: string; // uid
   createdByName: string;
+  assignedTo: string; // uid of assigned admin
+  assignedToName: string;
   createdAt: TimestampLike;
   updatedAt: TimestampLike;
   resolvedAt?: TimestampLike;

@@ -29,6 +29,24 @@
       ]
     },
     {
+      "collectionGroup": "transfers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sourceDepotId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "mode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timestamp",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "depoStok",
       "queryScope": "COLLECTION",
       "fields": [
@@ -114,6 +132,34 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "draftActionForms",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "deviceId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "formType",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isShipped",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "miad",
+          "order": "ASCENDING"
         }
       ]
     }

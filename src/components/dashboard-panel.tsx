@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getCountFromServer, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExpiringProductsCount } from '@/actions/stokActions';
@@ -90,6 +90,106 @@ export default function DashboardPanel({
     };
   }, []);
 
+  // Server-side query: count of products expiring within 45 days across all depots
+  const { data: expiringProductCount = 0 } = useQuery({
+    queryKey: ['expiringProductCount45'],
+    queryFn: async () => {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
+      const q = query(
+        collection(db, 'depoStok'),
+        where('isShipped', '==', false),
+        where('miad', '<=', Timestamp.fromDate(cutoff)),
+        where('miad', '>=', Timestamp.fromDate(now))
+      );
+      const snapshot = await getCountFromServer(q);
+      return snapshot.data().count;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Total stock cost using getCountFromServer per stokKodu (no document downloads)
+  const { data: totalStockCost = 0 } = useQuery({
+    queryKey: ['dashboardTotalStockCost'],
+    queryFn: async () => {
+      // Only fetch small productCodes collection
+      const productSnap = await getDocs(collection(db, 'productCodes'));
+      const pricedProducts: { stokKodu: string; cost: number }[] = [];
+      productSnap.docs.forEach(d => {
+        const data = d.data();
+        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+      });
+      if (pricedProducts.length === 0) return 0;
+      // Count stock items per stokKodu server-side (no document data transfer)
+      const counts = await Promise.all(
+        pricedProducts.map(async (p) => {
+          const snap = await getCountFromServer(
+            query(collection(db, 'depoStok'), where('stokKodu', '==', p.stokKodu))
+          );
+          return snap.data().count * p.cost;
+        })
+      );
+      return counts.reduce((sum, v) => sum + v, 0);
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Yesterday's consumption cost using getCountFromServer per stokKodu
+  const { data: yesterdayConsumptionCost = 0 } = useQuery({
+    queryKey: ['dashboardYesterdayConsumptionCost'],
+    queryFn: async () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+      const productSnap = await getDocs(collection(db, 'productCodes'));
+      const pricedProducts: { stokKodu: string; cost: number }[] = [];
+      productSnap.docs.forEach(d => {
+        const data = d.data();
+        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+      });
+      if (pricedProducts.length === 0) return 0;
+      const counts = await Promise.all(
+        pricedProducts.map(async (p) => {
+          const snap = await getCountFromServer(
+            query(
+              collection(db, 'tuketimKayitlari'),
+              where('stokKodu', '==', p.stokKodu),
+              where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
+              where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
+            )
+          );
+          return snap.data().count * p.cost;
+        })
+      );
+      return counts.reduce((sum, v) => sum + v, 0);
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Server-side: Average efficiency from totalEfficiencyRecords
+  const { data: avgEfficiency } = useQuery<number | null>({
+    queryKey: ['dashboardAvgEfficiency'],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+      const efficiencies: number[] = [];
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
+        if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
+          efficiencies.push(genelVerimlilik);
+        }
+      });
+      if (efficiencies.length === 0) return null;
+      return efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length;
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
     if (report.status === 'atama_bekliyor') acc.atamaBekleyen += 1;
     if (report.status === 'mudahale_bekliyor') acc.mudahaleBekleyen += 1;
@@ -141,6 +241,19 @@ export default function DashboardPanel({
     ];
 
     return { timelineItems, todayTasks };
+  }, [purchasingTasks, currentUserProfile?.uid]);
+
+  const todayTasks = useMemo(() => {
+    if (!currentUserProfile?.uid) return [];
+    const todayKey = format(new Date(), 'yyyy-MM-dd');
+    return purchasingTasks
+      .filter((task) => {
+        if (task.date !== todayKey) return false;
+        return task.createdByUid === currentUserProfile.uid
+          || task.assignedPersonnel?.some((p) => p.uid === currentUserProfile.uid)
+          || task.accompanyingPersonnel?.some((p) => p.uid === currentUserProfile.uid);
+      })
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
   }, [purchasingTasks, currentUserProfile?.uid]);
 
   useEffect(() => {
@@ -355,7 +468,8 @@ export default function DashboardPanel({
         </h1>
 
         {/* Main KPI Grid - Mobile Responsive */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
+          {/* Tüketim Trendi */}
           <motion.div {...motionProps} className="xl:col-span-2">
             <Card className="glass-card h-full flex flex-col">
               <CardHeader className="space-y-2 sm:space-y-3">
@@ -462,7 +576,7 @@ export default function DashboardPanel({
                     className="h-[120px] space-y-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   >
                     {personalCalendarKpi.timelineItems.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Takvim kaydı bulunmuyor.</p>
+                      <p className="text-xs text-muted-foreground text-center">Takvim kaydı bulunmuyor.</p>
                     ) : (
                       personalCalendarKpi.timelineItems.map((item) => (
                         <div
@@ -507,11 +621,7 @@ export default function DashboardPanel({
         </div>
 
         <Card className="glass-card">
-          <CardHeader>
-            <CardTitle>Paneller</CardTitle>
-            <CardDescription>Yetkiniz dahilinde erişebileceğiniz modüller</CardDescription>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12">
               {visiblePanels.map((panel) => {
                 const Icon = panel.icon;
