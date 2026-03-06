@@ -24,7 +24,7 @@ import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Textarea } from '@/components/ui/textarea';
-import WizardFormShell from '@/components/islem-formu/WizardFormShell';
+import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 
 // Operation types (Yapılan İşlem)

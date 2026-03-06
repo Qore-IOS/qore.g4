@@ -63,9 +63,10 @@
   display: flex;
   flex-direction: column;
   background: var(--wz-bg);
-  z-index: 40;
+  z-index: 41;
   overflow-y: auto;
   overflow-x: hidden;
+  padding-bottom: 120px; /* space for mobile dock */
 }
 
 /* ============= COMPACT HEADER ============= */
@@ -437,16 +438,14 @@
 /* ============= BOTTOM BUTTONS ============= */
 .wizard-bottom-buttons {
   display: flex;
-  padding: 16px 24px 24px;
+  padding: 16px 24px 0;
   gap: 12px;
   margin-top: auto;
-  flex: 1;
-  align-items: flex-end;
 }
 
 .wizard-btn {
   flex: 1;
-  padding: 16px 24px;
+  padding: 22px 24px;
   font-size: 15px;
   font-weight: 600;
   text-transform: uppercase;
@@ -570,14 +569,7 @@
 
   .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons {
     width: 100%;
-    flex: 1;
-    display: flex;
-    align-items: stretch;
     border-bottom: none;
-  }
-
-  .wizard-heading-list.wizard-grid-mode > .wizard-bottom-buttons .wizard-btn {
-    align-items: center;
   }
 
   .wizard-heading-list.wizard-grid-mode .wizard-heading-row {

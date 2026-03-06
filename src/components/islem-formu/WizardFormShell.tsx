@@ -3,6 +3,13 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { ArrowLeft, Check } from 'lucide-react';
 import './wizard-form.css';
 
+/** Light single-tap haptic feedback */
+export const haptic = () => {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    navigator.vibrate(1);
+  }
+};
+
 export type WizardHeading = {
   id: string;
   label: string;
@@ -67,6 +74,7 @@ export default function WizardFormShell({
 
   const navigateToDetail = useCallback((headingId: string) => {
     if (transition !== 'idle') return;
+    haptic();
     onHeadingClick?.(headingId);
     setTransition('exiting-to-detail');
     animationTimeoutRef.current = setTimeout(() => {
@@ -80,6 +88,7 @@ export default function WizardFormShell({
 
   const navigateToList = useCallback(() => {
     if (transition !== 'idle') return;
+    haptic();
     setTransition('exiting-to-list');
     animationTimeoutRef.current = setTimeout(() => {
       setView({ type: 'list' });
@@ -92,6 +101,7 @@ export default function WizardFormShell({
 
   const navigateToSaveConfirm = useCallback(() => {
     if (transition !== 'idle') return;
+    haptic();
     setTransition('exiting-to-detail');
     animationTimeoutRef.current = setTimeout(() => {
       setView({ type: 'save_confirm' });
@@ -192,14 +202,14 @@ export default function WizardFormShell({
         <div className="wizard-bottom-buttons">
           <button
             className="wizard-btn wizard-btn-secondary"
-            onClick={onSaveDraft}
+            onClick={() => { haptic(); onSaveDraft?.(); }}
             disabled={isSavingDraft || isSaving}
           >
             {isSavingDraft ? 'Kaydediliyor...' : 'ARA KAYIT'}
           </button>
           <button
             className="wizard-btn wizard-btn-primary"
-            onClick={renderSaveConfirm ? navigateToSaveConfirm : onSave}
+            onClick={() => { haptic(); (renderSaveConfirm ? navigateToSaveConfirm : onSave)?.(); }}
             disabled={saveDisabled || isSaving}
           >
             {isSaving ? 'Kaydediliyor...' : 'KAYDET'}
@@ -251,8 +261,14 @@ export default function WizardFormShell({
     );
   };
 
+  const handleHapticCapture = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const interactive = target.closest('button, [role="button"], [role="radio"], .wizard-option-item, .wizard-heading-row, .wizard-action-item-delete, .wizard-sub-tab, .wizard-add-button, .wizard-personel-item, [onclick], [data-haptic]');
+    if (interactive) haptic();
+  }, []);
+
   return (
-    <div className={`wizard-content-area ${className}`} ref={contentRef}>
+    <div className={`wizard-content-area ${className}`} ref={contentRef} onClickCapture={handleHapticCapture}>
       {view.type === 'list' && renderHeadingList()}
       {view.type === 'detail' && renderDetailView()}
       {view.type === 'save_confirm' && renderSaveConfirmView()}
