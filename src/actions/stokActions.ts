@@ -8,6 +8,7 @@ import {
   query,
   where,
   getDocs,
+  getCountFromServer,
   Timestamp,
   QueryDocumentSnapshot,
   DocumentData,
@@ -18,6 +19,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
+import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -193,5 +195,185 @@ export async function updateLabTransferDates(
     }
   } catch (error) {
     console.error('Error updating lab transfer dates:', error);
+  }
+}
+
+/* ================================================================
+   Grouped Stock Row – returned from server-side pagination
+   ================================================================ */
+export interface GroupedStockRow {
+  key: string;
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  miad: string;
+  anaBirim: string;
+  rafAdresi: string;
+  quantity: number;
+  itemIds: string[];
+}
+
+export interface PaginatedStockResult {
+  rows: GroupedStockRow[];
+  totalRows: number;
+  totalPages: number;
+  currentPage: number;
+  /** Unique values per column – used for Excel-like column filters */
+  columnValues: {
+    stokAdi: string[];
+    lotNumarasi: string[];
+    miad: string[];
+    rafAdresi: string[];
+  };
+}
+
+/**
+ * Server-side paginated + grouped depot stock.
+ * Groups individual DepoStokItem docs by (stokKodu, lotNumarasi, miad).
+ * Only the requested page of grouped rows is returned to the client.
+ */
+export async function getPaginatedDepotStock(params: {
+  depotId: string;
+  page: number;
+  pageSize: number;
+  sortField: string;
+  sortDirection: 'asc' | 'desc';
+  columnFilters?: Record<string, string[]>;
+}): Promise<PaginatedStockResult> {
+  const { depotId, page, pageSize, sortField, sortDirection, columnFilters } = params;
+
+  if (!depotId) {
+    return { rows: [], totalRows: 0, totalPages: 0, currentPage: 1, columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] } };
+  }
+
+  // Query all unshipped items for this depot (server-side)
+  const stockQuery = query(
+    collection(db, 'depoStok'),
+    where('depotId', '==', depotId),
+    where('isShipped', '==', false)
+  );
+  const snapshot = await getDocs(stockQuery);
+  const allItems = snapshot.docs.map(processDoc);
+
+  // Group by (stokKodu, lotNumarasi, miad)
+  const grouped: Record<string, GroupedStockRow> = {};
+  for (const item of allItems) {
+    const lot = item.lotNumarasi || '';
+    const miad = typeof item.miad === 'string' ? item.miad : '';
+    const key = `${item.stokKodu}-${lot}-${miad}`;
+    if (!grouped[key]) {
+      grouped[key] = {
+        key,
+        stokKodu: item.stokKodu || '',
+        stokAdi: item.stokAdi || '',
+        lotNumarasi: lot,
+        miad,
+        anaBirim: 'Kutu',
+        rafAdresi: item.rafAdresi || '',
+        quantity: 0,
+        itemIds: [],
+      };
+    }
+    grouped[key].quantity += 1;
+    if (item.id) grouped[key].itemIds.push(item.id);
+  }
+
+  let rows = Object.values(grouped);
+
+  // Collect unique column values BEFORE filtering (so filter dropdowns show all options)
+  const columnValues = {
+    stokAdi: [...new Set(rows.map(r => r.stokAdi))].sort(),
+    lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
+    miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
+    rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
+  };
+
+  // Apply column filters
+  if (columnFilters) {
+    for (const [col, values] of Object.entries(columnFilters)) {
+      if (values.length === 0) continue;
+      rows = rows.filter(r => {
+        const fieldVal = (r as any)[col];
+        return values.includes(String(fieldVal ?? ''));
+      });
+    }
+  }
+
+  // Sort
+  rows.sort((a, b) => {
+    const aVal = (a as any)[sortField] ?? '';
+    const bVal = (b as any)[sortField] ?? '';
+
+    if (sortField === 'miad') {
+      const dateA = parse(String(aVal), 'dd.MM.yyyy', new Date());
+      const dateB = parse(String(bVal), 'dd.MM.yyyy', new Date());
+      if (isValid(dateA) && isValid(dateB)) {
+        return sortDirection === 'asc' ? compareAsc(dateA, dateB) : compareAsc(dateB, dateA);
+      }
+    }
+
+    if (sortField === 'quantity') {
+      return sortDirection === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
+    }
+
+    return sortDirection === 'asc'
+      ? String(aVal).localeCompare(String(bVal), 'tr')
+      : String(bVal).localeCompare(String(aVal), 'tr');
+  });
+
+  const totalRows = rows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * pageSize;
+  const pageRows = rows.slice(start, start + pageSize);
+
+  return {
+    rows: pageRows,
+    totalRows,
+    totalPages,
+    currentPage: safePage,
+    columnValues,
+  };
+}
+
+/**
+ * Returns the count of unique product groups (stokKodu+lot+miad)
+ * whose miad is within the next `thresholdDays` days,
+ * across ALL depots. Server-side computation – only the count is returned.
+ */
+export async function getExpiringProductsCount(thresholdDays: number = 45): Promise<number> {
+  try {
+    const stockQuery = query(
+      collection(db, 'depoStok'),
+      where('isShipped', '==', false)
+    );
+    const snapshot = await getDocs(stockQuery);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const seenKeys = new Set<string>();
+    let count = 0;
+
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data();
+      const miadStr = typeof data.miad === 'string' ? data.miad : '';
+      if (!miadStr) continue;
+      const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+      if (!isValid(miadDate)) continue;
+
+      const days = differenceInDays(miadDate, today);
+      if (days <= thresholdDays && days >= 0) {
+        const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          count += 1;
+        }
+      }
+    }
+
+    return count;
+  } catch (error) {
+    console.error('Error counting expiring products:', error);
+    return 0;
   }
 }
