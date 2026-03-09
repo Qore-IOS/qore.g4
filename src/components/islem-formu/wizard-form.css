@@ -533,6 +533,109 @@
   cursor: not-allowed;
 }
 
+
+/* ============= MODERN HEADING BUTTONS ============= */
+.wizard-heading-row {
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  border: 2px solid transparent;
+  border-radius: 22px;
+  box-shadow: inset 0 0 0 1px var(--wz-border), 0 0 0 2px rgba(255, 255, 255, 0.88);
+  overflow: hidden;
+  transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.wizard-heading-content {
+  position: relative;
+  z-index: 2;
+  transform: translateX(-8px);
+  transition: transform 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.wizard-heading-arrow {
+  position: absolute;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--wz-text);
+  z-index: 3;
+  transition: all 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.wizard-heading-arrow-right {
+  right: 24px;
+}
+
+.wizard-heading-arrow-left {
+  left: -20%;
+}
+
+.wizard-heading-circle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--wz-accent) 24%, white 76%);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: all 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.wizard-heading-row:hover {
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--wz-text) 12%, transparent), 0 0 0 10px transparent;
+}
+
+.wizard-heading-row:hover .wizard-heading-arrow-right {
+  right: -20%;
+}
+
+.wizard-heading-row:hover .wizard-heading-arrow-left {
+  left: 24px;
+}
+
+.wizard-heading-row:hover .wizard-heading-content {
+  transform: translateX(8px);
+}
+
+.wizard-heading-row:hover .wizard-heading-circle {
+  width: 260px;
+  height: 260px;
+  opacity: 1;
+}
+
+.wizard-heading-row:active {
+  transform: scale(0.98);
+  background: transparent;
+}
+
+.wizard-heading-row .wizard-checkmark {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 20px;
+  height: 20px;
+  background: color-mix(in oklab, var(--wz-check) 16%, transparent);
+  border-radius: 999px;
+  z-index: 4;
+}
+
+.wizard-heading-row-inline {
+  min-height: 92px;
+}
+
+.wizard-heading-label {
+  font-size: clamp(1.7rem, 2.2vw, 2.1rem);
+  text-align: center;
+}
+
+.wizard-heading-label-small {
+  font-size: clamp(1.2rem, 1.7vw, 1.5rem);
+}
+
 /* ============= ANIMATIONS ============= */
 .wizard-heading-exit {
   animation: wizard-heading-slide-out 0.28s ease-out forwards;
