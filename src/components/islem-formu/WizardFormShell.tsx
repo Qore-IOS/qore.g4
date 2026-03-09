@@ -113,6 +113,27 @@ export default function WizardFormShell({
   }, [transition]);
 
   // Group inline headings together
+  const renderHeadingContent = (heading: WizardHeading, small = false) => (
+    <>
+      <span className="wizard-heading-arrow wizard-heading-arrow-right" aria-hidden="true">→</span>
+      <span className="wizard-heading-arrow wizard-heading-arrow-left" aria-hidden="true">→</span>
+      <span className="wizard-heading-circle" aria-hidden="true" />
+      <div className="wizard-heading-content">
+        <div className={`wizard-heading-label ${small ? 'wizard-heading-label-small' : ''}`}>{heading.label}</div>
+        {heading.isComplete && heading.completedSublabel && (
+          <div className="wizard-heading-sublabel">{heading.completedSublabel}</div>
+        )}
+      </div>
+      {heading.isComplete && (
+        <div className="wizard-checkmark" aria-label="Tamamlandı">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </div>
+      )}
+    </>
+  );
+
   const renderHeadingList = () => {
     const groups: Array<WizardHeading | WizardHeading[]> = [];
     let inlineBuffer: WizardHeading[] = [];
@@ -150,19 +171,7 @@ export default function WizardFormShell({
                     tabIndex={0}
                     onKeyDown={(e) => e.key === 'Enter' && navigateToDetail(h.id)}
                   >
-                    <div className="wizard-checkmark">
-                      {h.isComplete && (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </div>
-                    <div>
-                      <div className="wizard-heading-label wizard-heading-label-small">{h.label}</div>
-                      {h.isComplete && h.completedSublabel && (
-                        <div className="wizard-heading-sublabel">{h.completedSublabel}</div>
-                      )}
-                    </div>
+                    {renderHeadingContent(h, true)}
                   </div>
                 ))}
               </div>
@@ -181,19 +190,7 @@ export default function WizardFormShell({
               tabIndex={0}
               onKeyDown={(e) => e.key === 'Enter' && navigateToDetail(h.id)}
             >
-              <div className="wizard-checkmark">
-                {h.isComplete && (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                )}
-              </div>
-              <div>
-                <div className="wizard-heading-label">{h.label}</div>
-                {h.isComplete && h.completedSublabel && (
-                  <div className="wizard-heading-sublabel">{h.completedSublabel}</div>
-                )}
-              </div>
+              {renderHeadingContent(h)}
             </div>
           );
         })}
