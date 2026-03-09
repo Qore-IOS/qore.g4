@@ -198,7 +198,7 @@ export default function DirektTransferPanel() {
   const [prereqsLoading, setPrereqsLoading] = useState(true);
 
   const { formats: barcodeFormats, loading: formatsLoading } = useSafeBarcodeFormats();
-  const { parseAnyBarcode, resolveProductFromParsed } = useBarcodeParser();
+  const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
   
   const [productTracking, setProductTracking] = useState<Record<string, TrackingMode>>({});
   const [productNames, setProductNames] = useState<Record<string, string>>({});
@@ -439,28 +439,34 @@ export default function DirektTransferPanel() {
         return;
       }
       
-      let parsed: ParsedGeneric | null = null;
+      let resolveResult: ReturnType<typeof parseAndResolveBarcode> = null;
       if (selectedFormatId && selectedFormatId !== '__auto__') {
           const fmt = barcodeFormats.find(f => f.id === selectedFormatId);
-          if (fmt) parsed = parseAnyBarcode(trimmedRaw, [fmt]);
+          if (fmt) {
+            const parsed = parseAnyBarcode(trimmedRaw, [fmt]);
+            if (parsed) {
+              const resolved = resolveProductFromParsed(parsed, products);
+              resolveResult = { parsed: resolved, product: resolved.product };
+            }
+          }
       }
-      if (!parsed) {
-          parsed = parseAnyBarcode(trimmedRaw, barcodeFormats);
+      if (!resolveResult || !resolveResult.product) {
+          resolveResult = parseAndResolveBarcode(trimmedRaw, barcodeFormats, products);
       }
 
-      if (!parsed) {
+      if (!resolveResult || !resolveResult.parsed) {
         playFeedback(true);
         toast({ title: 'Ayrıştırma Hatası', description: 'Barkod tanımlı formatlarla eşleşmiyor.', variant: 'destructive' });
         return;
       }
-      
-      const resolved = resolveProductFromParsed(parsed, products);
-      if (!resolved.product || !resolved.stokKodu) {
+
+      const resolved = resolveResult.parsed;
+      if (!resolveResult.product || !resolved.stokKodu) {
         playFeedback(true);
         toast({ title: 'Ürün Bulunamadı', description: 'Barkoddan bir ürün çözümlenemedi.', variant: 'destructive' });
         return;
       }
-      const { product } = resolved;
+      const product = resolveResult.product;
       const stokKodu = product.stokKodu ?? '';
       const stokAdi = product.stokAdi ?? '';
       const lot = resolved.lotNumarasi || '';
@@ -475,8 +481,8 @@ export default function DirektTransferPanel() {
       }
 
       // Determine tracking mode based on what the barcode contains
-      const matchedFormat = parsed.matchedFormatId
-        ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+      const matchedFormat = resolved.matchedFormatId
+        ? barcodeFormats.find(f => f.id === resolved.matchedFormatId)
         : undefined;
       const staticTrackingMode = productTracking[stokKodu] || resolveDefaultTrackingMode(product as any);
       const mode: TrackingMode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
@@ -552,7 +558,7 @@ export default function DirektTransferPanel() {
       setLastScannedProduct({ stokKodu, stokAdi });
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, directTransferItems, isBulkScanMode]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode]
   );
   
   useHidScanner({
