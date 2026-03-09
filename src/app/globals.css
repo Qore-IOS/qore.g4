@@ -73,7 +73,7 @@
     --background: 0 0% 0%; /* Pure Black for bg */
     --foreground: 0 0% 98%;
 
-    --card: 0 0% 10%; 
+    --card: 0 0% 10%;
     --card-foreground: 0 0% 98%;
 
     --popover: 0 0% 10%;
@@ -97,6 +97,37 @@
     --border: 0 0% 20%;
     --input: 0 0% 15%;
     --ring: 35 90% 50%;
+
+    /* Dashboard neumorphic tokens (dark mode) */
+    --dashboard-bg: #000000;
+    --dashboard-surface: #111111;
+    --dashboard-surface-2: #0A0A0A;
+    --dashboard-stroke: rgba(255, 255, 255, 0.08);
+    --dashboard-text: #F0F0F0;
+    --dashboard-muted: #9CA3AF;
+    --dashboard-accent: #F2994A;
+    --dashboard-focus-glow: rgba(245, 158, 11, 0.30);
+    --dashboard-raised: 0 2px 10px rgba(0, 0, 0, 0.5);
+    --dashboard-raised-soft: 0 1px 6px rgba(0, 0, 0, 0.4);
+    --dashboard-pressed: inset 0 2px 8px rgba(0, 0, 0, 0.5);
+
+    /* Device management module tokens (dark mode) */
+    --device-bg: #000000;
+    --device-surface: #111111;
+    --device-surface-2: #0A0A0A;
+    --device-border: rgba(255, 255, 255, 0.08);
+    --device-text: #F0F0F0;
+    --device-muted: #9CA3AF;
+    --device-accent: #F59E0B;
+    --device-accent-weak: rgba(245, 158, 11, 0.18);
+    --device-success: #22C55E;
+    --device-danger: #EF4444;
+    --device-info: #3B82F6;
+    --device-purple: #8B5CF6;
+    --device-focus-ring: rgba(245, 158, 11, 0.30);
+    --device-elev-1: 0 1px 6px rgba(0, 0, 0, 0.4);
+    --device-elev-2: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --device-pressed: inset 0 2px 8px rgba(0, 0, 0, 0.5);
   }
 
   body {
@@ -191,6 +222,62 @@
       font-weight: 600;
       letter-spacing: 0.06em;
       text-transform: uppercase;
+      color: var(--dashboard-muted);
+    }
+
+    /* ===== Dark Mode: Neumorphic Primitives ===== */
+
+    .dark .cihaz-shell {
+      background: #000000;
+      color: var(--dashboard-text);
+    }
+
+    .dark .cihaz-card {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised-soft);
+    }
+
+    .dark .cihaz-card-strong {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised);
+    }
+
+    .dark .cihaz-pressed {
+      background: var(--dashboard-surface-2);
+      box-shadow: var(--dashboard-pressed);
+    }
+
+    .dark .cihaz-action-tile {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised-soft);
+    }
+
+    .dark .cihaz-action-tile:hover {
+      box-shadow: var(--dashboard-raised);
+    }
+
+    .dark .cihaz-action-tile:active {
+      box-shadow: var(--dashboard-pressed);
+    }
+
+    .dark .cihaz-tool-item {
+      background: var(--dashboard-surface);
+      border: 1px solid var(--dashboard-stroke);
+      box-shadow: var(--dashboard-raised-soft);
+    }
+
+    .dark .cihaz-tool-item:hover {
+      box-shadow: var(--dashboard-raised);
+    }
+
+    .dark .cihaz-tool-item:active {
+      box-shadow: var(--dashboard-pressed);
+    }
+
+    .dark .cihaz-section-label {
       color: var(--dashboard-muted);
     }
 
@@ -567,6 +654,118 @@
   box-shadow: var(--dashboard-pressed);
 }
 
+/* Dashboard dark-mode overrides */
+.dark .dashboard-neu-page {
+  background: #000000;
+  color: var(--dashboard-text);
+}
+
+.dark .dashboard-neu-page .glass-card {
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised);
+}
+
+.dark .dashboard-neu-button {
+  background: var(--dashboard-surface-2);
+  border-color: var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised-soft);
+  color: var(--dashboard-text);
+}
+
+.dark .dashboard-neu-button:hover {
+  box-shadow: var(--dashboard-raised);
+}
+
+.dark .dashboard-neu-button:active {
+  box-shadow: var(--dashboard-pressed);
+}
+
+.dark .dashboard-segment {
+  background: var(--dashboard-surface-2);
+  border: 1px solid var(--dashboard-stroke);
+  box-shadow: var(--dashboard-pressed);
+}
+
+.dark .dashboard-segment-trigger {
+  color: var(--dashboard-muted);
+}
+
+.dark .dashboard-segment-trigger[data-state="active"] {
+  background: var(--dashboard-surface);
+  color: var(--dashboard-text);
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+.dark .dashboard-segment-trigger:hover {
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+.dark .dashboard-segment-trigger:focus-visible,
+.dark .dashboard-neu-button:focus-visible,
+.dark .dashboard-panel-tile:focus-visible,
+.dark .dashboard-kpi-mini:focus-visible,
+.dark .dashboard-timeline-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--dashboard-focus-glow), var(--dashboard-raised-soft);
+}
+
+.dark .dashboard-kpi-mini {
+  background: var(--dashboard-surface-2);
+  border: 1px solid var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+.dark .dashboard-kpi-mini:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dashboard-raised);
+}
+
+.dark .dashboard-kpi-mini:active {
+  transform: translateY(0);
+  box-shadow: var(--dashboard-pressed);
+}
+
+.dark .dashboard-timeline-row {
+  background: var(--dashboard-surface);
+  color: var(--dashboard-text);
+}
+
+.dark .dashboard-timeline-row:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--dashboard-raised);
+}
+
+.dark .dashboard-timeline-row-active {
+  border-color: rgba(242, 153, 74, 0.35);
+  box-shadow: var(--dashboard-raised), 0 0 0 4px rgba(242, 153, 74, 0.16);
+}
+
+.dark .dashboard-panel-tile {
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-stroke);
+  box-shadow: var(--dashboard-raised-soft);
+}
+
+.dark .dashboard-panel-tile-frequent {
+  border-color: rgba(242, 153, 74, 0.25);
+}
+
+.dark .dashboard-panel-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dashboard-raised);
+}
+
+.dark .dashboard-panel-tile:active {
+  transform: translateY(0);
+  box-shadow: var(--dashboard-pressed);
+}
+
+.dark .dashboard-panel-icon {
+  background: var(--dashboard-surface-2);
+  box-shadow: var(--dashboard-pressed);
+}
+
 /* Device management module neumorphic system */
 :root:not(.dark) .device-module-page {
   background:
@@ -648,6 +847,53 @@
 :root:not(.dark) .device-module-page .sticky.top-0,
 :root:not(.dark) .device-module-page .sticky.bottom-0 {
   backdrop-filter: blur(4px);
+}
+
+/* Device management module dark mode */
+.dark .device-module-page {
+  background: #000000;
+  color: var(--device-text);
+}
+
+.dark .device-module-page .text-muted-foreground {
+  color: var(--device-muted);
+}
+
+.dark .device-module-page .bg-muted\/30,
+.dark .device-module-page .bg-muted\/50,
+.dark .device-module-page .bg-muted {
+  background: var(--device-surface-2);
+}
+
+.dark .device-module-page .bg-background,
+.dark .device-module-page .bg-card,
+.dark .device-module-page .bg-popover {
+  background: var(--device-surface);
+}
+
+.dark .device-module-page .border,
+.dark .device-module-page [class*="border-"] {
+  border-color: var(--device-border);
+}
+
+.dark .device-module-page .shadow-sm,
+.dark .device-module-page .shadow,
+.dark .device-module-page .shadow-md,
+.dark .device-module-page .shadow-lg {
+  box-shadow: var(--device-elev-1);
+}
+
+.dark .device-module-page .hover\:shadow-lg:hover {
+  box-shadow: var(--device-elev-2);
+}
+
+.dark .device-module-page button[class*="variant-outline"],
+.dark .device-module-page .border-input,
+.dark .device-module-page [role="combobox"],
+.dark .device-module-page [data-state][class*="select-trigger"] {
+  background: var(--device-surface-2);
+  border-color: var(--device-border);
+  box-shadow: var(--device-pressed);
 }
 
     .text-gradient-primary {
