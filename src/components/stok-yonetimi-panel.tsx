@@ -42,6 +42,7 @@ import { ScrollArea } from './ui/scroll-area';
 import NfcStockQueryModal from './NfcStockQueryModal';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { type GroupedStockRow, type PaginatedStockResult } from '@/actions/stokActions';
+import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 /* ────────────────────────────────────────────
    Filter Dialog (kept for marka/urunGrubu filters)
@@ -288,13 +289,15 @@ export default function StokYonetimiPanel() {
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'hospitals')),
         ]);
-        const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-        setDepots(depotList);
+        const allDepots = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
+        setDepots(allDepots);
         setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
         setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
 
-        if (depotList.length > 0 && depotList[0]?.id) {
-          setSelectedDepotId(depotList[0].id);
+        // Filter out pool warehouses for operational panels
+        const operationalDepots = filterOperationalSourceDepots(allDepots, currentUserProfile);
+        if (operationalDepots.length > 0 && operationalDepots[0]?.id) {
+          setSelectedDepotId(operationalDepots[0].id);
         }
       } catch (e) {
         toast({ title: 'Veri Yükleme Hatası', description: 'Ana veriler yüklenemedi.', variant: 'destructive' });
@@ -302,7 +305,7 @@ export default function StokYonetimiPanel() {
         setIsLoading(false);
       }
     })();
-  }, [toast]);
+  }, [toast, currentUserProfile]);
 
   /* ─── Fetch min/max rules when depot changes ─── */
   useEffect(() => {
@@ -427,6 +430,11 @@ export default function StokYonetimiPanel() {
     return { rows: pageRows, totalRows: total, totalPages: pages, colValues: columnUniqueValues };
   }, [allGroupedRows, columnFilters, sortField, sortDirection, currentPage, rowsPerPage, columnUniqueValues]);
 
+  // Filter out pool warehouses for the depot selector
+  const availableDepots = useMemo(
+    () => filterOperationalSourceDepots(depots, currentUserProfile),
+    [depots, currentUserProfile]
+  );
   const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
   const isPending = isStockLoading;
 
@@ -614,6 +622,19 @@ export default function StokYonetimiPanel() {
           <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
             {depotName || 'Depo seçin'} · Depodaki tüm sevk edilmemiş ürünler
           </p>
+          {availableDepots.length > 1 && (
+            <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
+              <SelectTrigger className="w-48 h-8 text-xs mt-1 bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]">
+                <Warehouse className="h-3.5 w-3.5 mr-1.5 text-orange-500 shrink-0" />
+                <SelectValue placeholder="Depo seçin" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableDepots.map(d => (
+                  <SelectItem key={d.id} value={d.id!}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
