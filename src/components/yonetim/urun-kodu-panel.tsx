@@ -474,6 +474,21 @@ export default function UrunKoduPanel() {
     fetchAllData();
   };
 
+  // Version grouping: products with same stokAdi (excluding stokKodu suffix) are versions of each other
+  const getVersionGroupId = (p: Partial<ProductCode>): string => {
+    return p.stokAdi?.trim().toLowerCase() || p.stokKodu || '';
+  };
+
+  const versionsByGroup = useMemo(() => {
+    const map = new Map<string, ProductCode[]>();
+    productCodes.forEach(p => {
+      const groupId = getVersionGroupId(p);
+      if (!map.has(groupId)) map.set(groupId, []);
+      map.get(groupId)!.push(p);
+    });
+    return map;
+  }, [productCodes]);
+
   const handleSetActiveVersion = async (versionId: string) => {
     const next = productCodes.find((p) => p.id === versionId);
     if (!next) return;
