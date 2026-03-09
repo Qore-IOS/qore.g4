@@ -1,7 +1,7 @@
 
 'use client';
 import React, { useState, useEffect, FC } from 'react';
-import { X, Loader2, ChevronDown, ChevronRight, Lock, Package, Tag, Cpu, BarChart3 } from 'lucide-react';
+import { X, Loader2, ChevronDown, ChevronRight, Lock, Package, Tag, Cpu, BarChart3, GitBranch, ArrowRight, Check } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import type { ProductCode, Currency } from '@/lib/types';
@@ -147,6 +147,78 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     setProduct(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleVersionDraftChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setVersionDraft(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleVersionDraftSelectChange = (name: keyof ProductCode, value: string) => {
+    setVersionDraft(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleVersionSave = async () => {
+    if (!currentUser) return;
+    if (!versionDraft.stokKodu?.trim() || !versionDraft.stokAdi?.trim()) {
+      toast({ title: "Hata", description: "Yeni versiyon için stok kodu ve adı zorunludur.", variant: "destructive" });
+      return;
+    }
+    // Check duplicate stokKodu
+    const existing = productCodes.find(p => p.stokKodu === versionDraft.stokKodu?.trim());
+    if (existing) {
+      toast({ title: "Hata", description: "Bu stok kodu zaten mevcut.", variant: "destructive" });
+      return;
+    }
+    setIsVersionSaving(true);
+    try {
+      const newVersionData: any = {
+        stokKodu: versionDraft.stokKodu!.trim(),
+        stokAdi: versionDraft.stokAdi?.trim() || product.stokAdi,
+        urunGrubu: versionDraft.urunGrubu || product.urunGrubu || 'kit',
+        anaBirim: versionDraft.anaBirim || product.anaBirim || 'Kutu',
+        cost: versionDraft.cost ?? product.cost ?? 0,
+        currency: versionDraft.currency || product.currency || 'EUR',
+        marka: versionDraft.marka || product.marka || null,
+        laboratuvarGrubu: versionDraft.laboratuvarGrubu || product.laboratuvarGrubu || null,
+        testGrubu: versionDraft.testGrubu || product.testGrubu || null,
+        cihazGrubu: versionDraft.cihazGrubu || product.cihazGrubu || null,
+        testAdi: versionDraft.testAdi || product.testAdi || null,
+        trackingMode: versionDraft.trackingMode || product.trackingMode || 'serial',
+        isActiveVersion: false,
+        barcodeNumber: versionDraft.barcodeNumber || product.barcodeNumber || null,
+        barcodeFormatId: product.barcodeFormatId || null,
+        barcodeFormatIds: (product as any).barcodeFormatIds || null,
+        ambalajDegeri: versionDraft.ambalajDegeri ?? product.ambalajDegeri ?? null,
+        genislik: product.genislik || null,
+        yukseklik: product.yukseklik || null,
+        derinlik: product.derinlik || null,
+      };
+      const ref = await addDoc(collection(db, 'productCodes'), newVersionData);
+      onSave({ id: ref.id, ...newVersionData } as ProductCode);
+      toast({ title: 'Başarılı', description: 'Yeni versiyon oluşturuldu.' });
+      setIsVersionModalOpen(false);
+    } catch (error: any) {
+      toast({ title: 'Hata', description: `Versiyon oluşturulamadı: ${error.message}`, variant: 'destructive' });
+    } finally {
+      setIsVersionSaving(false);
+    }
+  };
+
+  // Diff fields for version comparison
+  const versionDiffFields = isEditMode && versions.length > 1 ? (() => {
+    const current = product;
+    const fields = [
+      { label: 'Stok Kodu', key: 'stokKodu' },
+      { label: 'Stok Adı', key: 'stokAdi' },
+      { label: 'Marka', key: 'marka' },
+      { label: 'Ürün Grubu', key: 'urunGrubu' },
+      { label: 'Lab Grubu', key: 'laboratuvarGrubu' },
+      { label: 'Test Grubu', key: 'testGrubu' },
+      { label: 'Cihaz Grubu', key: 'cihazGrubu' },
+      { label: 'Maliyet', key: 'cost' },
+    ];
+    return fields;
+  })() : [];
+
   const handleSubmit = async () => {
     if (!currentUser) {
       toast({ title: "Yetki Hatası", description: "Bu işlemi yapmak için giriş yapmalısınız.", variant: "destructive" });
@@ -224,21 +296,69 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       {/* Modal */}
       <div className="relative w-full max-w-lg mx-4 glass-card rounded-3xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 pb-3 border-b border-[var(--dashboard-stroke)]">
-          <div>
-            <h2 className="text-lg font-bold text-[var(--dashboard-text)]">
-              {isEditMode ? 'Ürün Düzenle' : 'Yeni Ürün'}
-            </h2>
-            {isEditMode && (
-              <p className="text-xs text-[var(--dashboard-muted)] mt-0.5 font-mono">{product.stokKodu}</p>
-            )}
-            {!isEditMode && (
-              <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">Temel bilgileri girin, detayları sonra tamamlayabilirsiniz</p>
-            )}
+        <div className="p-5 pb-3 border-b border-[var(--dashboard-stroke)] space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-[var(--dashboard-text)]">
+                {isEditMode ? 'Ürün Düzenle' : 'Yeni Ürün'}
+              </h2>
+              {isEditMode && (
+                <p className="text-xs text-[var(--dashboard-muted)] mt-0.5 font-mono">{product.stokKodu}</p>
+              )}
+              {!isEditMode && (
+                <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">Temel bilgileri girin, detayları sonra tamamlayabilirsiniz</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {isEditMode && (
+                <button
+                  onClick={() => {
+                    setVersionDraft({ ...product, id: undefined, stokKodu: '' });
+                    setIsVersionModalOpen(true);
+                  }}
+                  className="neu-btn-universal px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <GitBranch className="h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
+                  Versiyon Değişikliği
+                </button>
+              )}
+              <button onClick={onClose} className="neu-btn-universal w-9 h-9 rounded-xl flex items-center justify-center">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-          <button onClick={onClose} className="neu-btn-universal w-9 h-9 rounded-xl flex items-center justify-center">
-            <X className="h-4 w-4" />
-          </button>
+
+          {/* Version Banner */}
+          {isEditMode && versions.length > 1 && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-x-auto">
+              <GitBranch className="h-4 w-4 text-[var(--dashboard-muted)] flex-shrink-0" />
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] flex-shrink-0">Versiyonlar:</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                {versions.map((v) => {
+                  const isActive = (v as any).isActiveVersion || v.id === product.id;
+                  return (
+                    <button
+                      key={v.id}
+                      onClick={() => {
+                        if (onSetActiveVersion && v.id !== product.id) {
+                          onSetActiveVersion(v.id);
+                        }
+                      }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all flex items-center gap-1",
+                        isActive
+                          ? "bg-[var(--device-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                          : "bg-[var(--dashboard-surface)] text-[var(--dashboard-muted)] hover:shadow-[var(--dashboard-raised-soft)]"
+                      )}
+                    >
+                      {isActive && <Check className="h-3 w-3" />}
+                      <span className="font-mono">{v.stokKodu}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Body */}
@@ -457,6 +577,163 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
             {isSaving ? 'Kaydediliyor...' : 'Kaydet'}
           </button>
         </div>
+
+        {/* ═══════════ Version Change Sub-Modal ═══════════ */}
+        {isVersionModalOpen && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/20 backdrop-blur-[2px]" onClick={() => setIsVersionModalOpen(false)} />
+            <div className="relative w-full max-w-md mx-4 glass-card rounded-2xl overflow-hidden shadow-2xl max-h-[80vh] flex flex-col">
+              {/* Version Modal Header */}
+              <div className="p-4 pb-2 border-b border-[var(--dashboard-stroke)]">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+                      <GitBranch className="h-4 w-4 text-[var(--device-accent)]" />
+                      Versiyon Değişikliği
+                    </h3>
+                    <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">Bu işlem yeni bir versiyon oluşturur</p>
+                  </div>
+                  <button onClick={() => setIsVersionModalOpen(false)} className="neu-btn-universal w-8 h-8 rounded-lg flex items-center justify-center">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {/* Warning banner */}
+                <div className="mt-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                  Mevcut ürün korunacak, yeni stok koduyla ayrı bir kayıt oluşturulacaktır.
+                </div>
+              </div>
+
+              {/* Version Modal Body */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {/* Current version info */}
+                <div className="p-3 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] mb-1.5">Mevcut Versiyon</p>
+                  <p className="font-mono text-sm text-[var(--dashboard-text)]">{product.stokKodu}</p>
+                  <p className="text-xs text-[var(--dashboard-muted)]">{product.stokAdi}</p>
+                </div>
+
+                <div className="flex items-center justify-center">
+                  <ArrowRight className="h-5 w-5 text-[var(--device-accent)]" />
+                </div>
+
+                {/* New version fields */}
+                <div className="space-y-3">
+                  <NeuInput
+                    label="Yeni Stok Kodu"
+                    name="stokKodu"
+                    value={versionDraft.stokKodu || ''}
+                    onChange={handleVersionDraftChange}
+                    placeholder="Yeni versiyon stok kodu"
+                    className="font-mono"
+                  />
+                  <NeuInput
+                    label="Stok Adı"
+                    name="stokAdi"
+                    value={versionDraft.stokAdi || ''}
+                    onChange={handleVersionDraftChange}
+                    placeholder="Stok adı"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <NeuSelect
+                      label="Marka"
+                      value={versionDraft.marka || ''}
+                      onValueChange={(v) => handleVersionDraftSelectChange('marka', v)}
+                      placeholder="Seçin..."
+                      options={definitions.brands}
+                    />
+                    <div>
+                      <label className="text-xs font-semibold text-[var(--dashboard-text)] block mb-1.5">Ürün Grubu</label>
+                      <Select value={versionDraft.urunGrubu || product.urunGrubu || 'kit'} onValueChange={(value) => handleVersionDraftSelectChange('urunGrubu', value as any)}>
+                        <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="kit">Kit</SelectItem>
+                          <SelectItem value="sarf">Sarf Malzeme</SelectItem>
+                          <SelectItem value="yedek_parca">Yedek Parça</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <NeuSelect
+                    label="Laboratuvar Grubu"
+                    value={versionDraft.laboratuvarGrubu || ''}
+                    onValueChange={(v) => handleVersionDraftSelectChange('laboratuvarGrubu', v)}
+                    placeholder="Seçin..."
+                    options={definitions.labGroups}
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <NeuSelect
+                      label="Test Grubu"
+                      value={versionDraft.testGrubu || ''}
+                      onValueChange={(v) => handleVersionDraftSelectChange('testGrubu', v)}
+                      placeholder="Seçin..."
+                      options={definitions.testGroups}
+                    />
+                    <NeuSelect
+                      label="Cihaz Grubu"
+                      value={versionDraft.cihazGrubu || ''}
+                      onValueChange={(v) => handleVersionDraftSelectChange('cihazGrubu', v)}
+                      placeholder="Seçin..."
+                      options={definitions.deviceGroups}
+                    />
+                  </div>
+                </div>
+
+                {/* Diff summary - show changed fields */}
+                {(() => {
+                  const changes: { label: string; from: string; to: string }[] = [];
+                  const fieldMap: [string, keyof typeof product][] = [
+                    ['Stok Adı', 'stokAdi'],
+                    ['Marka', 'marka'],
+                    ['Ürün Grubu', 'urunGrubu'],
+                    ['Lab Grubu', 'laboratuvarGrubu'],
+                    ['Test Grubu', 'testGrubu'],
+                    ['Cihaz Grubu', 'cihazGrubu'],
+                  ];
+                  fieldMap.forEach(([label, key]) => {
+                    const oldVal = String((product as any)[key] || '—');
+                    const newVal = String((versionDraft as any)[key] || '—');
+                    if (oldVal !== newVal && newVal !== '—') {
+                      changes.push({ label, from: oldVal, to: newVal });
+                    }
+                  });
+                  if (changes.length === 0) return null;
+                  return (
+                    <div className="mt-2 p-3 rounded-xl bg-blue-50 border border-blue-200 space-y-1.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Değişiklik Özeti</p>
+                      {changes.map(c => (
+                        <div key={c.label} className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-blue-800 w-20 flex-shrink-0">{c.label}:</span>
+                          <span className="text-blue-500 line-through">{c.from}</span>
+                          <ArrowRight className="h-3 w-3 text-blue-400 flex-shrink-0" />
+                          <span className="font-semibold text-blue-800">{c.to}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Version Modal Footer */}
+              <div className="flex items-center justify-between p-4 pt-2 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+                <button onClick={() => setIsVersionModalOpen(false)} className="neu-btn-universal px-4 py-2 rounded-xl text-sm font-semibold">
+                  İptal
+                </button>
+                <button
+                  onClick={handleVersionSave}
+                  disabled={isVersionSaving || !versionDraft.stokKodu?.trim()}
+                  className="neu-btn-universal neu-text-primary px-5 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isVersionSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <GitBranch className="h-4 w-4" />
+                  Yeni Versiyon Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
