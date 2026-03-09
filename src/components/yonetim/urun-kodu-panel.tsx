@@ -2,11 +2,8 @@
 'use client';
 import React, { useState, useEffect, useCallback, ChangeEvent, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, BookText, Search, Filter, X, Type, Save, Calendar } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, Search, Filter, X, Type, Save, Calendar, MoreHorizontal, Copy, GitBranch, ChevronDown, ChevronRight, Eye, EyeOff, FileSpreadsheet } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,13 +19,13 @@ import { ProductFormatModal } from '@/components/ProductFormatModal';
 import { readExcelDataSmart } from '@/lib/utils';
 import { trackingModeFromExcel, trackingModeToExcel, TRACKING_MODE_LABEL, TrackingMode } from '@/lib/tracking';
 import * as XLSX from 'xlsx';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent as FilterDialogContent, DialogHeader as FilterDialogHeader, DialogTitle as FilterDialogTitle, DialogFooter as FilterDialogFooter, DialogDescription as FilterDialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
 import { Badge } from '../ui/badge';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Checkbox } from '../ui/checkbox';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -36,9 +33,6 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 }));
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
-import { Checkbox } from '../ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-
 
 type Definitions = {
   brands: string[];
@@ -68,92 +62,247 @@ interface Filter {
   value: string;
 }
 
+/* ─────────────────────────────────────────────
+ * Filter Modal - Checkbox + Search approach
+ * ───────────────────────────────────────────── */
 const FiltreDialog: React.FC<{
   isOpen: boolean;
   onClose: () => void;
   availableGroups: Record<string, string[]>;
   onApply: (filters: Filter[]) => void;
-}> = ({ isOpen, onClose, availableGroups, onApply }) => {
-  const [selectedFilters, setSelectedFilters] = useState<Filter[]>([]);
+  currentFilters: Filter[];
+}> = ({ isOpen, onClose, availableGroups, onApply, currentFilters }) => {
+  const [draftFilters, setDraftFilters] = useState<Filter[]>(currentFilters);
+  const [filterSearch, setFilterSearch] = useState('');
 
-  const handleDragStart = (e: React.DragEvent, group: 'marka' | 'urunGrubu', value: string) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({ group, value }));
+  useEffect(() => {
+    if (isOpen) setDraftFilters(currentFilters);
+  }, [isOpen, currentFilters]);
+
+  const toggleFilter = (group: 'marka' | 'urunGrubu', value: string) => {
+    setDraftFilters(prev => {
+      const exists = prev.some(f => f.group === group && f.value === value);
+      if (exists) return prev.filter(f => !(f.group === group && f.value === value));
+      return [...prev, { group, value }];
+    });
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const data = JSON.parse(e.dataTransfer.getData('application/json')) as Filter;
-    if (!selectedFilters.some(f => f.group === data.group && f.value === data.value)) {
-      setSelectedFilters(prev => [...prev, data]);
-    }
-  };
+  const clearAll = () => setDraftFilters([]);
 
-  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
-
-  const removeFilter = (filterToRemove: Filter) => {
-    setSelectedFilters(prev => prev.filter(f => !(f.group === filterToRemove.group && f.value === filterToRemove.value)));
-  };
+  if (!isOpen) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-        <FilterDialogContent className="max-w-3xl">
-            <FilterDialogHeader>
-                <FilterDialogTitle className="text-xl font-headline">Stoğu Filtrele</FilterDialogTitle>
-                <FilterDialogDescription>Filtrelemek istediğiniz değerleri sağdaki alandan soldaki "Seçilen Filtreler" kutusuna sürükleyin.</FilterDialogDescription>
-            </FilterDialogHeader>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
-                <div
-                    className="border-2 border-dashed border-muted rounded-lg p-4 min-h-[250px] flex flex-col gap-2"
-                    onDrop={handleDrop}
-                    onDragOver={handleDragOver}
-                >
-                    <h3 className="font-semibold">Seçilen Filtreler</h3>
-                    {selectedFilters.length === 0 ? (
-                        <div className="flex-1 flex items-center justify-center">
-                            <p className="text-sm text-muted-foreground">Filtreleri buraya sürükleyin</p>
-                        </div>
-                    ) : (
-                        <div className="flex flex-wrap gap-2">
-                            {selectedFilters.map(f => (
-                                <div key={`${f.group}-${f.value}`} className="flex items-center bg-primary/10 text-primary-foreground px-3 py-1.5 rounded-full text-sm font-medium">
-                                    <span>{f.value}</span>
-                                    <button onClick={() => removeFilter(f)} className="ml-2 rounded-full hover:bg-primary/20 p-0.5">
-                                        <X className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-                <div className="space-y-4 max-h-[300px] overflow-y-auto p-1 glass-scroll">
-                    {Object.entries(availableGroups).map(([group, items]) => (
-                        <div key={group}>
-                          <h3 className="font-semibold mb-2">{group === 'marka' ? 'Marka' : 'Ürün Grubu'}</h3>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                              {items.map(item => (
-                                  <div
-                                      key={item}
-                                      draggable
-                                      onDragStart={e => handleDragStart(e, group as 'marka' | 'urunGrubu', item)}
-                                      className="px-3 py-1 bg-background border rounded-md cursor-move text-sm shadow-sm hover:bg-accent hover:text-accent-foreground"
-                                  >
-                                      {item}
-                                  </div>
-                              ))}
-                          </div>
-                        </div>
-                    ))}
-                </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative w-full max-w-2xl mx-4 glass-card rounded-3xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 pb-3 border-b border-[var(--dashboard-stroke)]">
+          <div>
+            <h2 className="text-lg font-bold text-[var(--dashboard-text)]">Filtrele</h2>
+            <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">Marka ve ürün grubuna göre filtreleyin</p>
+          </div>
+          <button onClick={onClose} className="neu-btn-universal w-9 h-9 rounded-xl flex items-center justify-center">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Selected Filters */}
+          {draftFilters.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)]">Seçilen Filtreler ({draftFilters.length})</span>
+                <button onClick={clearAll} className="text-xs font-medium text-[var(--device-danger)] hover:underline">Temizle</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {draftFilters.map(f => (
+                  <span
+                    key={`${f.group}-${f.value}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-[var(--device-accent)] text-white"
+                  >
+                    {f.value}
+                    <button onClick={() => toggleFilter(f.group, f.value)} className="hover:bg-white/20 rounded-full p-0.5">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
             </div>
-            <FilterDialogFooter>
-                <Button variant="outline" onClick={onClose}>İptal</Button>
-                <Button onClick={() => { onApply(selectedFilters); onClose(); }}>Filtreleri Uygula</Button>
-            </FilterDialogFooter>
-        </FilterDialogContent>
-    </Dialog>
+          )}
+
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--dashboard-muted)]" />
+            <input
+              type="text"
+              placeholder="Marka veya grup ara..."
+              value={filterSearch}
+              onChange={e => setFilterSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-none outline-none text-sm text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)]"
+            />
+          </div>
+
+          {/* Filter Groups */}
+          {Object.entries(availableGroups).map(([group, items]) => {
+            const filteredItems = filterSearch
+              ? items.filter(item => item.toLowerCase().includes(filterSearch.toLowerCase()))
+              : items;
+            if (filteredItems.length === 0) return null;
+            return (
+              <div key={group}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] mb-2">
+                  {group === 'marka' ? 'Marka' : 'Ürün Grubu'}
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {filteredItems.map(item => {
+                    const isSelected = draftFilters.some(f => f.group === group && f.value === item);
+                    return (
+                      <button
+                        key={item}
+                        onClick={() => toggleFilter(group as 'marka' | 'urunGrubu', item)}
+                        className={cn(
+                          "flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all text-left",
+                          isSelected
+                            ? "bg-[var(--device-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                            : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)] shadow-[var(--dashboard-pressed)] hover:shadow-[var(--dashboard-raised-soft)]"
+                        )}
+                      >
+                        <div className={cn(
+                          "w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                          isSelected ? "border-white bg-white/20" : "border-[var(--dashboard-muted)]"
+                        )}>
+                          {isSelected && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                        </div>
+                        <span className="truncate">{item}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer - Sticky */}
+        <div className="flex items-center justify-between p-5 pt-3 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+          <button onClick={onClose} className="neu-btn-universal px-5 py-2.5 rounded-xl text-sm font-semibold">
+            İptal
+          </button>
+          <button
+            onClick={() => { onApply(draftFilters); onClose(); }}
+            className="neu-btn-universal neu-text-primary px-5 py-2.5 rounded-xl text-sm font-semibold"
+          >
+            Filtreleri Uygula ({draftFilters.length})
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 
+/* ─────────────────────────────────────────────
+ * Row Actions Menu
+ * ───────────────────────────────────────────── */
+const RowActionsMenu: React.FC<{
+  product: ProductCode;
+  onEdit: (p: ProductCode) => void;
+  onDelete: (id: string) => void;
+  onDuplicate: (p: ProductCode) => void;
+}> = ({ product, onEdit, onDelete, onDuplicate }) => {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="neu-btn-universal w-8 h-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <MoreHorizontal className="h-4 w-4 text-[var(--dashboard-muted)]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onClick={() => onEdit(product)}>
+          <Edit3 className="h-4 w-4 mr-2" /> Düzenle
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onDuplicate(product)}>
+          <Copy className="h-4 w-4 mr-2" /> Kopyala
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onDelete(product.id)} className="text-[var(--device-danger)] focus:text-[var(--device-danger)]">
+          <Trash2 className="h-4 w-4 mr-2" /> Sil
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+/* ─────────────────────────────────────────────
+ * Mobile Product Card
+ * ───────────────────────────────────────────── */
+const ProductCard: React.FC<{
+  product: ProductCode;
+  isSelected: boolean;
+  onSelect: (checked: boolean) => void;
+  onEdit: (p: ProductCode) => void;
+  onDelete: (id: string) => void;
+  onDuplicate: (p: ProductCode) => void;
+  barcodeFormats: any[];
+}> = ({ product, isSelected, onSelect, onEdit, onDelete, onDuplicate, barcodeFormats }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className={cn(
+      "cihaz-card p-3 space-y-2 transition-all",
+      isSelected && "ring-2 ring-[var(--device-accent)]"
+    )}>
+      <div className="flex items-start gap-3">
+        <div className="pt-0.5">
+          <Checkbox checked={isSelected} onCheckedChange={onSelect} />
+        </div>
+        <div className="flex-1 min-w-0" onClick={() => setExpanded(!expanded)}>
+          <p className="font-semibold text-sm text-[var(--dashboard-text)] truncate">{product.stokAdi}</p>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <span className="font-mono text-xs text-[var(--dashboard-muted)]">{product.stokKodu}</span>
+            {product.marka && (
+              <span className="px-2 py-0.5 rounded-full bg-[var(--device-accent-weak)] text-[var(--device-accent)] text-[10px] font-bold">
+                {product.marka}
+              </span>
+            )}
+            <span className="text-xs text-[var(--dashboard-muted)]">{product.urunGrubu}</span>
+          </div>
+        </div>
+        <RowActionsMenu product={product} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} />
+      </div>
+
+      {expanded && (
+        <div className="pl-8 pt-2 border-t border-[var(--dashboard-stroke)] space-y-1.5 text-xs text-[var(--dashboard-muted)]">
+          {product.testGrubu && <p><span className="font-medium">Test Grubu:</span> {product.testGrubu}</p>}
+          {product.cihazGrubu && <p><span className="font-medium">Cihaz Grubu:</span> {product.cihazGrubu}</p>}
+          {product.laboratuvarGrubu && <p><span className="font-medium">Lab Grubu:</span> {product.laboratuvarGrubu}</p>}
+          {(() => {
+            const formatIds = (product as any).barcodeFormatIds;
+            if (Array.isArray(formatIds) && formatIds.length > 0) {
+              return (
+                <div className="flex flex-wrap gap-1 items-center">
+                  <span className="font-medium">Barkod:</span>
+                  {formatIds.map((fmtId: string) => {
+                    const fmt = barcodeFormats.find((f: any) => f.id === fmtId);
+                    return fmt ? <Badge key={fmtId} variant="secondary" className="text-[10px]">{fmt.name}</Badge> : null;
+                  })}
+                </div>
+              );
+            }
+            return null;
+          })()}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────
+ * Main Panel
+ * ───────────────────────────────────────────── */
 export default function UrunKoduPanel() {
   const { toast } = useToast();
   const router = useRouter();
@@ -161,11 +310,16 @@ export default function UrunKoduPanel() {
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
-  // Maliyet Checkpoint State'leri
+  // Active tab: 'products' | 'checkpoint'
+  const [activeTab, setActiveTab] = useState<'products' | 'checkpoint'>('products');
+
+  // Cost Checkpoint State
   const [costCheckpoints, setCostCheckpoints] = useState<{ id: string; year: number; month: number; productCount: number; createdAt: Date }[]>([]);
   const [selectedCheckpointMonth, setSelectedCheckpointMonth] = useState<number>(new Date().getMonth());
   const [selectedCheckpointYear, setSelectedCheckpointYear] = useState<number>(new Date().getFullYear());
   const [isSavingCheckpoint, setIsSavingCheckpoint] = useState(false);
+  const [checkpointExpanded, setCheckpointExpanded] = useState(false);
+
   const [definitions, setDefinitions] = useState<Definitions>({
     brands: [], labGroups: [], testGroups: [], deviceGroups: [], productGroups: [], mainUnits: []
   });
@@ -181,6 +335,8 @@ export default function UrunKoduPanel() {
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [bulkTrackingMode, setBulkTrackingMode] = useState<TrackingMode>('serial');
 
+  // View mode: 'compact' | 'comfortable'
+  const [viewMode, setViewMode] = useState<'compact' | 'comfortable'>('comfortable');
 
   const addFileRef = useRef<HTMLInputElement>(null);
   const updateFileRef = useRef<HTMLInputElement>(null);
@@ -216,11 +372,9 @@ export default function UrunKoduPanel() {
     }
   }, [toast]);
 
-  useEffect(() => {
-    fetchAllData();
-  }, [fetchAllData]);
+  useEffect(() => { fetchAllData(); }, [fetchAllData]);
 
-  // Maliyet checkpoint'lerini çek
+  // Fetch cost checkpoints
   useEffect(() => {
     const fetchCostCheckpoints = async () => {
       try {
@@ -245,18 +399,15 @@ export default function UrunKoduPanel() {
     fetchCostCheckpoints();
   }, []);
 
-  // Maliyet Checkpoint Kaydetme
+  // Save cost checkpoint
   const handleSaveCostCheckpoint = async () => {
     if (productCodes.length === 0) {
       toast({ title: 'Hata', description: 'Önce ürün kodları yüklenmelidir.', variant: 'destructive' });
       return;
     }
-
     setIsSavingCheckpoint(true);
     try {
-      // Maliyeti tanımlı ürünlerin listesini topla
       const costs: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> = {};
-
       productCodes.forEach(product => {
         if (product.cost && product.cost > 0) {
           costs[product.stokKodu] = {
@@ -265,9 +416,7 @@ export default function UrunKoduPanel() {
           };
         }
       });
-
       const docId = `${selectedCheckpointYear}-${String(selectedCheckpointMonth).padStart(2, '0')}`;
-
       const checkpointData = {
         year: selectedCheckpointYear,
         month: selectedCheckpointMonth,
@@ -277,10 +426,7 @@ export default function UrunKoduPanel() {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUser?.name || currentUser?.email || '',
       };
-
       await setDoc(doc(db, 'costCheckpoints', docId), checkpointData);
-
-      // Checkpoint listesini güncelle
       const newCheckpoint = {
         id: docId,
         year: selectedCheckpointYear,
@@ -295,7 +441,6 @@ export default function UrunKoduPanel() {
           return b.month - a.month;
         });
       });
-
       toast({
         title: 'Maliyet Checkpoint Kaydedildi',
         description: `${MONTHS[selectedCheckpointMonth]?.label} ${selectedCheckpointYear} - ${Object.keys(costs).length} ürün maliyeti kaydedildi.`,
@@ -310,6 +455,12 @@ export default function UrunKoduPanel() {
 
   const openModal = (product?: ProductCode) => {
     setSelectedProduct(product || {});
+    setIsModalOpen(true);
+  };
+
+  const handleDuplicate = (product: ProductCode) => {
+    const { id, stokKodu, ...rest } = product;
+    setSelectedProduct({ ...rest, stokKodu: '' });
     setIsModalOpen(true);
   };
 
@@ -344,7 +495,7 @@ export default function UrunKoduPanel() {
       fetchAllData();
     }
   };
-  
+
   const handleBulkUpdateTrackingMode = async () => {
     if (selectedProductIds.size === 0) {
       toast({ title: 'Uyarı', description: 'Önce ürün seçmelisiniz.', variant: 'default' });
@@ -360,7 +511,7 @@ export default function UrunKoduPanel() {
         await batch.commit();
         toast({ title: 'Başarılı', description: `${selectedProductIds.size} ürünün takip türü güncellendi.` });
         setSelectedProductIds(new Set());
-        fetchAllData(); // Veriyi yenile
+        fetchAllData();
       } catch (e) {
         toast({ title: 'Hata', description: 'Toplu güncelleme sırasında bir hata oluştu.', variant: 'destructive' });
       } finally {
@@ -369,36 +520,29 @@ export default function UrunKoduPanel() {
     }
   };
 
-
   const createReferenceSheet = () => {
     const trackingModes = Object.entries(TRACKING_MODE_LABEL).map(([key, label]) => ({ TakipTuru_Kodu: key, Aciklama: label }));
-
     const maxLength = Math.max(
-        definitions.brands.length,
-        definitions.labGroups.length,
-        definitions.testGroups.length,
-        definitions.deviceGroups.length,
-        definitions.productGroups.length,
-        definitions.mainUnits.length,
-        trackingModes.length
+      definitions.brands.length, definitions.labGroups.length, definitions.testGroups.length,
+      definitions.deviceGroups.length, definitions.productGroups.length, definitions.mainUnits.length,
+      trackingModes.length
     );
-
     const sheetData: any[] = [];
     for (let i = 0; i < maxLength; i++) {
-        sheetData.push({
-            'Markalar': definitions.brands[i] || '',
-            'Laboratuvar Gruplari': definitions.labGroups[i] || '',
-            'Test Gruplari': definitions.testGroups[i] || '',
-            'Cihaz Gruplari': definitions.deviceGroups[i] || '',
-            'Urun Gruplari': definitions.productGroups[i] || '',
-            'Ana Birimler': definitions.mainUnits[i] || '',
-            'Takip Turu Kodu': trackingModes[i]?.TakipTuru_Kodu || '',
-            'Takip Turu Aciklama': trackingModes[i]?.Aciklama || '',
-        });
+      sheetData.push({
+        'Markalar': definitions.brands[i] || '',
+        'Laboratuvar Gruplari': definitions.labGroups[i] || '',
+        'Test Gruplari': definitions.testGroups[i] || '',
+        'Cihaz Gruplari': definitions.deviceGroups[i] || '',
+        'Urun Gruplari': definitions.productGroups[i] || '',
+        'Ana Birimler': definitions.mainUnits[i] || '',
+        'Takip Turu Kodu': trackingModes[i]?.TakipTuru_Kodu || '',
+        'Takip Turu Aciklama': trackingModes[i]?.Aciklama || '',
+      });
     }
     return XLSX.utils.json_to_sheet(sheetData);
   };
-  
+
   const handleDownloadTemplate = () => {
     const workbook = XLSX.utils.book_new();
     const templateSheet = XLSX.utils.json_to_sheet([
@@ -407,161 +551,130 @@ export default function UrunKoduPanel() {
       },
     ]);
     XLSX.utils.book_append_sheet(workbook, templateSheet, 'Urunler');
-    
     const refSheet = createReferenceSheet();
     XLSX.utils.book_append_sheet(workbook, refSheet, 'Tanim_Referanslari');
-
     XLSX.writeFile(workbook, 'Urun_Ekleme_Sablonu.xlsx');
   };
 
   const handleExport = () => {
     const dataToExport = productCodes.map(p => ({
-        stokKodu: p.stokKodu,
-        stokAdi: p.stokAdi,
-        urunGrubu: p.urunGrubu,
-        ambalajDegeri: p.ambalajDegeri,
-        anaBirim: p.anaBirim,
-        cost: p.cost,
-        currency: p.currency,
-        marka: p.marka,
-        laboratuvarGrubu: p.laboratuvarGrubu,
-        testGrubu: p.testGrubu,
-        cihazGrubu: p.cihazGrubu,
-        testAdi: p.testAdi ?? '',
-        trackingMode: trackingModeToExcel((p as any).trackingMode),
-        barcodeNumber: (p as any).barcodeNumber ?? '',
-        barcodeFormatId: (p as any).barcodeFormatId ?? '',
-        barcodeFormatIds: Array.isArray((p as any).barcodeFormatIds)
-          ? (p as any).barcodeFormatIds.join(',')
-          : '',
+      stokKodu: p.stokKodu,
+      stokAdi: p.stokAdi,
+      urunGrubu: p.urunGrubu,
+      ambalajDegeri: p.ambalajDegeri,
+      anaBirim: p.anaBirim,
+      cost: p.cost,
+      currency: p.currency,
+      marka: p.marka,
+      laboratuvarGrubu: p.laboratuvarGrubu,
+      testGrubu: p.testGrubu,
+      cihazGrubu: p.cihazGrubu,
+      testAdi: p.testAdi ?? '',
+      trackingMode: trackingModeToExcel((p as any).trackingMode),
+      barcodeNumber: (p as any).barcodeNumber ?? '',
+      barcodeFormatId: (p as any).barcodeFormatId ?? '',
+      barcodeFormatIds: Array.isArray((p as any).barcodeFormatIds) ? (p as any).barcodeFormatIds.join(',') : '',
     }));
-    
     const workbook = XLSX.utils.book_new();
     const productSheet = XLSX.utils.json_to_sheet(dataToExport);
     XLSX.utils.book_append_sheet(workbook, productSheet, 'Urunler');
-    
     const refSheet = createReferenceSheet();
     XLSX.utils.book_append_sheet(workbook, refSheet, 'Tanim_Referanslari');
-
     XLSX.writeFile(workbook, 'Urun_Kodlari_Listesi.xlsx');
     toast({ title: 'Başarılı', description: 'Ürün listesi referanslarla birlikte dışa aktarıldı.' });
   };
-  
+
   const handleImport = async (event: ChangeEvent<HTMLInputElement>, mode: 'update' | 'add') => {
     const file = event.target.files?.[0];
     if (!file) return;
     setIsLoading(true);
-
     try {
-        const jsonData = await readExcelDataSmart(file, 'product', toast);
-        const batch = writeBatch(db);
-        let successCount = 0;
-        let updatedCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-  
-        for (const rawRow of jsonData) {
-          const row = Object.keys(rawRow).reduce((acc, key) => {
-            acc[normalizeKey(key)] = (rawRow as any)[key];
-            return acc;
-          }, {} as Record<string, any>);
-  
-          const stokKodu = String(row['stokkodu'] || '').trim();
-          if (!stokKodu) {
-            errorCount++;
-            continue;
-          }
-  
-          const stokAdi = String(row['stokadi'] || row['stokadı'] || '').trim();
-          const urunGrubuRaw = String(row['urungrubu'] || row['ürüngrubu'] || 'kit').toLowerCase();
-          const urunGrubu: 'kit' | 'sarf' | 'yedek_parca' = urunGrubuRaw.includes('yedek') || urunGrubuRaw.includes('parca') ? 'yedek_parca' : (urunGrubuRaw.includes('sarf') ? 'sarf' : 'kit');
-          const ambalajDegeri = parseNum(row['ambalajdegeri'] ?? row['ambalajdeğeri']);
-          
-          if (urunGrubu === 'kit' && mode === 'add' && (!ambalajDegeri || ambalajDegeri <= 0)) {
-            toast({ title: "Uyarı", description: `Kit ${stokKodu} için geçersiz ambalaj değeri. Satır atlandı.`, variant: "default" });
-            errorCount++;
-            continue;
-          }
-
-          const productData: Partial<ProductCode> = {
-            stokKodu,
-            stokAdi: stokAdi || undefined,
-            urunGrubu,
-            ambalajDegeri: urunGrubu === 'kit' ? ambalajDegeri : undefined,
-            anaBirim: (row['anabirim'] as ProductCode['anaBirim']) || 'Kutu',
-            cost: parseNum(row['maliyet'] ?? row['cost']),
-            currency: (String(row['parabirimi'] ?? row['currency'] ?? 'EUR').toUpperCase() as ProductCode['currency']) || undefined,
-            marka: row['marka'] || undefined,
-            laboratuvarGrubu: row['laboratuvargrubu'] || undefined,
-            testGrubu: row['testgrubu'] || undefined,
-            cihazGrubu: row['cihazgrubu'] || undefined,
-            testAdi: row['testadi'] || row['testadı'] || undefined,
-            trackingMode: trackingModeFromExcel(row['trackingmode']),
-            barcodeNumber: row['barcodenumber'] ?? null,
-            barcodeFormatId: row['barcodeformatid'] || null,
-            barcodeFormatIds: row['barcodeformatids']
-              ? String(row['barcodeformatids']).split(',').map(s => s.trim()).filter(Boolean)
-              : undefined,
-          };
-          
-          const cleanedProductData = Object.fromEntries(
-            Object.entries(productData).filter(([, value]) => value !== undefined)
-          );
-
-          const existing = productCodes.find(p => p.stokKodu === stokKodu);
-  
-          if (mode === 'update') {
-            if (existing) {
-              batch.set(doc(db, 'productCodes', existing.id), cleanedProductData, { merge: true });
-              updatedCount++;
-            } else { skippedCount++; }
-          } else { // add mode
-            if (existing) { skippedCount++; } 
-            else {
-              batch.set(doc(collection(db, 'productCodes')), cleanedProductData);
-              successCount++;
-            }
-          }
+      const jsonData = await readExcelDataSmart(file, 'product', toast);
+      const batch = writeBatch(db);
+      let successCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+      for (const rawRow of jsonData) {
+        const row = Object.keys(rawRow).reduce((acc, key) => {
+          acc[normalizeKey(key)] = (rawRow as any)[key];
+          return acc;
+        }, {} as Record<string, any>);
+        const stokKodu = String(row['stokkodu'] || '').trim();
+        if (!stokKodu) { errorCount++; continue; }
+        const stokAdi = String(row['stokadi'] || row['stokadı'] || '').trim();
+        const urunGrubuRaw = String(row['urungrubu'] || row['ürüngrubu'] || 'kit').toLowerCase();
+        const urunGrubu: 'kit' | 'sarf' | 'yedek_parca' = urunGrubuRaw.includes('yedek') || urunGrubuRaw.includes('parca') ? 'yedek_parca' : (urunGrubuRaw.includes('sarf') ? 'sarf' : 'kit');
+        const ambalajDegeri = parseNum(row['ambalajdegeri'] ?? row['ambalajdeğeri']);
+        if (urunGrubu === 'kit' && mode === 'add' && (!ambalajDegeri || ambalajDegeri <= 0)) {
+          toast({ title: "Uyarı", description: `Kit ${stokKodu} için geçersiz ambalaj değeri. Satır atlandı.`, variant: "default" });
+          errorCount++; continue;
         }
-  
-        if (successCount > 0 || updatedCount > 0) await batch.commit();
-        toast({ title: "Yükleme Tamamlandı", description: `${successCount} kayıt eklendi, ${updatedCount} kayıt güncellendi. ${skippedCount} satır atlandı. ${errorCount} satır hatalı.` });
-        if (successCount > 0 || updatedCount > 0) fetchAllData();
-  
-      } catch (error) {
-        toast({ title: "Excel Yükleme Hatası", description: "Dosya işlenirken hata oluştu.", variant: "destructive" });
-      } finally {
-        setIsLoading(false);
-        if (event.target) (event.target as HTMLInputElement).value = '';
+        const productData: Partial<ProductCode> = {
+          stokKodu,
+          stokAdi: stokAdi || undefined,
+          urunGrubu,
+          ambalajDegeri: urunGrubu === 'kit' ? ambalajDegeri : undefined,
+          anaBirim: (row['anabirim'] as ProductCode['anaBirim']) || 'Kutu',
+          cost: parseNum(row['maliyet'] ?? row['cost']),
+          currency: (String(row['parabirimi'] ?? row['currency'] ?? 'EUR').toUpperCase() as ProductCode['currency']) || undefined,
+          marka: row['marka'] || undefined,
+          laboratuvarGrubu: row['laboratuvargrubu'] || undefined,
+          testGrubu: row['testgrubu'] || undefined,
+          cihazGrubu: row['cihazgrubu'] || undefined,
+          testAdi: row['testadi'] || row['testadı'] || undefined,
+          trackingMode: trackingModeFromExcel(row['trackingmode']),
+          barcodeNumber: row['barcodenumber'] ?? null,
+          barcodeFormatId: row['barcodeformatid'] || null,
+          barcodeFormatIds: row['barcodeformatids']
+            ? String(row['barcodeformatids']).split(',').map(s => s.trim()).filter(Boolean)
+            : undefined,
+        };
+        const cleanedProductData = Object.fromEntries(
+          Object.entries(productData).filter(([, value]) => value !== undefined)
+        );
+        const existing = productCodes.find(p => p.stokKodu === stokKodu);
+        if (mode === 'update') {
+          if (existing) { batch.set(doc(db, 'productCodes', existing.id), cleanedProductData, { merge: true }); updatedCount++; }
+          else { skippedCount++; }
+        } else {
+          if (existing) { skippedCount++; }
+          else { batch.set(doc(collection(db, 'productCodes')), cleanedProductData); successCount++; }
+        }
       }
+      if (successCount > 0 || updatedCount > 0) await batch.commit();
+      toast({ title: "Yükleme Tamamlandı", description: `${successCount} kayıt eklendi, ${updatedCount} kayıt güncellendi. ${skippedCount} satır atlandı. ${errorCount} satır hatalı.` });
+      if (successCount > 0 || updatedCount > 0) fetchAllData();
+    } catch (error) {
+      toast({ title: "Excel Yükleme Hatası", description: "Dosya işlenirken hata oluştu.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+      if (event.target) (event.target as HTMLInputElement).value = '';
+    }
   };
 
   const availableFilterGroups = useMemo(() => {
     const markaSet = new Set<string>();
     const urunGrubuSet = new Set<'kit' | 'sarf' | 'yedek_parca'>();
     productCodes.forEach(p => {
-        if(p.marka) markaSet.add(p.marka);
-        if(p.urunGrubu) urunGrubuSet.add(p.urunGrubu);
+      if (p.marka) markaSet.add(p.marka);
+      if (p.urunGrubu) urunGrubuSet.add(p.urunGrubu);
     });
     return {
-        marka: Array.from(markaSet).sort(),
-        urunGrubu: Array.from(urunGrubuSet).sort()
+      marka: Array.from(markaSet).sort(),
+      urunGrubu: Array.from(urunGrubuSet).sort()
     };
   }, [productCodes]);
 
   const filteredProductCodes = useMemo(() => {
     let items = productCodes;
-    
-    // Brand Tab Filter
     if (selectedBrandTab !== 'ALL') {
-        if (selectedBrandTab === 'Diğer') {
-            items = items.filter(p => !p.marka);
-        } else {
-            items = items.filter(p => p.marka === selectedBrandTab);
-        }
+      if (selectedBrandTab === 'Diğer') {
+        items = items.filter(p => !p.marka);
+      } else {
+        items = items.filter(p => p.marka === selectedBrandTab);
+      }
     }
-    
-    // General Filters
     if (activeFilters.length > 0) {
       items = items.filter(p => {
         return activeFilters.every(filter => {
@@ -571,7 +684,6 @@ export default function UrunKoduPanel() {
         });
       });
     }
-
     if (debouncedSearchTerm) {
       const lowercasedTerm = debouncedSearchTerm.toLowerCase();
       items = items.filter(p =>
@@ -581,7 +693,7 @@ export default function UrunKoduPanel() {
     }
     return items;
   }, [productCodes, debouncedSearchTerm, activeFilters, selectedBrandTab]);
-  
+
   const brandTabOptions = useMemo(() => {
     const counts: Record<string, number> = {};
     productCodes.forEach(p => {
@@ -594,7 +706,7 @@ export default function UrunKoduPanel() {
     const total = productCodes.length;
     return { total, items };
   }, [productCodes]);
-  
+
   const handleSelectAll = (checked: boolean | 'indeterminate') => {
     if (checked === true) {
       setSelectedProductIds(new Set(filteredProductCodes.map(p => p.id)));
@@ -615,234 +727,410 @@ export default function UrunKoduPanel() {
   const allSelected = filteredProductCodes.length > 0 && selectedProductIds.size === filteredProductCodes.length;
   const someSelected = selectedProductIds.size > 0 && selectedProductIds.size < filteredProductCodes.length;
 
+  const renderBarcodeFormats = (p: ProductCode) => {
+    const formatIds = (p as any).barcodeFormatIds;
+    if (Array.isArray(formatIds) && formatIds.length > 0) {
+      return (
+        <div className="flex flex-wrap gap-1">
+          {formatIds.map((fmtId: string) => {
+            const fmt = barcodeFormats.find(f => f.id === fmtId);
+            return fmt ? (
+              <span key={fmtId} className="px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium text-[var(--dashboard-text)]">
+                {fmt.name}
+              </span>
+            ) : null;
+          })}
+        </div>
+      );
+    }
+    const singleFormatId = (p as any).barcodeFormatId;
+    if (singleFormatId && singleFormatId !== '__auto__') {
+      const fmt = barcodeFormats.find(f => f.id === singleFormatId);
+      return fmt ? (
+        <span className="px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium">{fmt.name}</span>
+      ) : (
+        <span className="text-xs text-[var(--dashboard-muted)]">{singleFormatId}</span>
+      );
+    }
+    return <span className="text-xs text-[var(--dashboard-muted)]">{singleFormatId === '__auto__' ? 'Otomatik' : '—'}</span>;
+  };
+
   return (
     <>
-        <Card className="shadow-lg">
-          <CardHeader className="flex flex-col sm:flex-row justify-between sm:items-center">
-            <div>
-              <CardTitle className="text-xl font-headline flex items-center">
-                <Barcode className="mr-2 h-6 w-6 text-blue-500" />
-                Ürün Kodu Yönetimi
-              </CardTitle>
-              <CardDescription>Yeni ürünler ekleyin, mevcutları düzenleyin veya silin.</CardDescription>
-            </div>
+      <input ref={addFileRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={(e) => handleImport(e, 'add')} />
+      <input ref={updateFileRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={(e) => handleImport(e, 'update')} />
 
-            <input
-              ref={addFileRef}
-              id="product-excel-add"
-              type="file"
-              className="hidden"
-              accept=".xlsx,.xls"
-              onChange={(e) => handleImport(e, 'add')}
-            />
-            <input
-              ref={updateFileRef}
-              id="product-excel-update"
-              type="file"
-              className="hidden"
-              accept=".xlsx,.xls"
-              onChange={(e) => handleImport(e, 'update')}
-            />
+      {/* ═══════════════ HEADER ═══════════════ */}
+      <div className="cihaz-card-strong p-4 sm:p-5 space-y-4">
+        {/* Title + Actions */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+              <Barcode className="h-6 w-6 text-[var(--device-accent)]" />
+              Ürün Kodu Yönetimi
+            </h1>
+            <p className="text-xs sm:text-sm text-[var(--dashboard-muted)] mt-0.5">
+              {productCodes.length} ürün kayıtlı
+            </p>
+          </div>
 
-            <div className="flex gap-2 mt-2 sm:mt-0">
-                <Button onClick={handleExport} size="sm" variant="outline" disabled={isLoading}><Download className="mr-2 h-4 w-4"/>Dışa Aktar</Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => updateFileRef.current?.click()}
-                  disabled={isLoading}
-                >
-                  <Upload className="mr-2 h-4 w-4" />
-                  Güncelle
-                </Button>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button size="sm"><PlusCircle className="mr-2 h-4 w-4"/>Yeni Ürün</Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent>
-                        <DropdownMenuItem onSelect={() => openModal()}>Manuel Ekle</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={handleDownloadTemplate}>Excel Şablonu İndir</DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={(e) => {
-                            addFileRef.current?.click();
-                          }}
-                        >
-                            Excel ile İçe Aktar
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4 mb-4 flex-wrap">
-              <div className="relative flex-grow">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Import/Export Group */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="neu-btn-universal px-3 py-2 rounded-xl text-sm font-semibold flex items-center gap-2">
+                  <FileSpreadsheet className="h-4 w-4 text-[var(--dashboard-muted)]" />
+                  <span className="hidden sm:inline">Aktarım</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onClick={handleExport}>
+                  <Download className="h-4 w-4 mr-2" /> Dışa Aktar (Excel)
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => updateFileRef.current?.click()}>
+                  <Upload className="h-4 w-4 mr-2" /> Güncelle (Excel)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDownloadTemplate}>
+                  <Download className="h-4 w-4 mr-2" /> Excel Şablonu İndir
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => addFileRef.current?.click()}>
+                  <Upload className="h-4 w-4 mr-2" /> Excel ile İçe Aktar
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* New Product */}
+            <button
+              onClick={() => openModal()}
+              className="neu-btn-universal neu-text-primary px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+            >
+              <PlusCircle className="h-4 w-4" />
+              Yeni Ürün
+            </button>
+          </div>
+        </div>
+
+        {/* Tab Switcher: Products / Checkpoint */}
+        <div className="flex rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1 gap-1">
+          <button
+            onClick={() => setActiveTab('products')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+              activeTab === 'products'
+                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+            )}
+          >
+            <Barcode className="h-4 w-4" />
+            Ürün Kataloğu
+          </button>
+          <button
+            onClick={() => setActiveTab('checkpoint')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+              activeTab === 'checkpoint'
+                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+            )}
+          >
+            <Calendar className="h-4 w-4" />
+            Maliyet Snapshot
+            {costCheckpoints.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[var(--device-accent)] text-white text-[10px] font-bold">
+                {costCheckpoints.length}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* ═══════════════ PRODUCTS TAB ═══════════════ */}
+      {activeTab === 'products' && (
+        <div className="space-y-3">
+          {/* ── Toolbar ── */}
+          <div className="cihaz-card p-3 sm:p-4 space-y-3">
+            {/* Search + Filter + View */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Search */}
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--dashboard-muted)]" />
+                <input
+                  type="text"
                   placeholder="Stok adı veya kodu ile ara..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 w-full max-w-sm"
+                  className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-none outline-none text-sm text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)]"
                 />
-              </div>
-              <Button variant="outline" onClick={() => setIsFilterDialogOpen(true)}>
-                <Filter className="mr-2 h-4 w-4" /> Filtrele ({activeFilters.length})
-              </Button>
-               {selectedProductIds.size > 0 && (
-                <>
-                  <Button variant="destructive" onClick={handleDeleteSelected}>
-                      <Trash2 className="mr-2 h-4 w-4" /> Seçili ({selectedProductIds.size}) Ürünü Sil
-                  </Button>
-                  <div className="flex items-center gap-2 border-l pl-4">
-                    <Select value={bulkTrackingMode} onValueChange={(v) => setBulkTrackingMode(v as TrackingMode)}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Takip Türü Seçin" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(TRACKING_MODE_LABEL).map(([key, label]) => (
-                          <SelectItem key={key} value={key}>{label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button onClick={handleBulkUpdateTrackingMode}>
-                      <Type className="mr-2 h-4 w-4" /> Ata
-                    </Button>
-                  </div>
-                </>
+                {searchTerm && (
+                  <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <X className="h-4 w-4 text-[var(--dashboard-muted)]" />
+                  </button>
                 )}
-            </div>
-             <div className="w-full -mt-2 mb-2 overflow-x-auto">
-                <div className="flex items-center gap-2 pb-2 min-w-max">
-                    <Button
-                    size="sm"
-                    variant={selectedBrandTab === 'ALL' ? 'default' : 'outline'}
-                    className="rounded-2xl"
-                    onClick={() => setSelectedBrandTab('ALL')}
-                    >
-                    Tümü <span className="ml-1 text-xs opacity-80">({brandTabOptions.total})</span>
-                    </Button>
+              </div>
 
-                    {brandTabOptions.items.map(({ brand, count }) => (
-                    <Button
-                        key={brand}
-                        size="sm"
-                        variant={selectedBrandTab === brand ? 'default' : 'outline'}
-                        className="rounded-2xl whitespace-nowrap"
-                        onClick={() => setSelectedBrandTab(brand)}
-                    >
-                        {brand} <span className="ml-1 text-xs opacity-80">({count})</span>
-                    </Button>
-                    ))}
-                </div>
+              {/* Filter Button */}
+              <button
+                onClick={() => setIsFilterDialogOpen(true)}
+                className={cn(
+                  "neu-btn-universal px-3 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2",
+                  activeFilters.length > 0 && "ring-2 ring-[var(--device-accent)]"
+                )}
+              >
+                <Filter className="h-4 w-4" />
+                <span className="hidden sm:inline">Filtrele</span>
+                {activeFilters.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-[var(--device-accent)] text-white text-[10px] font-bold">{activeFilters.length}</span>
+                )}
+              </button>
+
+              {/* View Toggle */}
+              <button
+                onClick={() => setViewMode(v => v === 'compact' ? 'comfortable' : 'compact')}
+                className="neu-btn-universal px-3 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2"
+                title={viewMode === 'compact' ? 'Rahat Görünüm' : 'Kompakt Görünüm'}
+              >
+                {viewMode === 'compact' ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                <span className="hidden sm:inline">{viewMode === 'compact' ? 'Rahat' : 'Kompakt'}</span>
+              </button>
             </div>
-             {isLoading ? (
-              <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>
-            ) : (
-              <ScrollArea className="h-[60vh] border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">
-                        <Checkbox
+
+            {/* Active Filters Display */}
+            {activeFilters.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-[var(--dashboard-muted)]">Aktif:</span>
+                {activeFilters.map(f => (
+                  <span key={`${f.group}-${f.value}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--device-accent-weak)] text-[var(--device-accent)] text-xs font-semibold">
+                    {f.value}
+                    <button onClick={() => setActiveFilters(prev => prev.filter(pf => !(pf.group === f.group && pf.value === f.value)))}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                <button onClick={() => setActiveFilters([])} className="text-xs text-[var(--device-danger)] font-medium hover:underline">Temizle</button>
+              </div>
+            )}
+
+            {/* Bulk Actions Bar */}
+            {selectedProductIds.size > 0 && (
+              <div className="flex items-center gap-2 flex-wrap p-2.5 rounded-xl bg-[var(--device-accent-weak)] border border-[var(--device-accent)]/20">
+                <span className="text-xs font-semibold text-[var(--device-accent)]">{selectedProductIds.size} ürün seçili</span>
+                <div className="flex-1" />
+                <div className="flex items-center gap-2">
+                  <Select value={bulkTrackingMode} onValueChange={(v) => setBulkTrackingMode(v as TrackingMode)}>
+                    <SelectTrigger className="w-[160px] h-8 text-xs bg-white/80 border-[var(--dashboard-stroke)] rounded-lg">
+                      <SelectValue placeholder="Takip Türü" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(TRACKING_MODE_LABEL).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button onClick={handleBulkUpdateTrackingMode} className="neu-btn-universal neu-text-primary px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+                    <Type className="h-3.5 w-3.5" /> Ata
+                  </button>
+                  <button onClick={handleDeleteSelected} className="neu-btn-universal neu-text-destructive px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+                    <Trash2 className="h-3.5 w-3.5" /> Sil
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Brand Chips ── */}
+          <div className="w-full overflow-x-auto scrollbar-hide">
+            <div className="flex items-center gap-1.5 pb-1 min-w-max px-1">
+              <button
+                onClick={() => setSelectedBrandTab('ALL')}
+                className={cn(
+                  "px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all",
+                  selectedBrandTab === 'ALL'
+                    ? "bg-[var(--device-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] hover:shadow-[var(--dashboard-raised-soft)]"
+                )}
+              >
+                Tümü <span className="ml-0.5 opacity-80">{brandTabOptions.total}</span>
+              </button>
+              {brandTabOptions.items.map(({ brand, count }) => (
+                <button
+                  key={brand}
+                  onClick={() => setSelectedBrandTab(brand)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all",
+                    selectedBrandTab === brand
+                      ? "bg-[var(--device-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] hover:shadow-[var(--dashboard-raised-soft)]"
+                  )}
+                >
+                  {brand} <span className="ml-0.5 opacity-80">{count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Table (Desktop) ── */}
+          {isLoading ? (
+            <div className="cihaz-card flex items-center justify-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-[var(--device-accent)]" />
+              <span className="ml-2 text-sm text-[var(--dashboard-muted)]">Yükleniyor...</span>
+            </div>
+          ) : filteredProductCodes.length === 0 ? (
+            <div className="cihaz-card flex flex-col items-center justify-center py-16 text-center px-4">
+              <Barcode className="h-12 w-12 text-[var(--dashboard-muted)] opacity-30 mb-3" />
+              <p className="text-sm font-semibold text-[var(--dashboard-text)]">Ürün bulunamadı</p>
+              <p className="text-xs text-[var(--dashboard-muted)] mt-1">Arama veya filtre kriterlerinizi değiştirin</p>
+            </div>
+          ) : (
+            <>
+              {/* Desktop Table */}
+              <div className="hidden md:block cihaz-card overflow-hidden" style={{ paddingBottom: '80px' }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="sticky top-0 z-10 bg-[var(--dashboard-surface)] backdrop-blur-sm">
+                        <th className="w-10 px-3 py-3 text-left">
+                          <Checkbox
                             checked={allSelected ? true : (someSelected ? 'indeterminate' : false)}
                             onCheckedChange={handleSelectAll}
-                            aria-label="Tümünü seç"
-                        />
-                      </TableHead>
-                      <TableHead>Stok Kodu</TableHead>
-                      <TableHead>Stok Adı</TableHead>
-                      <TableHead>Ürün Grubu</TableHead>
-                      <TableHead>Marka</TableHead>
-                      <TableHead>Barkod Formatları</TableHead>
-                      <TableHead>Test Grubu</TableHead>
-                      <TableHead>Cihaz Grubu</TableHead>
-                      <TableHead className="text-right">İşlemler</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredProductCodes.map(p => (
-                      <TableRow key={p.id} data-state={selectedProductIds.has(p.id) ? 'selected' : ''}>
-                        <TableCell>
+                          />
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] sticky left-0 bg-[var(--dashboard-surface)]">Stok Kodu</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)]">Stok Adı</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)]">Ürün Grubu</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)]">Marka</th>
+                        {viewMode === 'comfortable' && (
+                          <>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)]">Barkod</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)]">Test Grubu</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)]">Cihaz Grubu</th>
+                          </>
+                        )}
+                        <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] w-14"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--dashboard-stroke)]">
+                      {filteredProductCodes.map(p => (
+                        <tr
+                          key={p.id}
+                          className={cn(
+                            "group transition-colors hover:bg-[var(--dashboard-surface-2)]/50",
+                            selectedProductIds.has(p.id) && "bg-[var(--device-accent-weak)]",
+                            viewMode === 'compact' ? "h-10" : "h-14"
+                          )}
+                        >
+                          <td className="px-3">
                             <Checkbox
-                                checked={selectedProductIds.has(p.id)}
-                                onCheckedChange={(checked) => handleRowSelect(p.id, !!checked)}
-                                aria-label={`Select ${p.stokAdi}`}
+                              checked={selectedProductIds.has(p.id)}
+                              onCheckedChange={(checked) => handleRowSelect(p.id, !!checked)}
                             />
-                        </TableCell>
-                        <TableCell className="font-mono">{p.stokKodu}</TableCell>
-                        <TableCell className="font-medium">{p.stokAdi}</TableCell>
-                        <TableCell>{p.urunGrubu}</TableCell>
-                        <TableCell>{p.marka}</TableCell>
-                        <TableCell>
-                          {(() => {
-                            // Çoklu format desteği (yeni)
-                            const formatIds = (p as any).barcodeFormatIds;
-                            if (Array.isArray(formatIds) && formatIds.length > 0) {
-                              return (
-                                <div className="flex flex-wrap gap-1">
-                                  {formatIds.map((fmtId: string) => {
-                                    const fmt = barcodeFormats.find(f => f.id === fmtId);
-                                    return fmt ? (
-                                      <Badge key={fmtId} variant="secondary" className="text-xs">
-                                        {fmt.name}
-                                      </Badge>
-                                    ) : null;
-                                  })}
-                                </div>
-                              );
-                            }
-                            // Tek format (eski - geriye uyumluluk)
-                            const singleFormatId = (p as any).barcodeFormatId;
-                            if (singleFormatId && singleFormatId !== '__auto__') {
-                              const fmt = barcodeFormats.find(f => f.id === singleFormatId);
-                              return fmt ? (
-                                <Badge variant="outline" className="text-xs">
-                                  {fmt.name}
-                                </Badge>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">{singleFormatId}</span>
-                              );
-                            }
-                            // Otomatik veya tanımsız
-                            return (
-                              <span className="text-xs text-muted-foreground">
-                                {singleFormatId === '__auto__' ? 'Otomatik' : '—'}
-                              </span>
-                            );
-                          })()}
-                        </TableCell>
-                        <TableCell>{p.testGrubu}</TableCell>
-                        <TableCell>{p.cihazGrubu}</TableCell>
-                        <TableCell className="text-right space-x-1">
-                          <Button variant="ghost" size="icon" onClick={() => openModal(p)}><Edit3 className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(p.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            )}
-          </CardContent>
-        </Card>
+                          </td>
+                          <td className="px-3 font-mono text-xs text-[var(--dashboard-text)] sticky left-0 bg-inherit">{p.stokKodu}</td>
+                          <td className="px-3 font-medium text-[var(--dashboard-text)] max-w-[280px] truncate">{p.stokAdi}</td>
+                          <td className="px-3">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
+                              p.urunGrubu === 'kit' && "bg-blue-100 text-blue-700",
+                              p.urunGrubu === 'sarf' && "bg-emerald-100 text-emerald-700",
+                              p.urunGrubu === 'yedek_parca' && "bg-violet-100 text-violet-700",
+                            )}>
+                              {p.urunGrubu === 'yedek_parca' ? 'yedek parça' : p.urunGrubu}
+                            </span>
+                          </td>
+                          <td className="px-3 text-[var(--dashboard-text)] text-xs">{p.marka || '—'}</td>
+                          {viewMode === 'comfortable' && (
+                            <>
+                              <td className="px-3">{renderBarcodeFormats(p)}</td>
+                              <td className="px-3 text-xs text-[var(--dashboard-muted)]">{p.testGrubu || '—'}</td>
+                              <td className="px-3 text-xs text-[var(--dashboard-muted)]">{p.cihazGrubu || '—'}</td>
+                            </>
+                          )}
+                          <td className="px-3 text-right">
+                            <RowActionsMenu
+                              product={p}
+                              onEdit={openModal}
+                              onDelete={handleDelete}
+                              onDuplicate={handleDuplicate}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Results count */}
+                <div className="px-4 py-2.5 border-t border-[var(--dashboard-stroke)] text-xs text-[var(--dashboard-muted)]">
+                  {filteredProductCodes.length} / {productCodes.length} ürün gösteriliyor
+                </div>
+              </div>
 
-        {/* Maliyet Checkpoint Yönetimi */}
-        <Card className="shadow-lg mt-6">
-          <CardHeader>
-            <CardTitle className="text-lg font-headline flex items-center">
-              <Calendar className="mr-2 h-5 w-5 text-emerald-500" />
-              Maliyet Checkpoint Yönetimi
-            </CardTitle>
-            <CardDescription>
-              Aylık maliyet snapshot'ları alarak verimlilik hesaplamalarında tarihsel maliyet verilerini kullanın.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              {/* Mobile Card List */}
+              <div className="md:hidden space-y-2" style={{ paddingBottom: '80px' }}>
+                {/* Select All */}
+                <div className="flex items-center gap-2 px-1">
+                  <Checkbox
+                    checked={allSelected ? true : (someSelected ? 'indeterminate' : false)}
+                    onCheckedChange={handleSelectAll}
+                  />
+                  <span className="text-xs text-[var(--dashboard-muted)]">
+                    {filteredProductCodes.length} ürün
+                  </span>
+                </div>
+                {filteredProductCodes.map(p => (
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    isSelected={selectedProductIds.has(p.id)}
+                    onSelect={(checked) => handleRowSelect(p.id, !!checked)}
+                    onEdit={openModal}
+                    onDelete={handleDelete}
+                    onDuplicate={handleDuplicate}
+                    barcodeFormats={barcodeFormats}
+                  />
+                ))}
+                <div className="text-xs text-center text-[var(--dashboard-muted)] py-2">
+                  {filteredProductCodes.length} / {productCodes.length} ürün
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ CHECKPOINT TAB ═══════════════ */}
+      {activeTab === 'checkpoint' && (
+        <div className="space-y-4">
+          {/* Checkpoint Save Card */}
+          <div className="cihaz-card-strong p-4 sm:p-5 space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-[var(--device-accent)]" />
+                Maliyet Checkpoint Kaydet
+              </h2>
+              <p className="text-xs text-[var(--dashboard-muted)] mt-1">
+                Aylık maliyet snapshot'ları alarak verimlilik hesaplamalarında tarihsel maliyet verilerini kullanın.
+              </p>
+            </div>
+
+            {/* Info banner */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+              <div className="w-10 h-10 rounded-xl bg-[var(--device-accent-weak)] flex items-center justify-center flex-shrink-0">
+                <Save className="h-5 w-5 text-[var(--device-accent)]" />
+              </div>
+              <div className="text-xs text-[var(--dashboard-text)]">
+                <p className="font-semibold">{productCodes.filter(p => p.cost && p.cost > 0).length} ürünün maliyeti tanımlı</p>
+                <p className="text-[var(--dashboard-muted)] mt-0.5">Toplam {productCodes.length} kayıtlı ürün</p>
+              </div>
+            </div>
+
+            {/* Period Selectors */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
               <div>
-                <label className="text-sm font-medium mb-1 block">Dönem Ayı</label>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] block mb-1.5">Dönem Ayı</label>
                 <Select value={String(selectedCheckpointMonth)} onValueChange={v => setSelectedCheckpointMonth(Number(v))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     {MONTHS.map((m, i) => (
                       <SelectItem key={i} value={String(i)}>{m.label}</SelectItem>
@@ -851,9 +1139,11 @@ export default function UrunKoduPanel() {
                 </Select>
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">Dönem Yılı</label>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] block mb-1.5">Dönem Yılı</label>
                 <Select value={String(selectedCheckpointYear)} onValueChange={v => setSelectedCheckpointYear(Number(v))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     {YEARS.map(y => (
                       <SelectItem key={y} value={String(y)}>{y}</SelectItem>
@@ -861,65 +1151,57 @@ export default function UrunKoduPanel() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="md:col-span-2">
-                <Button
+              <div className="col-span-2">
+                <button
                   onClick={handleSaveCostCheckpoint}
                   disabled={isSavingCheckpoint || productCodes.length === 0}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700"
+                  className="neu-btn-universal neu-text-primary w-full px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isSavingCheckpoint ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Save className="h-4 w-4 mr-2" />
+                    <Save className="h-4 w-4" />
                   )}
-                  {MONTHS[selectedCheckpointMonth]?.label} {selectedCheckpointYear} Checkpoint Kaydet
-                </Button>
+                  {MONTHS[selectedCheckpointMonth]?.label} {selectedCheckpointYear} Kaydet
+                </button>
               </div>
             </div>
+          </div>
 
-            {/* Mevcut Checkpoint'ler Listesi */}
-            <div className="border rounded-md">
-              <div className="p-3 bg-muted/50 border-b">
-                <h4 className="font-medium text-sm">Kayıtlı Checkpoint'ler ({costCheckpoints.length})</h4>
+          {/* Checkpoint History */}
+          <div className="cihaz-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-[var(--dashboard-stroke)]">
+              <h3 className="text-sm font-bold text-[var(--dashboard-text)]">Kayıtlı Checkpoint'ler ({costCheckpoints.length})</h3>
+            </div>
+            {costCheckpoints.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                <Calendar className="h-10 w-10 text-[var(--dashboard-muted)] opacity-30 mb-3" />
+                <p className="text-sm text-[var(--dashboard-muted)]">Henüz maliyet checkpoint'i kaydedilmemiş.</p>
               </div>
-              <ScrollArea className="h-48">
-                {costCheckpoints.length === 0 ? (
-                  <div className="p-4 text-center text-muted-foreground text-sm">
-                    Henüz maliyet checkpoint'i kaydedilmemiş.
+            ) : (
+              <div className="divide-y divide-[var(--dashboard-stroke)]">
+                {costCheckpoints.map(cp => (
+                  <div key={cp.id} className="flex items-center justify-between px-4 py-3 hover:bg-[var(--dashboard-surface-2)]/50 transition-colors">
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--dashboard-text)]">
+                        {MONTHS[cp.month]?.label} {cp.year}
+                      </p>
+                      <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">
+                        {cp.createdAt.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">
+                      {cp.productCount} ürün
+                    </span>
                   </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Dönem</TableHead>
-                        <TableHead>Ürün Sayısı</TableHead>
-                        <TableHead>Kayıt Tarihi</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {costCheckpoints.map(cp => (
-                        <TableRow key={cp.id}>
-                          <TableCell className="font-medium">
-                            {MONTHS[cp.month]?.label} {cp.year}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700">
-                              {cp.productCount} ürün
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-sm">
-                            {cp.createdAt.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </ScrollArea>
-            </div>
-          </CardContent>
-        </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
+      {/* ═══════════════ MODALS ═══════════════ */}
       {isModalOpen && (
         <ProductFormatModal
           open={isModalOpen}
@@ -930,13 +1212,13 @@ export default function UrunKoduPanel() {
           definitions={definitions}
         />
       )}
-      <FiltreDialog 
+      <FiltreDialog
         isOpen={isFilterDialogOpen}
         onClose={() => setIsFilterDialogOpen(false)}
         availableGroups={availableFilterGroups}
         onApply={setActiveFilters}
+        currentFilters={activeFilters}
       />
     </>
   );
 }
-

@@ -1,13 +1,9 @@
 
 'use client';
 import React, { useState, useEffect, FC } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { X, Loader2, ChevronDown, ChevronRight, Lock, Package, Tag, Cpu, BarChart3 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Loader2 } from 'lucide-react';
 import type { ProductCode, Currency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { doc, setDoc, addDoc, collection, getDocs, query, where, updateDoc } from 'firebase/firestore';
@@ -18,6 +14,7 @@ import TrackingModeSelect from './TrackingModeSelect';
 import { TrackingMode, resolveDefaultTrackingMode, TRACKING_MODE_LABEL } from '@/lib/tracking';
 import BarcodeFormatSelect, { type FormatValue } from './BarcodeFormatSelect';
 import BarcodeFormatMultiSelect from './BarcodeFormatMultiSelect';
+import { cn } from '@/lib/utils';
 
 type Definitions = {
   brands: string[];
@@ -37,28 +34,59 @@ interface ProductFormatModalProps {
   definitions: Definitions;
 }
 
-/**
- * Removes properties with `undefined` values from an object, converting empty strings to null.
- * This is crucial for Firestore updates with `merge: true` to correctly delete fields.
- */
-function cleanDataForFirestore(data: Record<string, any>): Record<string, any> {
-  const cleaned: Record<string, any> = {};
-  for (const key in data) {
-    const value = data[key];
-    if (value === undefined) {
-      // Exclude undefined properties entirely.
-      continue;
-    }
-    if (value === '') {
-      // Convert empty strings to null for intentional field deletion.
-      cleaned[key] = null;
-    } else {
-      cleaned[key] = value;
-    }
-  }
-  return cleaned;
-}
+/* ─── Collapsible Section ─── */
+const Section: FC<{ title: string; icon: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode }> = ({ title, icon, defaultOpen = true, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left"
+      >
+        <span className="text-[var(--dashboard-muted)]">{icon}</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] flex-1">{title}</span>
+        {open ? <ChevronDown className="h-4 w-4 text-[var(--dashboard-muted)]" /> : <ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)]" />}
+      </button>
+      {open && <div className="px-4 pb-4 space-y-3">{children}</div>}
+    </div>
+  );
+};
 
+/* ─── Neumorphic Input ─── */
+const NeuInput: FC<React.InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }> = ({ label, hint, className, ...props }) => (
+  <div>
+    <label className="text-xs font-semibold text-[var(--dashboard-text)] block mb-1.5">{label}</label>
+    <input
+      {...props}
+      className={cn(
+        "w-full px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-none outline-none text-sm text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] disabled:opacity-50",
+        className
+      )}
+    />
+    {hint && <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">{hint}</p>}
+  </div>
+);
+
+/* ─── Neumorphic Select Wrapper ─── */
+const NeuSelect: FC<{
+  label: string;
+  value: string;
+  onValueChange: (v: string) => void;
+  placeholder: string;
+  options: string[];
+}> = ({ label, value, onValueChange, placeholder, options }) => (
+  <div>
+    <label className="text-xs font-semibold text-[var(--dashboard-text)] block mb-1.5">{label}</label>
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10 text-sm">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  </div>
+);
 
 export const ProductFormatModal: FC<ProductFormatModalProps> = ({
   open,
@@ -70,13 +98,14 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
 }) => {
   const { toast } = useToast();
   const { currentUser } = useAuth();
+  const isEditMode = !!initial.id;
+
   const [product, setProduct] = useState<Partial<ProductCode & { trackingMode: TrackingMode }>>({
     ...initial,
     trackingMode: resolveDefaultTrackingMode(initial as any),
   });
   const [isSaving, setIsSaving] = useState(false);
 
-  // Çoklu format modu kontrolü - eğer barcodeFormatIds varsa çoklu mod aktif
   const hasMultipleFormats = Array.isArray((initial as any)?.barcodeFormatIds) &&
     (initial as any).barcodeFormatIds.length > 0;
   const [multiFormatMode, setMultiFormatMode] = useState(hasMultipleFormats);
@@ -95,7 +124,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     const { name, value } = e.target;
     setProduct(prev => ({ ...prev, [name]: value }));
   };
-  
+
   const handleSelectChange = (name: keyof ProductCode, value: string) => {
     setProduct(prev => ({ ...prev, [name]: value }));
   };
@@ -110,13 +139,12 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       return;
     }
     if (product.urunGrubu === 'kit' && (!product.ambalajDegeri || product.ambalajDegeri <= 0)) {
-        toast({ title: "Hata", description: "Kitler için ambalaj değeri pozitif bir sayı olmalıdır.", variant: "destructive" });
-        return;
+      toast({ title: "Hata", description: "Kitler için ambalaj değeri pozitif bir sayı olmalıdır.", variant: "destructive" });
+      return;
     }
-    
+
     setIsSaving(true);
-    
-    // Explicitly prepare the data payload, defaulting undefined/empty strings to null
+
     const productData: Omit<ProductCode, 'id'> = {
       stokKodu: product.stokKodu!.trim(),
       stokAdi: product.stokAdi!.trim(),
@@ -130,12 +158,10 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       cihazGrubu: product.cihazGrubu?.trim() || null,
       testAdi: product.testAdi?.trim() || null,
       barcodeNumber: (product.barcodeNumber || '').trim() || null,
-      // Çoklu format modunda barcodeFormatIds kullan, tek modda barcodeFormatId
       barcodeFormatId: multiFormatMode ? null : (product.barcodeFormatId || null),
       barcodeFormatIds: multiFormatMode ? ((product as any).barcodeFormatIds || []) : null,
       ambalajDegeri: product.ambalajDegeri || null,
       trackingMode: product.trackingMode || resolveDefaultTrackingMode(product as any),
-      // Ürün boyutları (cm cinsinden)
       genislik: product.genislik || null,
       yukseklik: product.yukseklik || null,
       derinlik: product.derinlik || null,
@@ -143,7 +169,6 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
 
     try {
       if (product.id) {
-        // Use updateDoc for existing documents to ensure fields set to null are actually removed
         await updateDoc(doc(db, 'productCodes', product.id), productData);
         onSave({ ...product, ...productData } as ProductCode);
       } else {
@@ -161,236 +186,260 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       onClose();
     } catch (error: any) {
       console.error("Error saving product:", error);
-      toast({ 
-        title: 'Hata', 
-        description: `Ürün kaydedilemedi: ${error.code || error.message}`, 
-        variant: 'destructive' 
+      toast({
+        title: 'Hata',
+        description: `Ürün kaydedilemedi: ${error.code || error.message}`,
+        variant: 'destructive'
       });
     } finally {
       setIsSaving(false);
     }
   };
 
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{product.id ? 'Ürün Düzenle' : 'Yeni Ürün'}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 py-3 max-h-[70vh] overflow-y-auto pr-2">
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative w-full max-w-lg mx-4 glass-card rounded-3xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 pb-3 border-b border-[var(--dashboard-stroke)]">
           <div>
-            <Label>Stok Kodu</Label>
-            <Input
+            <h2 className="text-lg font-bold text-[var(--dashboard-text)]">
+              {isEditMode ? 'Ürün Düzenle' : 'Yeni Ürün'}
+            </h2>
+            {isEditMode && (
+              <p className="text-xs text-[var(--dashboard-muted)] mt-0.5 font-mono">{product.stokKodu}</p>
+            )}
+            {!isEditMode && (
+              <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">Temel bilgileri girin, detayları sonra tamamlayabilirsiniz</p>
+            )}
+          </div>
+          <button onClick={onClose} className="neu-btn-universal w-9 h-9 rounded-xl flex items-center justify-center">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {/* Section: Kimlik (Always Open) */}
+          <Section title="Kimlik Bilgileri" icon={<Package className="h-4 w-4" />} defaultOpen={true}>
+            <NeuInput
+              label="Stok Kodu"
               name="stokKodu"
               value={product.stokKodu || ''}
               onChange={handleChange}
-              disabled={!!product.id}
+              disabled={isEditMode}
               placeholder="Örn: 03589301190"
-              className="font-code"
+              className="font-mono"
+              hint={isEditMode ? "Stok kodu düzenlenemez." : undefined}
             />
-            {product.id && <p className="text-xs text-muted-foreground">Stok kodu düzenlenemez.</p>}
-          </div>
-          <div><Label>Stok Adı</Label><Input name="stokAdi" value={product.stokAdi || ''} onChange={handleChange} placeholder="Örn: Cobas E411 Temizlik Solüsyonu"/></div>
-          
-          <div>
-            <Label>Marka</Label>
-            <Select value={product.marka || ''} onValueChange={(value) => handleSelectChange('marka', value)}>
-                <SelectTrigger><SelectValue placeholder="Marka seçin..." /></SelectTrigger>
-                <SelectContent>{definitions.brands.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Laboratuvar Grubu</Label>
-            <Select value={product.laboratuvarGrubu || ''} onValueChange={(value) => handleSelectChange('laboratuvarGrubu', value)}>
-                <SelectTrigger><SelectValue placeholder="Laboratuvar grubu seçin..." /></SelectTrigger>
-                <SelectContent>{definitions.labGroups.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Test Grubu</Label>
-             <Select value={product.testGrubu || ''} onValueChange={(value) => handleSelectChange('testGrubu', value)}>
-                <SelectTrigger><SelectValue placeholder="Test grubu seçin..." /></SelectTrigger>
-                <SelectContent>{definitions.testGroups.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Test Adı</Label>
-            <Input
+            <NeuInput
+              label="Stok Adı"
+              name="stokAdi"
+              value={product.stokAdi || ''}
+              onChange={handleChange}
+              placeholder="Örn: Cobas E411 Temizlik Solüsyonu"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <NeuSelect
+                label="Marka"
+                value={product.marka || ''}
+                onValueChange={(v) => handleSelectChange('marka', v)}
+                placeholder="Seçin..."
+                options={definitions.brands}
+              />
+              <div>
+                <label className="text-xs font-semibold text-[var(--dashboard-text)] block mb-1.5">Ürün Grubu</label>
+                <Select value={product.urunGrubu || 'kit'} onValueChange={(value) => handleSelectChange('urunGrubu', value as any)}>
+                  <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="kit">Kit</SelectItem>
+                    <SelectItem value="sarf">Sarf Malzeme</SelectItem>
+                    <SelectItem value="yedek_parca">Yedek Parça</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </Section>
+
+          {/* Section: Sınıflandırma */}
+          <Section title="Sınıflandırma" icon={<Tag className="h-4 w-4" />} defaultOpen={isEditMode}>
+            <NeuSelect
+              label="Laboratuvar Grubu"
+              value={product.laboratuvarGrubu || ''}
+              onValueChange={(v) => handleSelectChange('laboratuvarGrubu', v)}
+              placeholder="Seçin..."
+              options={definitions.labGroups}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <NeuSelect
+                label="Test Grubu"
+                value={product.testGrubu || ''}
+                onValueChange={(v) => handleSelectChange('testGrubu', v)}
+                placeholder="Seçin..."
+                options={definitions.testGroups}
+              />
+              <NeuSelect
+                label="Cihaz Grubu"
+                value={product.cihazGrubu || ''}
+                onValueChange={(v) => handleSelectChange('cihazGrubu', v)}
+                placeholder="Seçin..."
+                options={definitions.deviceGroups}
+              />
+            </div>
+            <NeuInput
+              label="Test Adı"
               name="testAdi"
               value={product.testAdi || ''}
               onChange={handleChange}
               placeholder="Örn: HbA1c, TSH, Ferritin..."
+              hint="Ürünün çalıştığı testin adı (Total Verimlilik paneli için)."
             />
-            <p className="text-xs text-muted-foreground mt-1">Ürünün çalıştığı testin adı (Total Verimlilik paneli için).</p>
-          </div>
-          <div>
-            <Label>Cihaz Grubu</Label>
-             <Select value={product.cihazGrubu || ''} onValueChange={(value) => handleSelectChange('cihazGrubu', value)}>
-                <SelectTrigger><SelectValue placeholder="Cihaz grubu seçin..." /></SelectTrigger>
-                <SelectContent>{definitions.deviceGroups.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          
-          <div>
-            <Label>Ürün Grubu</Label>
-            <Select value={product.urunGrubu || 'kit'} onValueChange={(value) => handleSelectChange('urunGrubu', value as any)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="kit">Kit</SelectItem>
-                    <SelectItem value="sarf">Sarf Malzeme</SelectItem>
-                    <SelectItem value="yedek_parca">Yedek Parça</SelectItem>
-                </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label>Ambalaj Değeri (Test Adedi/Birim)</Label>
-            <Input type="number" name="ambalajDegeri" value={product.ambalajDegeri || ''} onChange={e => setProduct(p => ({ ...p, ambalajDegeri: e.target.value === '' ? undefined : Number(e.target.value) }))} placeholder="Örn: 100" min="0"/>
-          </div>
-          
-          <div>
-            <Label>Ana Birim</Label>
-            <Select value={product.anaBirim || ''} onValueChange={(value) => handleSelectChange('anaBirim', value as any)}>
-                <SelectTrigger><SelectValue placeholder="Ana birim seçin..." /></SelectTrigger>
-                <SelectContent>
-                  {definitions.mainUnits.map(unit => (<SelectItem key={unit} value={unit}>{unit}</SelectItem>))}
-                </SelectContent>
-            </Select>
-          </div>
-
-          <TrackingModeSelect
-            value={product.trackingMode ?? 'qty_barcode'}
-            onChange={(v) => setProduct((s) => ({ ...s, trackingMode: v }))}
-            className="mt-2"
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-            <div>
-              <Label>Barkod Numarası (UDI)</Label>
-              <Input
-                value={product.barcodeNumber ?? ''}
-                onChange={(e) => setProduct(s => ({ ...s, barcodeNumber: e.target.value.trim() }))}
-                placeholder="Örn: 00812345678901"
+            <div className="grid grid-cols-2 gap-3">
+              <NeuInput
+                label="Ambalaj Değeri"
+                type="number"
+                name="ambalajDegeri"
+                value={product.ambalajDegeri || ''}
+                onChange={e => setProduct(p => ({ ...p, ambalajDegeri: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                placeholder="Örn: 100"
+                hint="Test adedi / birim"
               />
-              <p className="text-xs text-muted-foreground mt-1">Referans gömülü değilse ürünün benzersiz barkod numarası.</p>
+              <NeuSelect
+                label="Ana Birim"
+                value={product.anaBirim || ''}
+                onValueChange={(v) => handleSelectChange('anaBirim', v as any)}
+                placeholder="Seçin..."
+                options={definitions.mainUnits}
+              />
             </div>
+          </Section>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">Çoklu Format</Label>
-                <Switch
-                  checked={multiFormatMode}
-                  onCheckedChange={(checked) => {
-                    setMultiFormatMode(checked);
-                    if (checked) {
-                      // Tek format'tan çoklu format'a geçiş
-                      const currentFormatId = product.barcodeFormatId;
-                      setProduct(s => ({
-                        ...s,
-                        barcodeFormatIds: currentFormatId && currentFormatId !== '__auto__'
-                          ? [currentFormatId]
-                          : [],
-                        barcodeFormatId: null
-                      }));
-                    } else {
-                      // Çoklu format'tan tek format'a geçiş
-                      const formatIds = (product as any).barcodeFormatIds || [];
-                      setProduct(s => ({
-                        ...s,
-                        barcodeFormatId: formatIds.length > 0 ? formatIds[0] : '__auto__',
-                        barcodeFormatIds: null
-                      }));
-                    }
-                  }}
-                />
+          {/* Section: İzleme / Barkod */}
+          <Section title="Takip ve Barkod" icon={<Cpu className="h-4 w-4" />} defaultOpen={isEditMode}>
+            <TrackingModeSelect
+              value={product.trackingMode ?? 'qty_barcode'}
+              onChange={(v) => setProduct((s) => ({ ...s, trackingMode: v }))}
+            />
+
+            <NeuInput
+              label="Barkod Numarası (UDI)"
+              value={product.barcodeNumber ?? ''}
+              onChange={(e) => setProduct(s => ({ ...s, barcodeNumber: e.target.value.trim() }))}
+              placeholder="Örn: 00812345678901"
+              hint="Referans gömülü değilse ürünün benzersiz barkod numarası."
+            />
+
+            <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)]">
+              <div>
+                <p className="text-xs font-semibold text-[var(--dashboard-text)]">Çoklu Format</p>
+                <p className="text-[10px] text-[var(--dashboard-muted)]">Hem seri no hem lot takipli barkod formatları</p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Aynı ürün için hem seri no hem lot takipli barkod formatları kullanabilirsiniz.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-2">
-            {multiFormatMode ? (
-              <BarcodeFormatMultiSelect
-                value={(product as any).barcodeFormatIds || []}
-                onChange={(ids) => setProduct(s => ({ ...s, barcodeFormatIds: ids }))}
-              />
-            ) : (
-              <BarcodeFormatSelect
-                value={product.barcodeFormatId}
-                onChange={(id) => setProduct(s => ({ ...s, barcodeFormatId: id }))}
-              />
-            )}
-          </div>
-          <div>
-              <Label>Maliyet</Label>
-              <CostInput
-                initialCost={product.cost || 0}
-                initialCurrency={product.currency || 'EUR'}
-                onCostChange={(newCost, newCurrency) => {
-                  setProduct(p => ({...p, cost: newCost, currency: newCurrency}));
+              <Switch
+                checked={multiFormatMode}
+                onCheckedChange={(checked) => {
+                  setMultiFormatMode(checked);
+                  if (checked) {
+                    const currentFormatId = product.barcodeFormatId;
+                    setProduct(s => ({
+                      ...s,
+                      barcodeFormatIds: currentFormatId && currentFormatId !== '__auto__' ? [currentFormatId] : [],
+                      barcodeFormatId: null
+                    }));
+                  } else {
+                    const formatIds = (product as any).barcodeFormatIds || [];
+                    setProduct(s => ({
+                      ...s,
+                      barcodeFormatId: formatIds.length > 0 ? formatIds[0] : '__auto__',
+                      barcodeFormatIds: null
+                    }));
+                  }
                 }}
               />
-          </div>
-
-          {/* Ürün Boyutları */}
-          <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
-            <div className="flex items-center gap-2">
-              <Label className="text-sm font-semibold">Ürün Boyutları (cm)</Label>
-              <span className="text-xs text-muted-foreground">- Araç doluluk oranı hesaplaması için</span>
             </div>
+
+            <div>
+              <label className="text-xs font-semibold text-[var(--dashboard-text)] block mb-1.5">Barkod Formatı</label>
+              {multiFormatMode ? (
+                <BarcodeFormatMultiSelect
+                  value={(product as any).barcodeFormatIds || []}
+                  onChange={(ids) => setProduct(s => ({ ...s, barcodeFormatIds: ids }))}
+                />
+              ) : (
+                <BarcodeFormatSelect
+                  value={product.barcodeFormatId}
+                  onChange={(id) => setProduct(s => ({ ...s, barcodeFormatId: id }))}
+                />
+              )}
+            </div>
+          </Section>
+
+          {/* Section: Maliyet */}
+          <Section title="Maliyet" icon={<BarChart3 className="h-4 w-4" />} defaultOpen={isEditMode}>
+            <CostInput
+              initialCost={product.cost || 0}
+              initialCurrency={product.currency || 'EUR'}
+              onCostChange={(newCost, newCurrency) => {
+                setProduct(p => ({ ...p, cost: newCost, currency: newCurrency }));
+              }}
+            />
+          </Section>
+
+          {/* Section: Boyutlar (default closed) */}
+          <Section title="Ürün Boyutları (cm)" icon={<Package className="h-4 w-4" />} defaultOpen={false}>
+            <p className="text-[10px] text-[var(--dashboard-muted)] -mt-1 mb-2">Araç doluluk oranı hesaplaması için</p>
             <div className="grid grid-cols-3 gap-3">
-              <div>
-                <Label className="text-xs">Genişlik</Label>
-                <Input
-                  type="number"
-                  placeholder="cm"
-                  value={product.genislik || ''}
-                  onChange={(e) => setProduct(s => ({ ...s, genislik: e.target.value ? Number(e.target.value) : undefined }))}
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Yükseklik</Label>
-                <Input
-                  type="number"
-                  placeholder="cm"
-                  value={product.yukseklik || ''}
-                  onChange={(e) => setProduct(s => ({ ...s, yukseklik: e.target.value ? Number(e.target.value) : undefined }))}
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Derinlik</Label>
-                <Input
-                  type="number"
-                  placeholder="cm"
-                  value={product.derinlik || ''}
-                  onChange={(e) => setProduct(s => ({ ...s, derinlik: e.target.value ? Number(e.target.value) : undefined }))}
-                  min="0"
-                  step="0.1"
-                />
-              </div>
+              <NeuInput
+                label="Genişlik"
+                type="number"
+                placeholder="cm"
+                value={product.genislik || ''}
+                onChange={(e) => setProduct(s => ({ ...s, genislik: e.target.value ? Number(e.target.value) : undefined }))}
+              />
+              <NeuInput
+                label="Yükseklik"
+                type="number"
+                placeholder="cm"
+                value={product.yukseklik || ''}
+                onChange={(e) => setProduct(s => ({ ...s, yukseklik: e.target.value ? Number(e.target.value) : undefined }))}
+              />
+              <NeuInput
+                label="Derinlik"
+                type="number"
+                placeholder="cm"
+                value={product.derinlik || ''}
+                onChange={(e) => setProduct(s => ({ ...s, derinlik: e.target.value ? Number(e.target.value) : undefined }))}
+              />
             </div>
             {product.genislik && product.yukseklik && product.derinlik && (
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-[var(--dashboard-muted)] mt-1">
                 Hesaplanan hacim: <span className="font-mono font-semibold">{((product.genislik * product.yukseklik * product.derinlik) / 1000).toFixed(2)} L</span>
               </div>
             )}
-          </div>
+          </Section>
         </div>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline" disabled={isSaving}>İptal</Button>
-          </DialogClose>
-          <Button onClick={handleSubmit} disabled={isSaving}>
-            {isSaving ? <Loader2 className="animate-spin mr-2" /> : 'Kaydet'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+        {/* Footer - Sticky */}
+        <div className="flex items-center justify-between p-5 pt-3 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+          <button onClick={onClose} className="neu-btn-universal px-5 py-2.5 rounded-xl text-sm font-semibold" disabled={isSaving}>
+            İptal
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isSaving}
+            className="neu-btn-universal neu-text-primary px-6 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 disabled:opacity-50"
+          >
+            {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isSaving ? 'Kaydediliyor...' : 'Kaydet'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
