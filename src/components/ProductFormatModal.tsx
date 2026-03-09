@@ -7,16 +7,16 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Loader2 } from 'lucide-react';
+import { Loader2, GitBranchPlus } from 'lucide-react';
 import type { ProductCode, Currency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { doc, setDoc, addDoc, collection, getDocs, query, where, updateDoc } from 'firebase/firestore';
+import { doc, addDoc, collection, getDocs, query, where, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { CostInput } from './CostInput';
 import { useAuth } from '@/contexts/auth-context';
 import TrackingModeSelect from './TrackingModeSelect';
 import { TrackingMode, resolveDefaultTrackingMode, TRACKING_MODE_LABEL } from '@/lib/tracking';
-import BarcodeFormatSelect, { type FormatValue } from './BarcodeFormatSelect';
+import BarcodeFormatSelect from './BarcodeFormatSelect';
 import BarcodeFormatMultiSelect from './BarcodeFormatMultiSelect';
 
 type Definitions = {
@@ -35,6 +35,8 @@ interface ProductFormatModalProps {
   onClose: () => void;
   productCodes: ProductCode[];
   definitions: Definitions;
+  versions?: ProductCode[];
+  onSetActiveVersion?: (versionId: string) => Promise<void>;
 }
 
 /**
@@ -59,6 +61,31 @@ function cleanDataForFirestore(data: Record<string, any>): Record<string, any> {
   return cleaned;
 }
 
+const toVersionedPayload = (
+  input: Partial<ProductCode & { trackingMode: TrackingMode }>,
+  multiFormatMode: boolean,
+): Omit<ProductCode, 'id'> => ({
+  stokKodu: String(input.stokKodu || '').trim(),
+  stokAdi: String(input.stokAdi || '').trim(),
+  urunGrubu: input.urunGrubu || 'kit',
+  anaBirim: input.anaBirim || 'Kutu',
+  cost: input.cost || 0,
+  currency: input.currency || 'EUR',
+  marka: String(input.marka || '').trim() || null,
+  laboratuvarGrubu: String(input.laboratuvarGrubu || '').trim() || null,
+  testGrubu: String(input.testGrubu || '').trim() || null,
+  cihazGrubu: String(input.cihazGrubu || '').trim() || null,
+  testAdi: String(input.testAdi || '').trim() || null,
+  barcodeNumber: String(input.barcodeNumber || '').trim() || null,
+  barcodeFormatId: multiFormatMode ? null : (input.barcodeFormatId || null),
+  barcodeFormatIds: multiFormatMode ? ((input as any).barcodeFormatIds || []) : null,
+  ambalajDegeri: input.ambalajDegeri || null,
+  trackingMode: input.trackingMode || resolveDefaultTrackingMode(input as any),
+  genislik: input.genislik || null,
+  yukseklik: input.yukseklik || null,
+  derinlik: input.derinlik || null,
+});
+
 
 export const ProductFormatModal: FC<ProductFormatModalProps> = ({
   open,
@@ -66,7 +93,9 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
   onSave,
   onClose,
   productCodes,
-  definitions
+  definitions,
+  versions = [],
+  onSetActiveVersion,
 }) => {
   const { toast } = useToast();
   const { currentUser } = useAuth();
@@ -75,6 +104,14 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     trackingMode: resolveDefaultTrackingMode(initial as any),
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [isVersionModalOpen, setIsVersionModalOpen] = useState(false);
+  const [versionDraft, setVersionDraft] = useState<Partial<ProductCode & { trackingMode: TrackingMode }>>({
+    ...initial,
+    id: undefined,
+    stokKodu: '',
+    trackingMode: resolveDefaultTrackingMode(initial as any),
+  });
+  const [isVersionSaving, setIsVersionSaving] = useState(false);
 
   // Çoklu format modu kontrolü - eğer barcodeFormatIds varsa çoklu mod aktif
   const hasMultipleFormats = Array.isArray((initial as any)?.barcodeFormatIds) &&
@@ -89,6 +126,12 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     const hasMulti = Array.isArray((initial as any)?.barcodeFormatIds) &&
       (initial as any).barcodeFormatIds.length > 0;
     setMultiFormatMode(hasMulti);
+    setVersionDraft({
+      ...initial,
+      id: undefined,
+      stokKodu: '',
+      trackingMode: resolveDefaultTrackingMode(initial as any),
+    });
   }, [initial]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -117,29 +160,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     setIsSaving(true);
     
     // Explicitly prepare the data payload, defaulting undefined/empty strings to null
-    const productData: Omit<ProductCode, 'id'> = {
-      stokKodu: product.stokKodu!.trim(),
-      stokAdi: product.stokAdi!.trim(),
-      urunGrubu: product.urunGrubu || 'kit',
-      anaBirim: product.anaBirim || 'Kutu',
-      cost: product.cost || 0,
-      currency: product.currency || 'EUR',
-      marka: product.marka?.trim() || null,
-      laboratuvarGrubu: product.laboratuvarGrubu?.trim() || null,
-      testGrubu: product.testGrubu?.trim() || null,
-      cihazGrubu: product.cihazGrubu?.trim() || null,
-      testAdi: product.testAdi?.trim() || null,
-      barcodeNumber: (product.barcodeNumber || '').trim() || null,
-      // Çoklu format modunda barcodeFormatIds kullan, tek modda barcodeFormatId
-      barcodeFormatId: multiFormatMode ? null : (product.barcodeFormatId || null),
-      barcodeFormatIds: multiFormatMode ? ((product as any).barcodeFormatIds || []) : null,
-      ambalajDegeri: product.ambalajDegeri || null,
-      trackingMode: product.trackingMode || resolveDefaultTrackingMode(product as any),
-      // Ürün boyutları (cm cinsinden)
-      genislik: product.genislik || null,
-      yukseklik: product.yukseklik || null,
-      derinlik: product.derinlik || null,
-    };
+    const productData = toVersionedPayload(product, multiFormatMode);
 
     try {
       if (product.id) {
@@ -171,13 +192,97 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     }
   };
 
+  const handleVersionChangeSave = async () => {
+    if (!currentUser || !product.id) return;
+    if (!versionDraft.stokKodu?.trim() || !versionDraft.stokAdi?.trim()) {
+      toast({ title: 'Hata', description: 'Yeni versiyon için stok kodu ve stok adı zorunludur.', variant: 'destructive' });
+      return;
+    }
+
+    setIsVersionSaving(true);
+    try {
+      const nextCode = versionDraft.stokKodu.trim();
+      const duplicate = productCodes.find(p => p.stokKodu === nextCode);
+      if (duplicate) {
+        toast({ title: 'Hata', description: 'Bu stok kodu zaten kullanılıyor.', variant: 'destructive' });
+        return;
+      }
+
+      const currentVersion = Number((product as any).versionNumber || 1);
+      const versionGroupId = (product as any).versionGroupId || product.id;
+      const payload = cleanDataForFirestore({
+        ...toVersionedPayload(versionDraft, multiFormatMode),
+        versionGroupId,
+        versionNumber: currentVersion + 1,
+        isActiveVersion: true,
+        previousVersionId: product.id,
+        updatedByUid: currentUser.uid,
+        updatedByName: (currentUser as any).name || currentUser.email || '',
+      });
+
+      const batch = writeBatch(db);
+      const newDocRef = doc(collection(db, 'productCodes'));
+      batch.set(newDocRef, payload);
+      batch.update(doc(db, 'productCodes', product.id), {
+        versionGroupId,
+        versionNumber: currentVersion,
+        isActiveVersion: false,
+      });
+      await batch.commit();
+
+      toast({ title: 'Başarılı', description: 'Versiyon değişikliği kaydedildi.' });
+      setIsVersionModalOpen(false);
+      onSave({ id: newDocRef.id, ...(payload as any) } as ProductCode);
+      onClose();
+    } catch (error: any) {
+      toast({ title: 'Hata', description: `Versiyon değiştirilemedi: ${error.code || error.message}`, variant: 'destructive' });
+    } finally {
+      setIsVersionSaving(false);
+    }
+  };
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{product.id ? 'Ürün Düzenle' : 'Yeni Ürün'}</DialogTitle>
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle>{product.id ? 'Ürün Düzenle' : 'Yeni Ürün'}</DialogTitle>
+            {product.id && (
+              <Button size="sm" variant="secondary" onClick={() => setIsVersionModalOpen(true)}>
+                <GitBranchPlus className="mr-2 h-4 w-4" /> Versiyon Değişikliği
+              </Button>
+            )}
+          </div>
         </DialogHeader>
         <div className="space-y-3 py-3 max-h-[70vh] overflow-y-auto pr-2">
+          {product.id && versions.length > 0 && (
+            <div className="border rounded-md p-3 bg-muted/40 space-y-2">
+              <p className="text-xs font-medium">Versiyonlar</p>
+              <div className="space-y-1">
+                {versions
+                  .slice()
+                  .sort((a, b) => Number((b as any).versionNumber || 1) - Number((a as any).versionNumber || 1))
+                  .map((v) => (
+                    <div key={v.id} className="flex items-center justify-between text-xs">
+                      <span className="font-mono">v{(v as any).versionNumber || 1} · {v.stokKodu} · {v.stokAdi}</span>
+                      {(v as any).isActiveVersion === false ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onSetActiveVersion?.(v.id)}
+                        >
+                          Aktif Yap
+                        </Button>
+                      ) : (
+                        <span className="text-emerald-600 font-semibold">Aktif</span>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
           <div>
             <Label>Stok Kodu</Label>
             <Input
@@ -217,7 +322,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
             <Label>Test Adı</Label>
             <Input
               name="testAdi"
-              value={product.testAdi || ''}
+              value={String((product as any).testAdi || '')}
               onChange={handleChange}
               placeholder="Örn: HbA1c, TSH, Ferritin..."
             />
@@ -346,7 +451,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
                 <Input
                   type="number"
                   placeholder="cm"
-                  value={product.genislik || ''}
+                  value={Number((product as any).genislik || 0) || ''}
                   onChange={(e) => setProduct(s => ({ ...s, genislik: e.target.value ? Number(e.target.value) : undefined }))}
                   min="0"
                   step="0.1"
@@ -357,7 +462,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
                 <Input
                   type="number"
                   placeholder="cm"
-                  value={product.yukseklik || ''}
+                  value={Number((product as any).yukseklik || 0) || ''}
                   onChange={(e) => setProduct(s => ({ ...s, yukseklik: e.target.value ? Number(e.target.value) : undefined }))}
                   min="0"
                   step="0.1"
@@ -368,16 +473,16 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
                 <Input
                   type="number"
                   placeholder="cm"
-                  value={product.derinlik || ''}
+                  value={Number((product as any).derinlik || 0) || ''}
                   onChange={(e) => setProduct(s => ({ ...s, derinlik: e.target.value ? Number(e.target.value) : undefined }))}
                   min="0"
                   step="0.1"
                 />
               </div>
             </div>
-            {product.genislik && product.yukseklik && product.derinlik && (
+            {Number((product as any).genislik) && Number((product as any).yukseklik) && Number((product as any).derinlik) && (
               <div className="text-xs text-muted-foreground">
-                Hesaplanan hacim: <span className="font-mono font-semibold">{((product.genislik * product.yukseklik * product.derinlik) / 1000).toFixed(2)} L</span>
+                Hesaplanan hacim: <span className="font-mono font-semibold">{((Number((product as any).genislik) * Number((product as any).yukseklik) * Number((product as any).derinlik)) / 1000).toFixed(2)} L</span>
               </div>
             )}
           </div>
@@ -392,5 +497,66 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={isVersionModalOpen} onOpenChange={setIsVersionModalOpen}>
+      <DialogContent className="max-w-6xl">
+        <DialogHeader>
+          <DialogTitle>Versiyon Değişikliği</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
+          <div className="space-y-2 border rounded-md p-3">
+            <p className="text-sm font-semibold">Eski Bilgiler</p>
+            <Input value={product.stokKodu || ''} disabled />
+            <Input value={product.stokAdi || ''} disabled />
+            <Input value={product.marka || ''} disabled />
+            <Input value={product.laboratuvarGrubu || ''} disabled />
+            <Input value={product.testGrubu || ''} disabled />
+            <Input value={String((product as any).testAdi || '')} disabled />
+            <Input value={product.cihazGrubu || ''} disabled />
+            <Input value={product.urunGrubu || ''} disabled />
+            <Input value={String(product.ambalajDegeri || '')} disabled />
+            <Input value={product.anaBirim || ''} disabled />
+            <Input value={product.barcodeNumber || ''} disabled />
+            <Input value={String(product.cost || '')} disabled />
+            <Input value={product.currency || ''} disabled />
+            <Input value={String(product.genislik || '')} disabled />
+            <Input value={String(product.yukseklik || '')} disabled />
+            <Input value={String(product.derinlik || '')} disabled />
+          </div>
+
+          <div className="space-y-2 border rounded-md p-3">
+            <p className="text-sm font-semibold">Yeni Bilgiler</p>
+            <Input
+              placeholder="Yeni Stok Kodu"
+              value={versionDraft.stokKodu || ''}
+              onChange={(e) => setVersionDraft(s => ({ ...s, stokKodu: e.target.value }))}
+            />
+            <Input value={versionDraft.stokAdi || ''} onChange={(e) => setVersionDraft(s => ({ ...s, stokAdi: e.target.value }))} />
+            <Input value={versionDraft.marka || ''} onChange={(e) => setVersionDraft(s => ({ ...s, marka: e.target.value }))} />
+            <Input value={versionDraft.laboratuvarGrubu || ''} onChange={(e) => setVersionDraft(s => ({ ...s, laboratuvarGrubu: e.target.value }))} />
+            <Input value={versionDraft.testGrubu || ''} onChange={(e) => setVersionDraft(s => ({ ...s, testGrubu: e.target.value }))} />
+            <Input value={String((versionDraft as any).testAdi || '')} onChange={(e) => setVersionDraft(s => ({ ...s, testAdi: e.target.value }))} />
+            <Input value={versionDraft.cihazGrubu || ''} onChange={(e) => setVersionDraft(s => ({ ...s, cihazGrubu: e.target.value }))} />
+            <Input value={versionDraft.urunGrubu || ''} onChange={(e) => setVersionDraft(s => ({ ...s, urunGrubu: e.target.value as any }))} />
+            <Input type="number" value={versionDraft.ambalajDegeri || ''} onChange={(e) => setVersionDraft(s => ({ ...s, ambalajDegeri: e.target.value ? Number(e.target.value) : undefined }))} />
+            <Input value={versionDraft.anaBirim || ''} onChange={(e) => setVersionDraft(s => ({ ...s, anaBirim: e.target.value }))} />
+            <Input value={versionDraft.barcodeNumber || ''} onChange={(e) => setVersionDraft(s => ({ ...s, barcodeNumber: e.target.value }))} />
+            <Input type="number" value={versionDraft.cost || ''} onChange={(e) => setVersionDraft(s => ({ ...s, cost: e.target.value ? Number(e.target.value) : undefined }))} />
+            <Input value={versionDraft.currency || ''} onChange={(e) => setVersionDraft(s => ({ ...s, currency: e.target.value as Currency }))} />
+            <Input type="number" value={Number((versionDraft as any).genislik || 0) || ''} onChange={(e) => setVersionDraft(s => ({ ...s, genislik: e.target.value ? Number(e.target.value) : undefined }))} />
+            <Input type="number" value={Number((versionDraft as any).yukseklik || 0) || ''} onChange={(e) => setVersionDraft(s => ({ ...s, yukseklik: e.target.value ? Number(e.target.value) : undefined }))} />
+            <Input type="number" value={Number((versionDraft as any).derinlik || 0) || ''} onChange={(e) => setVersionDraft(s => ({ ...s, derinlik: e.target.value ? Number(e.target.value) : undefined }))} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsVersionModalOpen(false)}>İptal</Button>
+          <Button onClick={handleVersionChangeSave} disabled={isVersionSaving}>
+            {isVersionSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Kaydet
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
