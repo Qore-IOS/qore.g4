@@ -14,7 +14,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import type { DepoStokItem, ProductCode } from '@/lib/types';
-import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
+import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 type NewFromCount = {
@@ -305,19 +305,18 @@ export function useLabCountMissingStock(params: {
 
   const onScanAndStageIfMissing = useCallback(
     async (rawBarcode: string) => {
-      const parsed = parseAnyBarcode(rawBarcode, barcodeFormats);
-      if (!parsed) {
+      const resolveResult = parseAndResolveBarcode(rawBarcode, barcodeFormats, productCodes);
+      if (!resolveResult || !resolveResult.parsed) {
         toast?.({ title: 'Hata', description: 'Geçersiz barkod formatı.', variant: 'destructive' });
         return { parsed: null, stagedNew: false, staged: null, createdLabDoc: null };
       }
 
-      const resolved = resolveProductFromParsed(parsed, productCodes);
-      if (!resolved.product || !resolved.stokKodu) {
+      if (!resolveResult.product || !resolveResult.parsed.stokKodu) {
           toast?.({ title: 'Hata', description: 'Barkod bir ürünle eşleşmedi.', variant: 'destructive' });
           return { parsed: null, stagedNew: false, staged: null, createdLabDoc: null };
       }
 
-      const finalParsed = resolved;
+      const finalParsed = resolveResult.parsed;
       const serial = finalParsed.seriNumarasi || '';
 
       if (serial && existingLabSerials.has(serial)) {

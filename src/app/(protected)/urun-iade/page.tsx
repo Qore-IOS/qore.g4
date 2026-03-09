@@ -37,7 +37,7 @@ type ScanRow = DepoStokItem & {
 export default function UrunIadePanel() {
   const { toast } = useToast();
   const { currentUserProfile } = useAuth();
-  const { parseAnyBarcode, resolveProductFromParsed, formats: barcodeFormats } = useBarcodeParser();
+  const { parseAndResolveBarcode, formats: barcodeFormats } = useBarcodeParser();
   const router = useRouter();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -102,14 +102,15 @@ export default function UrunIadePanel() {
     }
     setProcessing(true);
 
-    const parsed = parseAnyBarcode(barcode, barcodeFormats);
-    if (!parsed) {
+    const resolveResult = parseAndResolveBarcode(barcode, barcodeFormats, productCodes as any);
+    if (!resolveResult || !resolveResult.parsed) {
         toast({ title: 'Geçersiz Barkod', description: 'Barkod formatı tanınamadı.', variant: 'destructive'});
         setProcessing(false);
         return;
     }
 
-    const { product, stokKodu, seriNumarasi, lotNumarasi } = resolveProductFromParsed(parsed, productCodes as any);
+    const { product } = resolveResult;
+    const { stokKodu, seriNumarasi, lotNumarasi } = resolveResult.parsed;
     if (!product) {
         toast({ title: 'Ürün Bulunamadı', description: 'Barkodla eşleşen bir ürün tanımı bulunamadı.', variant: 'destructive'});
         setProcessing(false);
@@ -176,7 +177,7 @@ export default function UrunIadePanel() {
 
     setReturnBarcode('');
     setProcessing(false);
-  }, [shippedStock, returnItems, barcodeFormats, toast, selectedLabId, parseAnyBarcode, productCodes, resolveProductFromParsed]);
+  }, [shippedStock, returnItems, barcodeFormats, toast, selectedLabId, parseAndResolveBarcode, productCodes]);
 
 
   useHidScanner({

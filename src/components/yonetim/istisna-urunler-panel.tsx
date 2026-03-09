@@ -24,7 +24,7 @@ import { Label } from '@/components/ui/label';
 import { motion } from 'framer-motion';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import useHidScanner from '@/hooks/useHidScanner';
-import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
+import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 
@@ -88,20 +88,18 @@ export default function IstisnaUrunlerPanel() {
     setIsProcessingScan(true);
 
     try {
-        let parsed: ParsedGeneric | null = parseAnyBarcode(barcodeData, barcodeFormats);
+        const resolveResult = parseAndResolveBarcode(barcodeData, barcodeFormats, productCodes);
 
-        if (!parsed) {
+        if (!resolveResult || !resolveResult.parsed) {
           throw new Error('Barkod tanımlı formatlarla eşleşmiyor.');
         }
 
-        const resolved = resolveProductFromParsed(parsed, productCodes);
-        
-        if (!resolved.product) {
+        if (!resolveResult.product) {
           throw new Error(`Barkod numarası/referans herhangi bir ürünle eşleşmedi.`);
         }
-        
-        const { lotNumarasi, miadFormatted, seriNumarasi } = resolved;
-        const matchedProduct = resolved.product;
+
+        const { lotNumarasi, miadFormatted, seriNumarasi } = resolveResult.parsed;
+        const matchedProduct = resolveResult.product;
         
         const newItem: ScanRow = {
           id: generateId(), 

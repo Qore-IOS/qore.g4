@@ -49,7 +49,7 @@ import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapsh
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
-import { parseAnyBarcode, resolveProductFromParsed, decodeBulkSerialQrPayload, encodeBulkSerialQrPayload } from '@/lib/barcode';
+import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode, decodeBulkSerialQrPayload, encodeBulkSerialQrPayload } from '@/lib/barcode';
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';
@@ -502,8 +502,8 @@ export default function AnaPanel(props: AnaPanelProps) {
 
     setIsProcessingScan(true);
     try {
-        const parsed: ParsedGeneric | null = parseAnyBarcode(trimmedData, barcodeFormats);
-        if (!parsed) {
+        const resolveResult = parseAndResolveBarcode(trimmedData, barcodeFormats, productCodes as any);
+        if (!resolveResult || !resolveResult.parsed) {
           malKabulLogger.warn('Single barcode parse failed', {
             source,
             payloadPreview: trimmedData.slice(0, 160),
@@ -511,17 +511,17 @@ export default function AnaPanel(props: AnaPanelProps) {
           throw new Error('Barkod tanımlı formatlarla eşleşmiyor.');
         }
 
-        const resolved = resolveProductFromParsed(parsed, productCodes as any);
-        if (!resolved.product) throw new Error(`Barkod numarası/referans herhangi bir ürünle eşleşmedi.`);
+        const resolved = resolveResult.parsed;
+        if (!resolveResult.product) throw new Error(`Barkod numarası/referans herhangi bir ürünle eşleşmedi.`);
 
         const { lotNumarasi, miadFormatted, seriNumarasi, stokKodu } = resolved;
         if (!stokKodu) throw new Error('Stok kodu bulunamadı.');
 
-        const matchedProduct = resolved.product;
+        const matchedProduct = resolveResult.product;
 
         // Determine tracking mode based on what the barcode contains
-        const matchedFormat = parsed.matchedFormatId
-          ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+        const matchedFormat = resolved.matchedFormatId
+          ? barcodeFormats.find(f => f.id === resolved.matchedFormatId)
           : undefined;
         const staticTrackingMode = productTracking[stokKodu] || resolveDefaultTrackingMode(matchedProduct as any);
         const mode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
