@@ -680,7 +680,7 @@ export default function UrunKoduPanel() {
       marka: Array.from(markaSet).sort(),
       urunGrubu: Array.from(urunGrubuSet).sort()
     };
-  }, [activeProductCodes]);
+  }, [productCodes]);
 
   const filteredProductCodes = useMemo(() => {
     let items = productCodes;
@@ -712,14 +712,14 @@ export default function UrunKoduPanel() {
 
   const brandTabOptions = useMemo(() => {
     const counts: Record<string, number> = {};
-    activeProductCodes.forEach(p => {
+    productCodes.forEach(p => {
       const brand = p.marka || 'Diğer';
       counts[brand] = (counts[brand] || 0) + 1;
     });
     const items = Object.entries(counts)
       .map(([brand, count]) => ({ brand, count }))
       .sort((a, b) => a.brand.localeCompare(b.brand, 'tr'));
-    const total = activeProductCodes.length;
+    const total = productCodes.length;
     return { total, items };
   }, [productCodes]);
 
