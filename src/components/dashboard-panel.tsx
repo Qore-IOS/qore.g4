@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query, where, getCountFromServer, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExpiringProductsCount } from '@/actions/stokActions';
@@ -90,32 +90,34 @@ export default function DashboardPanel({
     };
   }, []);
 
-  // Total stock cost
+  // Total stock cost – fetch all unshipped stock once, join with product prices client-side
   const [totalStockCost, setTotalStockCost] = useState(0);
   useEffect(() => {
     (async () => {
       try {
-        const productSnap = await getDocs(collection(db, 'productCodes'));
-        const pricedProducts: { stokKodu: string; cost: number }[] = [];
+        const [productSnap, stockSnap] = await Promise.all([
+          getDocs(collection(db, 'productCodes')),
+          getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', false))),
+        ]);
+
+        const priceMap = new Map<string, number>();
         productSnap.docs.forEach(d => {
           const data = d.data();
-          if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+          if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
         });
-        if (pricedProducts.length === 0) return;
-        const counts = await Promise.all(
-          pricedProducts.map(async (p) => {
-            const snap = await getCountFromServer(
-              query(collection(db, 'depoStok'), where('stokKodu', '==', p.stokKodu))
-            );
-            return snap.data().count * p.cost;
-          })
-        );
-        setTotalStockCost(counts.reduce((sum, v) => sum + v, 0));
+
+        let total = 0;
+        stockSnap.docs.forEach(d => {
+          const stokKodu = d.data().stokKodu;
+          const cost = priceMap.get(stokKodu);
+          if (cost) total += cost;
+        });
+        setTotalStockCost(total);
       } catch (e) { console.error('Total stock cost error:', e); }
     })();
   }, []);
 
-  // Yesterday's consumption cost
+  // Yesterday's consumption cost – fetch by date range, then join client-side
   const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
   useEffect(() => {
     (async () => {
@@ -124,27 +126,29 @@ export default function DashboardPanel({
         yesterday.setDate(yesterday.getDate() - 1);
         const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
         const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
-        const productSnap = await getDocs(collection(db, 'productCodes'));
-        const pricedProducts: { stokKodu: string; cost: number }[] = [];
+
+        const [productSnap, consumptionSnap] = await Promise.all([
+          getDocs(collection(db, 'productCodes')),
+          getDocs(query(
+            collection(db, 'tuketimKayitlari'),
+            where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
+            where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
+          )),
+        ]);
+
+        const priceMap = new Map<string, number>();
         productSnap.docs.forEach(d => {
           const data = d.data();
-          if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+          if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
         });
-        if (pricedProducts.length === 0) return;
-        const counts = await Promise.all(
-          pricedProducts.map(async (p) => {
-            const snap = await getCountFromServer(
-              query(
-                collection(db, 'tuketimKayitlari'),
-                where('stokKodu', '==', p.stokKodu),
-                where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
-                where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
-              )
-            );
-            return snap.data().count * p.cost;
-          })
-        );
-        setYesterdayConsumptionCost(counts.reduce((sum, v) => sum + v, 0));
+
+        let total = 0;
+        consumptionSnap.docs.forEach(d => {
+          const stokKodu = d.data().stokKodu;
+          const cost = priceMap.get(stokKodu);
+          if (cost) total += cost;
+        });
+        setYesterdayConsumptionCost(total);
       } catch (e) { console.error('Yesterday consumption cost error:', e); }
     })();
   }, []);
