@@ -90,105 +90,84 @@ export default function DashboardPanel({
     };
   }, []);
 
-  // Server-side query: count of products expiring within 45 days across all depots
-  const { data: expiringProductCount = 0 } = useQuery({
-    queryKey: ['expiringProductCount45'],
-    queryFn: async () => {
-      const now = new Date();
-      const cutoff = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
-      const q = query(
-        collection(db, 'depoStok'),
-        where('isShipped', '==', false),
-        where('miad', '<=', Timestamp.fromDate(cutoff)),
-        where('miad', '>=', Timestamp.fromDate(now))
-      );
-      const snapshot = await getCountFromServer(q);
-      return snapshot.data().count;
-    },
-    staleTime: 5 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-  });
+  // Total stock cost
+  const [totalStockCost, setTotalStockCost] = useState(0);
+  useEffect(() => {
+    (async () => {
+      try {
+        const productSnap = await getDocs(collection(db, 'productCodes'));
+        const pricedProducts: { stokKodu: string; cost: number }[] = [];
+        productSnap.docs.forEach(d => {
+          const data = d.data();
+          if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+        });
+        if (pricedProducts.length === 0) return;
+        const counts = await Promise.all(
+          pricedProducts.map(async (p) => {
+            const snap = await getCountFromServer(
+              query(collection(db, 'depoStok'), where('stokKodu', '==', p.stokKodu))
+            );
+            return snap.data().count * p.cost;
+          })
+        );
+        setTotalStockCost(counts.reduce((sum, v) => sum + v, 0));
+      } catch (e) { console.error('Total stock cost error:', e); }
+    })();
+  }, []);
 
-  // Server-side: Total stock cost using getCountFromServer per stokKodu (no document downloads)
-  const { data: totalStockCost = 0 } = useQuery({
-    queryKey: ['dashboardTotalStockCost'],
-    queryFn: async () => {
-      // Only fetch small productCodes collection
-      const productSnap = await getDocs(collection(db, 'productCodes'));
-      const pricedProducts: { stokKodu: string; cost: number }[] = [];
-      productSnap.docs.forEach(d => {
-        const data = d.data();
-        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
-      });
-      if (pricedProducts.length === 0) return 0;
-      // Count stock items per stokKodu server-side (no document data transfer)
-      const counts = await Promise.all(
-        pricedProducts.map(async (p) => {
-          const snap = await getCountFromServer(
-            query(collection(db, 'depoStok'), where('stokKodu', '==', p.stokKodu))
-          );
-          return snap.data().count * p.cost;
-        })
-      );
-      return counts.reduce((sum, v) => sum + v, 0);
-    },
-    staleTime: 10 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-  });
+  // Yesterday's consumption cost
+  const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
+  useEffect(() => {
+    (async () => {
+      try {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+        const productSnap = await getDocs(collection(db, 'productCodes'));
+        const pricedProducts: { stokKodu: string; cost: number }[] = [];
+        productSnap.docs.forEach(d => {
+          const data = d.data();
+          if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
+        });
+        if (pricedProducts.length === 0) return;
+        const counts = await Promise.all(
+          pricedProducts.map(async (p) => {
+            const snap = await getCountFromServer(
+              query(
+                collection(db, 'tuketimKayitlari'),
+                where('stokKodu', '==', p.stokKodu),
+                where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
+                where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
+              )
+            );
+            return snap.data().count * p.cost;
+          })
+        );
+        setYesterdayConsumptionCost(counts.reduce((sum, v) => sum + v, 0));
+      } catch (e) { console.error('Yesterday consumption cost error:', e); }
+    })();
+  }, []);
 
-  // Server-side: Yesterday's consumption cost using getCountFromServer per stokKodu
-  const { data: yesterdayConsumptionCost = 0 } = useQuery({
-    queryKey: ['dashboardYesterdayConsumptionCost'],
-    queryFn: async () => {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
-      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
-      const productSnap = await getDocs(collection(db, 'productCodes'));
-      const pricedProducts: { stokKodu: string; cost: number }[] = [];
-      productSnap.docs.forEach(d => {
-        const data = d.data();
-        if (data.cost && data.stokKodu) pricedProducts.push({ stokKodu: data.stokKodu, cost: data.cost });
-      });
-      if (pricedProducts.length === 0) return 0;
-      const counts = await Promise.all(
-        pricedProducts.map(async (p) => {
-          const snap = await getCountFromServer(
-            query(
-              collection(db, 'tuketimKayitlari'),
-              where('stokKodu', '==', p.stokKodu),
-              where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
-              where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
-            )
-          );
-          return snap.data().count * p.cost;
-        })
-      );
-      return counts.reduce((sum, v) => sum + v, 0);
-    },
-    staleTime: 10 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-  });
-
-  // Server-side: Average efficiency from totalEfficiencyRecords
-  const { data: avgEfficiency } = useQuery<number | null>({
-    queryKey: ['dashboardAvgEfficiency'],
-    queryFn: async () => {
-      const snap = await getDocs(collection(db, 'totalEfficiencyRecords'));
-      const efficiencies: number[] = [];
-      snap.docs.forEach(d => {
-        const data = d.data();
-        const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
-        if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
-          efficiencies.push(genelVerimlilik);
-        }
-      });
-      if (efficiencies.length === 0) return null;
-      return efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length;
-    },
-    staleTime: 10 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-  });
+  // Average efficiency
+  const [avgEfficiency, setAvgEfficiency] = useState<number | null>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        const efficiencies: number[] = [];
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
+          if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
+            efficiencies.push(genelVerimlilik);
+          }
+        });
+        if (efficiencies.length === 0) return;
+        setAvgEfficiency(efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length);
+      } catch (e) { console.error('Avg efficiency error:', e); }
+    })();
+  }, []);
 
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
     if (report.status === 'atama_bekliyor') acc.atamaBekleyen += 1;
