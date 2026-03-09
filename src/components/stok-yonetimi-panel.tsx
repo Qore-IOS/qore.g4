@@ -732,7 +732,7 @@ export default function StokYonetimiPanel() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="sticky top-[49px] z-10">
+              <thead className="z-10">
                 <tr className="bg-[var(--dashboard-surface-2)]">
                   {/* Color strip spacer */}
                   <th className="w-1.5" />
