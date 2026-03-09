@@ -84,7 +84,7 @@ export default function ImhaEdilenKitlerPanel() {
 
     // Barcode scanning
     const { formats: barcodeFormats, loading: formatsLoading } = useSafeBarcodeFormats();
-    const { parseAnyBarcode, resolveProductFromParsed } = useBarcodeParser();
+    const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
     const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
     const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
 
@@ -205,29 +205,35 @@ export default function ImhaEdilenKitlerPanel() {
             return;
         }
 
-        let parsed = null;
+        let resolveResult: ReturnType<typeof parseAndResolveBarcode> = null;
         if (selectedFormatId && selectedFormatId !== '__auto__') {
             const fmt = barcodeFormats.find(f => f.id === selectedFormatId);
-            if (fmt) parsed = parseAnyBarcode(raw, [fmt]);
+            if (fmt) {
+              const parsed = parseAnyBarcode(raw, [fmt]);
+              if (parsed) {
+                const resolved = resolveProductFromParsed(parsed, products);
+                resolveResult = { parsed: resolved, product: resolved.product };
+              }
+            }
         }
-        if (!parsed) {
-            parsed = parseAnyBarcode(raw, barcodeFormats);
+        if (!resolveResult || !resolveResult.product) {
+            resolveResult = parseAndResolveBarcode(raw, barcodeFormats, products);
         }
 
-        if (!parsed) {
+        if (!resolveResult || !resolveResult.parsed) {
             playFeedback(true);
             toast({ title: 'Ayrıştırma Hatası', description: 'Barkod tanımlı formatlarla eşleşmiyor.', variant: 'destructive' });
             return;
         }
 
-        const resolved = resolveProductFromParsed(parsed, products);
-        if (!resolved.product || !resolved.stokKodu) {
+        const resolved = resolveResult.parsed;
+        if (!resolveResult.product || !resolved.stokKodu) {
             playFeedback(true);
             toast({ title: 'Ürün Bulunamadı', description: 'Barkoddan bir ürün çözümlenemedi.', variant: 'destructive' });
             return;
         }
 
-        const { product } = resolved;
+        const product = resolveResult.product;
         const stokKodu = product.stokKodu ?? '';
         const stokAdi = product.stokAdi ?? '';
         const lot = resolved.lotNumarasi || '';
@@ -242,8 +248,8 @@ export default function ImhaEdilenKitlerPanel() {
         }
 
         // Determine tracking mode based on what the barcode contains
-        const matchedFormat = parsed.matchedFormatId
-            ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+        const matchedFormat = resolved.matchedFormatId
+            ? barcodeFormats.find(f => f.id === resolved.matchedFormatId)
             : undefined;
         const mode: TrackingMode = resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
 
@@ -382,7 +388,7 @@ export default function ImhaEdilenKitlerPanel() {
         setPendingItem(newItem);
         setRemainingTestsInput(String(defaultRemainingTests));
         setIsRemainingTestsDialogOpen(true);
-    }, [selectedSourceType, selectedDepotId, selectedLabId, selectedFormatId, barcodeFormats, products, destroyedItems, parseAnyBarcode, resolveProductFromParsed, toast, selectedSourceName, countStockBySerial, countStockByLot]);
+    }, [selectedSourceType, selectedDepotId, selectedLabId, selectedFormatId, barcodeFormats, products, destroyedItems, parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode, toast, selectedSourceName, countStockBySerial, countStockByLot]);
 
     useHidScanner({
         enabled: true,

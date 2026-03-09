@@ -481,6 +481,38 @@ export function parseAllBarcodes(rawInput: string, formats: AnyFormat[]): Parsed
     .map(({ formatPriority, ...rest }) => rest);
 }
 
+/**
+ * Parses a barcode and resolves it to a product by trying ALL matching formats.
+ * Unlike parseAnyBarcode (which returns only the highest-scoring format),
+ * this function validates each parse result against the product list and
+ * returns the first one that actually matches a known product.
+ *
+ * This solves the problem where two formats share the same totalLength:
+ * both formats will regex-match the barcode, but only one will extract
+ * the correct stokKodu that exists in the product database.
+ */
+export function parseAndResolveBarcode(
+  rawInput: string,
+  formats: AnyFormat[],
+  productCodes: ProductCode[]
+): { parsed: ParsedGeneric; product?: ProductCode } | null {
+  const allResults = parseAllBarcodes(rawInput, formats);
+  if (allResults.length === 0) return null;
+
+  // Try each parse result and return the first one that matches a known product
+  for (const parsed of allResults) {
+    const resolved = resolveProductFromParsed(parsed, productCodes);
+    if (resolved.product) {
+      return { parsed: resolved, product: resolved.product };
+    }
+  }
+
+  // No product found with any format — fall back to the highest-scoring parse
+  const best = allResults[0];
+  const resolved = resolveProductFromParsed(best, productCodes);
+  return { parsed: resolved, product: resolved.product };
+}
+
 export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: ProductCode[]) {
   let product =
     (parsed.stokKodu ? productCodes.find(p => p.stokKodu === parsed.stokKodu) : undefined) ||

@@ -119,7 +119,7 @@ export default function ToplamaPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
-  const { parseAnyBarcode, resolveProductFromParsed, formats: barcodeFormats } = useBarcodeParser();
+  const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode, formats: barcodeFormats } = useBarcodeParser();
   const { suppressGlobalLoading } = useLoading();
 
   // Suppress global loading overlay - it interferes with barcode scanning
@@ -395,9 +395,9 @@ export default function ToplamaPage() {
     }
     scanLockRef.current = true;
     try {
-      const parsed = parseAnyBarcode(code, barcodeFormats);
+      const resolveResult = parseAndResolveBarcode(code, barcodeFormats, productCodes);
 
-      if (!parsed) {
+      if (!resolveResult || !resolveResult.parsed) {
           const stockItem = depoStok.find(item => item.seriNumarasi === code && item.depotId === order?.depotId && !item.isShipped);
           if (stockItem) {
               const pickItem = pickingList.find(it => it.stokKodu === stockItem.stokKodu);
@@ -418,8 +418,9 @@ export default function ToplamaPage() {
           return;
       }
 
-      const resolved = resolveProductFromParsed(parsed, productCodes);
-      const { product, stokKodu, seriNumarasi, lotNumarasi } = resolved;
+      const resolved = resolveResult.parsed;
+      const product = resolveResult.product;
+      const { stokKodu, seriNumarasi, lotNumarasi } = resolved;
 
       if (!product || !stokKodu) {
           pushScanEvent(false, `Barkod eşleşmedi: ${code.slice(0, 20)}…`);
@@ -433,8 +434,8 @@ export default function ToplamaPage() {
       }
 
       // Use effective tracking mode based on actual barcode content (like direct transfer)
-      const matchedFormat = parsed.matchedFormatId
-        ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+      const matchedFormat = resolved.matchedFormatId
+        ? barcodeFormats.find(f => f.id === resolved.matchedFormatId)
         : undefined;
       const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
 
@@ -517,7 +518,7 @@ export default function ToplamaPage() {
     } finally {
       scanLockRef.current = false;
     }
-  }, [order, scannedSerials, depoStok, pickingList, addScannedSerial, parseAnyBarcode, productCodes, resolveProductFromParsed, barcodeFormats, pushScanEvent]);
+  }, [order, scannedSerials, depoStok, pickingList, addScannedSerial, parseAndResolveBarcode, productCodes, barcodeFormats, pushScanEvent]);
   
   useHidScanner({
     enabled: true,

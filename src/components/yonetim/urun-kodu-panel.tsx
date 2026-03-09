@@ -331,6 +331,7 @@ export default function UrunKoduPanel() {
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Filter[]>([]);
   const [selectedBrandTab, setSelectedBrandTab] = useState<string>('ALL');
+  const [versionHistoryProduct, setVersionHistoryProduct] = useState<ProductCode | null>(null);
 
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [bulkTrackingMode, setBulkTrackingMode] = useState<TrackingMode>('serial');
@@ -424,7 +425,7 @@ export default function UrunKoduPanel() {
         productCount: Object.keys(costs).length,
         createdAt: Timestamp.now(),
         createdByUid: currentUser?.uid || '',
-        createdByName: currentUser?.name || currentUser?.email || '',
+        createdByName: (currentUser as any)?.name || currentUser?.email || '',
       };
       await setDoc(doc(db, 'costCheckpoints', docId), checkpointData);
       const newCheckpoint = {
@@ -470,6 +471,21 @@ export default function UrunKoduPanel() {
     } else {
       setProductCodes(prev => prev.map(p => p.id === product.id ? product : p));
     }
+    fetchAllData();
+  };
+
+  const handleSetActiveVersion = async (versionId: string) => {
+    const next = productCodes.find((p) => p.id === versionId);
+    if (!next) return;
+    const groupId = getVersionGroupId(next);
+    const groupVersions = versionsByGroup.get(groupId) || [];
+    const batch = writeBatch(db);
+    groupVersions.forEach((v) => {
+      batch.update(doc(db, 'productCodes', v.id), { isActiveVersion: v.id === versionId });
+    });
+    await batch.commit();
+    toast({ title: 'Başarılı', description: 'Aktif versiyon güncellendi.' });
+    setSelectedProduct(next);
     fetchAllData();
   };
 
@@ -664,7 +680,7 @@ export default function UrunKoduPanel() {
       marka: Array.from(markaSet).sort(),
       urunGrubu: Array.from(urunGrubuSet).sort()
     };
-  }, [productCodes]);
+  }, [activeProductCodes]);
 
   const filteredProductCodes = useMemo(() => {
     let items = productCodes;
@@ -696,14 +712,14 @@ export default function UrunKoduPanel() {
 
   const brandTabOptions = useMemo(() => {
     const counts: Record<string, number> = {};
-    productCodes.forEach(p => {
+    activeProductCodes.forEach(p => {
       const brand = p.marka || 'Diğer';
       counts[brand] = (counts[brand] || 0) + 1;
     });
     const items = Object.entries(counts)
       .map(([brand, count]) => ({ brand, count }))
       .sort((a, b) => a.brand.localeCompare(b.brand, 'tr'));
-    const total = productCodes.length;
+    const total = activeProductCodes.length;
     return { total, items };
   }, [productCodes]);
 
@@ -1210,6 +1226,8 @@ export default function UrunKoduPanel() {
           onClose={() => setIsModalOpen(false)}
           productCodes={productCodes}
           definitions={definitions}
+          versions={versionsByGroup.get(getVersionGroupId(selectedProduct)) || []}
+          onSetActiveVersion={handleSetActiveVersion}
         />
       )}
       <FiltreDialog

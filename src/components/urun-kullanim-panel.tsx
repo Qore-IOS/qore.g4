@@ -32,7 +32,7 @@ import Image from 'next/image';
 import { Label } from '@/components/ui/label';
 import { useTheme } from 'next-themes';
 import { useUsageRouteSync } from '@/hooks/useUsageRouteSync';
-import { parseAnyBarcode, resolveProductFromParsed } from '@/lib/barcode';
+import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import { TrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { emitFefoOverride } from '@/lib/notifications';
 import { Input } from './ui/input';
@@ -733,15 +733,15 @@ export default function UrunKullanimPanel() {
     }
 
     const candidate = sanitizeGS1(rawInput) || rawInput;
-    const parsed = parseAnyBarcode(candidate, barcodeFormats);
+    const resolveResult = parseAndResolveBarcode(candidate, barcodeFormats, products);
 
-    if (!parsed) {
+    if (!resolveResult || !resolveResult.parsed) {
       toast({ title: 'Barkod Ayrıştırma Hatası', description: 'Tanımlı formatlarla eşleşmedi.', variant: 'destructive' });
       return;
     }
 
-    const resolved = resolveProductFromParsed(parsed, products);
-    if (!resolved.product || !resolved.stokKodu) {
+    const resolved = resolveResult.parsed;
+    if (!resolveResult.product || !resolved.stokKodu) {
       toast({ title: 'Ürün Bulunamadı', description: 'Barkoddan bir ürün çözümlenemedi.', variant: 'destructive' });
       return;
     }
@@ -751,10 +751,10 @@ export default function UrunKullanimPanel() {
     const seri = resolved.seriNumarasi || '';
 
     // Determine tracking mode based on what the barcode contains
-    const matchedFormat = parsed.matchedFormatId
-      ? barcodeFormats.find(f => f.id === parsed.matchedFormatId)
+    const matchedFormat = resolved.matchedFormatId
+      ? barcodeFormats.find(f => f.id === resolved.matchedFormatId)
       : undefined;
-    const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, resolved.product as any);
+    const mode = resolveEffectiveTrackingMode(resolved, matchedFormat, resolveResult.product as any);
 
     let item: DepoStokItem | undefined;
 

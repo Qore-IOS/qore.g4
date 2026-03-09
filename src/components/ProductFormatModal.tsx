@@ -6,13 +6,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import type { ProductCode, Currency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { doc, setDoc, addDoc, collection, getDocs, query, where, updateDoc } from 'firebase/firestore';
+import { doc, addDoc, collection, getDocs, query, where, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { CostInput } from './CostInput';
 import { useAuth } from '@/contexts/auth-context';
 import TrackingModeSelect from './TrackingModeSelect';
 import { TrackingMode, resolveDefaultTrackingMode, TRACKING_MODE_LABEL } from '@/lib/tracking';
-import BarcodeFormatSelect, { type FormatValue } from './BarcodeFormatSelect';
+import BarcodeFormatSelect from './BarcodeFormatSelect';
 import BarcodeFormatMultiSelect from './BarcodeFormatMultiSelect';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +32,8 @@ interface ProductFormatModalProps {
   onClose: () => void;
   productCodes: ProductCode[];
   definitions: Definitions;
+  versions?: ProductCode[];
+  onSetActiveVersion?: (versionId: string) => Promise<void>;
 }
 
 /* ─── Collapsible Section ─── */
@@ -94,7 +96,9 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
   onSave,
   onClose,
   productCodes,
-  definitions
+  definitions,
+  versions = [],
+  onSetActiveVersion,
 }) => {
   const { toast } = useToast();
   const { currentUser } = useAuth();
@@ -105,6 +109,14 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     trackingMode: resolveDefaultTrackingMode(initial as any),
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [isVersionModalOpen, setIsVersionModalOpen] = useState(false);
+  const [versionDraft, setVersionDraft] = useState<Partial<ProductCode & { trackingMode: TrackingMode }>>({
+    ...initial,
+    id: undefined,
+    stokKodu: '',
+    trackingMode: resolveDefaultTrackingMode(initial as any),
+  });
+  const [isVersionSaving, setIsVersionSaving] = useState(false);
 
   const hasMultipleFormats = Array.isArray((initial as any)?.barcodeFormatIds) &&
     (initial as any).barcodeFormatIds.length > 0;
@@ -118,6 +130,12 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
     const hasMulti = Array.isArray((initial as any)?.barcodeFormatIds) &&
       (initial as any).barcodeFormatIds.length > 0;
     setMultiFormatMode(hasMulti);
+    setVersionDraft({
+      ...initial,
+      id: undefined,
+      stokKodu: '',
+      trackingMode: resolveDefaultTrackingMode(initial as any),
+    });
   }, [initial]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

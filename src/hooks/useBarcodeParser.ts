@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import type { BarcodeFormat } from '@/lib/barcode';
 import type { ParsedBarcode, ProductCode } from '@/lib/types';
 import { useSafeBarcodeFormats } from './useSafeBarcodeFormats';
-import { parseAnyBarcode, parseAllBarcodes, resolveProductFromParsed } from '@/lib/barcode';
+import { parseAnyBarcode, parseAllBarcodes, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 
 
 /** ---------- Public Hook ---------- **/
@@ -61,5 +61,5 @@ export function useBarcodeParser() {
     return resolveProductFromParsed(allResults[0], products);
   }
 
-  return { parseAuto, parseWithFormat, formats, loading, parseAnyBarcode, resolveProductFromParsed };
+  return { parseAuto, parseWithFormat, formats, loading, parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode };
 }
