@@ -43,6 +43,7 @@ import NfcStockQueryModal from './NfcStockQueryModal';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { type GroupedStockRow, type PaginatedStockResult } from '@/actions/stokActions';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
+import { resolveDefaultTrackingMode } from '@/lib/tracking';
 
 /* ────────────────────────────────────────────
    Filter Dialog (kept for marka/urunGrubu filters)
@@ -470,6 +471,18 @@ export default function StokYonetimiPanel() {
 
   const hasActiveColumnFilters = Object.values(columnFilters).some((v: string[]) => v.length > 0);
 
+  const lotTrackedStockCodes = useMemo(() => {
+    const tracked = new Set<string>();
+    for (const product of productCodes) {
+      if (!product.stokKodu) continue;
+      const trackingMode = resolveDefaultTrackingMode(product);
+      if (trackingMode === 'serial' || trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
+        tracked.add(product.stokKodu);
+      }
+    }
+    return tracked;
+  }, [productCodes]);
+
   /* ─── Miad severity helpers ─── */
   const getMiadInfo = (miadStr: string) => {
     if (!miadStr) return { days: Infinity, severity: 'normal' as const };
@@ -485,15 +498,18 @@ export default function StokYonetimiPanel() {
   };
 
   /* ─── Coverage days calculation ─── */
-  const getCoverageInfo = (stokKodu: string): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } => {
+  const getCoverageInfo = (row: GroupedStockRow): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } => {
+    const stokKodu = row.stokKodu;
     const rule = minMaxRules[stokKodu];
     if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
-    const totalProductStock = rows.reduce((acc, r) => r.stokKodu === stokKodu ? acc + r.quantity : acc, 0);
+    const stockForCoverage = lotTrackedStockCodes.has(stokKodu)
+      ? row.quantity
+      : rows.reduce((acc, r) => r.stokKodu === stokKodu ? acc + r.quantity : acc, 0);
     const periodDays = Math.floor(rule.maxGun);
     if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
     const dailyNeed = rule.max / periodDays;
     if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
-    const coverageDays = Math.floor(totalProductStock / dailyNeed);
+    const coverageDays = Math.floor(stockForCoverage / dailyNeed);
     if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical', coverageDays, dailyNeed };
     if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning', coverageDays, dailyNeed };
     return { label: `${coverageDays} gün yeter`, severity: 'good', coverageDays, dailyNeed };
@@ -796,7 +812,7 @@ export default function StokYonetimiPanel() {
                 ) : (
                   rows.map((row) => {
                     const miadInfo = getMiadInfo(row.miad);
-                    const coverageInfo = getCoverageInfo(row.stokKodu);
+                    const coverageInfo = getCoverageInfo(row);
                     const stripeColor = getRowStripeColor(row);
 
                     return (
