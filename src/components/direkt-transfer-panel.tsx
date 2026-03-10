@@ -46,7 +46,6 @@ import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { useLoading } from '@/contexts/loading-context';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
@@ -181,15 +180,8 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
 export default function DirektTransferPanel() {
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
-  const { suppressGlobalLoading } = useLoading();
   const router = useRouter();
   const { invalidateDepoStok } = useInvalidateQueries();
-
-  // Suppress global loading overlay for this panel - it interferes with barcode scanning
-  useEffect(() => {
-    const unsuppress = suppressGlobalLoading();
-    return unsuppress;
-  }, [suppressGlobalLoading]);
 
   const [depots, setDepots] = useState<Depot[]>([]);
   const [products, setProducts] = useState<ProductCode[]>([]);
