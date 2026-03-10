@@ -485,18 +485,18 @@ export default function StokYonetimiPanel() {
   };
 
   /* ─── Coverage days calculation ─── */
-  const getCoverageInfo = (stokKodu: string): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown' } => {
+  const getCoverageInfo = (stokKodu: string): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } => {
     const rule = minMaxRules[stokKodu];
-    if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown' };
+    if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
     const totalProductStock = rows.reduce((acc, r) => r.stokKodu === stokKodu ? acc + r.quantity : acc, 0);
     const periodDays = Math.floor(rule.maxGun);
-    if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown' };
+    if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
     const dailyNeed = rule.max / periodDays;
-    if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown' };
+    if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
     const coverageDays = Math.floor(totalProductStock / dailyNeed);
-    if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical' };
-    if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning' };
-    return { label: `${coverageDays} gün yeter`, severity: 'good' };
+    if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical', coverageDays, dailyNeed };
+    if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning', coverageDays, dailyNeed };
+    return { label: `${coverageDays} gün yeter`, severity: 'good', coverageDays, dailyNeed };
   };
 
   /* ─── Row color strip ─── */
@@ -851,17 +851,29 @@ export default function StokYonetimiPanel() {
                         {/* Raf */}
                         <td className="px-3 py-3 text-xs text-[var(--dashboard-muted)]">{row.rafAdresi}</td>
 
-                        {/* Stok Yeterlilik - colored badge */}
+                        {/* Stok Yeterlilik - colored badge + risky box count */}
                         <td className="px-3 py-3">
-                          <span className={cn(
-                            "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
-                            coverageInfo.severity === 'good' && 'bg-emerald-100 text-emerald-700',
-                            coverageInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
-                            coverageInfo.severity === 'critical' && 'bg-red-100 text-red-700',
-                            coverageInfo.severity === 'unknown' && 'bg-slate-100 text-slate-500',
-                          )}>
-                            {coverageInfo.label}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={cn(
+                              "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                              coverageInfo.severity === 'good' && 'bg-emerald-100 text-emerald-700',
+                              coverageInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
+                              coverageInfo.severity === 'critical' && 'bg-red-100 text-red-700',
+                              coverageInfo.severity === 'unknown' && 'bg-slate-100 text-slate-500',
+                            )}>
+                              {coverageInfo.label}
+                            </span>
+                            {coverageInfo.severity !== 'unknown' && miadInfo.days !== Infinity && miadInfo.days > 0 && coverageInfo.coverageDays > miadInfo.days && (() => {
+                              const riskyDays = coverageInfo.coverageDays - miadInfo.days;
+                              const riskyBoxes = Math.ceil(riskyDays * coverageInfo.dailyNeed);
+                              if (riskyBoxes <= 0) return null;
+                              return (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800" title={`Miad ${miadInfo.days} gün sonra dolacak, ${riskyDays} günlük stok (${riskyBoxes} kutu) risk altında`}>
+                                  ⚠ {riskyBoxes} kutu riskli
+                                </span>
+                              );
+                            })()}
+                          </div>
                         </td>
 
                         {/* İşlemler - sticky right */}
