@@ -12,7 +12,6 @@ import AutoRedirectOnLogin from "./AutoRedirectOnLogin";
 import OnlyUsageAutoRedirect from "./OnlyUsageAutoRedirect";
 import { useDock } from "@/hooks/use-dock";
 import PresenceManager from "./PresenceManager";
-import { useLoading } from "@/contexts/loading-context";
 import PersistentNotificationToast from "./notifications/PersistentNotificationToast";
 import PageShell from "./responsive/PageShell";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
@@ -100,9 +99,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [pathname]);
 
-  const { isLoading } = useLoading();
-
-  if (isLoadingAuth || !currentUser || isLoading) {
+  if (isLoadingAuth || !currentUser) {
     return null;
   }
 

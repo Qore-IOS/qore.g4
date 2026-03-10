@@ -27,7 +27,6 @@ import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQue
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
-import { useLoading } from '@/contexts/loading-context';
 
 // UI Components
 import { Button } from '@/components/ui/button';
@@ -311,13 +310,6 @@ export default function AnaPanel(props: AnaPanelProps) {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser, currentUserProfile } = useAuth();
-  const { suppressGlobalLoading } = useLoading();
-
-  // Suppress global loading overlay for this panel - it interferes with barcode scanning
-  useEffect(() => {
-    const unsuppress = suppressGlobalLoading();
-    return unsuppress;
-  }, [suppressGlobalLoading]);
 
   // Use TanStack Query for static data - shared cache, 1 hour stale time
   const { data: depots = [], isLoading: depotsLoading } = useDepots();
