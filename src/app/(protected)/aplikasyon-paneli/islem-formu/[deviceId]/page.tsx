@@ -538,21 +538,36 @@ export default function AplikasyonIslemFormuPage() {
     );
   }, [sortedUsers, personelSearchQuery]);
 
-  // Filtered personal stock
+  // IDs of stock items already used in current actions (to prevent duplicate adds)
+  const usedPersonalStockIds = useMemo(() => {
+    const ids = new Set<string>();
+    actions.forEach(a => { if (a.personalStockId) ids.add(a.personalStockId); });
+    return ids;
+  }, [actions]);
+
+  const usedPoolStockIds = useMemo(() => {
+    const ids = new Set<string>();
+    actions.forEach(a => { if (a.poolStockId) ids.add(a.poolStockId); });
+    return ids;
+  }, [actions]);
+
+  // Filtered personal stock (excludes already-used items)
   const filteredStock = useMemo(() => {
-    if (!partSearchQuery) return personalStock;
+    const available = personalStock.filter(p => !usedPersonalStockIds.has(p.id));
+    if (!partSearchQuery) return available;
     const q = partSearchQuery.toLowerCase();
-    return personalStock.filter(p =>
+    return available.filter(p =>
       p.stokKodu.toLowerCase().includes(q) ||
       p.stokAdi.toLowerCase().includes(q) ||
       p.serialNumber.toLowerCase().includes(q)
     );
-  }, [personalStock, partSearchQuery]);
+  }, [personalStock, partSearchQuery, usedPersonalStockIds]);
 
   const filteredPoolStock = useMemo(() => {
-    if (!partSearchQuery) return poolStockItems;
+    const available = poolStockItems.filter(p => !usedPoolStockIds.has(p.id));
+    if (!partSearchQuery) return available;
     const q = partSearchQuery.toLowerCase();
-    return poolStockItems.filter(p =>
+    return available.filter(p =>
       p.stokKodu.toLowerCase().includes(q) ||
       p.stokAdi.toLowerCase().includes(q) ||
       p.serialNumber.toLowerCase().includes(q)
@@ -2131,7 +2146,7 @@ export default function AplikasyonIslemFormuPage() {
                     <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
                       {filteredStock.length === 0 ? (
                         <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
-                          {personalStock.length === 0 ? 'Şahsi stokunuzda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                          {personalStock.filter(p => !usedPersonalStockIds.has(p.id)).length === 0 ? 'Şahsi stokunuzda eklenebilir yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
                         </div>
                       ) : filteredStock.map(item => (
                         <div
@@ -2164,7 +2179,7 @@ export default function AplikasyonIslemFormuPage() {
                     <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
                       {filteredPoolStock.length === 0 ? (
                         <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
-                          {poolStockItems.length === 0 ? 'Havuz depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                          {poolStockItems.filter(p => !usedPoolStockIds.has(p.id)).length === 0 ? 'Havuz depoda eklenebilir yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
                         </div>
                       ) : filteredPoolStock.map(item => (
                         <div
@@ -2599,14 +2614,14 @@ export default function AplikasyonIslemFormuPage() {
                     className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'personal' ? 'bg-background shadow-sm' : ''}`}
                   >
                     <Package className="h-3 w-3 inline mr-1" />
-                    Şahsi Stok ({personalStock.length})
+                    Şahsi Stok ({personalStock.filter(p => !usedPersonalStockIds.has(p.id)).length})
                   </button>
                   <button
                     onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }}
                     className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'pool' ? 'bg-background shadow-sm' : ''}`}
                   >
                     <Package className="h-3 w-3 inline mr-1" />
-                    Havuz Stok ({poolStockItems.length})
+                    Havuz Stok ({poolStockItems.filter(p => !usedPoolStockIds.has(p.id)).length})
                   </button>
                 </div>
               )}
@@ -2625,8 +2640,8 @@ export default function AplikasyonIslemFormuPage() {
                   <ScrollArea className="h-44 border border-border rounded-lg bg-background">
                     {filteredStock.length === 0 ? (
                       <div className="p-4 text-center text-muted-foreground">
-                        {personalStock.length === 0
-                          ? 'Şahsi stokunuzda yedek parça bulunmuyor.'
+                        {personalStock.filter(p => !usedPersonalStockIds.has(p.id)).length === 0
+                          ? 'Şahsi stokunuzda eklenebilir yedek parça bulunmuyor.'
                           : 'Sonuç bulunamadı.'}
                       </div>
                     ) : (
@@ -2682,8 +2697,8 @@ export default function AplikasyonIslemFormuPage() {
                   <ScrollArea className="h-44 border border-border rounded-lg bg-background">
                     {filteredPoolStock.length === 0 ? (
                       <div className="p-4 text-center text-muted-foreground">
-                        {poolStockItems.length === 0
-                          ? 'Havuz depoda yedek parça bulunmuyor.'
+                        {poolStockItems.filter(p => !usedPoolStockIds.has(p.id)).length === 0
+                          ? 'Havuz depoda eklenebilir yedek parça bulunmuyor.'
                           : 'Sonuç bulunamadı.'}
                       </div>
                     ) : (
