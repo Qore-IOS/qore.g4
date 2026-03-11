@@ -546,6 +546,8 @@
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
   transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+  isolation: isolate;
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
 }
 
 .wizard-heading-content {
@@ -583,7 +585,23 @@
   background: color-mix(in oklab, var(--wz-accent) 24%, white 76%);
   transform: translate(-50%, -50%);
   opacity: 0;
+  pointer-events: none;
+  z-index: 0;
   transition: all 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* On touch-only devices, never show the circle */
+@media (hover: none) {
+  .wizard-heading-circle {
+    display: none !important;
+  }
+}
+
+/* On devices with both touch and hover (e.g. tablets with trackpad), hide circle */
+@media (any-hover: hover) and (any-pointer: coarse) {
+  .wizard-heading-circle {
+    display: none !important;
+  }
 }
 
 @media (hover: hover) and (pointer: fine) {
