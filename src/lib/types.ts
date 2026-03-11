@@ -642,7 +642,8 @@ export type SparePartTransferAction =
   | 'return_to_depot'        // Depoya iade edildi (yeni parça)
   | 'submit_to_depot'        // Depoya teslim edildi (cihazdan çıkan)
   | 'return_confirmed'       // Depo tarafından iade teslim alındı
-  | 'submit_confirmed';      // Depo tarafından teslim alındı
+  | 'submit_confirmed'       // Depo tarafından teslim alındı
+  | 'cancel_usage';          // Kullanım iptal edildi, parça şahsi stoğa geri döndü
 
 // Personel şahsi stok item
 export interface PersonalStockItem {
