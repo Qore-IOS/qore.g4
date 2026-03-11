@@ -182,10 +182,11 @@ export default function FaultDetailPage() {
   // Yedek parça değişim state'leri
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
+  const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
   const [partSearchQuery, setPartSearchQuery] = useState('');
   const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
   const [stockSourceTab, setStockSourceTab] = useState<StockSourceTab>('personal');
-  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PersonalStockItem | null>(null);
+  const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
   const [manualPartCode, setManualPartCode] = useState('');
   const [manualPartName, setManualPartName] = useState('');
   const [manualSerialNumber, setManualSerialNumber] = useState('');
@@ -678,9 +679,17 @@ export default function FaultDetailPage() {
   };
 
   // Yedek parça değişim fonksiyonları
-  // Backward-compat alias: bazı eski bundle'larda dependency adı poolStockItems olarak kalabiliyor.
-  const poolStockItems = personalStock;
   const filteredStock = useMemo(() => {
+    if (!partSearchQuery) return personalStock;
+    const q = partSearchQuery.toLowerCase();
+    return personalStock.filter(p =>
+      p.stokKodu?.toLowerCase().includes(q) ||
+      p.stokAdi?.toLowerCase().includes(q) ||
+      p.serialNumber?.toLowerCase().includes(q)
+    );
+  }, [personalStock, partSearchQuery]);
+
+  const filteredPoolStock = useMemo(() => {
     if (!partSearchQuery) return poolStockItems;
     const q = partSearchQuery.toLowerCase();
     return poolStockItems.filter(p =>
