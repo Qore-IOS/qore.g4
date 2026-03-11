@@ -1552,6 +1552,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                         <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
                         <div className="flex items-center gap-1.5">
                           <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                           {group.bulkQrAssigned && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
                               <Download className="h-2.5 w-2.5" />
@@ -1584,7 +1585,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                       </div>
                       <div className="text-right">
                         {hasSerials ? (
-                          <span className="text-sm font-bold text-[var(--dashboard-text)]">{group.adet}</span>
+                          <span className="text-sm font-bold text-[var(--dashboard-text)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
                         ) : (
                           <Input
                             type="number"
@@ -1622,6 +1623,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                               <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
                               <div className="flex items-center gap-1.5">
                                 <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                                <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                                 {group.bulkQrAssigned && (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
                                     <Download className="h-2.5 w-2.5" />
@@ -1632,7 +1634,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
                               {hasSerials ? (
-                                <span className="text-base font-bold text-[var(--dashboard-accent)]">{group.adet}</span>
+                                <span className="text-base font-bold text-[var(--dashboard-accent)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
                               ) : (
                                 <Input
                                   type="number"

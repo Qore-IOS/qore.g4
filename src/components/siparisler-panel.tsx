@@ -828,6 +828,7 @@ export default function SiparislerPanel(): JSX.Element {
                       <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                         </div>
                         <div>
                           <span className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</span>
@@ -871,6 +872,7 @@ export default function SiparislerPanel(): JSX.Element {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                            <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                             <p className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
                           </div>
                           <div className="flex items-center gap-1">
