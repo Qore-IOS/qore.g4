@@ -15,7 +15,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { Loader2, FileText, FileSpreadsheet } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -24,6 +24,7 @@ import * as XLSX from 'xlsx';
 import TransferTutanakPDFButton from '@/components/exports/TransferTutanakPDFButton';
 import TimestampText from '@/components/TimestampText';
 import { transferGecmisLogger } from '@/lib/logger';
+import type { ProductCode } from '@/lib/types';
 
 
 type TransferRoot = {
@@ -42,6 +43,8 @@ type TransferItem = {
   lotNumarasi: string;
   miad: string;
   seriNumarasi: string;
+  anaBirim?: string;
+  ambalajDegeri?: number | null;
 };
 
 export default function Page() {
@@ -52,6 +55,7 @@ export default function Page() {
 
   const [root, setRoot] = useState<TransferRoot | null>(null);
   const [items, setItems] = useState<TransferItem[]>([]);
+  const [productCodeMap, setProductCodeMap] = useState<Record<string, { anaBirim?: string; ambalajDegeri?: number | null }>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -69,9 +73,31 @@ export default function Page() {
         const rootData = { id: snap.id, ...snap.data() } as TransferRoot; // Include id in rootData
         const itemsSnap = await getDocs(collection(db, 'transfers', transferId, 'items'));
         const rows = itemsSnap.docs.map(d => d.data() as TransferItem);
+
+        const stokKodlari = Array.from(new Set(rows.map((r) => r.stokKodu).filter(Boolean)));
+        const metaMap: Record<string, { anaBirim?: string; ambalajDegeri?: number | null }> = {};
+        if (stokKodlari.length > 0) {
+          const chunkSize = 30;
+          for (let i = 0; i < stokKodlari.length; i += chunkSize) {
+            const chunk = stokKodlari.slice(i, i + chunkSize);
+            const q = query(collection(db, 'productCodes'), where('stokKodu', 'in', chunk));
+            const pSnap = await getDocs(q);
+            pSnap.docs.forEach((d) => {
+              const data = d.data() as ProductCode;
+              if (data.stokKodu) {
+                metaMap[data.stokKodu] = {
+                  anaBirim: data.anaBirim,
+                  ambalajDegeri: data.ambalajDegeri ?? null,
+                };
+              }
+            });
+          }
+        }
+
         if (!mounted) return;
         setRoot(rootData);
         setItems(rows);
+        setProductCodeMap(metaMap);
       } catch (e) {
         transferGecmisLogger.error('Transfer detayları yüklenemedi', e, {
           transferId,
@@ -83,15 +109,23 @@ export default function Page() {
   }, [transferId, router, toast]);
 
   const summary = useMemo(() => {
-    const m = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string; adet: number }>();
+    const m = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string; adet: number; anaBirim?: string; ambalajDegeri?: number | null }>();
     for (const it of items) {
       const key = `${it.stokKodu}||${it.lotNumarasi}||${it.miad}`;
       const prev = m.get(key);
       if (prev) prev.adet += 1;
-      else m.set(key, { stokKodu: it.stokKodu, stokAdi: it.stokAdi, lotNumarasi: it.lotNumarasi, miad: it.miad, adet: 1 });
+      else m.set(key, {
+        stokKodu: it.stokKodu,
+        stokAdi: it.stokAdi,
+        lotNumarasi: it.lotNumarasi,
+        miad: it.miad,
+        adet: 1,
+        anaBirim: it.anaBirim || productCodeMap[it.stokKodu]?.anaBirim,
+        ambalajDegeri: it.ambalajDegeri ?? productCodeMap[it.stokKodu]?.ambalajDegeri ?? null,
+      });
     }
     return Array.from(m.values());
-  }, [items]);
+  }, [items, productCodeMap]);
   
   if (loading) {
     return (
@@ -130,7 +164,9 @@ export default function Page() {
               urun: s.stokAdi,
               lot: s.lotNumarasi,
               miad: s.miad,
-              adet: s.adet
+              adet: s.adet,
+              anaBirim: s.anaBirim,
+              ambalajDegeri: s.ambalajDegeri ?? null,
             }))}
           />
         )}

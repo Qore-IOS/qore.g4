@@ -8,6 +8,7 @@ import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import { tr } from 'date-fns/locale';
 import { format } from 'date-fns';
+import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 type HeaderInfo = {
   shipmentId: string;
@@ -26,6 +27,8 @@ type Row = {
   lot?: string;
   miad?: string;
   adet: number;
+  anaBirim?: string;
+  ambalajDegeri?: number | null;
   seriNo?: string | string[];
 };
 
@@ -147,13 +150,14 @@ export default function TransferTutanakPDFButton({ header, rows, className }: Tr
 
 
       autoTable(doc, {
-        head: [['Stok Kodu', 'Urun', 'Lot', 'Miad', 'Adet']],
+        head: [['Stok Kodu', 'Urun', 'Lot', 'Miad', 'Adet', 'Birim']],
         body: rows.map(r => [
           sanitizeForPdfFont(r.stokKodu),
           sanitizeForPdfFont(r.urun),
           sanitizeForPdfFont(r.lot) || '-',
           sanitizeForPdfFont(r.miad) || '-',
           String(r.adet),
+          sanitizeForPdfFont(`${normalizeUnitLabel(r.anaBirim)}${formatUnitMultiplier(r) ? ` (${formatUnitMultiplier(r)})` : ''}`),
         ]),
         startY: currentY,
         theme: 'grid',
