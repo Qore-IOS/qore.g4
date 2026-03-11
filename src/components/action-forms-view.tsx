@@ -7,7 +7,7 @@ import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimes
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
-import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X } from 'lucide-react';
+import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X, Ban } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
@@ -302,6 +302,9 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   const [usedPartImagePreview, setUsedPartImagePreview] = useState<string | null>(null);
   const removedPartImageInputRef = useRef<HTMLInputElement>(null);
   const usedPartImageInputRef = useRef<HTMLInputElement>(null);
+  const [cancelPartModalOpen, setCancelPartModalOpen] = useState(false);
+  const [cancelActionIndex, setCancelActionIndex] = useState<number | null>(null);
+  const [isCancellingPart, setIsCancellingPart] = useState(false);
 
   useEffect(() => {
     const fetchForm = async () => {
@@ -525,6 +528,149 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     setRemovedPartImagePreview(null);
     setUsedPartImageFile(null);
     setUsedPartImagePreview(null);
+  };
+
+  const openCancelPartModal = (actionIndex: number) => {
+    setCancelActionIndex(actionIndex);
+    setCancelPartModalOpen(true);
+  };
+
+  const cancelPartUsage = async () => {
+    if (!form || cancelActionIndex === null || !form.actions || !form.actions[cancelActionIndex]) return;
+
+    const action = form.actions[cancelActionIndex];
+    if (action.type !== 'part_change') return;
+
+    try {
+      setIsCancellingPart(true);
+      const now = new Date();
+      const formType = moduleType === 'teknik-servis' ? 'teknik_servis' : 'aplikasyon';
+      const batch = writeBatch(db);
+
+      // Remove the action from the form's actions array
+      const updatedActions = form.actions.filter((_, idx) => idx !== cancelActionIndex);
+      batch.update(doc(db, getCollectionName(moduleType), form.id), {
+        actions: updatedActions,
+        updatedAt: serverTimestamp(),
+      });
+
+      // If the part came from personal stock, return it to in_stock
+      if (action.personalStockId) {
+        const stockRef = doc(db, 'personalStock', action.personalStockId);
+        batch.update(stockRef, {
+          status: 'in_stock',
+          usedAt: null,
+          usedOnDeviceId: null,
+          usedOnDeviceName: null,
+          usedOnFormId: null,
+          usedOnFormType: null,
+          usedPartImageUrl: null,
+        });
+      }
+
+      // If the part came from pool stock, return it to in_stock
+      if (action.poolStockId) {
+        const poolStockRef = doc(db, 'poolWarehouseStock', action.poolStockId);
+        batch.update(poolStockRef, {
+          status: 'in_stock',
+          usedAt: null,
+          usedByUid: null,
+          usedByName: null,
+          usedOnDeviceId: null,
+          usedOnDeviceName: null,
+          usedOnFormId: null,
+          usedOnFormType: null,
+          usedOnLabId: null,
+          usedOnLabName: null,
+        });
+      }
+
+      // Log the cancellation in sparePartTransferLogs
+      const cancelLogRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(cancelLogRef, {
+        action: 'cancel_usage',
+        personalStockId: action.personalStockId || null,
+        poolStockId: action.poolStockId || null,
+        poolWarehouseId: action.poolWarehouseId || null,
+        poolWarehouseName: action.poolWarehouseName || null,
+        stokKodu: action.stokKodu || '',
+        stokAdi: action.stokAdi || '',
+        serialNumber: action.serialNumber || '',
+        deviceId: form.deviceId,
+        deviceName: form.cihazAdi || '',
+        labName: form.labName || '',
+        formId: form.id,
+        formType,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        notes: `Yedek parça kullanımı iptal edildi. Parça ${action.personalStockId ? 'şahsi stoğa' : action.poolStockId ? 'havuz deposuna' : 'kaynağına'} geri iade edildi.`,
+      });
+
+      // Log in actionFormHistoryLogs for full audit trail
+      const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
+      batch.set(historyRef, {
+        formId: form.id,
+        moduleType,
+        type: 'part_usage_cancelled',
+        cancelledAction: {
+          actionId: action.id || null,
+          stokKodu: action.stokKodu || '',
+          stokAdi: action.stokAdi || '',
+          quantity: action.quantity || 0,
+          serialNumber: action.serialNumber || '',
+          personalStockId: action.personalStockId || null,
+          poolStockId: action.poolStockId || null,
+          poolWarehouseId: action.poolWarehouseId || null,
+          poolWarehouseName: action.poolWarehouseName || null,
+          removedPartStokKodu: action.removedPartStokKodu || '',
+          removedPartStokAdi: action.removedPartStokAdi || '',
+          removedPartSerialNumber: action.removedPartSerialNumber || '',
+          removedPartImageUrl: action.removedPartImageUrl || '',
+          usedPartImageUrl: action.usedPartImageUrl || '',
+          isManualEntry: action.isManualEntry || false,
+        },
+        deviceId: form.deviceId,
+        deviceName: form.cihazAdi || '',
+        deviceSerial: form.seriNumarasi || '',
+        labName: form.labName || '',
+        hospitalId: form.hospitalId || '',
+        cancelledByUid: currentUserProfile?.uid || '',
+        cancelledByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        cancelledAt: serverTimestamp(),
+        updatedByUid: currentUserProfile?.uid || '',
+        updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+
+      // Update local state
+      setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
+
+      // Re-add the stock item back to the local stock lists
+      if (action.personalStockId) {
+        const stockSnap = await getDoc(doc(db, 'personalStock', action.personalStockId));
+        if (stockSnap.exists()) {
+          setPersonalStock((prev) => [...prev, { id: stockSnap.id, ...stockSnap.data() } as PersonalStockItem]);
+        }
+      }
+      if (action.poolStockId) {
+        const poolSnap = await getDoc(doc(db, 'poolWarehouseStock', action.poolStockId));
+        if (poolSnap.exists()) {
+          setPoolStockItems((prev) => [...prev, { id: poolSnap.id, ...poolSnap.data() } as PoolWarehouseStockItem]);
+        }
+      }
+
+      setCancelPartModalOpen(false);
+      setCancelActionIndex(null);
+      toast({ title: 'Kullanım iptal edildi', description: 'Yedek parça kullanımı iptal edildi ve stok geri iade edildi.' });
+    } catch (error) {
+      console.error('Cancel part usage error:', error);
+      toast({ title: 'İptal hatası', description: 'Parça kullanımı iptal edilemedi.', variant: 'destructive' });
+    } finally {
+      setIsCancellingPart(false);
+    }
   };
 
   const handleRemovedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -819,6 +965,15 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
                           >
                             <RefreshCw className="h-3.5 w-3.5" /> Değişim
                           </button>
+                          {form.createdByUid === currentUserProfile?.uid && !(action as any).cancelled && (
+                            <button
+                              type="button"
+                              onClick={() => openCancelPartModal(idx)}
+                              className="cihaz-tool-item inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-red-600 hover:bg-red-50 border-red-200"
+                            >
+                              <Ban className="h-3.5 w-3.5" /> İptal Et
+                            </button>
+                          )}
                         </div>
                       )}
                       {(action.serialNumber || action.poolWarehouseName) && <div className="text-xs text-[var(--dashboard-muted)] mt-0.5">{action.serialNumber ? `Seri: ${action.serialNumber}` : ''} {action.poolWarehouseName ? `· Depo: ${action.poolWarehouseName}` : ''}</div>}
@@ -992,6 +1147,49 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
               {(isUploadingImage || isSavingAddedPart) ? <><Loader2 className="h-4 w-4 animate-spin" />Yükleniyor...</> : 'Ekle'}
             </button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelPartModalOpen} onOpenChange={setCancelPartModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Yedek Parça Kullanımını İptal Et</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-[var(--dashboard-muted)]">
+              Bu yedek parça kullanımını iptal etmek istediğinize emin misiniz?
+            </p>
+            {cancelActionIndex !== null && form?.actions?.[cancelActionIndex] && (
+              <div className="p-3 rounded-xl bg-red-50/80 border border-red-200/60 text-sm space-y-1">
+                <p className="font-medium text-red-800">
+                  {form.actions[cancelActionIndex].stokAdi || '-'} ({form.actions[cancelActionIndex].stokKodu || '-'})
+                </p>
+                <p className="text-red-700 text-xs">
+                  Seri: {form.actions[cancelActionIndex].serialNumber || '-'} · Adet: {form.actions[cancelActionIndex].quantity || 0}
+                </p>
+                {form.actions[cancelActionIndex].personalStockId && (
+                  <p className="text-red-600 text-xs">Parça şahsi stoğunuza geri iade edilecektir.</p>
+                )}
+                {form.actions[cancelActionIndex].poolStockId && (
+                  <p className="text-red-600 text-xs">Parça havuz deposuna geri iade edilecektir.</p>
+                )}
+                {form.actions[cancelActionIndex].isManualEntry && (
+                  <p className="text-red-600 text-xs">Manuel girilen parça formdan kaldırılacaktır.</p>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => { setCancelPartModalOpen(false); setCancelActionIndex(null); }}>Vazgeç</Button>
+              <Button
+                variant="destructive"
+                onClick={cancelPartUsage}
+                disabled={isCancellingPart}
+              >
+                {isCancellingPart ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Ban className="h-4 w-4 mr-1" />}
+                İptal Et
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
