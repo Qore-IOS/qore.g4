@@ -57,6 +57,7 @@ import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
+import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
@@ -364,6 +365,14 @@ export default function AnaPanel(props: AnaPanelProps) {
         return acc;
       }, {} as Record<string, number>);
   }, [scannedItems]);
+
+  const productMetaByCode = useMemo(() => {
+    const map = new Map<string, ProductCode>();
+    productCodes.forEach((p) => {
+      if (p.stokKodu) map.set(p.stokKodu, p);
+    });
+    return map;
+  }, [productCodes]);
 
   // Compute productTracking and productNames from productCodes (TanStack Query data)
   const sourceDepots = useMemo(() => filterOperationalSourceDepots(depots, currentUserProfile), [depots, currentUserProfile]);
@@ -1519,6 +1528,8 @@ export default function AnaPanel(props: AnaPanelProps) {
               renderItem={(group: ScanRow, groupIndex: number) => {
                 const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
                 const hasSerials = trackingMode === 'serial';
+                const meta = productMetaByCode.get(group.stokKodu || '');
+                const multiplier = formatUnitMultiplier(meta);
                 const missingAddress = !group.rafAdresi;
                 const missingIrsaliye = !group.irsaliyeNumarasi;
                 const hasWarnings = missingAddress || missingIrsaliye;
@@ -1540,6 +1551,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                         <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
                         <div className="flex items-center gap-1.5">
                           <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                           {group.bulkQrAssigned && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
                               <Download className="h-2.5 w-2.5" />
@@ -1572,7 +1584,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                       </div>
                       <div className="text-right">
                         {hasSerials ? (
-                          <span className="text-sm font-bold text-[var(--dashboard-text)]">{group.adet}</span>
+                          <span className="text-sm font-bold text-[var(--dashboard-text)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
                         ) : (
                           <Input
                             type="number"
@@ -1607,6 +1619,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                               <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
                               <div className="flex items-center gap-1.5">
                                 <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                                <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                                 {group.bulkQrAssigned && (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
                                     <Download className="h-2.5 w-2.5" />
@@ -1617,7 +1630,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
                               {hasSerials ? (
-                                <span className="text-base font-bold text-[var(--dashboard-accent)]">{group.adet}</span>
+                                <span className="text-base font-bold text-[var(--dashboard-accent)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
                               ) : (
                                 <Input
                                   type="number"
