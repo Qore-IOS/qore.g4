@@ -57,7 +57,7 @@ import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
-import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
@@ -1479,7 +1479,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         {/* ── Table header (desktop) ── */}
         {scannedItems.length > 0 && (
-          <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+          <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
             <span></span>
             <span>Ürün</span>
             <span>Lot</span>
@@ -1487,6 +1487,7 @@ export default function AnaPanel(props: AnaPanelProps) {
             <span>Adres</span>
             <span>İrsaliye</span>
             <span className="text-right">Adet</span>
+            <span className="text-center">Birim</span>
             <span></span>
           </div>
         )}
@@ -1540,7 +1541,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                     group.isSelected && "bg-[var(--dashboard-accent)]/5"
                   )}>
                     {/* Desktop row */}
-                    <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5 cursor-pointer hover:bg-[var(--dashboard-surface-2)]/60">
+                    <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5 cursor-pointer hover:bg-[var(--dashboard-surface-2)]/60">
                       <div>
                         <Checkbox
                           checked={group.isSelected}
@@ -1596,6 +1597,9 @@ export default function AnaPanel(props: AnaPanelProps) {
                         )}
                       </div>
                       <div className="text-center">
+                        <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
+                      </div>
+                      <div className="text-center">
                         <button
                           onClick={() => deleteGroup(group.key)}
                           className="p-1 rounded-lg hover:bg-red-100 transition-colors"
@@ -1640,6 +1644,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                                   min="1"
                                 />
                               )}
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
                               <button onClick={() => deleteGroup(group.key)} className="p-1">
                                 <Trash2 className="h-3.5 w-3.5 text-red-500" />
                               </button>

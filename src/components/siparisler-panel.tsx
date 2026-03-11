@@ -71,7 +71,7 @@ import { cn } from '@/lib/utils';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { siparislerLogger } from '@/lib/logger';
-import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 
 /**
@@ -784,10 +784,11 @@ export default function SiparislerPanel(): JSX.Element {
 
               {/* Table header (desktop) */}
               {orderItems.length > 0 && (
-                <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+                <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
                   <span>Ürün</span>
                   <span>Stok Kodu</span>
                   <span className="text-center">Adet</span>
+                  <span className="text-center">Birim</span>
                   <span></span>
                 </div>
               )}
@@ -824,7 +825,7 @@ export default function SiparislerPanel(): JSX.Element {
                     return (
                     <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
                       {/* Desktop row */}
-                      <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
+                      <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
                           <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
@@ -843,7 +844,7 @@ export default function SiparislerPanel(): JSX.Element {
                             >
                               <Minus className="h-3 w-3" />
                             </button>
-                            <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[72px]">{formatQuantityWithUnit(item.adet ?? 0, meta, { showMultiplier: true })}</span>
+                            <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[72px]">{item.adet}</span>
                             <button
                               onClick={() => {
                                 setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
@@ -853,6 +854,9 @@ export default function SiparislerPanel(): JSX.Element {
                               <Plus className="h-3 w-3" />
                             </button>
                           </div>
+                        </div>
+                        <div className="flex justify-center">
+                          <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
                         </div>
                         <div className="flex justify-center">
                           <button
@@ -875,10 +879,11 @@ export default function SiparislerPanel(): JSX.Element {
                             <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                               <Minus className="h-3 w-3" />
                             </button>
-                            <span className="text-center text-sm font-bold min-w-[92px]">{formatQuantityWithUnit(item.adet ?? 0, meta, { showMultiplier: true })}</span>
+                            <span className="text-center text-sm font-bold min-w-[92px]">{item.adet}</span>
                             <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                               <Plus className="h-3 w-3" />
                             </button>
+                            <span className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
                             <button onClick={() => removeItem(item.id ?? '')} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
                               <Trash2 className="h-3.5 w-3.5 text-red-500" />
                             </button>
