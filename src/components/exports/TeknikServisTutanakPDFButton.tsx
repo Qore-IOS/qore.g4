@@ -72,6 +72,7 @@ type ActionItem = {
   action: string;
   stokKodu?: string;
   stokAdi?: string;
+  anaBirim?: string;
   quantity: number;
   description?: string;
   isManualEntry?: boolean;
@@ -413,7 +414,7 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
         currentY += 18;
 
         autoTable(doc, {
-          head: [[txt('Parça', useTurkish), 'Kod', 'Adet']],
+          head: [[txt('Parça', useTurkish), 'Kod', 'Adet', txt('Birim', useTurkish)]],
           body: parts.map(act => {
             let partName = act.stokAdi || act.action;
             if (act.isManualEntry && act.stokKodu && act.stokAdi) {
@@ -422,7 +423,8 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
             return [
               txt(partName, useTurkish),
               txt(act.stokKodu || '-', useTurkish),
-              String(act.quantity)
+              String(act.quantity),
+              txt(act.anaBirim ? act.anaBirim.toLocaleLowerCase('tr-TR') : 'adet', useTurkish)
             ];
           }),
           startY: currentY,

@@ -8,6 +8,7 @@ import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { normalizeUnitLabel } from '@/lib/product-unit';
 
 type SparePartTransferLog = {
   id: string;
@@ -16,6 +17,7 @@ type SparePartTransferLog = {
   stokAdi?: string;
   serialNumber?: string;
   quantity?: number;
+  anaBirim?: string;
   timestamp?: Date;
   createdAt?: Date;
   fromName?: string;
@@ -124,12 +126,13 @@ export default function SparePartTransferTutanakPDFButton({ log, className }: Pr
       currentY += 35;
 
       autoTable(doc, {
-        head: [['Stok Kodu', 'Urun', 'Seri No', 'Adet', 'Islem Tarihi']],
+        head: [['Stok Kodu', 'Urun', 'Seri No', 'Adet', 'Birim', 'Islem Tarihi']],
         body: [[
           sanitizeForPdfFont(log.stokKodu || '-'),
           sanitizeForPdfFont(log.stokAdi || '-'),
           sanitizeForPdfFont(log.serialNumber || '-') || '-',
           String(log.quantity || 1),
+          sanitizeForPdfFont(normalizeUnitLabel(log.anaBirim)),
           format(now, 'dd.MM.yyyy HH:mm', { locale: tr }),
         ]],
         startY: currentY,
