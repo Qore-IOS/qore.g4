@@ -255,6 +255,7 @@ export default function YedekParcaTransferPage() {
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const isAdmin = currentUserProfile?.role === 'admin';
+  const isTeknikLojistik = currentUserProfile?.role === 'teknik_lojistik';
 
   const loadRecentTransferLogs = useCallback(async () => {
     const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
@@ -1507,8 +1508,8 @@ export default function YedekParcaTransferPage() {
   };
 
   const deletePersonnelStockItem = async (item: PersonnelStockViewItem) => {
-    if (!isAdmin) {
-      toast({ title: 'Yetki Hatası', description: 'Bu işlem sadece admin kullanıcılar için izinlidir.', variant: 'destructive' });
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Bu işlem için yetkiniz bulunmamaktadır.', variant: 'destructive' });
       return;
     }
 
@@ -1530,7 +1531,7 @@ export default function YedekParcaTransferPage() {
         fromUid: item.ownerUid,
         fromName: item.ownerName,
         quantity: item.quantity || 1,
-        notes: 'Admin personel stok satırı silme işlemi',
+        notes: `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok satırı silme işlemi`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -1550,8 +1551,8 @@ export default function YedekParcaTransferPage() {
   };
 
   const deletePoolStockItem = async (item: PoolWarehouseStockItem) => {
-    if (!isAdmin) {
-      toast({ title: 'Yetki Hatası', description: 'Bu işlem sadece admin kullanıcılar için izinlidir.', variant: 'destructive' });
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Bu işlem için yetkiniz bulunmamaktadır.', variant: 'destructive' });
       return;
     }
 
@@ -1573,7 +1574,7 @@ export default function YedekParcaTransferPage() {
         anaBirim: item.anaBirim || 'Adet',
         serialNumber: item.serialNumber || '',
         quantity: item.quantity || 1,
-        notes: 'Admin havuz stok satırı silme işlemi',
+        notes: `${isAdmin ? 'Admin' : 'Teknik Lojistik'} havuz stok satırı silme işlemi`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -2496,7 +2497,7 @@ export default function YedekParcaTransferPage() {
                           }
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {isAdmin ? (
+                          {(isAdmin || isTeknikLojistik) ? (
                             <button
                               onClick={() => deletePersonnelStockItem(item)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
@@ -2572,7 +2573,7 @@ export default function YedekParcaTransferPage() {
                         {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
                         {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
                       </span>
-                      {isAdmin ? (
+                      {(isAdmin || isTeknikLojistik) ? (
                         <button
                           onClick={() => deletePersonnelStockItem(item)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
@@ -2685,6 +2686,16 @@ export default function YedekParcaTransferPage() {
                 })}
               </div>
             </div>
+            {(isAdmin || isTeknikLojistik) && menuSelection.poolWarehouseId && (
+              <button
+                onClick={() => router.push(`/direkt-transfer/yedek-parca-transfer/stok-giris/havuz-stok-giris?poolWarehouseId=${menuSelection.poolWarehouseId}`)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all active:scale-95"
+                style={{ background: 'var(--dashboard-accent)', boxShadow: 'var(--dashboard-raised-soft)' }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Stok Girişi
+              </button>
+            )}
           </div>
         </div>
 
@@ -2758,7 +2769,7 @@ export default function YedekParcaTransferPage() {
                           {item.usedByName || '—'}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {isAdmin ? (
+                          {(isAdmin || isTeknikLojistik) ? (
                             <button
                               onClick={() => deletePoolStockItem(item)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
@@ -2816,7 +2827,7 @@ export default function YedekParcaTransferPage() {
                         {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
                         {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
                       </span>
-                      {isAdmin ? (
+                      {(isAdmin || isTeknikLojistik) ? (
                         <button
                           onClick={() => deletePoolStockItem(item)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
