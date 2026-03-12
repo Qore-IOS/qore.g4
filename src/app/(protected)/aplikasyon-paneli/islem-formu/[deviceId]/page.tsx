@@ -61,6 +61,7 @@ type ActionItem = {
   action: string;
   stokKodu?: string;
   stokAdi?: string;
+  anaBirim?: string;
   quantity: number;
   description?: string;
   isManualEntry?: boolean;
@@ -690,6 +691,7 @@ export default function AplikasyonIslemFormuPage() {
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || 'Adet',
       serialNumber: '',
       quantity: 1,
       address: '',
@@ -705,6 +707,7 @@ export default function AplikasyonIslemFormuPage() {
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || 'Adet',
       serialNumber: '',
       quantity: 1,
       notes: `Periyodik parça değişimine istinaden otomatik stok girişi (${device?.cihazAdi || device?.model || ''})`,
@@ -722,6 +725,7 @@ export default function AplikasyonIslemFormuPage() {
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || 'Adet',
       serialNumber: '',
       source: 'depot',
       status: 'in_stock',
@@ -737,6 +741,7 @@ export default function AplikasyonIslemFormuPage() {
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || 'Adet',
       serialNumber: '',
       toUid: currentUserProfile.uid,
       toName: currentUserProfile.name || '',
@@ -753,6 +758,7 @@ export default function AplikasyonIslemFormuPage() {
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || 'Adet',
       serialNumber: '',
       quantity: 1,
       relatedPersonnelUid: currentUserProfile.uid,
@@ -772,6 +778,7 @@ export default function AplikasyonIslemFormuPage() {
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || 'Adet',
       serialNumber: '',
       source: 'depot',
       status: 'in_stock',
@@ -1069,6 +1076,7 @@ export default function AplikasyonIslemFormuPage() {
         action: selectedStockItem.productCodeId,
         stokKodu: selectedStockItem.stokKodu,
         stokAdi: selectedStockItem.stokAdi,
+        anaBirim: selectedStockItem.anaBirim || 'Adet',
         serialNumber: selectedStockItem.serialNumber,
         personalStockId: selectedStockItem.id,
         quantity: 1, // Personal stock items are individual
@@ -1101,6 +1109,7 @@ export default function AplikasyonIslemFormuPage() {
         action: selectedPoolStockItem.productCodeId,
         stokKodu: selectedPoolStockItem.stokKodu,
         stokAdi: selectedPoolStockItem.stokAdi,
+        anaBirim: selectedPoolStockItem.anaBirim || 'Adet',
         serialNumber: selectedPoolStockItem.serialNumber,
         poolStockId: selectedPoolStockItem.id,
         poolWarehouseId: selectedPoolStockItem.poolWarehouseId,
@@ -2093,7 +2102,7 @@ export default function AplikasyonIslemFormuPage() {
                     <div>
                       <div className="wizard-action-item-label">{item.stokAdi || item.action}</div>
                       <div className="wizard-action-item-sub">
-                        {item.stokKodu} {item.serialNumber ? `/ SN: ${item.serialNumber}` : ''}
+                        {item.stokKodu} {item.serialNumber ? `/ SN: ${item.serialNumber}` : ''} {item.anaBirim ? `· ${item.anaBirim.toLocaleLowerCase('tr-TR')}` : ''}
                         {item.isManualEntry && ' (Manuel)'}
                         {item.isPeriodicPartChange && ' (Periyodik)'}
                       </div>
@@ -2166,7 +2175,7 @@ export default function AplikasyonIslemFormuPage() {
                         >
                           <div>
                             <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
-                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu} {item.anaBirim ? `· ${item.anaBirim.toLocaleLowerCase('tr-TR')}` : ''}</div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber}</div>
@@ -2199,7 +2208,7 @@ export default function AplikasyonIslemFormuPage() {
                         >
                           <div>
                             <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--wz-text)' }}>{item.stokAdi}</div>
-                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu} {item.anaBirim ? `· ${item.anaBirim.toLocaleLowerCase('tr-TR')}` : ''}</div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--wz-text)' }}>{item.serialNumber || '—'}</div>

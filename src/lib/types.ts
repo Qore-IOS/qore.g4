@@ -653,6 +653,7 @@ export interface PersonalStockItem {
   productCodeId: string;       // ProductCode referansı
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   serialNumber: string;        // Seri numarası
   source: PersonalStockSource; // depot = yeni, device = cihazdan çıkan
   sourceDeviceId?: string;     // Cihazdan çıktıysa device ID
@@ -686,6 +687,7 @@ export interface PoolWarehouseStockItem {
   productCodeId: string;       // ProductCode referansı
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   serialNumber: string;        // Seri numarası
   status: PoolStockStatus;
   createdAt: Date;
@@ -712,6 +714,7 @@ export interface SparePartTransferLog {
   productCodeId?: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   serialNumber: string;
   fromUid?: string;            // Kimden
   fromName?: string;
@@ -738,6 +741,7 @@ export interface PendingReturn {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   serialNumber: string;
   source: PersonalStockSource; // Orijinal kaynak
   sourceDeviceId?: string;
@@ -759,6 +763,7 @@ export interface SparePartTransferRow {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   serialNumber: string;
   quantity: number;            // Seri numarasız transferlerde adet (seri numaralıysa 1)
   cihazGrubu?: string;        // Cihaz ana grubu (kutu, adet, şişe vs.)
@@ -772,6 +777,7 @@ export interface YedekParcaDepoStokItem {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   address?: string;              // Depo adresleme bilgisi (raf, göz vb.)
   serialNumber?: string;         // Opsiyonel seri numarası
   quantity: number;              // Seri numarasız ürünler için adet
@@ -795,6 +801,7 @@ export interface YedekParcaDepoLog {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   address?: string;
   cihazGrubu?: string;
   serialNumber?: string;
