@@ -1476,6 +1476,7 @@ export default function DirektTransferPanel() {
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
                             <p className="text-[11px] text-[var(--dashboard-muted)]">{group.stokKodu}</p>
+                            <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                           </div>
                           {/* Lot / Miad chips */}
                           <div className="flex flex-wrap gap-1">
@@ -1528,7 +1529,7 @@ export default function DirektTransferPanel() {
                                 </button>
                               </div>
                             ) : (
-                              <span className="text-sm font-bold text-[var(--dashboard-text)]">{group.adet}</span>
+                              <span className="text-sm font-bold text-[var(--dashboard-text)]">{formatQuantityWithUnit(group.adet, meta, { showMultiplier: true })}</span>
                             )}
                           </div>
                           {/* Unit */}
@@ -1553,6 +1554,7 @@ export default function DirektTransferPanel() {
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
                               <p className="text-[11px] text-[var(--dashboard-muted)]">{group.stokKodu}</p>
+                              <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {group.lotNumarasi && (
                                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium">{group.lotNumarasi}</span>
@@ -1580,7 +1582,7 @@ export default function DirektTransferPanel() {
                                   </button>
                                 </div>
                               ) : (
-                                <span className="text-sm font-bold mr-1">{group.adet}</span>
+                                <span className="text-sm font-bold mr-1">{formatQuantityWithUnit(group.adet, meta, { showMultiplier: true })}</span>
                               )}
                               <span className="text-[10px] text-[var(--dashboard-muted)] mr-1">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
                               <button onClick={() => removeTransferItem(group.key, true)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
