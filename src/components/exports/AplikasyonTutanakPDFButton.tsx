@@ -197,7 +197,10 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
 
       // Logo in center - try to load invitrolab logo
       try {
-        const logoResponse = await fetch('/invitrolab_LOGO__-_Kopya__1_-removebg.png');
+        let logoResponse = await fetch('/invlogo.png');
+        if (!logoResponse.ok) {
+          logoResponse = await fetch('/invitrolab_LOGO__-_Kopya__1_-removebg.png');
+        }
         if (logoResponse.ok) {
           const logoBlob = await logoResponse.blob();
           const logoReader = new FileReader();
@@ -205,8 +208,8 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
           await new Promise<void>(resolve => {
             logoReader.onloadend = () => {
               const logoData = logoReader.result as string;
-              const logoWidth = 120;
-              const logoHeight = 35;
+              const logoWidth = 132;
+              const logoHeight = 40;
               const logoX = (pageW / 2) - (logoWidth / 2);
               doc.addImage(logoData, 'PNG', logoX, headerY + 5, logoWidth, logoHeight, undefined, 'FAST');
               resolve();
