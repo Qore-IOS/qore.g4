@@ -720,7 +720,6 @@ export default function StokYonetimiPanel() {
       ]);
 
       const rowsForPdf = riskyExportRows.map(({ row, miadInfo, coverageInfo, riskyBoxes }) => {
-        const riskyDays = coverageInfo.coverageDays - miadInfo.days;
         return {
           stokAdi: row.stokAdi,
           stokKodu: row.stokKodu,
@@ -730,15 +729,17 @@ export default function StokYonetimiPanel() {
           adet: `${row.quantity}`,
           anaBirim: row.anaBirim || '',
           yeterlilik: coverageInfo.label,
-          riskliLabel: `! ${riskyBoxes} kutu riskli`,
-          riskTooltip: miadInfo.days === Infinity
-            ? 'Miad bilgisi yok'
-            : `Miad ${miadInfo.days} gun sonra dolacak, ${Math.max(0, riskyDays)} gunluk stok risk altinda`,
           miadSeverity: miadInfo.severity,
           coverageSeverity: coverageInfo.severity,
           riskyBoxes,
         };
       });
+
+      // Total risky boxes across all rows
+      const totalRiskyBoxes = rowsForPdf.reduce((sum, r) => sum + r.riskyBoxes, 0);
+
+      // Header height reserved for title + summary (used for startY and margin.top)
+      const headerH = 78;
 
       // Drawn on every page (frame + title/depot header)
       const drawFrameAndHeader = () => {
@@ -758,6 +759,19 @@ export default function StokYonetimiPanel() {
         doc.setFont(FONT, 'bold');
         doc.setTextColor(71, 85, 105);
         doc.text(san(`${depotName || 'Depo'} Deposu`), pageW / 2, padX / 2 + 48, { align: 'center' });
+
+        // Total risky box count — styled summary badge
+        const summaryY = padX / 2 + 66;
+        doc.setFillColor(254, 243, 199);
+        const summaryText = san(`Toplam Riskli Stok: ${totalRiskyBoxes} kutu`);
+        const tw = doc.getTextWidth(summaryText);
+        const badgePadH = 14;
+        const badgePadV = 5;
+        doc.roundedRect(pageW / 2 - tw / 2 - badgePadH, summaryY - 9, tw + badgePadH * 2, 14 + badgePadV, 4, 4, 'F');
+        doc.setFont(FONT, 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(146, 64, 14);
+        doc.text(summaryText, pageW / 2, summaryY, { align: 'center' });
 
         // Timestamp — small, top right
         doc.setFont(FONT, 'normal');
@@ -784,9 +798,9 @@ export default function StokYonetimiPanel() {
           `${item.miad}\n${san(item.miadLabel)}`,
           `${item.adet} ${san(item.anaBirim)}`,
           san(item.yeterlilik),
-          `${san(item.riskliLabel)}\n${san(item.riskTooltip)}`,
+          `${item.riskyBoxes}`,
         ]),
-        startY: padX / 2 + 62,
+        startY: padX / 2 + headerH,
         theme: 'grid',
         styles: {
           font: FONT,
@@ -804,15 +818,15 @@ export default function StokYonetimiPanel() {
           fontSize: 8,
           cellPadding: { top: 4, right: 6, bottom: 4, left: 6 },
         },
-        margin: { left: padX / 2 + 8, right: padX / 2 + 8, bottom: 72 },
+        margin: { top: padX / 2 + headerH, left: padX / 2 + 8, right: padX / 2 + 8, bottom: 72 },
         columnStyles: {
           0: { cellWidth: 6 },
-          1: { cellWidth: 220 },
-          2: { cellWidth: 88 },
-          3: { cellWidth: 108 },
-          4: { cellWidth: 78, halign: 'center' },
-          5: { cellWidth: 118, halign: 'center' },
-          6: { cellWidth: 167 },
+          1: { cellWidth: 260 },
+          2: { cellWidth: 100 },
+          3: { cellWidth: 120 },
+          4: { cellWidth: 90, halign: 'center' },
+          5: { cellWidth: 130, halign: 'center' },
+          6: { cellWidth: 79, halign: 'center' },
         },
         didParseCell: (hookData) => {
           if (hookData.section !== 'body') return;
@@ -894,24 +908,30 @@ export default function StokYonetimiPanel() {
         },
       });
 
-      // Footer logos — on last page only, centered, equal size, divider line between them
+      // Footer logos — on last page only, centered with divider line
+      // blk.png is square, invlogo.png is rectangular — preserve natural aspect ratios
       const totalPages = doc.getNumberOfPages();
       doc.setPage(totalPages);
 
-      const logoSize = 32;          // Equal dimensions for both logos
-      const dividerGap = 20;        // Gap on each side of the center divider
+      const logoH = 30;             // Equal height for visual balance
+      const blkW = 30;              // Square logo (blk.png)
+      const invW = 80;              // Rectangular logo (invlogo.png) — wider
+      const dividerGap = 16;
       const centerX = pageW / 2;
-      const logoY = pageH - padX / 2 - logoSize - 10;
-      const leftLogoX = centerX - dividerGap / 2 - logoSize;
+      const logoY = pageH - padX / 2 - logoH - 10;
+
+      // Left logo (blk) — right-aligned to center
+      const leftLogoX = centerX - dividerGap / 2 - blkW;
+      // Right logo (invlogo) — left-aligned from center
       const rightLogoX = centerX + dividerGap / 2;
 
       // Vertical divider line between the two logos
       doc.setDrawColor(148, 163, 184);
       doc.setLineWidth(1);
-      doc.line(centerX, logoY - 4, centerX, logoY + logoSize + 4);
+      doc.line(centerX, logoY - 4, centerX, logoY + logoH + 4);
 
-      if (logoLeft) doc.addImage(logoLeft, 'PNG', leftLogoX, logoY, logoSize, logoSize, undefined, 'FAST');
-      if (logoRight) doc.addImage(logoRight, 'PNG', rightLogoX, logoY, logoSize, logoSize, undefined, 'FAST');
+      if (logoLeft) doc.addImage(logoLeft, 'PNG', leftLogoX, logoY, blkW, logoH, undefined, 'FAST');
+      if (logoRight) doc.addImage(logoRight, 'PNG', rightLogoX, logoY, invW, logoH, undefined, 'FAST');
 
       const safeFileName = `${depotName}_Riskli_Stok_Raporu`.replace(/[^a-z0-9_]/gi, '_');
       doc.save(`${safeFileName}.pdf`);
