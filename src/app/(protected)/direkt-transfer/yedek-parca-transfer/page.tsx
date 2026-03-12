@@ -81,6 +81,7 @@ interface GroupedDepoStokItem {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   cihazGrubu: string;
   totalQuantity: number;
   earliestDate: Date;
@@ -92,6 +93,7 @@ interface ManualPersonnelStockRow {
   id: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   serialNumber: string;
   quantity: number;
 }
@@ -371,6 +373,7 @@ export default function YedekParcaTransferPage() {
           productCodeId: item.productCodeId,
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || pc?.anaBirim || 'Adet',
           cihazGrubu: item.cihazGrubu || pc?.cihazGrubu || '',
           totalQuantity: 0,
           earliestDate: item.createdAt,
@@ -500,6 +503,7 @@ export default function YedekParcaTransferPage() {
           productCodeId: existing.productCodeId,
           stokKodu: existing.stokKodu,
           stokAdi: existing.stokAdi,
+          anaBirim: existing.anaBirim || 'Adet',
           address: nextAddress,
           cihazGrubu: existing.cihazGrubu || '',
           serialNumber: existing.serialNumber || '',
@@ -516,6 +520,7 @@ export default function YedekParcaTransferPage() {
           productCodeId: existing.productCodeId,
           stokKodu: existing.stokKodu,
           stokAdi: existing.stokAdi,
+          anaBirim: existing.anaBirim || 'Adet',
           serialNumber: existing.serialNumber || '',
           quantity: Math.abs(nextQuantity - existing.quantity),
           notes: `Excel ile güncellendi · adres: ${nextAddress || '-'}`,
@@ -849,6 +854,7 @@ export default function YedekParcaTransferPage() {
       productCodeId: selectedProduct.productCodeId,
       stokKodu: selectedProduct.stokKodu,
       stokAdi: selectedProduct.stokAdi,
+      anaBirim: selectedProduct.anaBirim || 'Adet',
       serialNumber: sn,
       quantity: qty,
       cihazGrubu: selectedProduct.cihazGrubu,
@@ -910,6 +916,7 @@ export default function YedekParcaTransferPage() {
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
               source: 'depot',
               status: 'in_stock',
@@ -929,6 +936,7 @@ export default function YedekParcaTransferPage() {
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
               toName: row.targetName,
               quantity: 1,
@@ -945,6 +953,7 @@ export default function YedekParcaTransferPage() {
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
               source: 'depot',
               status: 'in_stock',
@@ -961,6 +970,7 @@ export default function YedekParcaTransferPage() {
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
               toUid: row.targetUid,
               toName: row.targetName,
@@ -978,6 +988,7 @@ export default function YedekParcaTransferPage() {
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: row.serialNumber,
             quantity: 1,
@@ -1021,6 +1032,7 @@ export default function YedekParcaTransferPage() {
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
                 source: 'depot',
                 status: 'in_stock',
@@ -1040,6 +1052,7 @@ export default function YedekParcaTransferPage() {
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
               serialNumber: '',
               toName: row.targetName,
               quantity: row.quantity,
@@ -1057,6 +1070,7 @@ export default function YedekParcaTransferPage() {
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
                 source: 'depot',
                 status: 'in_stock',
@@ -1073,6 +1087,7 @@ export default function YedekParcaTransferPage() {
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
               serialNumber: '',
               toUid: row.targetUid,
               toName: row.targetName,
@@ -1090,6 +1105,7 @@ export default function YedekParcaTransferPage() {
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: '',
             quantity: row.quantity,
@@ -1214,6 +1230,7 @@ export default function YedekParcaTransferPage() {
             productCodeId: '',
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
             serialNumber: row.serialNumber,
             source: 'depot',
             status: 'in_stock',
@@ -1230,6 +1247,7 @@ export default function YedekParcaTransferPage() {
           productCodeId: '',
           stokKodu: row.stokKodu,
           stokAdi: row.stokAdi,
+              anaBirim: row.anaBirim || 'Adet',
           serialNumber: row.serialNumber,
           toUid: menuSelection.personnelUid,
           toName: menuSelection.personnelName,
@@ -1306,6 +1324,7 @@ export default function YedekParcaTransferPage() {
           productCodeId: editingDepoGroup.productCodeId,
           stokKodu: editingDepoGroup.stokKodu,
           stokAdi: editingDepoGroup.stokAdi,
+          anaBirim: editingDepoGroup.anaBirim || 'Adet',
           serialNumber: '',
           quantity: nextNonSerialTotal,
           address: '',
@@ -1324,6 +1343,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: editingDepoGroup.productCodeId,
         stokKodu: editingDepoGroup.stokKodu,
         stokAdi: editingDepoGroup.stokAdi,
+          anaBirim: editingDepoGroup.anaBirim || 'Adet',
         cihazGrubu: editingDepoGroup.cihazGrubu || '',
         serialNumber: '',
         address: editingDepoGroup.entries.find(e => (e.address || '').trim())?.address || '',
@@ -1340,6 +1360,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: editingDepoGroup.productCodeId,
         stokKodu: editingDepoGroup.stokKodu,
         stokAdi: editingDepoGroup.stokAdi,
+          anaBirim: editingDepoGroup.anaBirim || 'Adet',
         serialNumber: '',
         address: editingDepoGroup.entries.find(e => (e.address || '').trim())?.address || '',
         quantity: Math.abs(delta),
@@ -1384,6 +1405,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
         stokAdi: group.stokAdi,
+        anaBirim: group.anaBirim || 'Adet',
         cihazGrubu: group.cihazGrubu || '',
         serialNumber: serialEntry.serialNumber,
         quantity: 1,
@@ -1399,6 +1421,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
         stokAdi: group.stokAdi,
+        anaBirim: group.anaBirim || 'Adet',
         serialNumber: serialEntry.serialNumber,
         quantity: 1,
         createdAt: Timestamp.fromDate(now),
@@ -1443,6 +1466,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
         stokAdi: group.stokAdi,
+        anaBirim: group.anaBirim || 'Adet',
         cihazGrubu: group.cihazGrubu || '',
         serialNumber: '',
         address: group.entries.find(e => (e.address || '').trim())?.address || '',
@@ -1459,6 +1483,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
         stokAdi: group.stokAdi,
+        anaBirim: group.anaBirim || 'Adet',
         serialNumber: '',
         quantity: group.totalQuantity,
         notes: 'Admin depo stok satırı silme işlemi',
@@ -1500,6 +1525,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: item.productCodeId,
         stokKodu: item.stokKodu,
         stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
         serialNumber: item.serialNumber || '',
         fromUid: item.ownerUid,
         fromName: item.ownerName,
@@ -1544,6 +1570,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: item.productCodeId,
         stokKodu: item.stokKodu,
         stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
         serialNumber: item.serialNumber || '',
         quantity: item.quantity || 1,
         notes: 'Admin havuz stok satırı silme işlemi',
@@ -1589,6 +1616,7 @@ export default function YedekParcaTransferPage() {
           productCodeId: pendingReturn.productCodeId,
           stokKodu: pendingReturn.stokKodu,
           stokAdi: pendingReturn.stokAdi,
+          anaBirim: pendingReturn.anaBirim || 'Adet',
           cihazGrubu: pc?.cihazGrubu || '',
           serialNumber: pendingReturn.serialNumber || '',
           address: '',
@@ -1604,6 +1632,7 @@ export default function YedekParcaTransferPage() {
           productCodeId: pendingReturn.productCodeId,
           stokKodu: pendingReturn.stokKodu,
           stokAdi: pendingReturn.stokAdi,
+          anaBirim: pendingReturn.anaBirim || 'Adet',
           cihazGrubu: pc?.cihazGrubu || '',
           serialNumber: pendingReturn.serialNumber || '',
           address: '',
@@ -1623,6 +1652,7 @@ export default function YedekParcaTransferPage() {
         personalStockId: pendingReturn.personalStockId,
         stokKodu: pendingReturn.stokKodu,
         stokAdi: pendingReturn.stokAdi,
+          anaBirim: pendingReturn.anaBirim || 'Adet',
         serialNumber: pendingReturn.serialNumber,
         fromUid: pendingReturn.ownerUid,
         fromName: pendingReturn.ownerName,
@@ -1662,6 +1692,7 @@ export default function YedekParcaTransferPage() {
         action: 'borrowed_approved',
         stokKodu: borrowed.stokKodu,
         stokAdi: borrowed.stokAdi,
+        anaBirim: borrowed.anaBirim || 'Adet',
         serialNumber: borrowed.serialNumber,
         deviceId: borrowed.deviceId,
         deviceName: borrowed.deviceName,
@@ -1700,6 +1731,7 @@ export default function YedekParcaTransferPage() {
         action: 'borrowed_rejected',
         stokKodu: borrowed.stokKodu,
         stokAdi: borrowed.stokAdi,
+        anaBirim: borrowed.anaBirim || 'Adet',
         serialNumber: borrowed.serialNumber,
         deviceId: borrowed.deviceId,
         deviceName: borrowed.deviceName,
@@ -1757,6 +1789,7 @@ export default function YedekParcaTransferPage() {
         productCodeId: item.productCodeId,
         stokKodu: item.stokKodu,
         stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
         serialNumber: item.serialNumber || '',
         quantity: 1,
         fromUid: item.ownerUid,
@@ -1886,6 +1919,7 @@ export default function YedekParcaTransferPage() {
                               <div className="flex flex-col flex-1">
                                 <div className="flex items-center justify-between"><span className="font-mono font-medium text-sm">{product.stokKodu}</span><span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'rgba(107,114,128,.10)', color: 'var(--dashboard-muted)' }}>{product.totalQuantity} ad</span></div>
                                 <span className="text-xs text-muted-foreground truncate">{product.stokAdi}</span>
+                                {product.anaBirim && <span className="text-[10px]" style={{ color: 'var(--dashboard-accent)' }}>{product.anaBirim.toLocaleLowerCase('tr-TR')}</span>}
                                 {product.cihazGrubu && <span className="text-[10px]" style={{ color: 'var(--dashboard-accent)' }}>{product.cihazGrubu}</span>}
                               </div>
                             </CommandItem>
@@ -1895,6 +1929,7 @@ export default function YedekParcaTransferPage() {
                     </Command>
                   </PopoverContent>
                 </Popover>
+                {selectedProduct?.anaBirim && <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-accent)' }}>{selectedProduct.anaBirim.toLocaleLowerCase('tr-TR')}</p>}
                 {selectedProduct?.cihazGrubu && <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-accent)' }}>{selectedProduct.cihazGrubu}</p>}
               </div>
 
@@ -2011,7 +2046,7 @@ export default function YedekParcaTransferPage() {
                       <p className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>{row.stokAdi}</p>
                       <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{row.stokKodu} {row.serialNumber ? `· SN: ${row.serialNumber}` : ''}</p>
                     </div>
-                    <span className="text-xs font-bold" style={{ color: 'var(--dashboard-text)' }}>x{row.quantity}</span>
+                    <span className="text-xs font-bold" style={{ color: 'var(--dashboard-text)' }}>x{row.quantity} {row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'}</span>
                     <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>→ {row.targetName}</span>
                     <button onClick={() => removeTransferRow(row.id)} className="p-1 rounded-lg hover:bg-black/5"><Trash2 className="w-3 h-3" style={{ color: '#B91C1C' }} /></button>
                   </div>
@@ -2128,7 +2163,7 @@ export default function YedekParcaTransferPage() {
                             <span className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>{log.stokAdi}</span>
                           </div>
                           <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>
-                            {log.stokKodu} {log.serialNumber ? `· SN: ${log.serialNumber}` : ''} · x{log.quantity || 1} · {log.toName || log.fromName || '—'} · {log.createdByName}
+                            {log.stokKodu} {log.serialNumber ? `· SN: ${log.serialNumber}` : ''} · x{log.quantity || 1} {(log as any).anaBirim ? String((log as any).anaBirim).toLocaleLowerCase('tr-TR') : 'adet'} · {log.toName || log.fromName || '—'} · {log.createdByName}
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -2186,6 +2221,7 @@ export default function YedekParcaTransferPage() {
         await setDoc(doc(db, 'productCodes', docId), {
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
           urunGrubu: 'yedek_parca',
           marka: stockCardSyncBrand,
           createdAt: now,

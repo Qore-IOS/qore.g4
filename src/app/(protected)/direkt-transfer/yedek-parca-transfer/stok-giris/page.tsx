@@ -41,6 +41,7 @@ interface StokGirisRow {
   productCodeId: string;
   stokKodu: string;
   stokAdi: string;
+  anaBirim?: string;
   cihazGrubu: string;
   serialNumber: string;
   quantity: number; // seri numarası varsa 1, yoksa kullanıcının girdiği adet
@@ -170,6 +171,7 @@ export default function YedekParcaStokGirisPage() {
       productCodeId: selectedProduct?.id || '',
       stokKodu: rowStokKodu,
       stokAdi: rowStokAdi,
+      anaBirim: selectedProduct?.anaBirim || 'Adet',
       cihazGrubu: selectedProduct?.cihazGrubu || '',
       serialNumber: sn,
       quantity: qty,
@@ -319,6 +321,7 @@ export default function YedekParcaStokGirisPage() {
             productCodeId: '',
             stokKodu: stokKoduUpper,
             stokAdi: stokKoduUpper,
+            anaBirim: 'Adet',
             cihazGrubu: '',
             serialNumber: rawSeriNo || '',
             quantity: rawSeriNo ? 1 : (rawAdet && rawAdet >= 1 ? Math.floor(rawAdet) : 1),
@@ -345,6 +348,7 @@ export default function YedekParcaStokGirisPage() {
             productCodeId: product.id,
             stokKodu: product.stokKodu || '',
             stokAdi: product.stokAdi || '',
+            anaBirim: product.anaBirim || 'Adet',
             cihazGrubu: product.cihazGrubu || '',
             serialNumber: rawSeriNo,
             quantity: 1,
@@ -358,6 +362,7 @@ export default function YedekParcaStokGirisPage() {
             productCodeId: product.id,
             stokKodu: product.stokKodu || '',
             stokAdi: product.stokAdi || '',
+            anaBirim: product.anaBirim || 'Adet',
             cihazGrubu: product.cihazGrubu || '',
             serialNumber: '',
             quantity: adet,
@@ -466,6 +471,7 @@ export default function YedekParcaStokGirisPage() {
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
+            anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: row.serialNumber,
             quantity: 1,
@@ -480,6 +486,7 @@ export default function YedekParcaStokGirisPage() {
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
+            anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: '',
             quantity: row.quantity,
@@ -499,13 +506,14 @@ export default function YedekParcaStokGirisPage() {
           productCodeId: row.productCodeId,
           stokKodu: row.stokKodu,
           stokAdi: row.stokAdi,
+          anaBirim: row.anaBirim || 'Adet',
           cihazGrubu: row.cihazGrubu || '',
           serialNumber: row.serialNumber || '',
           quantity: row.serialNumber ? 1 : row.quantity,
           address: row.address || '',
           notes: row.serialNumber
             ? `Seri numaralı stok girişi: ${row.serialNumber}`
-            : `${row.quantity} adet stok girişi`,
+            : `${row.quantity} ${row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'} stok girişi`,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -710,6 +718,7 @@ export default function YedekParcaStokGirisPage() {
                             <div className="flex flex-col">
                               <span className="font-mono font-medium text-sm">{product.stokKodu}</span>
                               <span className="text-xs text-muted-foreground truncate">{product.stokAdi}</span>
+                              {product.anaBirim && <span className="text-[10px]" style={{ color: 'var(--dashboard-accent)' }}>{product.anaBirim.toLocaleLowerCase('tr-TR')}</span>}
                               {product.cihazGrubu && <span className="text-[10px]" style={{ color: 'var(--dashboard-accent)' }}>{product.cihazGrubu}</span>}
                             </div>
                           </CommandItem>
@@ -719,6 +728,9 @@ export default function YedekParcaStokGirisPage() {
                   </Command>
                 </PopoverContent>
               </Popover>
+              {selectedProduct?.anaBirim && (
+                <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-accent)' }}>Birim: {selectedProduct.anaBirim.toLocaleLowerCase('tr-TR')}</p>
+              )}
               {selectedProduct?.cihazGrubu && (
                 <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-accent)' }}>Grup: {selectedProduct.cihazGrubu}</p>
               )}
@@ -897,7 +909,7 @@ export default function YedekParcaStokGirisPage() {
                         <td className="px-3 py-2" style={{ color: 'var(--dashboard-text)' }}>{row.stokAdi}</td>
                         <td className="px-3 py-2 font-mono" style={{ color: row.serialNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.serialNumber || '—'}</td>
                         <td className="px-3 py-2" style={{ color: row.address ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.address || '—'}</td>
-                        <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity}</td>
+                        <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity} {row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'}</td>
                       </tr>
                     ))}
                     {excelRows.length > 20 && (
@@ -992,7 +1004,7 @@ export default function YedekParcaStokGirisPage() {
                     </td>
                     <td className="px-3 py-2.5 font-mono" style={{ color: row.serialNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.serialNumber || '—'}</td>
                     <td className="px-3 py-2.5" style={{ color: row.address ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.address || '—'}</td>
-                    <td className="px-3 py-2.5 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity}</td>
+                    <td className="px-3 py-2.5 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity} {row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'}</td>
                     <td className="px-2 py-2.5">
                       <button onClick={() => removeRow(row.id)} className="p-1 rounded-lg hover:bg-black/5 transition" title="Kaldır">
                         <Trash2 className="w-3.5 h-3.5" style={{ color: '#B91C1C' }} />

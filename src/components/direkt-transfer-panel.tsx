@@ -74,6 +74,7 @@ import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
+import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -194,6 +195,14 @@ export default function DirektTransferPanel() {
   
   const [productTracking, setProductTracking] = useState<Record<string, TrackingMode>>({});
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  
+  const productMetaByCode = useMemo(() => {
+    const map = new Map<string, ProductCode>();
+    products.forEach((p) => {
+      if (p.stokKodu) map.set(p.stokKodu, p);
+    });
+    return map;
+  }, [products]);
   
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
 
@@ -758,7 +767,7 @@ export default function DirektTransferPanel() {
         batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId: targetId || null, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad }, timestamp: Timestamp.now() });
       }
       const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id);
-      batch.set(itemRef, { stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi || '', miad: item.miad || '', seriNumarasi: item.seriNumarasi || '' });
+      batch.set(itemRef, { stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi || '', miad: item.miad || '', seriNumarasi: item.seriNumarasi || '', anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null });
     });
 
     batch.set(transferRef, {
@@ -1403,12 +1412,12 @@ export default function DirektTransferPanel() {
 
             {/* ── Table header (desktop) ── */}
             {directTransferItems.length > 0 && (
-              <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_60px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+              <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
                 <span>Ürün</span>
                 <span>Lot / Miad</span>
                 <span>Depoda</span>
                 <span className="text-center">Adet</span>
-                <span></span>
+                <span className="text-center">Birim</span>
                 <span></span>
               </div>
             )}
@@ -1452,6 +1461,8 @@ export default function DirektTransferPanel() {
                     const available = availabilityMap.get(stockKey) ?? 0;
                     const isOverStock = group.adet > available && available > 0;
                     const noStock = available === 0;
+                    const meta = productMetaByCode.get(group.stokKodu || '');
+                    const multiplier = formatUnitMultiplier(meta);
 
                     return (
                       <div className={cn(
@@ -1460,7 +1471,7 @@ export default function DirektTransferPanel() {
                         noStock && "bg-amber-50/30"
                       )}>
                         {/* Desktop row */}
-                        <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_60px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
+                        <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
                           {/* Product */}
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
@@ -1490,7 +1501,7 @@ export default function DirektTransferPanel() {
                             )}>
                               {available > 0 ? available : '?'}
                             </span>
-                            <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">adet</span>
+                            <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">{normalizeUnitLabel(meta?.anaBirim)}</span>
                           </div>
                           {/* Quantity stepper */}
                           <div className="flex items-center justify-center">
@@ -1520,11 +1531,11 @@ export default function DirektTransferPanel() {
                               <span className="text-sm font-bold text-[var(--dashboard-text)]">{group.adet}</span>
                             )}
                           </div>
-                          {/* Serials expand */}
+                          {/* Unit */}
                           <div className="flex justify-center">
-                            {group.serials.length > 0 && (
-                              <span className="text-[10px] text-[var(--dashboard-muted)]">{group.serials.length} seri</span>
-                            )}
+                            <span className="text-[11px] text-[var(--dashboard-muted)]">
+                              {normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}
+                            </span>
                           </div>
                           {/* Delete */}
                           <div className="flex justify-center">
@@ -1553,7 +1564,7 @@ export default function DirektTransferPanel() {
                                   "inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium",
                                   noStock ? "bg-amber-100 text-amber-700" : isOverStock ? "bg-red-100 text-red-700" : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]"
                                 )}>
-                                  Stok: {available > 0 ? available : '?'}
+                                  Stok: {available > 0 ? `${available} ${normalizeUnitLabel(meta?.anaBirim)}` : '?'}
                                 </span>
                               </div>
                             </div>
@@ -1571,6 +1582,7 @@ export default function DirektTransferPanel() {
                               ) : (
                                 <span className="text-sm font-bold mr-1">{group.adet}</span>
                               )}
+                              <span className="text-[10px] text-[var(--dashboard-muted)] mr-1">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
                               <button onClick={() => removeTransferItem(group.key, true)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
                                 <Trash2 className="h-3.5 w-3.5 text-red-500" />
                               </button>
