@@ -666,6 +666,26 @@ export default function StokYonetimiPanel() {
     exportDataToExcel(data, `${depotName}_Riskli_Stok_Raporu`, 'RiskliStok', toast);
   };
 
+  const loadImageAsDataUrl = async (candidates: string[]): Promise<string | null> => {
+    for (const path of candidates) {
+      try {
+        const response = await fetch(path);
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string | null>((resolve) => {
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl) return dataUrl;
+      } catch {
+        // try next
+      }
+    }
+    return null;
+  };
+
   const handleRiskyPdfExport = async () => {
     try {
       const [jsPDFModule, autoTableModule] = await Promise.all([
@@ -675,64 +695,150 @@ export default function StokYonetimiPanel() {
       const jsPDF = jsPDFModule.default;
       const autoTable = autoTableModule.default;
       const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 24;
+      const ORANGE: [number, number, number] = [199, 137, 65];
 
-      const body = riskyExportRows.map(({ row, miadInfo, coverageInfo, riskyBoxes }) => [
-        row.stokAdi,
-        row.lotNumarasi || '-',
-        row.miad,
-        miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`,
-        `${row.quantity} ${row.anaBirim}`,
-        coverageInfo.label,
-        `${riskyBoxes} kutu riskli`,
+      const logoLeft = await loadImageAsDataUrl([
+        '/home/user/studio/public/blk.png',
+        '/blk.png'
+      ]);
+      const logoRight = await loadImageAsDataUrl([
+        '/home/user/studio/public/invlogo.png',
+        '/invlogo.png',
+        '/QORE-INV_LOGO.PNG',
+        '/invitrolab_LOGO__-_Kopya__1_-removebg.png'
       ]);
 
+      const rowsForPdf = riskyExportRows.map(({ row, miadInfo, coverageInfo, riskyBoxes }) => {
+        const riskyDays = coverageInfo.coverageDays - miadInfo.days;
+        return {
+          stokAdi: row.stokAdi,
+          lot: row.lotNumarasi || '-',
+          miad: row.miad,
+          miadLabel: miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`,
+          adet: `${row.quantity} ${row.anaBirim}`,
+          yeterlilik: coverageInfo.label,
+          riskli: `⚠ ${riskyBoxes} kutu riskli`,
+          riskTooltip: miadInfo.days === Infinity
+            ? 'Miad bilgisi yok'
+            : `Miad ${miadInfo.days} gün sonra dolacak, ${Math.max(0, riskyDays)} günlük stok risk altında`,
+          miadSeverity: miadInfo.severity,
+          coverageSeverity: coverageInfo.severity,
+        };
+      });
+
+      const drawFrameAndHeader = () => {
+        doc.setDrawColor(...ORANGE);
+        doc.setLineWidth(2);
+        doc.rect(margin, margin, pageW - (margin * 2), pageH - (margin * 2));
+
+        doc.setTextColor(17, 24, 39);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(24);
+        doc.text('RİSKLİ STOK RAPORU', pageW / 2, margin + 24, { align: 'center' });
+
+        doc.setFontSize(16);
+        doc.text(`${depotName || 'Depo'} Deposu`, pageW / 2, margin + 48, { align: 'center' });
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
+        doc.text(new Date().toLocaleString('tr-TR'), pageW - margin - 8, margin + 16, { align: 'right' });
+      };
+
       autoTable(doc, {
-        head: [['Stok Adı', 'Lot', 'Miad', 'Kalan Gün', 'Adet', 'Yeterlilik', 'Riskli Adet']],
-        body,
+        head: [['', 'STOK ADI', 'LOT', 'MİAD', 'ADET', 'YETERLİLİK', 'RİSKLİ ADET']],
+        body: rowsForPdf.map((item) => [
+          '',
+          item.stokAdi,
+          item.lot,
+          `${item.miad}
+${item.miadLabel}`,
+          item.adet,
+          item.yeterlilik,
+          `${item.riskli}
+${item.riskTooltip}`,
+        ]),
+        startY: margin + 62,
         theme: 'grid',
-        styles: { fontSize: 8, cellPadding: 4, valign: 'middle' },
-        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: {
+          font: 'helvetica',
+          fontSize: 9,
+          cellPadding: 6,
+          textColor: [15, 23, 42],
+          valign: 'middle',
+        },
+        headStyles: {
+          fillColor: [241, 245, 249],
+          textColor: [71, 85, 105],
+          fontStyle: 'bold',
+        },
+        margin: { left: margin + 8, right: margin + 8, bottom: 84 },
+        columnStyles: {
+          0: { cellWidth: 6 },
+          1: { cellWidth: 225 },
+          2: { cellWidth: 92 },
+          3: { cellWidth: 120 },
+          4: { cellWidth: 85, halign: 'center' },
+          5: { cellWidth: 125, halign: 'center' },
+          6: { cellWidth: 155 },
+        },
         didParseCell: (hookData) => {
           if (hookData.section !== 'body') return;
-          const item = riskyExportRows[hookData.row.index];
+          const item = rowsForPdf[hookData.row.index];
           if (!item) return;
 
-          if (item.miadInfo.severity === 'expired' || item.miadInfo.severity === 'critical') {
-            hookData.cell.styles.fillColor = [254, 226, 226];
-          } else if (item.miadInfo.severity === 'warning' || item.miadInfo.severity === 'caution') {
-            hookData.cell.styles.fillColor = [254, 243, 199];
-          } else if (item.miadInfo.severity === 'notice') {
-            hookData.cell.styles.fillColor = [254, 249, 195];
+          if (item.miadSeverity === 'critical' || item.miadSeverity === 'expired') {
+            hookData.row.cells[1].styles.fillColor = [254, 242, 242];
+          } else if (item.miadSeverity === 'warning' || item.miadSeverity === 'caution') {
+            hookData.row.cells[1].styles.fillColor = [255, 251, 235];
           }
 
-          if (hookData.column.index === 3) {
-            if (item.miadInfo.severity === 'expired' || item.miadInfo.severity === 'critical') {
-              hookData.cell.styles.fillColor = [254, 202, 202];
-              hookData.cell.styles.textColor = [185, 28, 28];
-              hookData.cell.styles.fontStyle = 'bold';
-            } else if (item.miadInfo.severity === 'warning') {
-              hookData.cell.styles.fillColor = [255, 237, 213];
-              hookData.cell.styles.textColor = [194, 65, 12];
-              hookData.cell.styles.fontStyle = 'bold';
-            } else if (item.miadInfo.severity === 'caution') {
-              hookData.cell.styles.fillColor = [254, 243, 199];
-              hookData.cell.styles.textColor = [180, 83, 9];
-              hookData.cell.styles.fontStyle = 'bold';
-            } else if (item.miadInfo.severity === 'notice') {
-              hookData.cell.styles.fillColor = [254, 249, 195];
-              hookData.cell.styles.textColor = [161, 98, 7];
-              hookData.cell.styles.fontStyle = 'bold';
+          if (hookData.column.index === 0) {
+            if (item.miadSeverity === 'expired' || item.miadSeverity === 'critical') {
+              hookData.cell.styles.fillColor = [239, 68, 68];
+            } else if (item.miadSeverity === 'warning' || item.miadSeverity === 'caution') {
+              hookData.cell.styles.fillColor = [245, 158, 11];
+            } else if (item.miadSeverity === 'notice') {
+              hookData.cell.styles.fillColor = [250, 204, 21];
+            } else {
+              hookData.cell.styles.fillColor = [255, 255, 255];
             }
           }
 
-          if (hookData.column.index === 5) {
-            if (item.coverageInfo.severity === 'good') {
-              hookData.cell.styles.fillColor = [209, 250, 229];
-              hookData.cell.styles.textColor = [6, 95, 70];
-            } else if (item.coverageInfo.severity === 'warning') {
+          if (hookData.column.index === 3) {
+            if (item.miadSeverity === 'expired' || item.miadSeverity === 'critical') {
+              hookData.cell.styles.fillColor = [254, 202, 202];
+              hookData.cell.styles.textColor = [153, 27, 27];
+            } else if (item.miadSeverity === 'warning') {
               hookData.cell.styles.fillColor = [255, 237, 213];
               hookData.cell.styles.textColor = [194, 65, 12];
-            } else if (item.coverageInfo.severity === 'critical') {
+            } else if (item.miadSeverity === 'caution') {
+              hookData.cell.styles.fillColor = [254, 243, 199];
+              hookData.cell.styles.textColor = [180, 83, 9];
+            } else if (item.miadSeverity === 'notice') {
+              hookData.cell.styles.fillColor = [254, 249, 195];
+              hookData.cell.styles.textColor = [161, 98, 7];
+            }
+            hookData.cell.styles.fontStyle = 'bold';
+          }
+
+          if (hookData.column.index === 4) {
+            hookData.cell.styles.fillColor = [248, 250, 252];
+            hookData.cell.styles.textColor = [30, 41, 59];
+            hookData.cell.styles.fontStyle = 'bold';
+          }
+
+          if (hookData.column.index === 5) {
+            if (item.coverageSeverity === 'good') {
+              hookData.cell.styles.fillColor = [209, 250, 229];
+              hookData.cell.styles.textColor = [6, 95, 70];
+            } else if (item.coverageSeverity === 'warning') {
+              hookData.cell.styles.fillColor = [255, 237, 213];
+              hookData.cell.styles.textColor = [194, 65, 12];
+            } else if (item.coverageSeverity === 'critical') {
               hookData.cell.styles.fillColor = [254, 226, 226];
               hookData.cell.styles.textColor = [185, 28, 28];
             } else {
@@ -748,13 +854,28 @@ export default function StokYonetimiPanel() {
             hookData.cell.styles.fontStyle = 'bold';
           }
         },
-        margin: { top: 48, left: 24, right: 24, bottom: 24 },
         didDrawPage: () => {
-          doc.setFontSize(12);
-          doc.setTextColor(30, 41, 59);
-          doc.text(`${depotName} - Riskli Stok Raporu`, 24, 30);
+          drawFrameAndHeader();
         }
       });
+
+      const totalPages = doc.getNumberOfPages();
+      doc.setPage(totalPages);
+
+      const logoY = pageH - margin - 44;
+      const logoW = 90;
+      const logoH = 26;
+      const gap = 32;
+      const centerX = pageW / 2;
+      const leftX = centerX - gap - logoW;
+      const rightX = centerX + gap;
+
+      if (logoLeft) doc.addImage(logoLeft, 'PNG', leftX, logoY, logoW, logoH, undefined, 'FAST');
+      if (logoRight) doc.addImage(logoRight, 'PNG', rightX, logoY, logoW, logoH, undefined, 'FAST');
+
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(1);
+      doc.line(centerX, logoY - 2, centerX, logoY + logoH + 2);
 
       const safeFileName = `${depotName}_Riskli_Stok_Raporu`.replace(/[^a-z0-9_]/gi, '_');
       doc.save(`${safeFileName}.pdf`);
