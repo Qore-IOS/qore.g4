@@ -2,6 +2,7 @@
 import { autoPrintTutanakFromTransferId } from './tutanak-autoprint';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 export type TutanakGroup = {
   stokKodu: string;
@@ -9,6 +10,8 @@ export type TutanakGroup = {
   lotNumarasi?: string;
   miad?: string;
   adet: number;
+  anaBirim?: string;
+  ambalajDegeri?: number | null;
   serials?: string[];
 };
 
@@ -37,6 +40,8 @@ export function buildGroupsFromItems(items: Array<{
   lotNumarasi?: string;
   miad?: string;
   seriNumarasi?: string;
+  anaBirim?: string;
+  ambalajDegeri?: number | null;
 }>): TutanakGroup[] {
   const map = new Map<string, TutanakGroup>();
   for (const it of items) {
@@ -49,6 +54,8 @@ export function buildGroupsFromItems(items: Array<{
         lotNumarasi: it.lotNumarasi || '',
         miad: it.miad || '',
         adet: 1,
+        anaBirim: it.anaBirim || 'Adet',
+        ambalajDegeri: it.ambalajDegeri ?? null,
         serials: it.seriNumarasi ? [it.seriNumarasi] : [],
       });
     } else {
@@ -76,13 +83,14 @@ export function generateTutanakPDF(groups: TutanakGroup[], ctx: TutanakContext) 
   doc.text(`Tarih: ${ctx.timestamp.toLocaleString('tr-TR')}`, padX, 132);
 
   autoTable(doc, {
-    head: [[ 'Stok Adi', 'Stok Kodu', 'Lot', 'Miad', 'Adet' ]],
+    head: [[ 'Stok Adi', 'Stok Kodu', 'Lot', 'Miad', 'Adet', 'Birim' ]],
     body: groups.map(g => [
       g.stokAdi,
       g.stokKodu,
       g.lotNumarasi || '-',
       g.miad || '-',
       String(g.adet),
+      `${normalizeUnitLabel(g.anaBirim)}${formatUnitMultiplier(g) ? ` (${formatUnitMultiplier(g)})` : ''}` ,
     ]),
     startY: 160,
     styles: { font: 'helvetica', fontSize: 10 },

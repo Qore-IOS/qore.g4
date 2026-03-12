@@ -349,6 +349,9 @@ export default function StokYonetimiPanel() {
 
         // Group by (stokKodu, lotNumarasi, miad)
         const grouped: Record<string, GroupedStockRow> = {};
+        const productMetaByCode = new Map<string, ProductCode>(
+          productCodes.filter((p) => p.stokKodu !== undefined).map((p) => [p.stokKodu!, p] as const)
+        );
         for (const item of allItems) {
           const lot = item.lotNumarasi || '';
           const miad = typeof item.miad === 'string' ? item.miad : '';
@@ -360,7 +363,7 @@ export default function StokYonetimiPanel() {
               stokAdi: item.stokAdi || '',
               lotNumarasi: lot,
               miad,
-              anaBirim: 'Kutu',
+              anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
               rafAdresi: item.rafAdresi || '',
               quantity: 0,
               itemIds: [],
@@ -387,7 +390,7 @@ export default function StokYonetimiPanel() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedDepotId, toast]);
+  }, [selectedDepotId, productCodes, toast]);
 
   /* ─── Client-side filtering, sorting, pagination ─── */
   const { rows, totalRows, totalPages, colValues } = useMemo(() => {

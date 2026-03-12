@@ -20,6 +20,7 @@ import {
   HeadingLevel,
   Packer,
 } from 'docx';
+import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 // ---- Types ----
 export type TutanakGroup = {
@@ -28,6 +29,8 @@ export type TutanakGroup = {
   lotNumarasi?: string;
   miad?: string;
   adet: number;
+  anaBirim?: string;
+  ambalajDegeri?: number | null;
   serials?: string[];
 };
 
@@ -57,6 +60,8 @@ export function buildGroupsFromItems(items: Array<{
   lotNumarasi?: string;
   miad?: string;
   seriNumarasi?: string;
+  anaBirim?: string;
+  ambalajDegeri?: number | null;
 }>): TutanakGroup[] {
   const map = new Map<string, TutanakGroup>();
   for (const it of items) {
@@ -69,6 +74,8 @@ export function buildGroupsFromItems(items: Array<{
         lotNumarasi: it.lotNumarasi || '',
         miad: it.miad || '',
         adet: 1,
+        anaBirim: it.anaBirim || 'Adet',
+        ambalajDegeri: it.ambalajDegeri ?? null,
         serials: it.seriNumarasi ? [it.seriNumarasi] : [],
       });
     } else {
@@ -100,7 +107,7 @@ async function createTutanakDocx(
   ctx: TutanakContext
 ): Promise<Blob> {
   const head = new TableRow({
-    children: ['Stok Adı', 'Stok Kodu', 'Lot', 'Miad', 'Adet'].map(
+    children: ['Stok Adı', 'Stok Kodu', 'Lot', 'Miad', 'Adet', 'Birim'].map(
       (h) => new TableCell({ children: [new Paragraph({ text: h })] })
     ),
   });
@@ -117,6 +124,9 @@ async function createTutanakDocx(
           new TableCell({ children: [new Paragraph({ text: g.miad || '-' })] }),
           new TableCell({
             children: [new Paragraph({ text: String(g.adet) })],
+          }),
+          new TableCell({
+            children: [new Paragraph({ text: `${normalizeUnitLabel(g.anaBirim)}${formatUnitMultiplier(g) ? ` (${formatUnitMultiplier(g)})` : ''}` })],
           }),
         ],
       })
@@ -267,6 +277,8 @@ export async function autoPrintTutanakFromTransferId(
           ? (i.miad as Timestamp).toDate().toLocaleDateString('tr-TR')
           : i.miad || '',
       seriNumarasi: i.seriNumarasi,
+      anaBirim: i.anaBirim,
+      ambalajDegeri: i.ambalajDegeri,
     }))
   );
 
@@ -308,7 +320,7 @@ export async function autoPrintTutanakFromTransferId(
       <div><strong>İşlemi Yapan:</strong> ${ctx.userName || '-'}</div>
       <div><strong>Tarih:</strong> ${ctx.timestamp.toLocaleString('tr-TR')}</div>
       <table>
-        <thead><tr><th>Stok Adı</th><th>Stok Kodu</th><th>Lot</th><th>Miad</th><th>Adet</th></tr></thead>
+        <thead><tr><th>Stok Adı</th><th>Stok Kodu</th><th>Lot</th><th>Miad</th><th>Adet</th><th>Birim</th></tr></thead>
         <tbody>
           ${groups
             .map(
@@ -318,6 +330,7 @@ export async function autoPrintTutanakFromTransferId(
             <td>${g.lotNumarasi || '-'}</td>
             <td>${g.miad || '-'}</td>
             <td>${g.adet}</td>
+            <td>${normalizeUnitLabel(g.anaBirim)}${formatUnitMultiplier(g) ? ` (${formatUnitMultiplier(g)})` : ''}</td>
           </tr>`
             )
             .join('')}
