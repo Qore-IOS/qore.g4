@@ -697,185 +697,221 @@ export default function StokYonetimiPanel() {
       const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
-      const margin = 24;
+      // Same frame padding as TransferTutanakPDFButton
+      const padX = 40;
       const ORANGE: [number, number, number] = [199, 137, 65];
+      const FONT = 'helvetica';
 
-      const logoLeft = await loadImageAsDataUrl([
-        '/home/user/studio/public/blk.png',
-        '/blk.png'
-      ]);
-      const logoRight = await loadImageAsDataUrl([
-        '/home/user/studio/public/invlogo.png',
-        '/invlogo.png',
-        '/QORE-INV_LOGO.PNG',
-        '/invitrolab_LOGO__-_Kopya__1_-removebg.png'
+      // Sanitize Turkish chars for helvetica rendering (same as other tutanaks)
+      const san = (str: string | null | undefined): string => {
+        if (!str) return '';
+        return str
+          .replace(/İ/g, 'I').replace(/ı/g, 'i')
+          .replace(/Ş/g, 'S').replace(/ş/g, 's')
+          .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
+          .replace(/Ü/g, 'U').replace(/ü/g, 'u')
+          .replace(/Ö/g, 'O').replace(/ö/g, 'o')
+          .replace(/Ç/g, 'C').replace(/ç/g, 'c');
+      };
+
+      const [logoLeft, logoRight] = await Promise.all([
+        loadImageAsDataUrl(['/blk.png']),
+        loadImageAsDataUrl(['/invlogo.png', '/QORE-INV_LOGO.PNG', '/invitrolab_LOGO__-_Kopya__1_-removebg.png']),
       ]);
 
       const rowsForPdf = riskyExportRows.map(({ row, miadInfo, coverageInfo, riskyBoxes }) => {
         const riskyDays = coverageInfo.coverageDays - miadInfo.days;
         return {
           stokAdi: row.stokAdi,
+          stokKodu: row.stokKodu,
           lot: row.lotNumarasi || '-',
-          miad: row.miad,
-          miadLabel: miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`,
-          adet: `${row.quantity} ${row.anaBirim}`,
+          miad: row.miad || '-',
+          miadLabel: miadInfo.days < 0 ? 'Suresi dolmus' : `${miadInfo.days} gun kaldi`,
+          adet: `${row.quantity}`,
+          anaBirim: row.anaBirim || '',
           yeterlilik: coverageInfo.label,
-          riskli: `⚠ ${riskyBoxes} kutu riskli`,
+          riskliLabel: `! ${riskyBoxes} kutu riskli`,
           riskTooltip: miadInfo.days === Infinity
             ? 'Miad bilgisi yok'
-            : `Miad ${miadInfo.days} gün sonra dolacak, ${Math.max(0, riskyDays)} günlük stok risk altında`,
+            : `Miad ${miadInfo.days} gun sonra dolacak, ${Math.max(0, riskyDays)} gunluk stok risk altinda`,
           miadSeverity: miadInfo.severity,
           coverageSeverity: coverageInfo.severity,
+          riskyBoxes,
         };
       });
 
+      // Drawn on every page (frame + title/depot header)
       const drawFrameAndHeader = () => {
-        doc.setDrawColor(...ORANGE);
+        // Orange border — same style as TransferTutanakPDFButton
+        doc.setDrawColor(ORANGE[0], ORANGE[1], ORANGE[2]);
         doc.setLineWidth(2);
-        doc.rect(margin, margin, pageW - (margin * 2), pageH - (margin * 2));
+        doc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
 
+        // Report name — large & bold, centered
+        doc.setFont(FONT, 'bold');
+        doc.setFontSize(26);
         doc.setTextColor(17, 24, 39);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(24);
-        doc.text('RİSKLİ STOK RAPORU', pageW / 2, margin + 24, { align: 'center' });
+        doc.text(san('RISKLI STOK RAPORU'), pageW / 2, padX / 2 + 28, { align: 'center' });
 
-        doc.setFontSize(16);
-        doc.text(`${depotName || 'Depo'} Deposu`, pageW / 2, margin + 48, { align: 'center' });
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
+        // Depot name — below report name
+        doc.setFontSize(14);
+        doc.setFont(FONT, 'bold');
         doc.setTextColor(71, 85, 105);
-        doc.text(new Date().toLocaleString('tr-TR'), pageW - margin - 8, margin + 16, { align: 'right' });
+        doc.text(san(`${depotName || 'Depo'} Deposu`), pageW / 2, padX / 2 + 48, { align: 'center' });
+
+        // Timestamp — small, top right
+        doc.setFont(FONT, 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(new Date().toLocaleString('tr-TR'), pageW - padX / 2 - 6, padX / 2 + 14, { align: 'right' });
       };
 
+      // Available table width = pageW - (padX/2 + 8)*2 ≈ 785pt (landscape A4)
       autoTable(doc, {
-        head: [['', 'STOK ADI', 'LOT', 'MİAD', 'ADET', 'YETERLİLİK', 'RİSKLİ ADET']],
+        head: [[
+          '',
+          san('STOK ADI'),
+          'LOT',
+          san('MIAD'),
+          san('ADET'),
+          san('YETERLILIK'),
+          san('RISKLI ADET'),
+        ]],
         body: rowsForPdf.map((item) => [
           '',
-          item.stokAdi,
-          item.lot,
-          `${item.miad}
-${item.miadLabel}`,
-          item.adet,
-          item.yeterlilik,
-          `${item.riskli}
-${item.riskTooltip}`,
+          `${san(item.stokAdi)}\n(${san(item.stokKodu)})`,
+          san(item.lot),
+          `${item.miad}\n${san(item.miadLabel)}`,
+          `${item.adet} ${san(item.anaBirim)}`,
+          san(item.yeterlilik),
+          `${san(item.riskliLabel)}\n${san(item.riskTooltip)}`,
         ]),
-        startY: margin + 62,
+        startY: padX / 2 + 62,
         theme: 'grid',
         styles: {
-          font: 'helvetica',
+          font: FONT,
           fontSize: 9,
-          cellPadding: 6,
+          cellPadding: { top: 5, right: 6, bottom: 5, left: 6 },
           textColor: [15, 23, 42],
           valign: 'middle',
+          lineColor: [226, 232, 240],
+          lineWidth: 0.5,
         },
         headStyles: {
           fillColor: [241, 245, 249],
           textColor: [71, 85, 105],
           fontStyle: 'bold',
+          fontSize: 8,
+          cellPadding: { top: 4, right: 6, bottom: 4, left: 6 },
         },
-        margin: { left: margin + 8, right: margin + 8, bottom: 84 },
+        margin: { left: padX / 2 + 8, right: padX / 2 + 8, bottom: 72 },
         columnStyles: {
           0: { cellWidth: 6 },
-          1: { cellWidth: 225 },
-          2: { cellWidth: 92 },
-          3: { cellWidth: 120 },
-          4: { cellWidth: 85, halign: 'center' },
-          5: { cellWidth: 125, halign: 'center' },
-          6: { cellWidth: 155 },
+          1: { cellWidth: 220 },
+          2: { cellWidth: 88 },
+          3: { cellWidth: 108 },
+          4: { cellWidth: 78, halign: 'center' },
+          5: { cellWidth: 118, halign: 'center' },
+          6: { cellWidth: 167 },
         },
         didParseCell: (hookData) => {
           if (hookData.section !== 'body') return;
           const item = rowsForPdf[hookData.row.index];
           if (!item) return;
 
-          if (item.miadSeverity === 'critical' || item.miadSeverity === 'expired') {
-            hookData.row.cells[1].styles.fillColor = [254, 242, 242];
-          } else if (item.miadSeverity === 'warning' || item.miadSeverity === 'caution') {
-            hookData.row.cells[1].styles.fillColor = [255, 251, 235];
-          }
+          // Apply whole-row background tint matching UI row colors
+          const rowBg: [number, number, number] =
+            (item.miadSeverity === 'expired' || item.miadSeverity === 'critical') ? [254, 242, 242] :
+            (item.miadSeverity === 'warning' || item.miadSeverity === 'caution') ? [255, 251, 235] :
+            [255, 255, 255];
+          hookData.cell.styles.fillColor = rowBg;
 
+          // Col 0: left color strip (red / amber / yellow) — matches UI stripe
           if (hookData.column.index === 0) {
             if (item.miadSeverity === 'expired' || item.miadSeverity === 'critical') {
-              hookData.cell.styles.fillColor = [239, 68, 68];
+              hookData.cell.styles.fillColor = [239, 68, 68];   // bg-red-500
             } else if (item.miadSeverity === 'warning' || item.miadSeverity === 'caution') {
-              hookData.cell.styles.fillColor = [245, 158, 11];
+              hookData.cell.styles.fillColor = [245, 158, 11];  // bg-amber-500
             } else if (item.miadSeverity === 'notice') {
-              hookData.cell.styles.fillColor = [250, 204, 21];
+              hookData.cell.styles.fillColor = [250, 204, 21];  // bg-yellow-400
             } else {
               hookData.cell.styles.fillColor = [255, 255, 255];
             }
           }
 
+          // Col 3: MIAD cell — badge-like coloring matching UI miad badges
           if (hookData.column.index === 3) {
             if (item.miadSeverity === 'expired' || item.miadSeverity === 'critical') {
-              hookData.cell.styles.fillColor = [254, 202, 202];
-              hookData.cell.styles.textColor = [153, 27, 27];
+              hookData.cell.styles.fillColor = [254, 202, 202];  // bg-red-100
+              hookData.cell.styles.textColor = [153, 27, 27];    // text-red-700
             } else if (item.miadSeverity === 'warning') {
-              hookData.cell.styles.fillColor = [255, 237, 213];
-              hookData.cell.styles.textColor = [194, 65, 12];
+              hookData.cell.styles.fillColor = [255, 237, 213];  // bg-orange-100
+              hookData.cell.styles.textColor = [194, 65, 12];    // text-orange-700
             } else if (item.miadSeverity === 'caution') {
-              hookData.cell.styles.fillColor = [254, 243, 199];
-              hookData.cell.styles.textColor = [180, 83, 9];
+              hookData.cell.styles.fillColor = [254, 243, 199];  // bg-amber-100
+              hookData.cell.styles.textColor = [180, 83, 9];     // text-amber-700
             } else if (item.miadSeverity === 'notice') {
-              hookData.cell.styles.fillColor = [254, 249, 195];
-              hookData.cell.styles.textColor = [161, 98, 7];
+              hookData.cell.styles.fillColor = [254, 249, 195];  // bg-yellow-100
+              hookData.cell.styles.textColor = [161, 98, 7];     // text-yellow-700
             }
             hookData.cell.styles.fontStyle = 'bold';
           }
 
+          // Col 4: ADET — chip/badge style (bg-[dashboard-surface] border)
           if (hookData.column.index === 4) {
-            hookData.cell.styles.fillColor = [248, 250, 252];
-            hookData.cell.styles.textColor = [30, 41, 59];
+            hookData.cell.styles.fillColor = [248, 250, 252];  // slate-50
+            hookData.cell.styles.textColor = [30, 41, 59];     // slate-800
             hookData.cell.styles.fontStyle = 'bold';
           }
 
+          // Col 5: YETERLİLİK — coverage badge matching UI rounded-full badges
           if (hookData.column.index === 5) {
             if (item.coverageSeverity === 'good') {
-              hookData.cell.styles.fillColor = [209, 250, 229];
-              hookData.cell.styles.textColor = [6, 95, 70];
+              hookData.cell.styles.fillColor = [209, 250, 229];  // bg-emerald-100
+              hookData.cell.styles.textColor = [6, 95, 70];      // text-emerald-700
             } else if (item.coverageSeverity === 'warning') {
-              hookData.cell.styles.fillColor = [255, 237, 213];
-              hookData.cell.styles.textColor = [194, 65, 12];
+              hookData.cell.styles.fillColor = [255, 237, 213];  // bg-orange-100
+              hookData.cell.styles.textColor = [194, 65, 12];    // text-orange-700
             } else if (item.coverageSeverity === 'critical') {
-              hookData.cell.styles.fillColor = [254, 226, 226];
-              hookData.cell.styles.textColor = [185, 28, 28];
+              hookData.cell.styles.fillColor = [254, 226, 226];  // bg-red-100
+              hookData.cell.styles.textColor = [185, 28, 28];    // text-red-700
             } else {
-              hookData.cell.styles.fillColor = [241, 245, 249];
-              hookData.cell.styles.textColor = [100, 116, 139];
+              hookData.cell.styles.fillColor = [241, 245, 249];  // bg-slate-100
+              hookData.cell.styles.textColor = [100, 116, 139];  // text-slate-500
             }
             hookData.cell.styles.fontStyle = 'bold';
           }
 
+          // Col 6: RİSKLİ ADET — amber badge matching UI "⚠ X kutu riskli"
           if (hookData.column.index === 6) {
-            hookData.cell.styles.fillColor = [254, 243, 199];
-            hookData.cell.styles.textColor = [146, 64, 14];
+            hookData.cell.styles.fillColor = [254, 243, 199];  // bg-amber-100
+            hookData.cell.styles.textColor = [146, 64, 14];    // text-amber-800
             hookData.cell.styles.fontStyle = 'bold';
           }
         },
         didDrawPage: () => {
           drawFrameAndHeader();
-        }
+        },
       });
 
+      // Footer logos — on last page only, centered, equal size, divider line between them
       const totalPages = doc.getNumberOfPages();
       doc.setPage(totalPages);
 
-      const logoY = pageH - margin - 44;
-      const logoW = 90;
-      const logoH = 26;
-      const gap = 32;
+      const logoSize = 32;          // Equal dimensions for both logos
+      const dividerGap = 20;        // Gap on each side of the center divider
       const centerX = pageW / 2;
-      const leftX = centerX - gap - logoW;
-      const rightX = centerX + gap;
+      const logoY = pageH - padX / 2 - logoSize - 10;
+      const leftLogoX = centerX - dividerGap / 2 - logoSize;
+      const rightLogoX = centerX + dividerGap / 2;
 
-      if (logoLeft) doc.addImage(logoLeft, 'PNG', leftX, logoY, logoW, logoH, undefined, 'FAST');
-      if (logoRight) doc.addImage(logoRight, 'PNG', rightX, logoY, logoW, logoH, undefined, 'FAST');
-
+      // Vertical divider line between the two logos
       doc.setDrawColor(148, 163, 184);
       doc.setLineWidth(1);
-      doc.line(centerX, logoY - 2, centerX, logoY + logoH + 2);
+      doc.line(centerX, logoY - 4, centerX, logoY + logoSize + 4);
+
+      if (logoLeft) doc.addImage(logoLeft, 'PNG', leftLogoX, logoY, logoSize, logoSize, undefined, 'FAST');
+      if (logoRight) doc.addImage(logoRight, 'PNG', rightLogoX, logoY, logoSize, logoSize, undefined, 'FAST');
 
       const safeFileName = `${depotName}_Riskli_Stok_Raporu`.replace(/[^a-z0-9_]/gi, '_');
       doc.save(`${safeFileName}.pdf`);
