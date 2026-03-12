@@ -57,7 +57,7 @@ import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
-import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
