@@ -201,9 +201,12 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
       doc.setFont(FONT, 'bold');
       doc.text('Teknik Servis Formu', padX, headerY + 20);
 
-      // Logo in center - try to load invitrolab logo
+      // Logo in center - use new Invitrolab logo
       try {
-        const logoResponse = await fetch('/invitrolab_LOGO__-_Kopya__1_-removebg.png');
+        let logoResponse = await fetch('/invlogo.png');
+        if (!logoResponse.ok) {
+          logoResponse = await fetch('/invitrolab_LOGO__-_Kopya__1_-removebg.png');
+        }
         if (logoResponse.ok) {
           const logoBlob = await logoResponse.blob();
           const logoReader = new FileReader();
@@ -211,8 +214,8 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
           await new Promise<void>(resolve => {
             logoReader.onloadend = () => {
               const logoData = logoReader.result as string;
-              const logoWidth = 120;
-              const logoHeight = 35;
+              const logoWidth = 132;
+              const logoHeight = 40;
               const logoX = (pageW / 2) - (logoWidth / 2);
               doc.addImage(logoData, 'PNG', logoX, headerY + 5, logoWidth, logoHeight, undefined, 'FAST');
               resolve();

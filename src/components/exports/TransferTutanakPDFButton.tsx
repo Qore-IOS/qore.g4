@@ -104,9 +104,34 @@ export default function TransferTutanakPDFButton({ header, rows, className }: Tr
       doc.setFont(FONT_FAMILY, 'bold');
       doc.text(sanitizeForPdfFont('Transfer Formu'), pageW / 2, 60, { align: 'center' });
 
-      doc.setFontSize(36);
-      doc.setFont(FONT_FAMILY, 'bold');
-      doc.text('INVITROLAB', pageW / 2, 110, { align: 'center' });
+      let transferLogoRendered = false;
+      try {
+        const transferLogoResponse = await fetch('/invlogo.png');
+        if (transferLogoResponse.ok) {
+          const transferLogoBlob = await transferLogoResponse.blob();
+          const transferLogoReader = new FileReader();
+          transferLogoReader.readAsDataURL(transferLogoBlob);
+          await new Promise<void>(resolve => {
+            transferLogoReader.onloadend = () => {
+              const transferLogoData = transferLogoReader.result as string;
+              const transferLogoWidth = 250;
+              const transferLogoHeight = 48;
+              const transferLogoX = (pageW / 2) - (transferLogoWidth / 2);
+              doc.addImage(transferLogoData, 'PNG', transferLogoX, 78, transferLogoWidth, transferLogoHeight, undefined, 'FAST');
+              transferLogoRendered = true;
+              resolve();
+            };
+          });
+        }
+      } catch (e) {
+        console.error('Could not load transfer header logo:', e);
+      }
+
+      if (!transferLogoRendered) {
+        doc.setFontSize(36);
+        doc.setFont(FONT_FAMILY, 'bold');
+        doc.text('INVITROLAB', pageW / 2, 110, { align: 'center' });
+      }
 
       doc.setFont(FONT_FAMILY, 'normal');
       doc.setFontSize(10);
