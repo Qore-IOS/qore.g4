@@ -30,7 +30,7 @@ import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
   SlidersHorizontal, X, Filter, Nfc, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MoreHorizontal, Eye,
-  FileDown, ListChecks, BarChart3, ChevronsUpDown
+  FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
@@ -51,6 +51,49 @@ import { resolveDefaultTrackingMode } from '@/lib/tracking';
 interface FilterSpec {
   group: 'marka' | 'urunGrubu';
   value: string;
+}
+
+type MiadSeverity = 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
+
+function getMiadInfoFromString(miadStr: string): { days: number; severity: MiadSeverity } {
+  if (!miadStr) return { days: Infinity, severity: 'normal' };
+  const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+  if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' };
+  const days = differenceInDays(miadDate, new Date());
+  if (days < 0) return { days, severity: 'expired' };
+  if (days <= 3) return { days, severity: 'critical' };
+  if (days <= 10) return { days, severity: 'warning' };
+  if (days < 45) return { days, severity: 'caution' };
+  if (days < 60) return { days, severity: 'notice' };
+  return { days, severity: 'normal' };
+}
+
+function getCoverageInfoForRow(
+  row: GroupedStockRow,
+  minMaxRules: Record<string, MinMaxRule>,
+  lotTrackedStockCodes: Set<string>,
+  sourceRows: GroupedStockRow[]
+): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } {
+  const stokKodu = row.stokKodu;
+  const rule = minMaxRules[stokKodu];
+  if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  const stockForCoverage = lotTrackedStockCodes.has(stokKodu)
+    ? row.quantity
+    : sourceRows.reduce((acc, r) => r.stokKodu === stokKodu ? acc + r.quantity : acc, 0);
+  const periodDays = Math.floor(rule.maxGun);
+  if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  const dailyNeed = rule.max / periodDays;
+  if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  const coverageDays = Math.floor(stockForCoverage / dailyNeed);
+  if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical', coverageDays, dailyNeed };
+  if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning', coverageDays, dailyNeed };
+  return { label: `${coverageDays} gün yeter`, severity: 'good', coverageDays, dailyNeed };
+}
+
+function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: string; coverageDays: number; dailyNeed: number }) {
+  if (coverageInfo.severity === 'unknown' || miadInfo.days === Infinity || miadInfo.days <= 0 || coverageInfo.coverageDays <= miadInfo.days) return 0;
+  const riskyDays = coverageInfo.coverageDays - miadInfo.days;
+  return Math.max(0, Math.ceil(riskyDays * coverageInfo.dailyNeed));
 }
 
 const FiltreDialog: React.FC<{
@@ -276,7 +319,7 @@ export default function StokYonetimiPanel() {
   const [isLabCountModalOpen, setIsLabCountModalOpen] = useState(false);
   const [selectedLabsForReport, setSelectedLabsForReport] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<FilterSpec[]>([]);
-
+  const [showOnlyRiskyStock, setShowOnlyRiskyStock] = useState(false);
   // For NFC modal & exports we may need raw stock
   const [rawDepotStock, setRawDepotStock] = useState<DepoStokItem[]>([]);
 
@@ -392,6 +435,19 @@ export default function StokYonetimiPanel() {
     return () => { cancelled = true; };
   }, [selectedDepotId, productCodes, toast]);
 
+  const lotTrackedStockCodes = useMemo(() => {
+    const tracked = new Set<string>();
+    for (const product of productCodes) {
+      if (!product.stokKodu) continue;
+      const trackingMode = resolveDefaultTrackingMode(product);
+      if (trackingMode === 'serial' || trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
+        tracked.add(product.stokKodu);
+      }
+    }
+    return tracked;
+  }, [productCodes]);
+
+
   /* ─── Client-side filtering, sorting, pagination ─── */
   const { rows, totalRows, totalPages, colValues } = useMemo(() => {
     let filtered = [...allGroupedRows];
@@ -402,6 +458,14 @@ export default function StokYonetimiPanel() {
       filtered = filtered.filter(r => {
         const fieldVal = (r as any)[col];
         return values.includes(String(fieldVal ?? ''));
+      });
+    }
+
+    if (showOnlyRiskyStock) {
+      filtered = filtered.filter((row) => {
+        const miadInfo = getMiadInfoFromString(row.miad);
+        const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
+        return getRiskyBoxes(miadInfo, coverageInfo) > 0;
       });
     }
 
@@ -432,7 +496,7 @@ export default function StokYonetimiPanel() {
     const pageRows = filtered.slice(start, start + rowsPerPage);
 
     return { rows: pageRows, totalRows: total, totalPages: pages, colValues: columnUniqueValues };
-  }, [allGroupedRows, columnFilters, sortField, sortDirection, currentPage, rowsPerPage, columnUniqueValues]);
+  }, [allGroupedRows, columnFilters, sortField, sortDirection, currentPage, rowsPerPage, columnUniqueValues, showOnlyRiskyStock, minMaxRules, lotTrackedStockCodes]);
 
   // Filter out pool warehouses for the depot selector
   const availableDepots = useMemo(
@@ -474,49 +538,21 @@ export default function StokYonetimiPanel() {
 
   const hasActiveColumnFilters = Object.values(columnFilters).some((v: string[]) => v.length > 0);
 
-  const lotTrackedStockCodes = useMemo(() => {
-    const tracked = new Set<string>();
-    for (const product of productCodes) {
-      if (!product.stokKodu) continue;
-      const trackingMode = resolveDefaultTrackingMode(product);
-      if (trackingMode === 'serial' || trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
-        tracked.add(product.stokKodu);
-      }
-    }
-    return tracked;
-  }, [productCodes]);
+  const getMiadInfo = getMiadInfoFromString;
 
-  /* ─── Miad severity helpers ─── */
-  const getMiadInfo = (miadStr: string) => {
-    if (!miadStr) return { days: Infinity, severity: 'normal' as const };
-    const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
-    if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' as const };
-    const days = differenceInDays(miadDate, new Date());
-    if (days < 0) return { days, severity: 'expired' as const };
-    if (days <= 3) return { days, severity: 'critical' as const };
-    if (days <= 10) return { days, severity: 'warning' as const };
-    if (days < 45) return { days, severity: 'caution' as const };
-    if (days < 60) return { days, severity: 'notice' as const };
-    return { days, severity: 'normal' as const };
-  };
+  const getCoverageInfo = (row: GroupedStockRow) =>
+    getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
 
-  /* ─── Coverage days calculation ─── */
-  const getCoverageInfo = (row: GroupedStockRow): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } => {
-    const stokKodu = row.stokKodu;
-    const rule = minMaxRules[stokKodu];
-    if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
-    const stockForCoverage = lotTrackedStockCodes.has(stokKodu)
-      ? row.quantity
-      : rows.reduce((acc, r) => r.stokKodu === stokKodu ? acc + r.quantity : acc, 0);
-    const periodDays = Math.floor(rule.maxGun);
-    if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
-    const dailyNeed = rule.max / periodDays;
-    if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
-    const coverageDays = Math.floor(stockForCoverage / dailyNeed);
-    if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical', coverageDays, dailyNeed };
-    if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning', coverageDays, dailyNeed };
-    return { label: `${coverageDays} gün yeter`, severity: 'good', coverageDays, dailyNeed };
-  };
+  const riskyRows = useMemo(
+    () => allGroupedRows.filter((row) => {
+      const miadInfo = getMiadInfoFromString(row.miad);
+      const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
+      return getRiskyBoxes(miadInfo, coverageInfo) > 0;
+    }),
+    [allGroupedRows, minMaxRules, lotTrackedStockCodes]
+  );
+
+  const hasRiskyRows = riskyRows.length > 0;
 
   /* ─── Row color strip ─── */
   const getRowStripeColor = (row: GroupedStockRow): string => {
@@ -532,7 +568,7 @@ export default function StokYonetimiPanel() {
   /* ─── Available filter groups for marka/urunGrubu ─── */
   const availableFilterGroups = useMemo(() => {
     const markaSet = new Set<string>();
-    const urunGrubuSet = new Set<'kit' | 'sarf'>();
+    const urunGrubuSet = new Set<'kit' | 'sarf' | 'yedek_parca'>();
     productCodes.forEach(p => {
       if (p.marka) markaSet.add(p.marka);
       if (p.urunGrubu) urunGrubuSet.add(p.urunGrubu);
@@ -602,6 +638,252 @@ export default function StokYonetimiPanel() {
     }
   };
 
+  const riskyExportRows = useMemo(() => {
+    return riskyRows.map((row) => {
+      const miadInfo = getMiadInfoFromString(row.miad);
+      const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
+      const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
+      return {
+        row,
+        miadInfo,
+        coverageInfo,
+        riskyBoxes,
+      };
+    });
+  }, [riskyRows, minMaxRules, lotTrackedStockCodes, allGroupedRows]);
+
+  const handleRiskyExcelExport = () => {
+    const data = riskyExportRows.map(({ row, miadInfo, coverageInfo, riskyBoxes }) => ({
+      'Stok Adı': row.stokAdi,
+      'Stok Kodu': row.stokKodu,
+      'Lot': row.lotNumarasi,
+      'Miad': row.miad,
+      'Kalan Gün': miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün`,
+      'Adet': `${row.quantity} ${row.anaBirim}`,
+      'Yeterlilik': coverageInfo.label,
+      'Riskli Adet': `${riskyBoxes} kutu`,
+    }));
+    exportDataToExcel(data, `${depotName}_Riskli_Stok_Raporu`, 'RiskliStok', toast);
+  };
+
+  const loadImageAsDataUrl = async (candidates: string[]): Promise<string | null> => {
+    for (const path of candidates) {
+      try {
+        const response = await fetch(path);
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string | null>((resolve) => {
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl) return dataUrl;
+      } catch {
+        // try next
+      }
+    }
+    return null;
+  };
+
+  const handleRiskyPdfExport = async () => {
+    try {
+      const [jsPDFModule, autoTableModule] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable')
+      ]);
+      const jsPDF = jsPDFModule.default;
+      const autoTable = autoTableModule.default;
+      const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 24;
+      const ORANGE: [number, number, number] = [199, 137, 65];
+
+      const logoLeft = await loadImageAsDataUrl([
+        '/home/user/studio/public/blk.png',
+        '/blk.png'
+      ]);
+      const logoRight = await loadImageAsDataUrl([
+        '/home/user/studio/public/invlogo.png',
+        '/invlogo.png',
+        '/QORE-INV_LOGO.PNG',
+        '/invitrolab_LOGO__-_Kopya__1_-removebg.png'
+      ]);
+
+      const rowsForPdf = riskyExportRows.map(({ row, miadInfo, coverageInfo, riskyBoxes }) => {
+        const riskyDays = coverageInfo.coverageDays - miadInfo.days;
+        return {
+          stokAdi: row.stokAdi,
+          lot: row.lotNumarasi || '-',
+          miad: row.miad,
+          miadLabel: miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`,
+          adet: `${row.quantity} ${row.anaBirim}`,
+          yeterlilik: coverageInfo.label,
+          riskli: `⚠ ${riskyBoxes} kutu riskli`,
+          riskTooltip: miadInfo.days === Infinity
+            ? 'Miad bilgisi yok'
+            : `Miad ${miadInfo.days} gün sonra dolacak, ${Math.max(0, riskyDays)} günlük stok risk altında`,
+          miadSeverity: miadInfo.severity,
+          coverageSeverity: coverageInfo.severity,
+        };
+      });
+
+      const drawFrameAndHeader = () => {
+        doc.setDrawColor(...ORANGE);
+        doc.setLineWidth(2);
+        doc.rect(margin, margin, pageW - (margin * 2), pageH - (margin * 2));
+
+        doc.setTextColor(17, 24, 39);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(24);
+        doc.text('RİSKLİ STOK RAPORU', pageW / 2, margin + 24, { align: 'center' });
+
+        doc.setFontSize(16);
+        doc.text(`${depotName || 'Depo'} Deposu`, pageW / 2, margin + 48, { align: 'center' });
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
+        doc.text(new Date().toLocaleString('tr-TR'), pageW - margin - 8, margin + 16, { align: 'right' });
+      };
+
+      autoTable(doc, {
+        head: [['', 'STOK ADI', 'LOT', 'MİAD', 'ADET', 'YETERLİLİK', 'RİSKLİ ADET']],
+        body: rowsForPdf.map((item) => [
+          '',
+          item.stokAdi,
+          item.lot,
+          `${item.miad}
+${item.miadLabel}`,
+          item.adet,
+          item.yeterlilik,
+          `${item.riskli}
+${item.riskTooltip}`,
+        ]),
+        startY: margin + 62,
+        theme: 'grid',
+        styles: {
+          font: 'helvetica',
+          fontSize: 9,
+          cellPadding: 6,
+          textColor: [15, 23, 42],
+          valign: 'middle',
+        },
+        headStyles: {
+          fillColor: [241, 245, 249],
+          textColor: [71, 85, 105],
+          fontStyle: 'bold',
+        },
+        margin: { left: margin + 8, right: margin + 8, bottom: 84 },
+        columnStyles: {
+          0: { cellWidth: 6 },
+          1: { cellWidth: 225 },
+          2: { cellWidth: 92 },
+          3: { cellWidth: 120 },
+          4: { cellWidth: 85, halign: 'center' },
+          5: { cellWidth: 125, halign: 'center' },
+          6: { cellWidth: 155 },
+        },
+        didParseCell: (hookData) => {
+          if (hookData.section !== 'body') return;
+          const item = rowsForPdf[hookData.row.index];
+          if (!item) return;
+
+          if (item.miadSeverity === 'critical' || item.miadSeverity === 'expired') {
+            hookData.row.cells[1].styles.fillColor = [254, 242, 242];
+          } else if (item.miadSeverity === 'warning' || item.miadSeverity === 'caution') {
+            hookData.row.cells[1].styles.fillColor = [255, 251, 235];
+          }
+
+          if (hookData.column.index === 0) {
+            if (item.miadSeverity === 'expired' || item.miadSeverity === 'critical') {
+              hookData.cell.styles.fillColor = [239, 68, 68];
+            } else if (item.miadSeverity === 'warning' || item.miadSeverity === 'caution') {
+              hookData.cell.styles.fillColor = [245, 158, 11];
+            } else if (item.miadSeverity === 'notice') {
+              hookData.cell.styles.fillColor = [250, 204, 21];
+            } else {
+              hookData.cell.styles.fillColor = [255, 255, 255];
+            }
+          }
+
+          if (hookData.column.index === 3) {
+            if (item.miadSeverity === 'expired' || item.miadSeverity === 'critical') {
+              hookData.cell.styles.fillColor = [254, 202, 202];
+              hookData.cell.styles.textColor = [153, 27, 27];
+            } else if (item.miadSeverity === 'warning') {
+              hookData.cell.styles.fillColor = [255, 237, 213];
+              hookData.cell.styles.textColor = [194, 65, 12];
+            } else if (item.miadSeverity === 'caution') {
+              hookData.cell.styles.fillColor = [254, 243, 199];
+              hookData.cell.styles.textColor = [180, 83, 9];
+            } else if (item.miadSeverity === 'notice') {
+              hookData.cell.styles.fillColor = [254, 249, 195];
+              hookData.cell.styles.textColor = [161, 98, 7];
+            }
+            hookData.cell.styles.fontStyle = 'bold';
+          }
+
+          if (hookData.column.index === 4) {
+            hookData.cell.styles.fillColor = [248, 250, 252];
+            hookData.cell.styles.textColor = [30, 41, 59];
+            hookData.cell.styles.fontStyle = 'bold';
+          }
+
+          if (hookData.column.index === 5) {
+            if (item.coverageSeverity === 'good') {
+              hookData.cell.styles.fillColor = [209, 250, 229];
+              hookData.cell.styles.textColor = [6, 95, 70];
+            } else if (item.coverageSeverity === 'warning') {
+              hookData.cell.styles.fillColor = [255, 237, 213];
+              hookData.cell.styles.textColor = [194, 65, 12];
+            } else if (item.coverageSeverity === 'critical') {
+              hookData.cell.styles.fillColor = [254, 226, 226];
+              hookData.cell.styles.textColor = [185, 28, 28];
+            } else {
+              hookData.cell.styles.fillColor = [241, 245, 249];
+              hookData.cell.styles.textColor = [100, 116, 139];
+            }
+            hookData.cell.styles.fontStyle = 'bold';
+          }
+
+          if (hookData.column.index === 6) {
+            hookData.cell.styles.fillColor = [254, 243, 199];
+            hookData.cell.styles.textColor = [146, 64, 14];
+            hookData.cell.styles.fontStyle = 'bold';
+          }
+        },
+        didDrawPage: () => {
+          drawFrameAndHeader();
+        }
+      });
+
+      const totalPages = doc.getNumberOfPages();
+      doc.setPage(totalPages);
+
+      const logoY = pageH - margin - 44;
+      const logoW = 90;
+      const logoH = 26;
+      const gap = 32;
+      const centerX = pageW / 2;
+      const leftX = centerX - gap - logoW;
+      const rightX = centerX + gap;
+
+      if (logoLeft) doc.addImage(logoLeft, 'PNG', leftX, logoY, logoW, logoH, undefined, 'FAST');
+      if (logoRight) doc.addImage(logoRight, 'PNG', rightX, logoY, logoW, logoH, undefined, 'FAST');
+
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(1);
+      doc.line(centerX, logoY - 2, centerX, logoY + logoH + 2);
+
+      const safeFileName = `${depotName}_Riskli_Stok_Raporu`.replace(/[^a-z0-9_]/gi, '_');
+      doc.save(`${safeFileName}.pdf`);
+      toast({ title: 'Başarılı', description: 'Riskli stok PDF raporu oluşturuldu.' });
+    } catch {
+      toast({ title: 'Hata', description: 'Riskli stok PDF raporu oluşturulamadı.', variant: 'destructive' });
+    }
+  };
   /* ─── Lab count export ─── */
   const handleLabCountExport = async () => {
     if (selectedLabsForReport.length === 0) {
@@ -664,13 +946,28 @@ export default function StokYonetimiPanel() {
                 <FileDown className="h-4 w-4" /> <span className="hidden sm:inline">Rapor</span>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => handleExport(false)}>
-                <BarChart3 className="h-4 w-4 mr-2" /> Özet Rapor
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => handleExport(true)}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" /> Detaylı (Seri No) Rapor
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-64">
+              {showOnlyRiskyStock ? (
+                <>
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Riskli Stok Raporu</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={handleRiskyExcelExport} disabled={!hasRiskyRows}>
+                    <FileSpreadsheet className="h-4 w-4 mr-2" /> Riskli Stok Excel
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleRiskyPdfExport} disabled={!hasRiskyRows}>
+                    <FileText className="h-4 w-4 mr-2" /> Riskli Stok PDF (Yatay)
+                  </DropdownMenuItem>
+                </>
+              ) : (
+                <>
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Genel Raporlar</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={() => handleExport(false)}>
+                    <BarChart3 className="h-4 w-4 mr-2" /> Özet Rapor
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleExport(true)}>
+                    <FileSpreadsheet className="h-4 w-4 mr-2" /> Detaylı (Seri No) Rapor
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -685,6 +982,17 @@ export default function StokYonetimiPanel() {
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Filtre</DropdownMenuLabel>
               <DropdownMenuItem onSelect={() => setIsFilterDialogOpen(true)}>
                 <Filter className="h-4 w-4 mr-2" /> Marka / Ürün Grubu Filtrele
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  if (!hasRiskyRows) return;
+                  setShowOnlyRiskyStock(prev => !prev);
+                  setCurrentPage(1);
+                }}
+                disabled={!hasRiskyRows}
+              >
+                <BarChart3 className="h-4 w-4 mr-2" />
+                {showOnlyRiskyStock ? 'Riskli Stok Gösterimini Kapat' : 'Riskli Stoğu Göster'}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Operasyon / Sayım</DropdownMenuLabel>
@@ -705,7 +1013,7 @@ export default function StokYonetimiPanel() {
       </div>
 
       {/* ── ACTIVE FILTER CHIPS ── */}
-      {(hasActiveColumnFilters || activeFilters.length > 0) && (
+      {(hasActiveColumnFilters || activeFilters.length > 0 || showOnlyRiskyStock) && (
         <div className="cihaz-card flex flex-wrap items-center gap-2 px-3 py-2">
           {Object.entries(columnFilters).map(([col, vals]: [string, string[]]) =>
             vals.map((v: string) => (
@@ -720,7 +1028,12 @@ export default function StokYonetimiPanel() {
               {f.value}
             </span>
           ))}
-          <button onClick={clearAllFilters} className="text-[11px] text-red-500 hover:underline ml-auto">Temizle ✕</button>
+          {showOnlyRiskyStock && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2.5 py-0.5 text-[11px] font-medium">
+              ⚠ Riskli stoklar
+            </span>
+          )}
+          <button onClick={() => { clearAllFilters(); setShowOnlyRiskyStock(false); }} className="text-[11px] text-red-500 hover:underline ml-auto">Temizle ✕</button>
         </div>
       )}
 
@@ -729,7 +1042,7 @@ export default function StokYonetimiPanel() {
         {/* Sticky toolbar with summary */}
         <div className="sticky top-0 z-20 bg-[var(--dashboard-surface)] border-b border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 text-xs text-[var(--dashboard-muted)]">
-            <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{totalRows}</span> kayıt</span>
+            <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{showOnlyRiskyStock ? riskyRows.length : totalRows}</span> kayıt</span>
             {totalPages > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span>/{totalPages}</span>}
           </div>
           <div className="flex items-center gap-3">
@@ -882,10 +1195,10 @@ export default function StokYonetimiPanel() {
                             )}>
                               {coverageInfo.label}
                             </span>
-                            {coverageInfo.severity !== 'unknown' && miadInfo.days !== Infinity && miadInfo.days > 0 && coverageInfo.coverageDays > miadInfo.days && (() => {
-                              const riskyDays = coverageInfo.coverageDays - miadInfo.days;
-                              const riskyBoxes = Math.ceil(riskyDays * coverageInfo.dailyNeed);
+                            {(() => {
+                              const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
                               if (riskyBoxes <= 0) return null;
+                              const riskyDays = coverageInfo.coverageDays - miadInfo.days;
                               return (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800" title={`Miad ${miadInfo.days} gün sonra dolacak, ${riskyDays} günlük stok (${riskyBoxes} kutu) risk altında`}>
                                   ⚠ {riskyBoxes} kutu riskli
