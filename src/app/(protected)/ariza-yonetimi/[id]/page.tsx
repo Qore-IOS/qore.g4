@@ -1309,20 +1309,20 @@ export default function FaultDetailPage() {
                     {/* Buzlu arka plan efekti */}
                     <div className="absolute inset-0 backdrop-blur-sm bg-white/60 dark:bg-black/60 z-10" />
 
-                    {/* Arıza önizlemesi (bulanık) */}
-                    <div className="p-4 opacity-50">
+                    {/* Arıza önizlemesi (bulanık) - butonlara yeterli alan sağlamak için min yükseklik */}
+                    <div className="p-4 opacity-50 min-h-[160px]">
                       <p className="text-sm text-muted-foreground">{fault.description}</p>
                     </div>
 
                     {/* Üzerime Ata butonu */}
-                    <div className="absolute inset-0 z-20 flex items-center justify-center flex-col gap-2">
+                    <div className="absolute inset-0 z-20 flex items-center justify-center flex-col gap-3 px-4">
                       {canAssign ? (
                         <>
                           <Button
                             size="lg"
                             onClick={handleAssignToSelf}
                             disabled={isAssigning || isTransferringUnit}
-                            className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-lg px-8 py-6"
+                            className="w-full max-w-xs bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-base px-6 py-5"
                           >
                             {isAssigning ? (
                               <Loader2 className="h-5 w-5 mr-2 animate-spin" />
@@ -1335,7 +1335,7 @@ export default function FaultDetailPage() {
                             variant="outline"
                             onClick={() => setIsTransferDialogOpen(true)}
                             disabled={isAssigning || isTransferringUnit}
-                            className="border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-6 py-5"
+                            className="w-full max-w-xs border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-6 py-4"
                           >
                             {isTransferringUnit ? (
                               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
