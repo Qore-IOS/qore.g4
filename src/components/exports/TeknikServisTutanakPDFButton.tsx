@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import { format } from 'date-fns';
 import type { Device, Hospital } from '@/lib/types';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 // Turkish font cache
@@ -273,14 +273,12 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
       let labDisplayName = hospital?.name || '';
       if (hospital?.id) {
         try {
-          const poolsQ = query(
-            collection(db, 'deviceLabPools'),
-            where('active', '==', true),
-            where('memberIds', 'array-contains', hospital.id)
-          );
-          const poolsSnap = await getDocs(poolsQ);
-          if (!poolsSnap.empty) {
-            const pool = poolsSnap.docs[0].data();
+          const poolsSnap = await getDocs(collection(db, 'labPools'));
+          const matchingPool = poolsSnap.docs
+            .map(d => d.data())
+            .find(p => p.active && p.memberIds?.includes(hospital.id));
+          if (matchingPool) {
+            const pool = matchingPool;
             if (pool.mainLabId && pool.mainLabId !== hospital.id) {
               const mainLabDoc = await getDoc(doc(db, 'hospitals', pool.mainLabId));
               if (mainLabDoc.exists()) {
