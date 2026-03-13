@@ -64,6 +64,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTransferTutanakPDFButton';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
+import { emitSparePartTransfer } from '@/lib/notifications';
 
 // Menu selection types
 type MenuSection = 'transfer' | 'depo-stok' | 'toplam-stok' | 'personnel' | 'pool-stok';
@@ -1123,6 +1124,24 @@ export default function YedekParcaTransferPage() {
       }
 
       await batch.commit();
+
+      // Send notifications to each recipient user (not pool warehouses)
+      const personnelRows = transferRows.filter(r => !r.targetUid.startsWith('pool_'));
+      const byUser = new Map<string, { targetName: string; items: { stokKodu: string; stokAdi: string; quantity: number }[] }>();
+      for (const row of personnelRows) {
+        if (!byUser.has(row.targetUid)) {
+          byUser.set(row.targetUid, { targetName: row.targetName, items: [] });
+        }
+        byUser.get(row.targetUid)!.items.push({ stokKodu: row.stokKodu, stokAdi: row.stokAdi, quantity: row.quantity });
+      }
+      for (const [targetUid, data] of byUser) {
+        emitSparePartTransfer({
+          actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
+          targetUid,
+          targetName: data.targetName,
+          items: data.items,
+        }).catch(e => console.error('Spare part transfer notification error:', e));
+      }
 
       const totalItems = transferRows.reduce((s, r) => s + r.quantity, 0);
       toast({
