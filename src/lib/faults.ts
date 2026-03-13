@@ -4,7 +4,7 @@
 'use client';
 import { db } from '@/lib/firebase';
 import {
-  addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch
+  addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch, query, where, getDocs
 } from 'firebase/firestore';
 import { emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
@@ -70,6 +70,15 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
   };
 
   const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
+
+  // Update device arizaDurumu
+  if (deviceId) {
+    const deviceRef = doc(db, 'devices', deviceId);
+    await updateDoc(deviceRef, {
+      arizaDurumu: faultType,
+      arizaAciklamasi: openDescription ?? '',
+    });
+  }
 
   // first history event (no change here)
   await addDoc(collection(db, 'deviceFaultReports', reportRef.id, 'history'), {
@@ -154,12 +163,32 @@ export async function closeDeviceFaultReport(
   batch.update(reportRef, updateData);
 
   // 2. Update the main device document ONLY if a deviceId exists
+  //    Check if there are other open fault reports for the same device
   if (deviceId) {
+    const otherOpenFaults = await getDocs(
+      query(
+        collection(db, 'deviceFaultReports'),
+        where('deviceId', '==', deviceId),
+        where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+      )
+    );
+    // Exclude the current report being closed
+    const remainingOpenFaults = otherOpenFaults.docs.filter(d => d.id !== reportId);
+
     const deviceRef = doc(db, 'devices', deviceId);
-    batch.update(deviceRef, {
-      arizaDurumu: 'yok',
-      arizaAciklamasi: '',
-    });
+    if (remainingOpenFaults.length > 0) {
+      // There are other open faults - set arizaDurumu to the remaining fault's type
+      const remainingFault = remainingOpenFaults[0].data();
+      batch.update(deviceRef, {
+        arizaDurumu: remainingFault.faultType || 'teknik_servis',
+        arizaAciklamasi: remainingFault.description || '',
+      });
+    } else {
+      batch.update(deviceRef, {
+        arizaDurumu: 'yok',
+        arizaAciklamasi: '',
+      });
+    }
   }
 
   // 3. Add the history event for closing
@@ -224,6 +253,14 @@ export async function transferFaultToOtherUnit(
     assignedToName: null,
     atamaBekmeSuresi: null,
   });
+
+  // Update device arizaDurumu to reflect the new fault type
+  if (reportData.deviceId) {
+    const deviceRef = doc(db, 'devices', reportData.deviceId);
+    batch.update(deviceRef, {
+      arizaDurumu: targetFaultType,
+    });
+  }
 
   const historyRef = doc(collection(db, 'deviceFaultReports', reportId, 'history'));
   const targetLabel = targetFaultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
@@ -530,6 +567,15 @@ export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput)
 
   const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
 
+  // Update device arizaDurumu
+  if (deviceId) {
+    const deviceRef = doc(db, 'devices', deviceId);
+    await updateDoc(deviceRef, {
+      arizaDurumu: 'aplikasyon',
+      arizaAciklamasi: `Cihazdan çıkan kit: ${stokAdi} (${stokKodu})`,
+    });
+  }
+
   // First history event
   await addDoc(collection(db, 'deviceFaultReports', reportRef.id, 'history'), {
     type: 'opened' as DeviceFaultEventType,
@@ -583,13 +629,30 @@ export async function resolveEjectedKitFault(
     kitResolution: resolution,
   });
 
-  // 2. Update device if deviceId exists
+  // 2. Update device if deviceId exists - check for remaining open faults
   if (deviceId) {
+    const otherOpenFaults = await getDocs(
+      query(
+        collection(db, 'deviceFaultReports'),
+        where('deviceId', '==', deviceId),
+        where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+      )
+    );
+    const remainingOpenFaults = otherOpenFaults.docs.filter(d => d.id !== reportId);
+
     const deviceRef = doc(db, 'devices', deviceId);
-    batch.update(deviceRef, {
-      arizaDurumu: 'yok',
-      arizaAciklamasi: '',
-    });
+    if (remainingOpenFaults.length > 0) {
+      const remainingFault = remainingOpenFaults[0].data();
+      batch.update(deviceRef, {
+        arizaDurumu: remainingFault.faultType || 'aplikasyon',
+        arizaAciklamasi: remainingFault.description || '',
+      });
+    } else {
+      batch.update(deviceRef, {
+        arizaDurumu: 'yok',
+        arizaAciklamasi: '',
+      });
+    }
   }
 
   // 3. Add history event
