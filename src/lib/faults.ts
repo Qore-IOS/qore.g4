@@ -238,6 +238,16 @@ export async function transferFaultToOtherUnit(
 
   await batch.commit();
 
+  // Cihaz resmi URL'si için devices koleksiyonundan çek
+  let deviceImageUrl: string | undefined;
+  if (reportData?.deviceId) {
+    const deviceRef = doc(db, 'devices', reportData.deviceId);
+    const deviceSnap = await getDoc(deviceRef);
+    if (deviceSnap.exists()) {
+      deviceImageUrl = deviceSnap.data()?.imageUrl;
+    }
+  }
+
   await emitFaultTransferred({
     actor,
     faultReportId: reportId,
@@ -246,6 +256,8 @@ export async function transferFaultToOtherUnit(
     toFaultType: targetFaultType,
     hospitalId: reportData?.hospitalId,
     hospitalName: reportData?.labName || reportData?.hospitalName,
+    description: reportData?.description,
+    deviceImageUrl,
   });
 }
 export async function assignFaultToSelf(

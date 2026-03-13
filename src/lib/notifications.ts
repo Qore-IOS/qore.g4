@@ -365,19 +365,37 @@ export async function emitFaultTransferred(params: {
   toFaultType: "teknik_servis" | "aplikasyon";
   hospitalName?: string;
   hospitalId?: string;
+  description?: string;
+  deviceImageUrl?: string;
 }) {
   const targetRole = `role:${params.toFaultType}`;
-  const targetUnitLabel = params.toFaultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
-  const targets: string[] = [targetRole, 'role:admin'];
+  const faultTypeLabel = params.toFaultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+  const targets: string[] = [targetRole];
 
   if (params.hospitalId) {
     targets.push(`lab:${params.hospitalId}`);
   }
 
+  // Convert image path to full URL for push notifications
+  let fullDeviceImageUrl: string | null = null;
+  if (params.deviceImageUrl) {
+    if (/^https?:\/\//i.test(params.deviceImageUrl)) {
+      fullDeviceImageUrl = params.deviceImageUrl;
+    } else {
+      const imgPath = params.deviceImageUrl.startsWith("/")
+        ? params.deviceImageUrl
+        : `/${params.deviceImageUrl}`;
+      fullDeviceImageUrl = `https://qorengine.com${imgPath}`;
+    }
+  }
+
+  // fault_opened tipi kullanıyoruz ki Cloud Function'daki strict role filtresi,
+  // push bildirim action butonları ve deviceImageUrl desteği çalışsın.
+  // Hedef birim personeline yeni arıza açılmış gibi bildirim gider.
   await createNotification({
-    type: 'fault_transferred',
-    title: `Arıza Diğer Birime Aktarıldı: ${params.deviceName}`,
-    message: `${params.hospitalName || ''} - ${params.deviceName} cihaz arızası ${targetUnitLabel} birimine aktarıldı. (Aktaran: ${params.actor.name})`,
+    type: 'fault_opened',
+    title: `Arıza Aktarıldı: ${params.deviceName}`,
+    message: `${params.hospitalName || ''} - ${params.deviceName} cihaz arızası ${faultTypeLabel} birimine aktarıldı.${params.description ? ` Açıklama: ${params.description}` : ''} (Aktaran: ${params.actor.name})`,
     href: `/ariza-yonetimi/${params.faultReportId}`,
     resource: { type: 'device', id: params.assignedDeviceId },
     actor: params.actor,
@@ -386,8 +404,11 @@ export async function emitFaultTransferred(params: {
       hospitalId: params.hospitalId,
       deviceName: params.deviceName,
       faultReportId: params.faultReportId,
-      toFaultType: params.toFaultType,
-      transferredByName: params.actor.name,
+      faultType: params.toFaultType,
+      description: params.description || null,
+      deviceImageUrl: fullDeviceImageUrl,
+      openedByName: params.actor.name,
+      isTransfer: true,
     },
   });
 }
