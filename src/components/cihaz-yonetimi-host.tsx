@@ -19,6 +19,7 @@ import {
   AlertCircle,
   PlayCircle,
   ClipboardCheck,
+  Map,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -286,6 +287,7 @@ export default function CihazYonetimiHost() {
       : [{ icon: Wrench, label: 'Teknik Servis', description: 'Servis paneli', href: '/teknik-servis' }]),
     { icon: ShieldAlert, label: 'Tüm Arızalar', description: 'Arıza yönetimi', href: '/ariza-yonetimi' },
     { icon: CalendarClock, label: 'Nöbet Vardiyası', description: 'Vardiya takibi', href: '/nobet-yonetimi' },
+    { icon: Map, label: 'Harita Paneli', description: 'Cihaz haritası', href: currentUserProfile?.role === 'aplikasyon' ? '/aplikasyon-harita' : '/teknik-harita' },
   ];
 
   const analysisTools = [
@@ -508,7 +510,7 @@ export default function CihazYonetimiHost() {
           </div>
 
           <section className="mb-6 sm:mb-8">
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {quickActionTiles.map((action) => (
                 <ActionTile
                   key={action.label}
