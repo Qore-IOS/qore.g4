@@ -54,6 +54,9 @@ export default function TeknikServisDetayPage() {
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Real-time open fault reports: deviceId -> faultType
+  const [openFaultMap, setOpenFaultMap] = useState<Record<string, 'teknik_servis' | 'aplikasyon'>>({});
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [faultIdForSelectedDevice, setFaultIdForSelectedDevice] = useState<string | null>(null);
@@ -127,6 +130,33 @@ export default function TeknikServisDetayPage() {
     );
     return () => unsub();
   }, [hospitalId, toast]);
+
+  // --- Real-time open fault reports for this hospital's devices ---
+  useEffect(() => {
+    if (devicesByHospital.length === 0) {
+      setOpenFaultMap({});
+      return;
+    }
+    const deviceIds = new Set(devicesByHospital.map(d => d.id));
+    const qFaults = query(
+      collection(db, 'deviceFaultReports'),
+      where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+    );
+    const unsub = onSnapshot(qFaults, (snap) => {
+      const map: Record<string, 'teknik_servis' | 'aplikasyon'> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        if (data.deviceId && data.faultType && deviceIds.has(data.deviceId)) {
+          // For teknik servis panel: teknik_servis is primary (red), aplikasyon is secondary (amber)
+          // If device has both, prefer teknik_servis
+          if (map[data.deviceId] === 'teknik_servis') return;
+          map[data.deviceId] = data.faultType;
+        }
+      });
+      setOpenFaultMap(map);
+    });
+    return () => unsub();
+  }, [devicesByHospital]);
 
   // Fetch fault history for all devices
   useEffect(() => {
@@ -625,9 +655,13 @@ export default function TeknikServisDetayPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {devicesByHospital.map((device) => {
-                // For teknik servis panel: show red for teknik_servis faults, amber for aplikasyon faults
-                const isTeknikServisFaulty = device.arizaDurumu === 'teknik_servis';
-                const isAplikasyonFaulty = device.arizaDurumu === 'aplikasyon';
+                // For teknik servis panel: red for teknik_servis faults, amber for aplikasyon faults
+                // Check both device.arizaDurumu and real-time open fault reports
+                const faultFromReports = openFaultMap[device.id];
+                const faultFromDevice = device.arizaDurumu && device.arizaDurumu !== 'yok' ? device.arizaDurumu : null;
+                const effectiveFaultType = faultFromReports || faultFromDevice;
+                const isTeknikServisFaulty = effectiveFaultType === 'teknik_servis';
+                const isAplikasyonFaulty = effectiveFaultType === 'aplikasyon';
                 const isFaulty = isTeknikServisFaulty || isAplikasyonFaulty;
                 const deviceMaintenanceItems = maintenanceData[device.id] || [];
 
