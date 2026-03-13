@@ -30,7 +30,8 @@ import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
   SlidersHorizontal, X, Filter, Nfc, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MoreHorizontal, Eye,
-  FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText
+  FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText,
+  AlertTriangle, FlaskConical,
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
@@ -320,6 +321,11 @@ export default function StokYonetimiPanel() {
   const [selectedLabsForReport, setSelectedLabsForReport] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<FilterSpec[]>([]);
   const [showOnlyRiskyStock, setShowOnlyRiskyStock] = useState(false);
+  // Risk stock lab modal
+  const [isRiskLabModalOpen, setIsRiskLabModalOpen] = useState(false);
+  const [riskLabModalProduct, setRiskLabModalProduct] = useState<{ stokKodu: string; stokAdi: string; riskyBoxes: number } | null>(null);
+  const [riskLabModalLoading, setRiskLabModalLoading] = useState(false);
+  const [riskLabStockData, setRiskLabStockData] = useState<Array<{ labId: string; labName: string; items: Array<{ lotNumarasi: string; miad: string; miadDays: number; quantity: number }> }>>([]);
   // For NFC modal & exports we may need raw stock
   const [rawDepotStock, setRawDepotStock] = useState<DepoStokItem[]>([]);
 
@@ -966,6 +972,79 @@ export default function StokYonetimiPanel() {
     }
   };
 
+  /* ─── Risk lab modal handler ─── */
+  const handleOpenRiskLabModal = useCallback(async (stokKodu: string, stokAdi: string, riskyBoxes: number) => {
+    setRiskLabModalProduct({ stokKodu, stokAdi, riskyBoxes });
+    setIsRiskLabModalOpen(true);
+    setRiskLabModalLoading(true);
+    setRiskLabStockData([]);
+
+    try {
+      // Find which hospitals have this product in their minMaxRules
+      const labsWithProduct: { labId: string; labName: string }[] = [];
+      for (const hospital of hospitals) {
+        if (!hospital.id) continue;
+        const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
+        const hasProduct = rulesSnap.docs.some(d => {
+          const rule = d.data() as MinMaxRule;
+          return rule.stokKodu === stokKodu;
+        });
+        if (hasProduct) {
+          labsWithProduct.push({ labId: hospital.id, labName: hospital.name || hospital.id });
+        }
+      }
+
+      if (labsWithProduct.length === 0) {
+        setRiskLabStockData([]);
+        setRiskLabModalLoading(false);
+        return;
+      }
+
+      // Query shipped stock for this product code
+      const labNames = labsWithProduct.map(l => l.labName);
+      const shippedQuery = query(
+        collection(db, 'depoStok'),
+        where('stokKodu', '==', stokKodu),
+        where('isShipped', '==', true)
+      );
+      const shippedSnap = await getDocs(shippedQuery);
+      const shippedItems = shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+
+      // Group by lab → lot → miad
+      const labDataMap: Record<string, Array<{ lotNumarasi: string; miad: string; miadDays: number; quantity: number }>> = {};
+      for (const lab of labsWithProduct) {
+        labDataMap[lab.labId] = [];
+      }
+
+      for (const item of shippedItems) {
+        const matchedLab = labsWithProduct.find(l => l.labName === item.hedefKurum);
+        if (!matchedLab) continue;
+        const lot = item.lotNumarasi || '-';
+        const miad = typeof item.miad === 'string' ? item.miad : '';
+        const existing = labDataMap[matchedLab.labId]?.find(x => x.lotNumarasi === lot && x.miad === miad);
+        if (existing) {
+          existing.quantity += 1;
+        } else {
+          const miadInfo = getMiadInfoFromString(miad);
+          labDataMap[matchedLab.labId]?.push({ lotNumarasi: lot, miad, miadDays: miadInfo.days, quantity: 1 });
+        }
+      }
+
+      const result = labsWithProduct.map(lab => ({
+        labId: lab.labId,
+        labName: lab.labName,
+        items: (labDataMap[lab.labId] || []).sort((a, b) => a.miadDays - b.miadDays),
+      }));
+
+      setRiskLabStockData(result);
+    } catch (e) {
+      console.error('Risk lab modal error:', e);
+      toast({ title: 'Hata', description: 'Laboratuvar stok bilgisi yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setRiskLabModalLoading(false);
+    }
+  }, [hospitals, toast]);
+
   /* ═════════════════════════ RENDER ═════════════════════════ */
   return (
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 min-h-screen">
@@ -1256,9 +1335,15 @@ export default function StokYonetimiPanel() {
                               if (riskyBoxes <= 0) return null;
                               const riskyDays = coverageInfo.coverageDays - miadInfo.days;
                               return (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800" title={`Miad ${miadInfo.days} gün sonra dolacak, ${riskyDays} günlük stok (${riskyBoxes} kutu) risk altında`}>
-                                  ⚠ {riskyBoxes} kutu riskli
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleOpenRiskLabModal(row.stokKodu, row.stokAdi, riskyBoxes); }}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 hover:bg-amber-200 hover:shadow-sm active:scale-95 transition-all cursor-pointer"
+                                  title={`Miad ${miadInfo.days} gün sonra dolacak, ${riskyDays} günlük stok (${riskyBoxes} kutu) risk altında — Laboratuvar detayı için tıklayın`}
+                                >
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {riskyBoxes} kutu riskli
+                                </button>
                               );
                             })()}
                           </div>
@@ -1356,6 +1441,107 @@ export default function StokYonetimiPanel() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsLabCountModalOpen(false)}>İptal</Button>
             <Button onClick={handleLabCountExport} disabled={selectedLabsForReport.length === 0}>Rapor Oluştur</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── RISK LAB STOCK MODAL ── */}
+      <Dialog open={isRiskLabModalOpen} onOpenChange={setIsRiskLabModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              Riskli Stok — Laboratuvar Dağılımı
+            </DialogTitle>
+            {riskLabModalProduct && (
+              <DialogDescription>
+                <span className="font-semibold text-[var(--dashboard-text)]">{riskLabModalProduct.stokAdi}</span>
+                <span className="text-[var(--dashboard-muted)] ml-1">({riskLabModalProduct.stokKodu})</span>
+                <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                  <AlertTriangle className="h-3 w-3" />
+                  {riskLabModalProduct.riskyBoxes} kutu riskli
+                </span>
+              </DialogDescription>
+            )}
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto py-3 space-y-3">
+            {riskLabModalLoading ? (
+              <div className="flex items-center justify-center py-12 text-[var(--dashboard-muted)]">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                Laboratuvar stokları yükleniyor...
+              </div>
+            ) : riskLabStockData.length === 0 ? (
+              <div className="text-center py-12 text-[var(--dashboard-muted)]">
+                <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">Bu ürün herhangi bir laboratuvara tanımlı değil.</p>
+              </div>
+            ) : (
+              riskLabStockData.map((lab) => {
+                const totalQty = lab.items.reduce((s, i) => s + i.quantity, 0);
+                return (
+                  <div key={lab.labId} className="rounded-lg border border-[var(--dashboard-stroke)] overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--dashboard-surface-2)]">
+                      <div className="flex items-center gap-2">
+                        <FlaskConical className="h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
+                        <span className="text-sm font-semibold text-[var(--dashboard-text)]">{lab.labName}</span>
+                      </div>
+                      <span className={cn(
+                        "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold",
+                        totalQty > 0 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                      )}>
+                        {totalQty > 0 ? `${totalQty} kutu` : 'Stok yok'}
+                      </span>
+                    </div>
+                    {lab.items.length > 0 ? (
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)]">
+                            <th className="px-3 py-1.5 text-left font-medium">Lot</th>
+                            <th className="px-3 py-1.5 text-left font-medium">Miad</th>
+                            <th className="px-3 py-1.5 text-center font-medium">Adet</th>
+                            <th className="px-3 py-1.5 text-right font-medium">Durum</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lab.items.map((item, idx) => {
+                            const itemMiadInfo = getMiadInfoFromString(item.miad);
+                            return (
+                              <tr key={`${item.lotNumarasi}-${item.miad}-${idx}`} className="border-b border-[var(--dashboard-stroke)] last:border-0">
+                                <td className="px-3 py-1.5 font-mono text-[var(--dashboard-muted)]">{item.lotNumarasi}</td>
+                                <td className="px-3 py-1.5 text-[var(--dashboard-text)]">{item.miad || '-'}</td>
+                                <td className="px-3 py-1.5 text-center font-bold text-[var(--dashboard-text)]">{item.quantity}</td>
+                                <td className="px-3 py-1.5 text-right">
+                                  <span className={cn(
+                                    "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold",
+                                    itemMiadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
+                                    itemMiadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
+                                    itemMiadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
+                                    itemMiadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
+                                    itemMiadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
+                                    itemMiadInfo.severity === 'normal' && 'bg-emerald-100 text-emerald-700',
+                                  )}>
+                                    {itemMiadInfo.days < 0 ? 'Süresi dolmuş' : itemMiadInfo.days === Infinity ? '-' : `${itemMiadInfo.days} gün`}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="px-3 py-3 text-center text-[var(--dashboard-muted)] text-xs">
+                        Bu laboratuvarda stok bulunmuyor
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRiskLabModalOpen(false)}>Kapat</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
