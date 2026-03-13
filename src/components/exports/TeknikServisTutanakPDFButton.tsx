@@ -8,6 +8,8 @@ import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import { format } from 'date-fns';
 import type { Device, Hospital } from '@/lib/types';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 // Turkish font cache
 let turkishFontBase64: string | null = null;
@@ -267,6 +269,30 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
       doc.setFont(FONT, 'normal');
       let currentY = 100;
 
+      // Resolve pool main lab name if hospital belongs to a pool
+      let labDisplayName = hospital?.name || '';
+      if (hospital?.id) {
+        try {
+          const poolsQ = query(
+            collection(db, 'deviceLabPools'),
+            where('active', '==', true),
+            where('memberIds', 'array-contains', hospital.id)
+          );
+          const poolsSnap = await getDocs(poolsQ);
+          if (!poolsSnap.empty) {
+            const pool = poolsSnap.docs[0].data();
+            if (pool.mainLabId && pool.mainLabId !== hospital.id) {
+              const mainLabDoc = await getDoc(doc(db, 'hospitals', pool.mainLabId));
+              if (mainLabDoc.exists()) {
+                labDisplayName = `${mainLabDoc.data().name} - ${hospital.name}`;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Could not resolve pool main lab:', e);
+        }
+      }
+
       // Build personnel string with accompanying personnel
       let personnelStr = txt(actionRecord.createdByName, useTurkish);
       if (actionRecord.eslikEdenPersonel && actionRecord.eslikEdenPersonel.length > 0) {
@@ -276,7 +302,7 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
 
       const info = [
           ['Form No:', actionRecord.id],
-          ['Laboratuvar:', txt(hospital?.name, useTurkish)],
+          ['Laboratuvar:', txt(labDisplayName, useTurkish)],
           ['Cihaz:', txt(`${device.cihazAdi} (SN: ${device.seriNumarasi})`, useTurkish)],
           [txt('İşlemi Yapan:', useTurkish), personnelStr],
           ['Tarih / Saat:', actionRecord.baslangicTarihi && actionRecord.baslangicSaati
