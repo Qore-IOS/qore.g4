@@ -15,6 +15,7 @@ export type NotificationType =
   | "order_created"
   | "order_created_from_request"
   | "transfer_to_lab"
+  | "spare_part_transfer"
   | "fefo_override"
   | "fault_report"
   | "stock_threshold"
@@ -409,6 +410,33 @@ export async function emitFaultTransferred(params: {
       deviceImageUrl: fullDeviceImageUrl,
       openedByName: params.actor.name,
       isTransfer: true,
+    },
+  });
+}
+
+export async function emitSparePartTransfer(params: {
+  actor: Actor;
+  targetUid: string;
+  targetName: string;
+  items: { stokKodu: string; stokAdi: string; quantity: number }[];
+}) {
+  const itemSummary = params.items
+    .map(i => `${i.stokAdi} (${i.stokKodu}) x${i.quantity}`)
+    .join(', ');
+  const totalQty = params.items.reduce((s, i) => s + i.quantity, 0);
+
+  await createNotification({
+    type: 'spare_part_transfer',
+    channel: 'push',
+    title: 'Yedek Parça Transfer Edildi',
+    message: `${params.actor.name} tarafından ${totalQty} adet yedek parça transfer edildi: ${itemSummary}`,
+    href: '/direkt-transfer/yedek-parca-transfer',
+    actor: params.actor,
+    targets: [`user:${params.targetUid}`],
+    meta: {
+      targetUid: params.targetUid,
+      targetName: params.targetName,
+      items: params.items,
     },
   });
 }

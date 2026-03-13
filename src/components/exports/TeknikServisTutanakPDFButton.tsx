@@ -271,20 +271,31 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
 
       // Resolve pool main lab name if hospital belongs to a pool
       let labDisplayName = hospital?.name || '';
-      if (hospital?.id) {
+      const hospitalId = hospital?.id || device.hospitalId;
+      if (hospitalId) {
         try {
           const poolsSnap = await getDocs(collection(db, 'labPools'));
-          const matchingPool = poolsSnap.docs
-            .map(d => d.data())
-            .find(p => p.active && p.memberIds?.includes(hospital.id));
+          const allPools = poolsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          console.log('[PDF Pool Debug] hospitalId:', hospitalId, 'pools:', allPools.map(p => ({ id: p.id, name: (p as any).name, active: (p as any).active, mainLabId: (p as any).mainLabId, memberIds: (p as any).memberIds })));
+          const matchingPool = allPools.find((p: any) => p.active && p.memberIds?.includes(hospitalId));
           if (matchingPool) {
-            const pool = matchingPool;
-            if (pool.mainLabId && pool.mainLabId !== hospital.id) {
+            const pool = matchingPool as any;
+            console.log('[PDF Pool Debug] matched pool:', pool.name, 'mainLabId:', pool.mainLabId);
+            if (pool.mainLabId && pool.mainLabId !== hospitalId) {
               const mainLabDoc = await getDoc(doc(db, 'hospitals', pool.mainLabId));
               if (mainLabDoc.exists()) {
-                labDisplayName = `${mainLabDoc.data().name} - ${hospital.name}`;
+                const mainLabName = mainLabDoc.data().name;
+                console.log('[PDF Pool Debug] mainLabName:', mainLabName);
+                labDisplayName = `${mainLabName} - ${hospital?.name || ''}`;
               }
+            } else if (pool.mainLabId && pool.mainLabId === hospitalId) {
+              // Current lab IS the main lab - just show its name
+              console.log('[PDF Pool Debug] current lab IS the main lab');
+            } else {
+              console.log('[PDF Pool Debug] no mainLabId set on pool');
             }
+          } else {
+            console.log('[PDF Pool Debug] no matching pool found for hospitalId:', hospitalId);
           }
         } catch (e) {
           console.error('Could not resolve pool main lab:', e);
