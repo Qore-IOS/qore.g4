@@ -14,7 +14,6 @@ const DeviceMapPanel = dynamic(() => import('@/components/DeviceMapPanel'), { ss
 export default function TeknikHaritaPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [assignments, setAssignments] = useState<AssignedDevice[]>([]);
