@@ -56,6 +56,8 @@ export default function AplikasyonPaneliDetayPage() {
 
   // Real-time open fault reports: deviceId -> faultType
   const [openFaultMap, setOpenFaultMap] = useState<Record<string, 'teknik_servis' | 'aplikasyon'>>({});
+  // Track fault report IDs per device for orphan cleanup
+  const [openFaultReportIds, setOpenFaultReportIds] = useState<Record<string, string[]>>({});
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -144,9 +146,13 @@ export default function AplikasyonPaneliDetayPage() {
     );
     const unsub = onSnapshot(qFaults, (snap) => {
       const map: Record<string, 'teknik_servis' | 'aplikasyon'> = {};
+      const idsMap: Record<string, string[]> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
         if (data.deviceId && data.faultType && deviceIds.has(data.deviceId)) {
+          // Track all fault report IDs per device
+          if (!idsMap[data.deviceId]) idsMap[data.deviceId] = [];
+          idsMap[data.deviceId].push(d.id);
           // For aplikasyon panel: aplikasyon is primary (red), teknik_servis is secondary (amber)
           // If device has both, prefer aplikasyon
           if (map[data.deviceId] === 'aplikasyon') return;
@@ -154,9 +160,45 @@ export default function AplikasyonPaneliDetayPage() {
         }
       });
       setOpenFaultMap(map);
+      setOpenFaultReportIds(idsMap);
     });
     return () => unsub();
   }, [devicesByHospital]);
+
+  // Auto-cleanup orphaned fault reports: if device.arizaDurumu is 'yok' but openFaultMap has entries
+  useEffect(() => {
+    if (devicesByHospital.length === 0 || Object.keys(openFaultMap).length === 0) return;
+
+    const orphanedReportIds: string[] = [];
+    devicesByHospital.forEach((device) => {
+      const deviceFaultStatus = device.arizaDurumu;
+      const hasOpenReports = openFaultMap[device.id];
+      if (hasOpenReports && (!deviceFaultStatus || deviceFaultStatus === 'yok')) {
+        const ids = openFaultReportIds[device.id] || [];
+        orphanedReportIds.push(...ids);
+      }
+    });
+
+    if (orphanedReportIds.length === 0) return;
+
+    const closeOrphans = async () => {
+      for (const reportId of orphanedReportIds) {
+        try {
+          const reportRef = doc(db, 'deviceFaultReports', reportId);
+          await updateDoc(reportRef, {
+            status: 'cozuldu',
+            closedAt: serverTimestamp(),
+            closedByUid: 'system',
+            closedByName: 'Sistem (Otomatik Temizlik)',
+            closeDescription: 'Cihaz sağlıklı durumda olduğu için yetim arıza kaydı otomatik kapatıldı.',
+          });
+        } catch (err) {
+          console.error('Failed to auto-close orphaned fault report:', reportId, err);
+        }
+      }
+    };
+    closeOrphans();
+  }, [devicesByHospital, openFaultMap, openFaultReportIds]);
 
   // Fetch fault history for all devices
   useEffect(() => {
