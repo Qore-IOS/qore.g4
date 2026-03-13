@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Sparkles, Lock, ArrowRightLeft } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -159,6 +159,7 @@ export default function FaultDetailPage() {
   // Yeni atama sistemi state'leri
   const [isAssigning, setIsAssigning] = useState(false);
   const [isTransferringUnit, setIsTransferringUnit] = useState(false);
+  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
   const [isStartingIntervention, setIsStartingIntervention] = useState(false);
   const [isVerifyingLocation, setIsVerifyingLocation] = useState(false);
   const [locationVerified, setLocationVerified] = useState(false);
@@ -437,6 +438,20 @@ export default function FaultDetailPage() {
     }
   }, [fault?.locationVerifiedAt]);
 
+  // Kilit mekanizması: Arıza bir personele atandıysa, sadece o personel (veya admin) işlem yapabilir
+  const isLockedByOther = useMemo(() => {
+    if (!fault || !currentUser) return false;
+    const normalized = normalizeStatus(fault.status);
+    // Sadece müdahale_bekliyor ve müdahale_ediliyor durumlarında kilit aktif
+    if (normalized !== 'mudahale_bekliyor' && normalized !== 'mudahale_ediliyor') return false;
+    // Atanmış personel yoksa kilit yok
+    if (!fault.assignedToUid) return false;
+    // Admin her zaman erişebilir
+    if (isAdmin) return false;
+    // Atanmış kişi mevcut kullanıcıysa kilit yok
+    return fault.assignedToUid !== currentUser.uid;
+  }, [fault, currentUser, isAdmin]);
+
   const resolutionTime = useMemo(() => {
     const normalized = normalizeStatus(fault?.status || 'open');
     if (normalized === 'cozuldu' && fault?.toplamCozumSuresi) {
@@ -641,6 +656,10 @@ export default function FaultDetailPage() {
 
   const handleClose = useCallback(async () => {
     if (!fault) return;
+    if (isLockedByOther) {
+      toast({ title: 'Erişim Engellendi', description: 'Bu arıza başka bir personel tarafından üzerinde çalışılıyor.', variant: 'destructive' });
+      return;
+    }
     try {
       const supportPerson = selectedSupportPersonnelUid
         ? allPersonnel.find(p => p.uid === selectedSupportPersonnelUid)
@@ -660,7 +679,7 @@ export default function FaultDetailPage() {
       console.error(e);
       toast({ title: 'Hata', description: 'Arıza kapatılamadı.', variant: 'destructive' });
     }
-  }, [fault, closeDescription, currentUser, currentUserProfile, toast, selectedSupportPersonnelUid, allPersonnel]);
+  }, [fault, closeDescription, currentUser, currentUserProfile, toast, selectedSupportPersonnelUid, allPersonnel, isLockedByOther]);
 
   const handleKitResolution = async (resolution: 'imha' | 'tekrar_kullanim') => {
     if (!fault) return;
@@ -1246,6 +1265,37 @@ export default function FaultDetailPage() {
           {(() => {
             const normalized = normalizeStatus(fault.status);
 
+            // KİLİT MEKANİZMASI - Başka bir personel müdahale ediyorsa
+            if (isLockedByOther) {
+              return (
+                <div className="pt-4 border-t">
+                  <div className="relative rounded-lg overflow-hidden border-2 border-amber-400/50">
+                    <div className="bg-amber-50 dark:bg-amber-950/30 p-6">
+                      <div className="flex flex-col items-center justify-center text-center gap-3">
+                        <div className="h-12 w-12 rounded-full bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center">
+                          <Lock className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-amber-800 dark:text-amber-200 text-lg">
+                            Bu Arıza Üzerinde Çalışılıyor
+                          </p>
+                          <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                            <span className="font-medium">{fault.assignedToName}</span> bu arıza üzerinde müdahale ediyor.
+                          </p>
+                          <p className="text-xs text-amber-600/80 dark:text-amber-400/80 mt-2">
+                            Arıza kapama, müdahale ve diğer işlemler sadece atanmış personel tarafından yapılabilir.
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300 mt-1">
+                          {normalized === 'mudahale_bekliyor' ? 'Müdahale Bekleniyor' : 'Müdahale Ediliyor'}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
             // ATAMA BEKLİYOR - Buzlu arka plan ve "Üzerime Ata" butonu
             if (normalized === 'atama_bekliyor') {
               // Kullanıcının rolü arıza tipine uygun mu kontrol et
@@ -1282,15 +1332,17 @@ export default function FaultDetailPage() {
                             Arızayı Üzerime Al
                           </Button>
                           <Button
-                            variant="link"
-                            onClick={handleTransferToOtherUnit}
+                            variant="outline"
+                            onClick={() => setIsTransferDialogOpen(true)}
                             disabled={isAssigning || isTransferringUnit}
-                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                            className="border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-6 py-5"
                           >
                             {isTransferringUnit ? (
                               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            ) : null}
-                            Bu arızayı eğer teknikse aplikasyona, eğer aplikasyonsa tekniğe aktar
+                            ) : (
+                              <ArrowRightLeft className="h-4 w-4 mr-2" />
+                            )}
+                            {fault.faultType === 'teknik_servis' ? 'Aplikasyon Birimine Aktar' : 'Teknik Servis Birimine Aktar'}
                           </Button>
                         </>
                       ) : (
@@ -1795,6 +1847,58 @@ export default function FaultDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Birim Aktarma Onay Dialog */}
+      <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-blue-600" />
+              Birim Aktarma
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-center flex-1">
+                  <p className="text-xs text-muted-foreground mb-1">Mevcut Birim</p>
+                  <Badge variant="outline" className="text-sm px-3 py-1">
+                    {fault.faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                  </Badge>
+                </div>
+                <ArrowRightLeft className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                <div className="text-center flex-1">
+                  <p className="text-xs text-muted-foreground mb-1">Hedef Birim</p>
+                  <Badge className="text-sm px-3 py-1 bg-blue-600 hover:bg-blue-600">
+                    {fault.faultType === 'teknik_servis' ? 'Aplikasyon' : 'Teknik Servis'}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Bu arıza <span className="font-semibold">{fault.faultType === 'teknik_servis' ? 'Aplikasyon' : 'Teknik Servis'}</span> birimine aktarılacak. Aktarılan birim personeli arızayı üzerine alabilecektir.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsTransferDialogOpen(false)}>Vazgeç</Button>
+            <Button
+              onClick={async () => {
+                await handleTransferToOtherUnit();
+                setIsTransferDialogOpen(false);
+              }}
+              disabled={isTransferringUnit}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isTransferringUnit ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <ArrowRightLeft className="h-4 w-4 mr-2" />
+              )}
+              Aktarımı Onayla
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Yedek Parça Değişim Modal */}
       <Dialog open={isPartModalOpen} onOpenChange={(open) => {
         if (!open) resetPartModalState();
