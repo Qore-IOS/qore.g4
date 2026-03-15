@@ -24,14 +24,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, where, writeBatch, doc } from 'firebase/firestore';
+import { collection, getDocs, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
   SlidersHorizontal, X, Filter, Nfc, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MoreHorizontal, Eye,
   FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText,
-  AlertTriangle, FlaskConical,
+  AlertTriangle, FlaskConical, ShieldCheck, TrendingUp, ArrowRight,
+  CheckCircle2, XCircle, Send,
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
@@ -45,6 +46,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { type GroupedStockRow, type PaginatedStockResult } from '@/actions/stokActions';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
+import { calculateTransferSuggestions, distributeRiskyBoxes, type TransferSuggestion, type LabStockInfo } from '@/lib/rescue-transfer';
+import { createNotification } from '@/lib/notifications';
+import { touchStockMetadata } from '@/hooks/useFirebaseQueries';
 
 /* ────────────────────────────────────────────
    Filter Dialog (kept for marka/urunGrubu filters)
@@ -321,11 +325,16 @@ export default function StokYonetimiPanel() {
   const [selectedLabsForReport, setSelectedLabsForReport] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<FilterSpec[]>([]);
   const [showOnlyRiskyStock, setShowOnlyRiskyStock] = useState(false);
-  // Risk stock lab modal
-  const [isRiskLabModalOpen, setIsRiskLabModalOpen] = useState(false);
-  const [riskLabModalProduct, setRiskLabModalProduct] = useState<{ stokKodu: string; stokAdi: string; riskyBoxes: number } | null>(null);
-  const [riskLabModalLoading, setRiskLabModalLoading] = useState(false);
-  const [riskLabStockData, setRiskLabStockData] = useState<Array<{ labId: string; labName: string; items: Array<{ lotNumarasi: string; miad: string; miadDays: number; quantity: number }> }>>([]);
+  // Rescue transfer modal
+  const [isRescueModalOpen, setIsRescueModalOpen] = useState(false);
+  const [rescueProduct, setRescueProduct] = useState<{ stokKodu: string; stokAdi: string; riskyBoxes: number; miadDays: number; miad: string } | null>(null);
+  const [rescueLoading, setRescueLoading] = useState(false);
+  const [rescueSuggestions, setRescueSuggestions] = useState<TransferSuggestion[]>([]);
+  const [rescueTransferring, setRescueTransferring] = useState(false);
+  // Bulk rescue modal
+  const [isBulkRescueModalOpen, setIsBulkRescueModalOpen] = useState(false);
+  const [bulkRescueLoading, setBulkRescueLoading] = useState(false);
+  const [bulkRescuePlans, setBulkRescuePlans] = useState<Array<{ stokKodu: string; stokAdi: string; riskyBoxes: number; miadDays: number; miad: string; rescuable: number; suggestions: TransferSuggestion[] }>>([]);
   // For NFC modal & exports we may need raw stock
   const [rawDepotStock, setRawDepotStock] = useState<DepoStokItem[]>([]);
 
@@ -972,78 +981,261 @@ export default function StokYonetimiPanel() {
     }
   };
 
-  /* ─── Risk lab modal handler ─── */
-  const handleOpenRiskLabModal = useCallback(async (stokKodu: string, stokAdi: string, riskyBoxes: number) => {
-    setRiskLabModalProduct({ stokKodu, stokAdi, riskyBoxes });
-    setIsRiskLabModalOpen(true);
-    setRiskLabModalLoading(true);
-    setRiskLabStockData([]);
+  /* ─── Fetch lab stock info for a product ─── */
+  const fetchLabStockInfoForProduct = useCallback(async (stokKodu: string): Promise<LabStockInfo[]> => {
+    const labStocks: LabStockInfo[] = [];
 
-    try {
-      // Find which hospitals have this product in their minMaxRules
-      const labsWithProduct: { labId: string; labName: string }[] = [];
-      for (const hospital of hospitals) {
-        if (!hospital.id) continue;
-        const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
-        const hasProduct = rulesSnap.docs.some(d => {
-          const rule = d.data() as MinMaxRule;
-          return rule.stokKodu === stokKodu;
-        });
-        if (hasProduct) {
-          labsWithProduct.push({ labId: hospital.id, labName: hospital.name || hospital.id });
-        }
+    // Find which hospitals have this product in their minMaxRules
+    const labRulesPromises = hospitals.filter(h => h.id).map(async (hospital) => {
+      const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
+      const rule = rulesSnap.docs.find(d => (d.data() as MinMaxRule).stokKodu === stokKodu);
+      if (rule) {
+        return { labId: hospital.id, labName: hospital.name || hospital.id, rule: rule.data() as MinMaxRule };
       }
+      return null;
+    });
 
-      if (labsWithProduct.length === 0) {
-        setRiskLabStockData([]);
-        setRiskLabModalLoading(false);
-        return;
-      }
+    const labRulesResults = (await Promise.all(labRulesPromises)).filter(Boolean) as Array<{ labId: string; labName: string; rule: MinMaxRule }>;
 
-      // Query shipped stock for this product code
-      const labNames = labsWithProduct.map(l => l.labName);
-      const shippedQuery = query(
-        collection(db, 'depoStok'),
-        where('stokKodu', '==', stokKodu),
-        where('isShipped', '==', true)
+    if (labRulesResults.length === 0) return [];
+
+    // Query shipped stock for this product
+    const shippedQuery = query(
+      collection(db, 'depoStok'),
+      where('stokKodu', '==', stokKodu),
+      where('isShipped', '==', true)
+    );
+    const shippedSnap = await getDocs(shippedQuery);
+    const shippedItems = shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+
+    for (const labRule of labRulesResults) {
+      const labItems = shippedItems.filter(item =>
+        item.hedefKurum === labRule.labName || item.hedefKurumId === labRule.labId
       );
-      const shippedSnap = await getDocs(shippedQuery);
-      const shippedItems = shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
 
-      // Group by lab → lot → miad
-      const labDataMap: Record<string, Array<{ lotNumarasi: string; miad: string; miadDays: number; quantity: number }>> = {};
-      for (const lab of labsWithProduct) {
-        labDataMap[lab.labId] = [];
-      }
-
-      for (const item of shippedItems) {
-        const matchedLab = labsWithProduct.find(l => l.labName === item.hedefKurum);
-        if (!matchedLab) continue;
+      // Group by lot+miad
+      const entries: Array<{ lotNumarasi: string; miad: string; miadDays: number; quantity: number }> = [];
+      for (const item of labItems) {
         const lot = item.lotNumarasi || '-';
         const miad = typeof item.miad === 'string' ? item.miad : '';
-        const existing = labDataMap[matchedLab.labId]?.find(x => x.lotNumarasi === lot && x.miad === miad);
+        const existing = entries.find(x => x.lotNumarasi === lot && x.miad === miad);
         if (existing) {
           existing.quantity += 1;
         } else {
-          const miadInfo = getMiadInfoFromString(miad);
-          labDataMap[matchedLab.labId]?.push({ lotNumarasi: lot, miad, miadDays: miadInfo.days, quantity: 1 });
+          entries.push({ lotNumarasi: lot, miad, miadDays: getMiadInfoFromString(miad).days, quantity: 1 });
         }
       }
 
-      const result = labsWithProduct.map(lab => ({
-        labId: lab.labId,
-        labName: lab.labName,
-        items: (labDataMap[lab.labId] || []).sort((a, b) => a.miadDays - b.miadDays),
-      }));
+      const currentStock = labItems.length;
+      const maxStock = labRule.rule.max || 0;
+      const maxGun = labRule.rule.maxGun || 0;
+      const dailyNeed = maxGun > 0 ? maxStock / maxGun : 0;
+      const minMiadDays = entries.length > 0
+        ? Math.min(...entries.map(e => e.miadDays))
+        : Infinity;
 
-      setRiskLabStockData(result);
+      labStocks.push({
+        labId: labRule.labId,
+        labName: labRule.labName,
+        currentStock,
+        maxStock,
+        maxGun,
+        dailyNeed,
+        deficit: Math.max(0, maxStock - currentStock),
+        minMiadDays,
+        items: entries.sort((a, b) => a.miadDays - b.miadDays),
+      });
+    }
+
+    return labStocks;
+  }, [hospitals]);
+
+  /* ─── Open rescue modal for a single product ─── */
+  const handleOpenRescueModal = useCallback(async (stokKodu: string, stokAdi: string, riskyBoxes: number, miadDays: number, miad: string) => {
+    setRescueProduct({ stokKodu, stokAdi, riskyBoxes, miadDays, miad });
+    setIsRescueModalOpen(true);
+    setRescueLoading(true);
+    setRescueSuggestions([]);
+
+    try {
+      const labStocks = await fetchLabStockInfoForProduct(stokKodu);
+
+      if (labStocks.length === 0) {
+        setRescueSuggestions([]);
+      } else {
+        const suggestions = calculateTransferSuggestions(riskyBoxes, miadDays, labStocks);
+        const distributed = distributeRiskyBoxes(riskyBoxes, suggestions);
+        setRescueSuggestions(distributed);
+      }
     } catch (e) {
-      console.error('Risk lab modal error:', e);
+      console.error('Rescue modal error:', e);
       toast({ title: 'Hata', description: 'Laboratuvar stok bilgisi yüklenemedi.', variant: 'destructive' });
     } finally {
-      setRiskLabModalLoading(false);
+      setRescueLoading(false);
     }
-  }, [hospitals, toast]);
+  }, [fetchLabStockInfoForProduct, toast]);
+
+  /* ─── Execute rescue transfer ─── */
+  const handleExecuteRescueTransfer = useCallback(async (suggestion: TransferSuggestion) => {
+    if (!rescueProduct || !currentUserProfile || suggestion.safeTransfer <= 0) return;
+
+    setRescueTransferring(true);
+    try {
+      const { stokKodu, stokAdi } = rescueProduct;
+
+      // Find available items in depot for this product (FEFO order)
+      const stockQuery = query(
+        collection(db, 'depoStok'),
+        where('depotId', '==', selectedDepotId),
+        where('stokKodu', '==', stokKodu),
+        where('isShipped', '==', false)
+      );
+      const stockSnap = await getDocs(stockQuery);
+      const available = stockSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+        .sort((a, b) => {
+          const aDays = getMiadInfoFromString(typeof a.miad === 'string' ? a.miad : '').days;
+          const bDays = getMiadInfoFromString(typeof b.miad === 'string' ? b.miad : '').days;
+          return aDays - bDays; // FEFO: shortest expiry first
+        });
+
+      const itemsToTransfer = available.slice(0, suggestion.safeTransfer);
+      if (itemsToTransfer.length === 0) {
+        toast({ title: 'Yetersiz Stok', description: 'Depoda transfer edilecek stok bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      const selectedDepot = depots.find(d => d.id === selectedDepotId);
+      const depotName = selectedDepot?.name || '';
+      const transferRef = doc(collection(db, 'transfers'));
+      const batch = writeBatch(db);
+
+      for (const item of itemsToTransfer) {
+        const stokRef = doc(db, 'depoStok', item.id);
+        batch.set(stokRef, {
+          isShipped: true,
+          sevkTarihi: Timestamp.now(),
+          hedefKurum: suggestion.labName,
+          hedefKurumId: suggestion.labId,
+          transferId: transferRef.id,
+          sourceDepotId: selectedDepotId,
+          sourceDepotName: depotName,
+          rescueTransfer: true, // Mark as rescue operation
+        }, { merge: true });
+
+        const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id);
+        batch.set(itemRef, {
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi || stokAdi,
+          lotNumarasi: item.lotNumarasi || '',
+          miad: item.miad || '',
+          seriNumarasi: item.seriNumarasi || '',
+        });
+      }
+
+      batch.set(transferRef, {
+        id: transferRef.id,
+        timestamp: serverTimestamp(),
+        sourceDepotId: selectedDepotId,
+        sourceDepotName: depotName,
+        targetName: suggestion.labName,
+        targetHospitalId: suggestion.labId,
+        mode: 'lab',
+        company: null,
+        itemCount: itemsToTransfer.length,
+        createdByUid: currentUserProfile.uid ?? '',
+        createdByName: currentUserProfile.name ?? '',
+        rescueTransfer: true,
+      });
+
+      await batch.commit();
+      await touchStockMetadata();
+
+      // Emit notification
+      await createNotification({
+        type: 'transfer_to_lab',
+        title: 'Kurtarma Transferi Tamamlandı',
+        message: `${stokAdi} — ${itemsToTransfer.length} kutu riskli stok ${suggestion.labName} laboratuvarına transfer edildi (imhadan kurtarma).`,
+        resource: { type: 'transfer', id: transferRef.id },
+        actor: { uid: currentUserProfile.uid ?? '', name: currentUserProfile.name ?? '' },
+        targets: [`lab:${suggestion.labId}`, 'view:stok-yonetimi', 'role:admin'],
+        meta: {
+          stokKodu,
+          stokAdi,
+          labId: suggestion.labId,
+          depotId: selectedDepotId,
+          rescueTransfer: true,
+          rescuedBoxes: itemsToTransfer.length,
+        },
+      });
+
+      toast({
+        title: 'Kurtarma Transferi Başarılı',
+        description: `${itemsToTransfer.length} kutu ${suggestion.labName} laboratuvarına transfer edildi.`,
+      });
+
+      // Refresh suggestions
+      const updatedLabStocks = await fetchLabStockInfoForProduct(stokKodu);
+      const newRiskyBoxes = Math.max(0, rescueProduct.riskyBoxes - itemsToTransfer.length);
+      setRescueProduct(prev => prev ? { ...prev, riskyBoxes: newRiskyBoxes } : null);
+
+      if (newRiskyBoxes > 0 && updatedLabStocks.length > 0) {
+        const newSuggestions = calculateTransferSuggestions(newRiskyBoxes, rescueProduct.miadDays, updatedLabStocks);
+        setRescueSuggestions(distributeRiskyBoxes(newRiskyBoxes, newSuggestions));
+      } else {
+        setRescueSuggestions([]);
+      }
+    } catch (e) {
+      console.error('Rescue transfer error:', e);
+      toast({ title: 'Transfer Hatası', description: 'Kurtarma transferi sırasında hata oluştu.', variant: 'destructive' });
+    } finally {
+      setRescueTransferring(false);
+    }
+  }, [rescueProduct, currentUserProfile, selectedDepotId, depots, fetchLabStockInfoForProduct, toast]);
+
+  /* ─── Bulk rescue plan ─── */
+  const handleBulkRescuePlan = useCallback(async () => {
+    setIsBulkRescueModalOpen(true);
+    setBulkRescueLoading(true);
+    setBulkRescuePlans([]);
+
+    try {
+      // Find all risky rows
+      const riskyRows: Array<{ stokKodu: string; stokAdi: string; riskyBoxes: number; miadDays: number; miad: string }> = [];
+      const seenProducts = new Set<string>();
+
+      for (const row of allGroupedRows) {
+        const miadInfo = getMiadInfoFromString(row.miad);
+        const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
+        const risky = getRiskyBoxes(miadInfo, coverageInfo);
+        if (risky > 0 && !seenProducts.has(row.stokKodu)) {
+          seenProducts.add(row.stokKodu);
+          riskyRows.push({ stokKodu: row.stokKodu, stokAdi: row.stokAdi, riskyBoxes: risky, miadDays: miadInfo.days, miad: row.miad });
+        }
+      }
+
+      const plans: typeof bulkRescuePlans = [];
+
+      for (const risky of riskyRows) {
+        const labStocks = await fetchLabStockInfoForProduct(risky.stokKodu);
+        if (labStocks.length === 0) {
+          plans.push({ ...risky, rescuable: 0, suggestions: [] });
+          continue;
+        }
+        const suggestions = calculateTransferSuggestions(risky.riskyBoxes, risky.miadDays, labStocks);
+        const distributed = distributeRiskyBoxes(risky.riskyBoxes, suggestions);
+        const rescuable = distributed.reduce((s, d) => s + d.safeTransfer, 0);
+        plans.push({ ...risky, rescuable, suggestions: distributed });
+      }
+
+      setBulkRescuePlans(plans);
+    } catch (e) {
+      console.error('Bulk rescue plan error:', e);
+      toast({ title: 'Hata', description: 'Toplu kurtarma planı oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setBulkRescueLoading(false);
+    }
+  }, [allGroupedRows, minMaxRules, fetchLabStockInfoForProduct, toast]);
 
   /* ═════════════════════════ RENDER ═════════════════════════ */
   return (
@@ -1128,6 +1320,13 @@ export default function StokYonetimiPanel() {
               >
                 <BarChart3 className="h-4 w-4 mr-2" />
                 {showOnlyRiskyStock ? 'Riskli Stok Gösterimini Kapat' : 'Riskli Stoğu Göster'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={handleBulkRescuePlan}
+                disabled={!hasRiskyRows}
+              >
+                <ShieldCheck className="h-4 w-4 mr-2" />
+                Kurtarma Planı Oluştur
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Operasyon / Sayım</DropdownMenuLabel>
@@ -1337,7 +1536,7 @@ export default function StokYonetimiPanel() {
                               return (
                                 <button
                                   type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleOpenRiskLabModal(row.stokKodu, row.stokAdi, riskyBoxes); }}
+                                  onClick={(e) => { e.stopPropagation(); handleOpenRescueModal(row.stokKodu, row.stokAdi, riskyBoxes, miadInfo.days, row.miad); }}
                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 hover:bg-amber-200 hover:shadow-sm active:scale-95 transition-all cursor-pointer"
                                   title={`Miad ${miadInfo.days} gün sonra dolacak, ${riskyDays} günlük stok (${riskyBoxes} kutu) risk altında — Laboratuvar detayı için tıklayın`}
                                 >
@@ -1445,103 +1644,350 @@ export default function StokYonetimiPanel() {
         </DialogContent>
       </Dialog>
 
-      {/* ── RISK LAB STOCK MODAL ── */}
-      <Dialog open={isRiskLabModalOpen} onOpenChange={setIsRiskLabModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+      {/* ── RESCUE TRANSFER MODAL ── */}
+      <Dialog open={isRescueModalOpen} onOpenChange={setIsRescueModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              Riskli Stok — Laboratuvar Dağılımı
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              İmhadan Kurtarma — Transfer Önerileri
             </DialogTitle>
-            {riskLabModalProduct && (
-              <DialogDescription>
-                <span className="font-semibold text-[var(--dashboard-text)]">{riskLabModalProduct.stokAdi}</span>
-                <span className="text-[var(--dashboard-muted)] ml-1">({riskLabModalProduct.stokKodu})</span>
-                <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
-                  <AlertTriangle className="h-3 w-3" />
-                  {riskLabModalProduct.riskyBoxes} kutu riskli
-                </span>
+            {rescueProduct && (
+              <DialogDescription asChild>
+                <div className="flex flex-wrap items-center gap-2 mt-1">
+                  <span className="font-semibold text-[var(--dashboard-text)]">{rescueProduct.stokAdi}</span>
+                  <span className="text-[var(--dashboard-muted)]">({rescueProduct.stokKodu})</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                    <AlertTriangle className="h-3 w-3" />
+                    {rescueProduct.riskyBoxes} kutu riskli
+                  </span>
+                  <span className="text-[10px] text-[var(--dashboard-muted)]">
+                    Miad: {rescueProduct.miad} ({rescueProduct.miadDays} gün)
+                  </span>
+                </div>
               </DialogDescription>
             )}
           </DialogHeader>
 
           <div className="flex-1 overflow-auto py-3 space-y-3">
-            {riskLabModalLoading ? (
+            {rescueLoading ? (
               <div className="flex items-center justify-center py-12 text-[var(--dashboard-muted)]">
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                Laboratuvar stokları yükleniyor...
+                Laboratuvar stokları analiz ediliyor...
               </div>
-            ) : riskLabStockData.length === 0 ? (
+            ) : rescueSuggestions.length === 0 ? (
               <div className="text-center py-12 text-[var(--dashboard-muted)]">
                 <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">Bu ürün herhangi bir laboratuvara tanımlı değil.</p>
+                <p className="text-sm">Bu ürün herhangi bir laboratuvara tanımlı değil veya uygun lab bulunamadı.</p>
               </div>
             ) : (
-              riskLabStockData.map((lab) => {
-                const totalQty = lab.items.reduce((s, i) => s + i.quantity, 0);
-                return (
-                  <div key={lab.labId} className="rounded-lg border border-[var(--dashboard-stroke)] overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--dashboard-surface-2)]">
-                      <div className="flex items-center gap-2">
-                        <FlaskConical className="h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
-                        <span className="text-sm font-semibold text-[var(--dashboard-text)]">{lab.labName}</span>
-                      </div>
-                      <span className={cn(
-                        "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold",
-                        totalQty > 0 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      )}>
-                        {totalQty > 0 ? `${totalQty} kutu` : 'Stok yok'}
-                      </span>
+              <>
+                {/* Summary bar */}
+                {(() => {
+                  const totalRescuable = rescueSuggestions.reduce((s, d) => s + d.safeTransfer, 0);
+                  const unrescuable = (rescueProduct?.riskyBoxes ?? 0) - totalRescuable;
+                  return (
+                    <div className={cn(
+                      "flex items-center gap-3 px-3 py-2 rounded-lg border text-xs",
+                      unrescuable > 0
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    )}>
+                      {unrescuable > 0 ? (
+                        <>
+                          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                          <span>
+                            {rescueProduct?.riskyBoxes} riskli kutudan <strong>{totalRescuable}</strong> tanesi kurtarılabilir.
+                            <strong className="text-red-700 ml-1">{unrescuable} kutu</strong> için uygun laboratuvar bulunamadı — imha riski devam ediyor.
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                          <span>
+                            Tüm <strong>{rescueProduct?.riskyBoxes}</strong> riskli kutu kurtarılabilir!
+                          </span>
+                        </>
+                      )}
                     </div>
-                    {lab.items.length > 0 ? (
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)]">
-                            <th className="px-3 py-1.5 text-left font-medium">Lot</th>
-                            <th className="px-3 py-1.5 text-left font-medium">Miad</th>
-                            <th className="px-3 py-1.5 text-center font-medium">Adet</th>
-                            <th className="px-3 py-1.5 text-right font-medium">Durum</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {lab.items.map((item, idx) => {
-                            const itemMiadInfo = getMiadInfoFromString(item.miad);
-                            return (
-                              <tr key={`${item.lotNumarasi}-${item.miad}-${idx}`} className="border-b border-[var(--dashboard-stroke)] last:border-0">
-                                <td className="px-3 py-1.5 font-mono text-[var(--dashboard-muted)]">{item.lotNumarasi}</td>
-                                <td className="px-3 py-1.5 text-[var(--dashboard-text)]">{item.miad || '-'}</td>
-                                <td className="px-3 py-1.5 text-center font-bold text-[var(--dashboard-text)]">{item.quantity}</td>
-                                <td className="px-3 py-1.5 text-right">
-                                  <span className={cn(
-                                    "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold",
-                                    itemMiadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
-                                    itemMiadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
-                                    itemMiadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
-                                    itemMiadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
-                                    itemMiadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
-                                    itemMiadInfo.severity === 'normal' && 'bg-emerald-100 text-emerald-700',
-                                  )}>
-                                    {itemMiadInfo.days < 0 ? 'Süresi dolmuş' : itemMiadInfo.days === Infinity ? '-' : `${itemMiadInfo.days} gün`}
-                                  </span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="px-3 py-3 text-center text-[var(--dashboard-muted)] text-xs">
-                        Bu laboratuvarda stok bulunmuyor
+                  );
+                })()}
+
+                {/* Suggestions */}
+                {rescueSuggestions.map((s) => (
+                  <div key={s.labId} className={cn(
+                    "rounded-lg border overflow-hidden",
+                    s.status === 'recommended' && "border-emerald-200",
+                    s.status === 'possible' && "border-amber-200",
+                    s.status === 'not_suitable' && "border-[var(--dashboard-stroke)] opacity-60",
+                  )}>
+                    {/* Lab header */}
+                    <div className={cn(
+                      "flex items-center justify-between px-3 py-2",
+                      s.status === 'recommended' && "bg-emerald-50",
+                      s.status === 'possible' && "bg-amber-50",
+                      s.status === 'not_suitable' && "bg-[var(--dashboard-surface-2)]",
+                    )}>
+                      <div className="flex items-center gap-2">
+                        {s.status === 'recommended' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
+                        {s.status === 'possible' && <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />}
+                        {s.status === 'not_suitable' && <XCircle className="h-3.5 w-3.5 text-slate-400" />}
+                        <span className="text-sm font-semibold text-[var(--dashboard-text)]">{s.labName}</span>
                       </div>
-                    )}
+                      <div className="flex items-center gap-2">
+                        {/* Confidence bar */}
+                        {s.status !== 'not_suitable' && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-all",
+                                  s.confidenceScore >= 70 ? "bg-emerald-500" : s.confidenceScore >= 40 ? "bg-amber-500" : "bg-red-500"
+                                )}
+                                style={{ width: `${s.confidenceScore}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] font-bold text-[var(--dashboard-muted)]">%{s.confidenceScore}</span>
+                          </div>
+                        )}
+                        {s.safeTransfer > 0 && (
+                          <Button
+                            size="sm"
+                            variant={s.status === 'recommended' ? 'default' : 'outline'}
+                            className="h-7 text-[11px] gap-1"
+                            disabled={rescueTransferring}
+                            onClick={() => handleExecuteRescueTransfer(s)}
+                          >
+                            {rescueTransferring ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                            {s.safeTransfer} kutu transfer
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Lab details */}
+                    <div className="px-3 py-2 space-y-2">
+                      {/* Metrics row */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                        <div className="flex flex-col">
+                          <span className="text-[var(--dashboard-muted)]">Mevcut / Max</span>
+                          <span className="font-bold text-[var(--dashboard-text)]">{s.currentStock} / {s.maxStock}
+                            <span className="text-[var(--dashboard-muted)] font-normal ml-1">({s.deficit} açık)</span>
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[var(--dashboard-muted)]">Günlük Tüketim</span>
+                          <span className="font-bold text-[var(--dashboard-text)]">{s.dailyNeed.toFixed(1)} kutu/gün</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[var(--dashboard-muted)]">Tüketim Süresi</span>
+                          <span className={cn(
+                            "font-bold",
+                            s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) ? "text-emerald-700" : "text-red-700"
+                          )}>
+                            {s.daysToConsume === Infinity ? 'Hesaplanamadı' : `${s.daysToConsume} gün`}
+                            {s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) && ' ✓'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[var(--dashboard-muted)]">FEFO Uyumu</span>
+                          <span className={cn("font-bold", s.fefoCompatible ? "text-emerald-700" : "text-amber-700")}>
+                            {s.fefoCompatible ? 'Uyumlu ✓' : 'Uyarı ⚠'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Status reason */}
+                      <div className={cn(
+                        "text-[10px] px-2 py-1 rounded",
+                        s.status === 'recommended' && "bg-emerald-50 text-emerald-700",
+                        s.status === 'possible' && "bg-amber-50 text-amber-700",
+                        s.status === 'not_suitable' && "bg-slate-50 text-slate-500",
+                      )}>
+                        {s.statusReason}
+                      </div>
+
+                      {/* Lab stock table */}
+                      {s.labItems.length > 0 && (
+                        <details className="text-xs">
+                          <summary className="cursor-pointer text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] text-[10px]">
+                            Labdaki mevcut stok ({s.labItems.reduce((sum, i) => sum + i.quantity, 0)} kutu)
+                          </summary>
+                          <table className="w-full mt-1">
+                            <thead>
+                              <tr className="border-b border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)]">
+                                <th className="px-2 py-1 text-left font-medium text-[10px]">Lot</th>
+                                <th className="px-2 py-1 text-left font-medium text-[10px]">Miad</th>
+                                <th className="px-2 py-1 text-center font-medium text-[10px]">Adet</th>
+                                <th className="px-2 py-1 text-right font-medium text-[10px]">Durum</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {s.labItems.map((item, idx) => {
+                                const itemMiadInfo = getMiadInfoFromString(item.miad);
+                                return (
+                                  <tr key={`${item.lotNumarasi}-${item.miad}-${idx}`} className="border-b border-[var(--dashboard-stroke)] last:border-0">
+                                    <td className="px-2 py-1 font-mono text-[var(--dashboard-muted)]">{item.lotNumarasi}</td>
+                                    <td className="px-2 py-1 text-[var(--dashboard-text)]">{item.miad || '-'}</td>
+                                    <td className="px-2 py-1 text-center font-bold">{item.quantity}</td>
+                                    <td className="px-2 py-1 text-right">
+                                      <span className={cn(
+                                        "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold",
+                                        itemMiadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
+                                        itemMiadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
+                                        itemMiadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
+                                        itemMiadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
+                                        itemMiadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
+                                        itemMiadInfo.severity === 'normal' && 'bg-emerald-100 text-emerald-700',
+                                      )}>
+                                        {itemMiadInfo.days < 0 ? 'Süresi dolmuş' : itemMiadInfo.days === Infinity ? '-' : `${itemMiadInfo.days} gün`}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </details>
+                      )}
+                    </div>
                   </div>
-                );
-              })
+                ))}
+              </>
             )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsRiskLabModalOpen(false)}>Kapat</Button>
+            <Button variant="outline" onClick={() => setIsRescueModalOpen(false)}>Kapat</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── BULK RESCUE PLAN MODAL ── */}
+      <Dialog open={isBulkRescueModalOpen} onOpenChange={setIsBulkRescueModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              Toplu Kurtarma Planı
+            </DialogTitle>
+            <DialogDescription>
+              Tüm riskli ürünler için laboratuvar bazlı transfer önerilerinin özeti.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto py-3 space-y-3">
+            {bulkRescueLoading ? (
+              <div className="flex items-center justify-center py-12 text-[var(--dashboard-muted)]">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                Tüm riskli ürünler analiz ediliyor...
+              </div>
+            ) : bulkRescuePlans.length === 0 ? (
+              <div className="text-center py-12 text-[var(--dashboard-muted)]">
+                <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">Riskli stok bulunamadı — tüm stoklar güvende!</p>
+              </div>
+            ) : (
+              <>
+                {/* Overall summary */}
+                {(() => {
+                  const totalRisky = bulkRescuePlans.reduce((s, p) => s + p.riskyBoxes, 0);
+                  const totalRescuable = bulkRescuePlans.reduce((s, p) => s + p.rescuable, 0);
+                  const totalUnrescuable = totalRisky - totalRescuable;
+                  return (
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-amber-800">{totalRisky}</div>
+                        <div className="text-[10px] text-amber-600">Toplam Riskli Kutu</div>
+                      </div>
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-emerald-800">{totalRescuable}</div>
+                        <div className="text-[10px] text-emerald-600">Kurtarılabilir</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border px-3 py-2 text-center",
+                        totalUnrescuable > 0 ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"
+                      )}>
+                        <div className={cn("text-lg font-bold", totalUnrescuable > 0 ? "text-red-800" : "text-emerald-800")}>{totalUnrescuable}</div>
+                        <div className={cn("text-[10px]", totalUnrescuable > 0 ? "text-red-600" : "text-emerald-600")}>İmha Riski</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Per-product plans */}
+                {bulkRescuePlans.map((plan) => (
+                  <div key={plan.stokKodu} className="rounded-lg border border-[var(--dashboard-stroke)] overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--dashboard-surface-2)]">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{plan.stokAdi}</div>
+                        <div className="text-[10px] text-[var(--dashboard-muted)] font-mono">({plan.stokKodu}) — Miad: {plan.miad} ({plan.miadDays} gün)</div>
+                      </div>
+                      <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                          <AlertTriangle className="h-3 w-3" />
+                          {plan.riskyBoxes} riskli
+                        </span>
+                        {plan.rescuable > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" />
+                            {plan.rescuable} kurtarılabilir
+                          </span>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-[10px] gap-1"
+                          onClick={() => {
+                            setIsBulkRescueModalOpen(false);
+                            handleOpenRescueModal(plan.stokKodu, plan.stokAdi, plan.riskyBoxes, plan.miadDays, plan.miad);
+                          }}
+                        >
+                          <ArrowRight className="h-3 w-3" />
+                          Detay
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Brief suggestion list */}
+                    {plan.suggestions.filter(s => s.safeTransfer > 0).length > 0 && (
+                      <div className="px-3 py-1.5 space-y-1">
+                        {plan.suggestions.filter(s => s.safeTransfer > 0).map(s => (
+                          <div key={s.labId} className="flex items-center justify-between text-[10px]">
+                            <div className="flex items-center gap-1.5">
+                              {s.status === 'recommended' ? <CheckCircle2 className="h-3 w-3 text-emerald-600" /> : <AlertTriangle className="h-3 w-3 text-amber-600" />}
+                              <span className="text-[var(--dashboard-text)]">{s.labName}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[var(--dashboard-muted)]">{s.currentStock}/{s.maxStock}</span>
+                              <span className="font-bold text-[var(--dashboard-text)]">→ {s.safeTransfer} kutu</span>
+                              <div className="w-10 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                <div
+                                  className={cn("h-full rounded-full", s.confidenceScore >= 70 ? "bg-emerald-500" : "bg-amber-500")}
+                                  style={{ width: `${s.confidenceScore}%` }}
+                                />
+                              </div>
+                              <span className="text-[var(--dashboard-muted)] w-6 text-right">%{s.confidenceScore}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {plan.suggestions.filter(s => s.safeTransfer > 0).length === 0 && (
+                      <div className="px-3 py-2 text-[10px] text-red-600">
+                        <XCircle className="h-3 w-3 inline mr-1" />
+                        Uygun laboratuvar bulunamadı — {plan.riskyBoxes} kutu imha riski altında
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBulkRescueModalOpen(false)}>Kapat</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
