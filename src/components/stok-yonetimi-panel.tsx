@@ -1034,6 +1034,13 @@ export default function StokYonetimiPanel() {
         ? Math.min(...entries.map(e => e.miadDays))
         : Infinity;
 
+      // Ort. tüketim süresini gün cinsine çevir (saat ise /24)
+      const rawSuresi = labRule.rule.ortalamaTuketimSuresi;
+      const birim = labRule.rule.tuketimSuresiBirimi ?? 'gun';
+      const avgConsumptionDays = rawSuresi && rawSuresi > 0
+        ? (birim === 'saat' ? rawSuresi / 24 : rawSuresi)
+        : undefined;
+
       labStocks.push({
         labId: labRule.labId,
         labName: labRule.labName,
@@ -1044,6 +1051,7 @@ export default function StokYonetimiPanel() {
         deficit: Math.max(0, maxStock - currentStock),
         minMiadDays,
         items: entries.sort((a, b) => a.miadDays - b.miadDays),
+        avgConsumptionDays,
       });
     }
 
@@ -1768,7 +1776,7 @@ export default function StokYonetimiPanel() {
                     {/* Lab details */}
                     <div className="px-3 py-2 space-y-2">
                       {/* Metrics row */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                      <div className={cn("grid gap-2 text-[10px]", s.avgConsumptionDays ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4")}>
                         <div className="flex flex-col">
                           <span className="text-[var(--dashboard-muted)]">Mevcut / Max</span>
                           <span className="font-bold text-[var(--dashboard-text)]">{s.currentStock} / {s.maxStock}
@@ -1795,6 +1803,25 @@ export default function StokYonetimiPanel() {
                             {s.fefoCompatible ? 'Uyumlu ✓' : 'Uyarı ⚠'}
                           </span>
                         </div>
+                        {s.avgConsumptionDays != null && s.avgConsumptionDays > 0 && (
+                          <div className="flex flex-col">
+                            <span className="text-[var(--dashboard-muted)]">Ort. Tüketim</span>
+                            <span className="font-bold text-blue-700">
+                              {s.avgConsumptionDays < 1
+                                ? `${Math.round(s.avgConsumptionDays * 24)} saat/kutu`
+                                : `${s.avgConsumptionDays} gün/kutu`}
+                            </span>
+                            {s.estimatedConsumptionDays != null && s.safeTransfer > 0 && (
+                              <span className={cn(
+                                "text-[9px] mt-0.5",
+                                s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? "text-emerald-600" : "text-red-600"
+                              )}>
+                                {s.safeTransfer} kutu → ~{s.estimatedConsumptionDays} günde tüketilir
+                                {s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? ' ✓' : ' ✗'}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Status reason */}
@@ -1957,6 +1984,14 @@ export default function StokYonetimiPanel() {
                             <div className="flex items-center gap-1.5">
                               {s.status === 'recommended' ? <CheckCircle2 className="h-3 w-3 text-emerald-600" /> : <AlertTriangle className="h-3 w-3 text-amber-600" />}
                               <span className="text-[var(--dashboard-text)]">{s.labName}</span>
+                              {s.estimatedConsumptionDays != null && (
+                                <span className={cn(
+                                  "px-1 py-0.5 rounded text-[9px]",
+                                  s.estimatedConsumptionDays <= plan.miadDays ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"
+                                )}>
+                                  ~{s.estimatedConsumptionDays}g tüketim
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="text-[var(--dashboard-muted)]">{s.currentStock}/{s.maxStock}</span>

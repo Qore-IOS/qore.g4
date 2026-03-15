@@ -29,6 +29,8 @@ export interface LabStockInfo {
   deficit: number;
   minMiadDays: number; // Labdaki en kısa miadlı stokun gün sayısı
   items: LabStockEntry[];
+  /** Ortalama tüketim süresi (gün cinsinden). Örn: 1 kutu 5 günde tüketilir → 5 */
+  avgConsumptionDays?: number;
 }
 
 /** Transfer önerisi */
@@ -61,6 +63,10 @@ export interface TransferSuggestion {
   statusReason: string;
   /** Lab stok detayları */
   labItems: LabStockEntry[];
+  /** Ort. tüketim süresi (gün) — minMaxRule'dan gelen değer */
+  avgConsumptionDays?: number;
+  /** Transfer edilecek kutular bu labda tahmini kaç günde tüketilir (avgConsumptionDays bazlı) */
+  estimatedConsumptionDays?: number;
 }
 
 /** Toplu kurtarma planı sonucu */
@@ -118,6 +124,7 @@ export function calculateTransferSuggestions(
         status: 'not_suitable',
         statusReason: 'Laboratuvar max kapasitesinde',
         labItems: lab.items,
+        avgConsumptionDays: lab.avgConsumptionDays,
       });
       continue;
     }
@@ -125,41 +132,55 @@ export function calculateTransferSuggestions(
     // Transfer adayı = min(açık, riskli kutu)
     const transferCandidate = Math.min(deficit, riskyBoxes);
 
+    // Etkili günlük tüketim: avgConsumptionDays varsa onu kullan, yoksa maxGun/max bazlı dailyNeed
+    // avgConsumptionDays = 1 kutu kaç günde tüketilir → dailyRate = 1/avgConsumptionDays
+    const effectiveDailyNeed = lab.avgConsumptionDays && lab.avgConsumptionDays > 0
+      ? (1 / lab.avgConsumptionDays)
+      : dailyNeed;
+
     // Tüketim hızı kontrolü
     let safeTransfer: number;
     let daysToConsume: number;
 
-    if (dailyNeed <= 0) {
+    if (effectiveDailyNeed <= 0) {
       // Tüketim verisi yoksa, sadece açık kadar öner
       safeTransfer = transferCandidate;
       daysToConsume = Infinity;
     } else {
-      daysToConsume = transferCandidate / dailyNeed;
+      daysToConsume = transferCandidate / effectiveDailyNeed;
       if (daysToConsume > miadDays) {
         // Lab bu kadarını miadında tüketemez → güvenli miktarı hesapla
-        safeTransfer = Math.max(0, Math.floor(miadDays * dailyNeed));
+        safeTransfer = Math.max(0, Math.floor(miadDays * effectiveDailyNeed));
       } else {
         safeTransfer = transferCandidate;
       }
     }
+
+    // Ort. tüketim süresi bazlı tahmini tüketim (transfer edilecek kutular bu labda kaç günde biter)
+    const estimatedConsumptionDays = lab.avgConsumptionDays && lab.avgConsumptionDays > 0 && safeTransfer > 0
+      ? Math.round(safeTransfer * lab.avgConsumptionDays)
+      : undefined;
 
     // Skor hesaplama (0-100)
     let score = 0;
 
     if (safeTransfer > 0) {
       // 1. Tüketim marjı (ağırlık: 3) — miadından ne kadar önce tüketir
-      const consumptionMargin = dailyNeed > 0
-        ? Math.min(1, Math.max(0, (miadDays - (safeTransfer / dailyNeed)) / miadDays))
+      const consumptionMargin = effectiveDailyNeed > 0
+        ? Math.min(1, Math.max(0, (miadDays - (safeTransfer / effectiveDailyNeed)) / miadDays))
         : 0;
 
       // 2. Açık oranı (ağırlık: 2) — labın ne kadar boş alanı var
       const deficitRatio = lab.maxStock > 0 ? Math.min(1, deficit / lab.maxStock) : 0;
 
-      // 3. FEFO uyumu (ağırlık: 5)
+      // 3. FEFO uyumu (ağırlık: 4)
       const fefoScore = fefoCompatible ? 1 : 0;
 
+      // 4. Ort. tüketim süresi güveni (ağırlık: 1) — gerçek tüketim verisi varsa bonus
+      const consumptionDataScore = lab.avgConsumptionDays && lab.avgConsumptionDays > 0 ? 1 : 0;
+
       score = Math.round(
-        ((consumptionMargin * 3) + (deficitRatio * 2) + (fefoScore * 5)) / 10 * 100
+        ((consumptionMargin * 3) + (deficitRatio * 2) + (fefoScore * 4) + (consumptionDataScore * 1)) / 10 * 100
       );
     }
 
@@ -175,7 +196,9 @@ export function calculateTransferSuggestions(
       statusReason = 'Labda daha kısa miadlı stok var — FEFO sırası bozulabilir';
     } else if (score >= 70) {
       status = 'recommended';
-      statusReason = 'Uygun — miadı içinde tüketilebilir';
+      statusReason = lab.avgConsumptionDays
+        ? `Uygun — tahmini ${estimatedConsumptionDays ?? '?'} günde tüketilebilir`
+        : 'Uygun — miadı içinde tüketilebilir';
     } else {
       status = 'possible';
       statusReason = 'Kısmi uygunluk — marj dar';
@@ -186,17 +209,19 @@ export function calculateTransferSuggestions(
       labName: lab.labName,
       suggestedTransfer: transferCandidate,
       safeTransfer,
-      daysToConsume: dailyNeed > 0 ? Math.round(safeTransfer / dailyNeed) : Infinity,
+      daysToConsume: effectiveDailyNeed > 0 ? Math.round(safeTransfer / effectiveDailyNeed) : Infinity,
       currentStock: lab.currentStock,
       maxStock: lab.maxStock,
       deficit,
-      dailyNeed,
+      dailyNeed: effectiveDailyNeed,
       labMinMiadDays: minMiadDays === Infinity ? -1 : minMiadDays,
       fefoCompatible,
       confidenceScore: score,
       status,
       statusReason,
       labItems: lab.items,
+      avgConsumptionDays: lab.avgConsumptionDays,
+      estimatedConsumptionDays,
     });
   }
 
