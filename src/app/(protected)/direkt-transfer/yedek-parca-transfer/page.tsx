@@ -199,6 +199,7 @@ export default function YedekParcaTransferPage() {
   const [depoStokProducts, setDepoStokProducts] = useState<GroupedDepoStokItem[]>([]);
   const [selectedStokKodu, setSelectedStokKodu] = useState<string>('');
   const [serialNumber, setSerialNumber] = useState('');
+  const [hucreNumber, setHucreNumber] = useState('');
   const [transferQuantity, setTransferQuantity] = useState<number>(1);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [productSearchOpen, setProductSearchOpen] = useState(false);
@@ -815,6 +816,14 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  const handleTransferHucreChange = (value: string) => {
+    const normalized = value.toUpperCase();
+    setHucreNumber(normalized);
+    if (normalized.trim()) {
+      setTransferQuantity(1);
+    }
+  };
+
   // Add row to transfer list
   const addTransferRow = useCallback(() => {
     if (!selectedProduct || !selectedTransferTarget) {
@@ -822,21 +831,31 @@ export default function YedekParcaTransferPage() {
       return;
     }
 
-    const trackingInput = serialNumber.trim();
-    const normalizedTrackingInput = trackingInput.toUpperCase();
-    const selectedEntry = trackingInput
-      ? selectedProduct.serialNumbers.find(s =>
-        s.serialNumber === trackingInput ||
-        (s.hucreNumarasi || '').toUpperCase() === normalizedTrackingInput
-      )
-      : undefined;
-    const isManualHucreInput = !!trackingInput && hucreFormatRegex.test(normalizedTrackingInput) && !selectedEntry;
-    const resolvedSerial = selectedEntry?.serialNumber || '';
-    const resolvedHucre = selectedEntry?.hucreNumarasi || (isManualHucreInput ? normalizedTrackingInput : '');
-    const qty = trackingInput ? 1 : Math.max(1, Math.floor(transferQuantity));
+    const serialInput = serialNumber.trim();
+    const hucreInput = hucreNumber.trim().toUpperCase();
+
+    if (serialInput && hucreInput) {
+      toast({ title: 'Uyarı', description: 'Lütfen Seri No veya Hücre No alanlarından sadece birini doldurun.', variant: 'default' });
+      return;
+    }
+
+    if (hucreInput && !hucreFormatRegex.test(hucreInput)) {
+      toast({ title: 'Geçersiz Format', description: 'Hücre numarası 1 harf + 4 rakam olmalıdır (örn: A1234).', variant: 'destructive' });
+      return;
+    }
+
+    const selectedEntry = selectedProduct.serialNumbers.find(s =>
+      (!!serialInput && s.serialNumber === serialInput) ||
+      (!!hucreInput && (s.hucreNumarasi || '').toUpperCase() === hucreInput)
+    );
+    const isManualHucreInput = !!hucreInput && !selectedEntry;
+    const resolvedSerial = selectedEntry?.serialNumber || serialInput;
+    const resolvedHucre = selectedEntry?.hucreNumarasi || (isManualHucreInput ? hucreInput : '');
+    const hasTrackingInput = !!serialInput || !!hucreInput;
+    const qty = hasTrackingInput ? 1 : Math.max(1, Math.floor(transferQuantity));
 
     // Check for duplicate serial number in current rows
-    if (trackingInput && transferRows.some(r => (resolvedSerial && r.serialNumber === resolvedSerial) || (resolvedHucre && r.hucreNumarasi === resolvedHucre))) {
+    if (hasTrackingInput && transferRows.some(r => (resolvedSerial && r.serialNumber === resolvedSerial) || (resolvedHucre && r.hucreNumarasi === resolvedHucre))) {
       toast({ title: 'Uyarı', description: 'Bu seri/hücre kaydı zaten listede var.', variant: 'default' });
       return;
     }
@@ -856,8 +875,8 @@ export default function YedekParcaTransferPage() {
     }
 
     // Manual hücre girişi (format doğruysa) depoda kayıtlı olmasa da kabul edilir
-    if (trackingInput && !selectedEntry && !isManualHucreInput) {
-      toast({ title: 'Uyarı', description: 'Bu seri numarası depoda bulunamadı. Hücre için 1 harf + 4 rakam formatını kullanın (örn: A1234).', variant: 'default' });
+    if (serialInput && !selectedEntry) {
+      toast({ title: 'Uyarı', description: 'Bu seri numarası depoda bulunamadı.', variant: 'default' });
       return;
     }
 
@@ -882,9 +901,10 @@ export default function YedekParcaTransferPage() {
 
     // Reset form
     setSerialNumber('');
+    setHucreNumber('');
     setTransferQuantity(1);
 
-    const label = trackingInput
+    const label = hasTrackingInput
       ? (resolvedSerial && resolvedHucre
         ? `SN: ${resolvedSerial}, Hücre: ${resolvedHucre}`
         : resolvedSerial
@@ -895,7 +915,7 @@ export default function YedekParcaTransferPage() {
       title: 'Eklendi',
       description: `${selectedProduct.stokAdi} (${label}) listeye eklendi.`,
     });
-  }, [selectedProduct, serialNumber, transferQuantity, selectedTransferTarget, transferRows, toast]);
+  }, [selectedProduct, serialNumber, hucreNumber, transferQuantity, selectedTransferTarget, transferRows, toast]);
 
   // Remove row from transfer list
   const removeTransferRow = (rowId: string) => {
@@ -1981,7 +2001,7 @@ export default function YedekParcaTransferPage() {
                         <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
                         <CommandGroup>
                           {filteredProducts.map(product => (
-                            <CommandItem key={product.stokKodu} value={`${product.stokKodu} ${product.stokAdi}`} onSelect={() => { setSelectedStokKodu(product.stokKodu); setProductSearchOpen(false); setSerialNumber(''); setTransferQuantity(1); }}>
+                            <CommandItem key={product.stokKodu} value={`${product.stokKodu} ${product.stokAdi}`} onSelect={() => { setSelectedStokKodu(product.stokKodu); setProductSearchOpen(false); setSerialNumber(''); setHucreNumber(''); setTransferQuantity(1); }}>
                               <div className="flex flex-col flex-1">
                                 <div className="flex items-center justify-between"><span className="font-mono font-medium text-sm">{product.stokKodu}</span><span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'rgba(107,114,128,.10)', color: 'var(--dashboard-muted)' }}>{product.totalQuantity} ad</span></div>
                                 <span className="text-xs text-muted-foreground truncate">{product.stokAdi}</span>
@@ -2053,11 +2073,11 @@ export default function YedekParcaTransferPage() {
 
             {/* Serial + Qty + Add */}
             {selectedProduct && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No / Hücre</label>
                   <div className="flex gap-1.5">
-                    <Input placeholder="Seri no veya hücre (örn: A1234)" value={serialNumber} onChange={(e) => handleTransferSerialChange(e.target.value)} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs flex-1" style={{ borderRadius: 10 }} />
+                    <Input placeholder="Seri no" value={serialNumber} onChange={(e) => handleTransferSerialChange(e.target.value)} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs flex-1" style={{ borderRadius: 10 }} />
                     {selectedProduct.serialNumbers.length > 0 && (
                       <Popover open={serialSelectOpen} onOpenChange={setSerialSelectOpen}>
                         <PopoverTrigger asChild>
@@ -2072,7 +2092,7 @@ export default function YedekParcaTransferPage() {
                               <CommandEmpty>Bulunamadı.</CommandEmpty>
                               <CommandGroup heading={`${selectedProduct.stokKodu}`}>
                                 {selectedProduct.serialNumbers.filter(sn => !transferRows.some(r => (sn.serialNumber && r.serialNumber === sn.serialNumber) || (sn.hucreNumarasi && r.hucreNumarasi === sn.hucreNumarasi))).map(sn => (
-                                  <CommandItem key={sn.id} value={sn.serialNumber || sn.hucreNumarasi || sn.id} onSelect={() => { setSerialNumber(sn.serialNumber || sn.hucreNumarasi || ''); setTransferQuantity(1); setSerialSelectOpen(false); }}>
+                                  <CommandItem key={sn.id} value={sn.serialNumber || sn.hucreNumarasi || sn.id} onSelect={() => { setSerialNumber(sn.serialNumber || ''); setHucreNumber(sn.hucreNumarasi || ''); setTransferQuantity(1); setSerialSelectOpen(false); }}>
                                     <div className="flex flex-col">
                                       <span className="font-mono font-medium text-xs">{sn.serialNumber || '—'}{sn.hucreNumarasi ? ` · Hücre: ${sn.hucreNumarasi}` : ''}</span>
                                       <span className="text-[10px] text-muted-foreground">{format(sn.createdAt, 'dd.MM.yyyy', { locale: tr })}</span>
@@ -2088,9 +2108,13 @@ export default function YedekParcaTransferPage() {
                   </div>
                 </div>
                 <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Hücre No</label>
+                  <Input placeholder="Örn: A1234" value={hucreNumber} onChange={(e) => handleTransferHucreChange(e.target.value)} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs" style={{ borderRadius: 10 }} />
+                </div>
+                <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Adet</label>
-                  <Input type="number" min={1} max={selectedProduct.totalQuantity} value={serialNumber.trim() ? 1 : transferQuantity} onChange={(e) => setTransferQuantity(Math.max(1, parseInt(e.target.value) || 1))} disabled={!!serialNumber.trim()} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs" style={{ borderRadius: 10 }} />
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{serialNumber.trim() ? 'Tekil takip (seri/hücre) → adet 1 · Hücre formatı: 1 harf + 4 rakam' : `Depoda: ${selectedProduct.totalQuantity}`}</p>
+                  <Input type="number" min={1} max={selectedProduct.totalQuantity} value={(serialNumber.trim() || hucreNumber.trim()) ? 1 : transferQuantity} onChange={(e) => setTransferQuantity(Math.max(1, parseInt(e.target.value) || 1))} disabled={!!serialNumber.trim() || !!hucreNumber.trim()} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs" style={{ borderRadius: 10 }} />
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{(serialNumber.trim() || hucreNumber.trim()) ? 'Tekil takip (seri/hücre) → adet 1 · Hücre formatı: 1 harf + 4 rakam' : `Depoda: ${selectedProduct.totalQuantity}`}</p>
                 </div>
                 <div className="flex items-end">
                   <button onClick={addTransferRow} disabled={!selectedStokKodu || !selectedUserId} className="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all disabled:opacity-40" style={{ background: 'var(--dashboard-accent)' }}>
