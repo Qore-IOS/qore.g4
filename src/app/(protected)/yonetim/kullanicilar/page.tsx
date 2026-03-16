@@ -24,6 +24,7 @@ type NotificationTypeUI =
   | 'order_created'
   | 'order_created_from_request'
   | 'transfer_to_lab'
+  | 'spare_part_transfer'
   | 'fefo_override'
   | 'fault_report'
   | 'stock_threshold'
@@ -39,6 +40,7 @@ const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
     { key: 'order_created', label: 'Yeni Sipariş' },
     { key: 'order_created_from_request', label: 'Talep Üzerinden Sipariş' },
     { key: 'transfer_to_lab', label: 'Laboratuvara Transfer' },
+    { key: 'spare_part_transfer', label: 'Yedek Parça Transferi' },
     { key: 'depot_count_completed', label: 'Depo Sayımı Tamamlandı' },
     { key: 'lab_count_completed', label: 'Laboratuvar Sayımı Tamamlandı' },
     { key: 'fault_opened', label: 'Arıza Kaydı Açıldı' },

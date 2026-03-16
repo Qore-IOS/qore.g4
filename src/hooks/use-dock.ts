@@ -471,7 +471,7 @@ export function useDock() {
         // Check if there is a *new* unread notification
         if (newUnreadCount > prevUnreadCountRef.current) {
           const latestUnread = newItems.find(i => !(i.readBy || []).includes(uid));
-          if (latestUnread && (latestUnread.type === 'fefo_override' || latestUnread.type === 'fault_opened')) {
+          if (latestUnread && (latestUnread.type === 'fefo_override' || latestUnread.type === 'fault_opened' || latestUnread.type === 'spare_part_transfer')) {
             playNotificationSound();
           }
           peekDockStable();
