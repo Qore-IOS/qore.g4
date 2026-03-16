@@ -47,6 +47,43 @@ const ICON_COLORS: Record<string, [string, string]> = {
   'yonetim':               ['#6b7280', '#374151'],   // gray-dark
   'notifications':         ['#ef4444', '#f43f5e'],   // red-rose
   'logout':                ['#ef4444', '#dc2626'],   // red
+  // Sub-item keys for colorful submenu icons
+  'depolar':               ['#0ea5e9', '#0284c7'],   // sky
+  'borc-depolar':          ['#6366f1', '#4f46e5'],   // indigo
+  'urun-kodlari':          ['#f97316', '#ea580c'],   // orange
+  'adresler':              ['#ec4899', '#db2777'],   // pink
+  'laboratuvarlar':        ['#8b5cf6', '#7c3aed'],   // violet
+  'kullanicilar':          ['#14b8a6', '#0d9488'],   // teal
+  'test-yonetimi':         ['#06b6d4', '#0891b2'],   // cyan
+  'barkod-formatlari':     ['#64748b', '#475569'],   // slate
+  'personel-yonetimi':     ['#f59e0b', '#d97706'],   // amber
+  'envanter-yonetimi':     ['#22c55e', '#16a34a'],   // green
+  'kisisellistirme':       ['#d946ef', '#c026d3'],   // fuchsia
+  'oturum-yonetimi':       ['#ef4444', '#dc2626'],   // red
+  'ek-mesai':              ['#f97316', '#ea580c'],   // orange
+  'izin-yonetimi':         ['#22c55e', '#16a34a'],   // green
+  'masraf-yonetimi':       ['#eab308', '#ca8a04'],   // yellow
+  'hareketsiz-stok':       ['#64748b', '#475569'],   // slate
+  'minmax-grafik':         ['#3b82f6', '#1d4ed8'],   // blue
+  'gecmis-stok':           ['#8b5cf6', '#7c3aed'],   // violet
+  'kumulatif-islemleri':   ['#14b8a6', '#0d9488'],   // teal
+  'kumulatif-hesaplama':   ['#06b6d4', '#0891b2'],   // cyan
+  'kumulatif-gecmis':      ['#64748b', '#475569'],   // slate
+  'cihaz-ustu-islemleri':  ['#f43f5e', '#e11d48'],   // rose
+  'cihaz-ustu-ekle':       ['#22c55e', '#16a34a'],   // green
+  'cihaz-ustu-gecmisi':    ['#f59e0b', '#d97706'],   // amber
+  'urun-talep':            ['#3b82f6', '#1d4ed8'],   // blue
+  'tuketim-istatistikleri': ['#d946ef', '#c026d3'],  // fuchsia
+  'kullanim-dogrulama':    ['#22c55e', '#16a34a'],   // green
+  'mal-kabul-gecmis':      ['#64748b', '#475569'],   // slate
+  'siparis-gecmis':        ['#f59e0b', '#d97706'],   // amber
+  'verimlilik-hesaplama-sub': ['#84cc16', '#65a30d'], // lime
+  'cost-dashboard':        ['#eab308', '#ca8a04'],   // yellow
+  'teknik-servis':         ['#f97316', '#ea580c'],   // orange
+  'ariza-yonetimi':        ['#ef4444', '#dc2626'],   // red
+  'ek-mesai-bildirimi':    ['#f97316', '#ea580c'],   // orange
+  'islem-formlarim':       ['#6366f1', '#4f46e5'],   // indigo
+  'stogum':                ['#10b981', '#059669'],   // emerald
 };
 
 interface DockProps {
@@ -458,45 +495,74 @@ const DockItem = ({
   const nestedSubmenuRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const iconRef = useRef<HTMLDivElement>(null);
 
-  // Adjust main submenu position to stay within viewport
+  // Adjust main submenu: clamp horizontally, flip vertically if needed
   useEffect(() => {
-    if (!isHovered || !submenuRef.current || !iconRef.current) return;
+    if (!isHovered || !submenuRef.current) return;
     const menu = submenuRef.current;
     const rect = menu.getBoundingClientRect();
     const vw = window.innerWidth;
+    const vh = window.innerHeight;
 
-    // Reset any previous transforms
+    // Reset
     menu.style.transform = '';
+    menu.style.bottom = '';
+    menu.style.top = '';
+
+    // If the menu overflows above the viewport, flip it below the dock icon
+    if (rect.top < 8) {
+      menu.style.bottom = 'auto';
+      menu.style.top = '100%';
+      menu.style.marginTop = '4px';
+    }
+
+    // Re-measure after potential flip
+    const rect2 = menu.getBoundingClientRect();
 
     // Clamp horizontally
-    if (rect.right > vw - 8) {
-      const overflow = rect.right - vw + 8;
-      menu.style.transform = `translateX(-${overflow}px)`;
-    } else if (rect.left < 8) {
-      menu.style.transform = `translateX(${8 - rect.left}px)`;
+    if (rect2.right > vw - 8) {
+      menu.style.transform = `translateX(-${rect2.right - vw + 12}px)`;
+    } else if (rect2.left < 8) {
+      menu.style.transform = `translateX(${12 - rect2.left}px)`;
     }
   }, [isHovered]);
 
-  // Adjust nested submenu: flip to left if overflows right
+  // Adjust nested submenu: flip left if overflows right, flip up if overflows bottom
   useEffect(() => {
     if (!activeSubMenu) return;
     const el = nestedSubmenuRefs.current.get(activeSubMenu);
     if (!el) return;
+
+    // Reset first
+    el.style.left = '';
+    el.style.right = '';
+    el.style.top = '';
+    el.style.bottom = '';
+    el.style.marginLeft = '4px';
+    el.style.marginRight = '';
+
     const rect = el.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // Flip horizontally if overflows right
+    // Flip horizontally: if overflows right, position to the left
     if (rect.right > vw - 8) {
       el.style.left = 'auto';
       el.style.right = '100%';
       el.style.marginLeft = '0';
       el.style.marginRight = '4px';
     }
-    // Clamp vertically
-    if (rect.bottom > vh - 8) {
-      const overflow = rect.bottom - vh + 8;
+
+    // Re-measure after horizontal flip
+    const rect2 = el.getBoundingClientRect();
+
+    // Vertical: if overflows bottom, shift up
+    if (rect2.bottom > vh - 8) {
+      const overflow = rect2.bottom - vh + 12;
       el.style.top = `-${overflow}px`;
+    }
+    // If overflows top, shift down
+    if (rect2.top < 8) {
+      el.style.top = `${8 - rect2.top}px`;
     }
   }, [activeSubMenu]);
 
@@ -514,6 +580,18 @@ const DockItem = ({
   // Fast spring for snappy animations
   const fastSpring = { type: 'spring' as const, stiffness: 600, damping: 25 };
 
+  // Helper: get gradient style for a sub-item icon by key
+  const getSubIconStyle = (key: string): React.CSSProperties => {
+    const colors = ICON_COLORS[key];
+    if (!colors) return {};
+    return {
+      background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`,
+      WebkitBackgroundClip: 'text',
+      WebkitTextFillColor: 'transparent',
+      backgroundClip: 'text',
+    };
+  };
+
   // For items with submenus, use a different structure
   // Tooltip wraps only the icon, not the submenu
   if (hasSubItems) {
@@ -523,89 +601,78 @@ const DockItem = ({
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        {/* Submenu positioned above the icon - OUTSIDE tooltip */}
+        {/* Submenu positioned above the icon - no scroll, fits all buttons */}
         <AnimatePresence>
           {isHovered && (
             <motion.div
               ref={submenuRef}
-              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              initial={{ opacity: 0, y: 8, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-              transition={{ duration: 0.15 }}
-              className={cn("absolute bottom-full mb-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl min-w-[180px]", submenuSurface)}
+              exit={{ opacity: 0, y: 8, scale: 0.97 }}
+              transition={{ duration: 0.12 }}
+              className={cn("absolute bottom-full mb-1 flex flex-col items-stretch gap-0.5 p-1.5 rounded-xl", submenuSurface)}
               style={{
-                maxHeight: 'calc(100vh - 120px)',
-                overflowY: 'auto',
                 bottom: '100%',
                 marginBottom: '4px',
                 zIndex: 'var(--z-float)',
+                whiteSpace: 'nowrap',
               } as React.CSSProperties}
             >
               {/* Invisible bridge to prevent gap between submenu and icon */}
               <div className="absolute -bottom-2 left-0 right-0 h-3" />
-              {item.subItems!.map(sub => (
-                <div
-                  key={sub.key}
-                  className="relative w-full"
-                  onMouseEnter={() => handleSubMenuEnter(sub.key)}
-                  onMouseLeave={handleSubMenuLeave}
-                >
-                  <motion.div
-                    whileHover={{ scale: 1.01, x: 1 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+              {item.subItems!.map(sub => {
+                const subColors = ICON_COLORS[sub.key] || ['#6b7280', '#4b5563'];
+                return (
+                  <div
+                    key={sub.key}
+                    className="relative"
+                    onMouseEnter={() => handleSubMenuEnter(sub.key)}
+                    onMouseLeave={handleSubMenuLeave}
                   >
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
+                    <button
+                      className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
                       onClick={(e) => handleNavigate(e, sub.href)}
                     >
-                      <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
-                      <span className="truncate">{sub.label}</span>
-                      {sub.subItems && <ChevronRight className="w-3.5 h-3.5 ml-auto flex-shrink-0 opacity-50" />}
-                    </Button>
-                  </motion.div>
-                  {/* Nested Sub-Menu */}
-                  <AnimatePresence>
-                  {activeSubMenu === sub.key && sub.subItems && (
-                    <motion.div
-                      ref={(el) => { if (el) nestedSubmenuRefs.current.set(sub.key, el); }}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -8 }}
-                      transition={{ duration: 0.12 }}
-                      className={cn("absolute left-full top-0 ml-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl min-w-[180px]", submenuSurface)}
-                      style={{
-                        maxHeight: 'calc(100vh - 120px)',
-                        overflowY: 'auto',
-                        zIndex: 'var(--z-float)',
-                      } as React.CSSProperties}
-                    >
-                      {/* Invisible bridge for nested menu */}
-                      <div className="absolute -left-2 top-0 bottom-0 w-3" />
-                      {sub.subItems.map(nestedSub => (
-                        <motion.div
-                          key={nestedSub.key}
-                          whileHover={{ scale: 1.01, x: 1 }}
-                          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                          className="w-full"
-                        >
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
-                            onClick={(e) => handleNavigate(e, nestedSub.href)}
-                          >
-                            <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
-                            <span className="truncate">{nestedSub.label}</span>
-                          </Button>
-                        </motion.div>
-                      ))}
-                    </motion.div>
-                  )}
-                  </AnimatePresence>
-                </div>
-              ))}
+                      <sub.icon className="w-4 h-4 flex-shrink-0" style={{ color: subColors[0] }} />
+                      <span className="text-foreground">{sub.label}</span>
+                      {sub.subItems && <ChevronRight className="w-3.5 h-3.5 ml-auto flex-shrink-0 opacity-40" />}
+                    </button>
+                    {/* Nested Sub-Menu - viewport aware */}
+                    <AnimatePresence>
+                    {activeSubMenu === sub.key && sub.subItems && (
+                      <motion.div
+                        ref={(el) => { if (el) nestedSubmenuRefs.current.set(sub.key, el); }}
+                        initial={{ opacity: 0, scale: 0.97 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.97 }}
+                        transition={{ duration: 0.1 }}
+                        className={cn("absolute left-full top-0 ml-1 flex flex-col items-stretch gap-0.5 p-1.5 rounded-xl", submenuSurface)}
+                        style={{
+                          zIndex: 'var(--z-float)',
+                          whiteSpace: 'nowrap',
+                        } as React.CSSProperties}
+                      >
+                        {/* Invisible bridge for nested menu */}
+                        <div className="absolute -left-2 top-0 bottom-0 w-3" />
+                        {sub.subItems.map(nestedSub => {
+                          const nestedColors = ICON_COLORS[nestedSub.key] || ['#6b7280', '#4b5563'];
+                          return (
+                            <button
+                              key={nestedSub.key}
+                              className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
+                              onClick={(e) => handleNavigate(e, nestedSub.href)}
+                            >
+                              <nestedSub.icon className="w-4 h-4 flex-shrink-0" style={{ color: nestedColors[0] }} />
+                              <span className="text-foreground">{nestedSub.label}</span>
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
             </motion.div>
           )}
         </AnimatePresence>
