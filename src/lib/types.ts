@@ -432,6 +432,7 @@ export interface DeviceFaultReport {
   openedByName: string;
   closedAt: Date | null;
   closedBy?: string;
+  closedByUid?: string;
   closedByName?: string;
   source: string;
 

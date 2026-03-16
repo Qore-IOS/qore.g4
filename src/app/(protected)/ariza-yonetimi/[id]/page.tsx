@@ -156,6 +156,13 @@ export default function FaultDetailPage() {
   const [editingDescription, setEditingDescription] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
+  // Çözülmüş arıza düzenleme state'leri
+  const [isEditResolvedOpen, setIsEditResolvedOpen] = useState(false);
+  const [editCloseDescription, setEditCloseDescription] = useState('');
+  const [editSupportPersonnelUid, setEditSupportPersonnelUid] = useState('');
+  const [editPersonnelSearchQuery, setEditPersonnelSearchQuery] = useState('');
+  const [isSavingResolved, setIsSavingResolved] = useState(false);
+
   // Yeni atama sistemi state'leri
   const [isAssigning, setIsAssigning] = useState(false);
   const [isTransferringUnit, setIsTransferringUnit] = useState(false);
@@ -1080,19 +1087,30 @@ export default function FaultDetailPage() {
     setIsSavingEdit(true);
     try {
       const historyRef = doc(db, 'deviceFaultReports', fault.id, 'history', editingHistoryItem.id);
+      const oldDescription = editingHistoryItem.description || '';
       await updateDoc(historyRef, {
         description: editingDescription,
         lastEditedAt: serverTimestamp(),
         lastEditedBy: currentUser?.uid,
         lastEditedByName: currentUserProfile?.name || 'Bilinmeyen',
       });
-      
+
       if (editingHistoryItem.type === 'closed') {
         await updateDoc(doc(db, 'deviceFaultReports', fault.id), {
           closeDescription: editingDescription
         });
       }
-      
+
+      // Log the edit to history
+      await addDoc(collection(db, 'deviceFaultReports', fault.id, 'history'), {
+        type: 'note',
+        actorUid: currentUser?.uid,
+        actorName: currentUserProfile?.name || 'Bilinmeyen',
+        description: `Kapanış notu düzenlendi. Eski: "${oldDescription}" → Yeni: "${editingDescription}"`,
+        timestamp: serverTimestamp(),
+        editType: 'closeDescription_edit',
+      });
+
       toast({ title: 'Açıklama Güncellendi' });
       setIsEditHistoryModalOpen(false);
       setEditingHistoryItem(null);
@@ -1101,6 +1119,84 @@ export default function FaultDetailPage() {
       toast({ title: 'Hata', description: 'Açıklama güncellenemedi.', variant: 'destructive' });
     } finally {
       setIsSavingEdit(false);
+    }
+  };
+
+  const openEditResolved = () => {
+    if (!fault) return;
+    setEditCloseDescription(fault.closeDescription || '');
+    setEditSupportPersonnelUid(fault.supportPersonnelUid || 'none');
+    setEditPersonnelSearchQuery('');
+    setIsEditResolvedOpen(true);
+  };
+
+  const handleSaveResolvedEdit = async () => {
+    if (!fault) return;
+    setIsSavingResolved(true);
+    try {
+      const changes: string[] = [];
+      const updateData: Record<string, any> = {};
+
+      // Check closeDescription change
+      if (editCloseDescription !== (fault.closeDescription || '')) {
+        changes.push(`Çözüm açıklaması: "${fault.closeDescription || '-'}" → "${editCloseDescription}"`);
+        updateData.closeDescription = editCloseDescription;
+
+        // Also update the 'closed' history event
+        const historySnap = await getDocs(
+          query(
+            collection(db, 'deviceFaultReports', fault.id, 'history'),
+            where('type', '==', 'closed')
+          )
+        );
+        for (const hDoc of historySnap.docs) {
+          await updateDoc(doc(db, 'deviceFaultReports', fault.id, 'history', hDoc.id), {
+            description: editCloseDescription,
+            lastEditedAt: serverTimestamp(),
+            lastEditedBy: currentUser?.uid,
+            lastEditedByName: currentUserProfile?.name || 'Bilinmeyen',
+          });
+        }
+      }
+
+      // Check support personnel change
+      const newSupportUid = editSupportPersonnelUid === 'none' ? '' : editSupportPersonnelUid;
+      const oldSupportUid = fault.supportPersonnelUid || '';
+      if (newSupportUid !== oldSupportUid) {
+        const newPerson = allPersonnel.find(p => p.uid === newSupportUid);
+        const oldName = fault.supportPersonnelName || 'Seçim yok';
+        const newName = newPerson?.name || 'Seçim yok';
+        changes.push(`Destek personeli: "${oldName}" → "${newName}"`);
+        updateData.supportPersonnelUid = newSupportUid || null;
+        updateData.supportPersonnelName = newPerson?.name || null;
+      }
+
+      if (changes.length === 0) {
+        toast({ title: 'Değişiklik Yok', description: 'Herhangi bir değişiklik yapılmadı.' });
+        setIsEditResolvedOpen(false);
+        return;
+      }
+
+      // Update the fault report
+      await updateDoc(doc(db, 'deviceFaultReports', fault.id), updateData);
+
+      // Log the edit to history
+      await addDoc(collection(db, 'deviceFaultReports', fault.id, 'history'), {
+        type: 'note',
+        actorUid: currentUser?.uid,
+        actorName: currentUserProfile?.name || 'Bilinmeyen',
+        description: `Çözüm bilgileri düzenlendi:\n${changes.join('\n')}`,
+        timestamp: serverTimestamp(),
+        editType: 'resolved_edit',
+      });
+
+      toast({ title: 'Çözüm Bilgileri Güncellendi' });
+      setIsEditResolvedOpen(false);
+    } catch (err) {
+      console.error('Error updating resolved fault:', err);
+      toast({ title: 'Hata', description: 'Güncelleme başarısız oldu.', variant: 'destructive' });
+    } finally {
+      setIsSavingResolved(false);
     }
   };
 
@@ -1467,6 +1563,51 @@ export default function FaultDetailPage() {
               );
             }
 
+            // ÇÖZÜLDÜ - Çözüm bilgileri (düzenlenebilir)
+            if (normalized === 'cozuldu') {
+              const canEdit = isAdmin || fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid || fault.assignedToUid === currentUser?.uid;
+              return (
+                <div className="pt-4 border-t space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      Çözüm Bilgileri
+                    </p>
+                    {canEdit && (
+                      <Button variant="outline" size="sm" onClick={openEditResolved}>
+                        <Edit3 className="h-4 w-4 mr-1" /> Düzenle
+                      </Button>
+                    )}
+                  </div>
+                  <div className="bg-green-50/50 dark:bg-green-950/20 border border-green-200/50 dark:border-green-800/50 rounded-lg p-4 space-y-3 text-sm">
+                    <div>
+                      <p className="font-medium text-muted-foreground">Çözüm Açıklaması</p>
+                      <p className="whitespace-pre-wrap mt-1">{fault.closeDescription || '-'}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="font-medium text-muted-foreground">Kapatan</p>
+                        <p className="mt-1">{fault.closedByName || '-'}</p>
+                        {fault.closedAt && (
+                          <p className="text-xs text-muted-foreground">{format(fault.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-medium text-muted-foreground">Destek Personeli</p>
+                        <p className="mt-1">{fault.supportPersonnelName || 'Belirtilmedi'}</p>
+                      </div>
+                    </div>
+                    {fault.toplamCozumSuresi && (
+                      <div>
+                        <p className="font-medium text-muted-foreground">Toplam Çözüm Süresi</p>
+                        <p className="mt-1">{Math.round(fault.toplamCozumSuresi / 60000)} dakika</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
             // Legacy 'open' status için eski davranış
             if (fault.status === 'open') {
               return (
@@ -1498,7 +1639,7 @@ export default function FaultDetailPage() {
             const isActiveIntervention = normalized === 'mudahale_ediliyor' || normalized === 'mudahale_bekliyor';
             // Çözülmüş arızalarda, sadece arızayı kapatan kişi sonradan parça ekleyebilir
             const isOwnClosedFault = normalized === 'cozuldu' && (
-              fault.closedBy === currentUser?.uid ||
+              fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid ||
               fault.assignedToUid === currentUser?.uid
             );
             const showPartChange = isActiveIntervention || isOwnClosedFault;
@@ -1593,7 +1734,7 @@ export default function FaultDetailPage() {
                     <TableCell className="whitespace-pre-wrap">
                       <div className="flex items-start justify-between">
                         <span>{ev.description || '-'}</span>
-                        {ev.type === 'closed' && isAdmin && (
+                        {ev.type === 'closed' && (isAdmin || fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid || fault.assignedToUid === currentUser?.uid) && (
                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditModal(ev)}>
                             <Edit3 className="h-4 w-4 text-muted-foreground" />
                           </Button>
@@ -1693,6 +1834,71 @@ export default function FaultDetailPage() {
                     Kaydet
                 </Button>
             </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Çözüm Bilgileri Düzenleme Dialog */}
+      <Dialog open={isEditResolvedOpen} onOpenChange={setIsEditResolvedOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Çözüm Bilgilerini Düzenle</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Çözüm Açıklaması</label>
+              <Textarea
+                value={editCloseDescription}
+                onChange={(e) => setEditCloseDescription(e.target.value)}
+                placeholder="Yapılan işlem hakkında detay..."
+                rows={4}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Destek Personeli</label>
+              <p className="text-xs text-muted-foreground">
+                Arıza çözümünde destek veren personeli değiştirebilirsiniz.
+              </p>
+              <Select value={editSupportPersonnelUid} onValueChange={setEditSupportPersonnelUid}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Destek personeli seçin..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <div className="p-2">
+                    <Input
+                      placeholder="Personel ara..."
+                      value={editPersonnelSearchQuery}
+                      onChange={(e) => setEditPersonnelSearchQuery(e.target.value)}
+                      className="mb-2"
+                    />
+                  </div>
+                  <SelectItem value="none">Seçim Yok</SelectItem>
+                  {allPersonnel
+                    .filter(p => {
+                      if (fault?.faultType === 'teknik_servis') return p.role === 'teknik_servis';
+                      if (fault?.faultType === 'aplikasyon') return p.role === 'aplikasyon';
+                      return true;
+                    })
+                    .filter(p => {
+                      if (!editPersonnelSearchQuery) return true;
+                      const q = editPersonnelSearchQuery.toLowerCase();
+                      return (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q);
+                    })
+                    .map(p => (
+                      <SelectItem key={p.uid} value={p.uid}>
+                        {p.name || p.email} ({p.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsEditResolvedOpen(false)}>İptal</Button>
+            <Button onClick={handleSaveResolvedEdit} disabled={isSavingResolved}>
+              {isSavingResolved ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Kaydet
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
