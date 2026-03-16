@@ -328,7 +328,7 @@ export default function SiparislerPanel(): JSX.Element {
       const rules = await fetchRules('hospitals', labId);
       const rows = Object.values(rules).map(rule => {
         const have = depoStok.filter(
-          st => st.isShipped && st.hedefKurum === lab.name && st.stokKodu === rule.stokKodu
+          st => st.isShipped && (st.hedefKurumId === lab.id || (!st.hedefKurumId && st.hedefKurum === lab.name)) && st.stokKodu === rule.stokKodu
         ).length;
         const maxValue = rule.max ?? 0;
         const need = maxValue - have;
@@ -374,7 +374,7 @@ export default function SiparislerPanel(): JSX.Element {
   
     for (const rule of Object.values(rules)) {
       const labStockCount = depoStok.filter(
-        st => st.isShipped && st.hedefKurum === hospital.name && st.stokKodu === rule.stokKodu
+        st => st.isShipped && (st.hedefKurumId === hospital.id || (!st.hedefKurumId && st.hedefKurum === hospital.name)) && st.stokKodu === rule.stokKodu
       ).length;
       const maxValue = rule.max ?? 0;
       const need = maxValue - labStockCount;
