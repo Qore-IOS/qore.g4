@@ -46,7 +46,7 @@ type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
 
 type ActionItem = {
   id: string;
-  type: 'part_change' | 'operation';
+  type: 'part_change' | 'operation' | 'hucre_degisimi';
   action: string;
   stokKodu?: string;
   stokAdi?: string;
@@ -60,6 +60,8 @@ type ActionItem = {
   poolWarehouseId?: string;
   poolWarehouseName?: string;
   serialNumber?: string;
+  hucreNumarasi?: string;           // Hücre numarası (takılan)
+  removedHucreNumarasi?: string;    // Çıkan hücre numarası
   // Removed/replaced part info (from device)
   removedPartStokKodu?: string;
   removedPartStokAdi?: string;
@@ -202,6 +204,13 @@ export default function IslemFormuPage() {
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const removedPartImageInputRef = useRef<HTMLInputElement>(null);
   const usedPartImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Hücre değişimi state
+  const [isHucreDegisimiModalOpen, setIsHucreDegisimiModalOpen] = useState(false);
+  const [hucreDegisimiSelectedItem, setHucreDegisimiSelectedItem] = useState<PersonalStockItem | null>(null);
+  const [hucreDegisimiRemovedHucre, setHucreDegisimiRemovedHucre] = useState('');
+  const [hucreDegisimiDescription, setHucreDegisimiDescription] = useState('');
+  const [hucreDegisimiSearchQuery, setHucreDegisimiSearchQuery] = useState('');
 
   // Maintenance plans for periyodik bakım
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
@@ -1879,6 +1888,14 @@ export default function IslemFormuPage() {
         : undefined,
     },
     {
+      id: 'hucre_degisimi',
+      label: 'HÜCRE DEĞİŞİMİ',
+      isComplete: actions.some(a => a.type === 'hucre_degisimi'),
+      completedSublabel: actions.filter(a => a.type === 'hucre_degisimi').length > 0
+        ? `${actions.filter(a => a.type === 'hucre_degisimi').length} hücre`
+        : undefined,
+    },
+    {
       id: 'yapilan_islem',
       label: 'YAPILAN İŞLEM',
       isComplete: actions.some(a => a.type === 'operation'),
@@ -2384,6 +2401,162 @@ export default function IslemFormuPage() {
           </div>
         );
 
+      case 'hucre_degisimi': {
+        // Filter personal stock items that have hücre numarası
+        const hucreStockItems = personalStock
+          .filter(p => !usedPersonalStockIds.has(p.id) && (p as any).hucreNumarasi && p.status === 'in_stock')
+          .filter(p => {
+            if (!hucreDegisimiSearchQuery.trim()) return true;
+            const q = hucreDegisimiSearchQuery.trim().toLowerCase();
+            return p.stokKodu.toLowerCase().includes(q) || p.stokAdi.toLowerCase().includes(q) || ((p as any).hucreNumarasi || '').toLowerCase().includes(q);
+          });
+
+        const validateHucreFormat = (v: string) => !v || /^[A-Za-z]\d{4}$/.test(v);
+
+        const addHucreDegisimi = () => {
+          if (!hucreDegisimiSelectedItem) return;
+          const removedHn = hucreDegisimiRemovedHucre.trim().toUpperCase();
+          if (removedHn && !validateHucreFormat(removedHn)) {
+            toast({ title: 'Geçersiz Format', description: 'Çıkan hücre numarası 1 harf + 4 rakamdan oluşmalıdır.', variant: 'destructive' });
+            return;
+          }
+          const item = hucreDegisimiSelectedItem;
+          const newAction: ActionItem = {
+            id: `hucre_${Date.now()}`,
+            type: 'hucre_degisimi',
+            action: `Hücre Değişimi: ${(item as any).hucreNumarasi}`,
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            anaBirim: item.anaBirim,
+            quantity: 1,
+            personalStockId: item.id,
+            serialNumber: item.serialNumber,
+            hucreNumarasi: (item as any).hucreNumarasi || '',
+            removedHucreNumarasi: removedHn || '',
+            description: hucreDegisimiDescription.trim() || '',
+          };
+          setActions(prev => [...prev, newAction]);
+          setHucreDegisimiSelectedItem(null);
+          setHucreDegisimiRemovedHucre('');
+          setHucreDegisimiDescription('');
+          setHucreDegisimiSearchQuery('');
+          toast({ title: 'Hücre Değişimi Eklendi', description: `${item.stokAdi} - H:${(item as any).hucreNumarasi}` });
+        };
+
+        return (
+          <div>
+            {/* Existing hücre değişimi list */}
+            {actions.filter(a => a.type === 'hucre_degisimi').length > 0 && (
+              <div className="wizard-action-list" style={{ marginBottom: '16px' }}>
+                {actions.filter(a => a.type === 'hucre_degisimi').map(item => (
+                  <div key={item.id} className="wizard-action-item">
+                    <div>
+                      <div className="wizard-action-item-label">{item.stokAdi}</div>
+                      <div className="wizard-action-item-sub">
+                        Takılan: H:{item.hucreNumarasi} {item.removedHucreNumarasi ? `· Çıkan: H:${item.removedHucreNumarasi}` : ''}
+                        {item.description ? ` · ${item.description}` : ''}
+                      </div>
+                    </div>
+                    <button className="wizard-action-item-delete" onClick={() => removeActionRow(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Hücre stok seçimi */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>
+                1. Hücre Numaralı Ürün Seçin
+              </label>
+              <div style={{ position: 'relative', marginBottom: '8px' }}>
+                <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                <input
+                  type="text"
+                  placeholder="Hücre no veya ürün ile ara..."
+                  value={hucreDegisimiSearchQuery}
+                  onChange={(e) => setHucreDegisimiSearchQuery(e.target.value)}
+                  style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }}
+                />
+              </div>
+              <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                {hucreStockItems.length === 0 ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>
+                    Şahsi stokunuzda hücre numaralı ürün bulunmuyor.
+                  </div>
+                ) : hucreStockItems.map(item => (
+                  <div
+                    key={item.id}
+                    onClick={() => setHucreDegisimiSelectedItem(item)}
+                    style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
+                      background: hucreDegisimiSelectedItem?.id === item.id ? 'var(--wz-selected-bg)' : 'transparent',
+                      borderLeft: hucreDegisimiSelectedItem?.id === item.id ? '3px solid var(--wz-accent)' : '3px solid transparent',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--wz-text)' }}>{item.stokAdi}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>
+                        {item.stokKodu} · <span style={{ color: '#7C3AED', fontWeight: 700 }}>H:{(item as any).hucreNumarasi}</span>
+                        {item.serialNumber ? ` · SN:${item.serialNumber}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Çıkan hücre numarası */}
+            {hucreDegisimiSelectedItem && (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '8px' }}>
+                  2. Çıkan Hücre Numarası
+                </label>
+                <input
+                  type="text"
+                  placeholder="Örn: B5678"
+                  value={hucreDegisimiRemovedHucre}
+                  onChange={(e) => setHucreDegisimiRemovedHucre(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))}
+                  maxLength={5}
+                  style={{ background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px', fontSize: '15px', width: '100%', outline: 'none', fontFamily: 'monospace' }}
+                />
+                {hucreDegisimiRemovedHucre && !validateHucreFormat(hucreDegisimiRemovedHucre) && (
+                  <p style={{ fontSize: '12px', color: '#B91C1C', marginTop: '4px' }}>1 harf + 4 rakam formatında olmalıdır (örn: A1234)</p>
+                )}
+              </div>
+            )}
+
+            {/* Açıklama */}
+            {hucreDegisimiSelectedItem && (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '8px' }}>
+                  3. Açıklama (Opsiyonel)
+                </label>
+                <textarea
+                  placeholder="Hücre değişimi hakkında açıklama..."
+                  value={hucreDegisimiDescription}
+                  onChange={(e) => setHucreDegisimiDescription(e.target.value)}
+                  rows={2}
+                  style={{ background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px', fontSize: '15px', width: '100%', outline: 'none', resize: 'vertical' }}
+                />
+              </div>
+            )}
+
+            {/* Ekle butonu */}
+            <button
+              className="wizard-btn-main"
+              disabled={!hucreDegisimiSelectedItem}
+              onClick={addHucreDegisimi}
+              style={{ marginTop: '8px' }}
+            >
+              Hücre Değişimi Ekle
+            </button>
+          </div>
+        );
+      }
+
       case 'yapilan_islem':
         return (
           <div>
@@ -2483,6 +2656,12 @@ export default function IslemFormuPage() {
         <span className="label">Değişen Parça</span>
         <span className="value">{actions.filter(a => a.type === 'part_change').length} parça</span>
       </div>
+      {actions.filter(a => a.type === 'hucre_degisimi').length > 0 && (
+        <div className="wizard-save-summary-item">
+          <span className="label">Hücre Değişimi</span>
+          <span className="value">{actions.filter(a => a.type === 'hucre_degisimi').length} hücre</span>
+        </div>
+      )}
       <div className="wizard-save-summary-item">
         <span className="label">Yapılan İşlem</span>
         <span className="value">{actions.filter(a => a.type === 'operation').length} işlem</span>

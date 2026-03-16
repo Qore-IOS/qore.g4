@@ -660,6 +660,7 @@ export interface PersonalStockItem {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;        // Seri numarası
+  hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam) - tekil takip
   source: PersonalStockSource; // depot = yeni, device = cihazdan çıkan
   sourceDeviceId?: string;     // Cihazdan çıktıysa device ID
   sourceDeviceName?: string;   // Cihazdan çıktıysa device adı
@@ -694,6 +695,7 @@ export interface PoolWarehouseStockItem {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;        // Seri numarası
+  hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
   status: PoolStockStatus;
   createdAt: Date;
   transferredByUid?: string;   // Transfer eden kişi (lojistik)
@@ -770,6 +772,7 @@ export interface SparePartTransferRow {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;
+  hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
   quantity: number;            // Seri numarasız transferlerde adet (seri numaralıysa 1)
   cihazGrubu?: string;        // Cihaz ana grubu (kutu, adet, şişe vs.)
   targetUid: string;
@@ -785,6 +788,7 @@ export interface YedekParcaDepoStokItem {
   anaBirim?: string;
   address?: string;              // Depo adresleme bilgisi (raf, göz vb.)
   serialNumber?: string;         // Opsiyonel seri numarası
+  hucreNumarasi?: string;        // Hücre numarası (1 harf + 4 rakam) - tekil takip
   quantity: number;              // Seri numarasız ürünler için adet
   cihazGrubu?: string;          // Cihaz ana grubu (kutu, adet, şişe vs.)
   createdAt: Date;

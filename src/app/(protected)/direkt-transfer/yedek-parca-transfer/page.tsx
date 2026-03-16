@@ -86,7 +86,7 @@ interface GroupedDepoStokItem {
   cihazGrubu: string;
   totalQuantity: number;
   earliestDate: Date;
-  serialNumbers: { serialNumber: string; createdAt: Date; id: string; address?: string }[];
+  serialNumbers: { serialNumber: string; hucreNumarasi?: string; createdAt: Date; id: string; address?: string }[];
   entries: YedekParcaDepoStokItem[];
 }
 
@@ -388,9 +388,10 @@ export default function YedekParcaTransferPage() {
       g.totalQuantity += item.quantity;
       g.entries.push(item);
 
-      if (item.serialNumber) {
+      if (item.serialNumber || item.hucreNumarasi) {
         g.serialNumbers.push({
-          serialNumber: item.serialNumber,
+          serialNumber: item.serialNumber || '',
+          hucreNumarasi: item.hucreNumarasi || '',
           createdAt: item.createdAt,
           id: item.id,
           address: item.address || '',
@@ -793,7 +794,7 @@ export default function YedekParcaTransferPage() {
     return depoStokProducts.filter(g =>
       g.stokKodu.toLowerCase().includes(q) ||
       g.stokAdi.toLowerCase().includes(q) ||
-      g.serialNumbers.some(sn => sn.serialNumber.toLowerCase().includes(q))
+      g.serialNumbers.some(sn => sn.serialNumber.toLowerCase().includes(q) || (sn.hucreNumarasi || '').toLowerCase().includes(q))
     );
   }, [depoStokProducts, depoStokSearchQuery]);
 
@@ -848,6 +849,12 @@ export default function YedekParcaTransferPage() {
       return;
     }
 
+    // Find hücre numarası from the selected serial entry (if tracked by hücre)
+    const selectedEntry = sn
+      ? selectedProduct.serialNumbers.find(s => s.serialNumber === sn)
+      : undefined;
+    const hn = selectedEntry?.hucreNumarasi || '';
+
     const targetUid = selectedTransferTarget.type === 'user' ? selectedTransferTarget.uid : `pool_${selectedTransferTarget.id}`;
     const targetName = selectedTransferTarget.name;
 
@@ -858,6 +865,7 @@ export default function YedekParcaTransferPage() {
       stokAdi: selectedProduct.stokAdi,
       anaBirim: selectedProduct.anaBirim || 'Adet',
       serialNumber: sn,
+      ...(hn ? { hucreNumarasi: hn } : {}),
       quantity: qty,
       cihazGrubu: selectedProduct.cihazGrubu,
       targetUid,
@@ -870,11 +878,10 @@ export default function YedekParcaTransferPage() {
     setSerialNumber('');
     setTransferQuantity(1);
 
+    const label = sn ? (hn ? `SN: ${sn}, Hücre: ${hn}` : `SN: ${sn}`) : `x${qty}`;
     toast({
       title: 'Eklendi',
-      description: sn
-        ? `${selectedProduct.stokAdi} (SN: ${sn}) listeye eklendi.`
-        : `${selectedProduct.stokAdi} x${qty} listeye eklendi.`,
+      description: `${selectedProduct.stokAdi} (${label}) listeye eklendi.`,
     });
   }, [selectedProduct, serialNumber, transferQuantity, selectedTransferTarget, transferRows, toast]);
 
@@ -909,6 +916,8 @@ export default function YedekParcaTransferPage() {
             batch.delete(doc(db, 'yedekParcaDepoStok', depoItem.id));
           }
 
+          const hucreData = row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {};
+
           if (isPoolTarget) {
             // Havuz deposuna ekle
             const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
@@ -920,6 +929,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              ...hucreData,
               source: 'depot',
               status: 'in_stock',
               cihazGrubu: row.cihazGrubu || '',
@@ -940,6 +950,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              ...hucreData,
               toName: row.targetName,
               quantity: 1,
               createdAt: Timestamp.fromDate(now),
@@ -957,6 +968,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              ...hucreData,
               source: 'depot',
               status: 'in_stock',
               createdAt: Timestamp.fromDate(now),
@@ -974,6 +986,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              ...hucreData,
               toUid: row.targetUid,
               toName: row.targetName,
               quantity: 1,
@@ -993,6 +1006,7 @@ export default function YedekParcaTransferPage() {
               anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: row.serialNumber,
+            ...hucreData,
             quantity: 1,
             relatedPersonnelUid: isPoolTarget ? undefined : row.targetUid,
             relatedPersonnelName: row.targetName,
@@ -2025,9 +2039,12 @@ export default function YedekParcaTransferPage() {
                             <CommandList>
                               <CommandEmpty>Bulunamadı.</CommandEmpty>
                               <CommandGroup heading={`${selectedProduct.stokKodu}`}>
-                                {selectedProduct.serialNumbers.filter(sn => !transferRows.some(r => r.serialNumber === sn.serialNumber)).map(sn => (
-                                  <CommandItem key={sn.id} value={sn.serialNumber} onSelect={() => { setSerialNumber(sn.serialNumber); setTransferQuantity(1); setSerialSelectOpen(false); }}>
-                                    <div className="flex flex-col"><span className="font-mono font-medium text-xs">{sn.serialNumber}</span><span className="text-[10px] text-muted-foreground">{format(sn.createdAt, 'dd.MM.yyyy', { locale: tr })}</span></div>
+                                {selectedProduct.serialNumbers.filter(sn => !transferRows.some(r => r.serialNumber === sn.serialNumber && sn.serialNumber)).map(sn => (
+                                  <CommandItem key={sn.id} value={sn.serialNumber || sn.hucreNumarasi || sn.id} onSelect={() => { setSerialNumber(sn.serialNumber || sn.hucreNumarasi || ''); setTransferQuantity(1); setSerialSelectOpen(false); }}>
+                                    <div className="flex flex-col">
+                                      <span className="font-mono font-medium text-xs">{sn.serialNumber || '—'}{sn.hucreNumarasi ? ` · Hücre: ${sn.hucreNumarasi}` : ''}</span>
+                                      <span className="text-[10px] text-muted-foreground">{format(sn.createdAt, 'dd.MM.yyyy', { locale: tr })}</span>
+                                    </div>
                                   </CommandItem>
                                 ))}
                               </CommandGroup>
@@ -2346,11 +2363,12 @@ export default function YedekParcaTransferPage() {
                     <div className="px-3 pb-3 pt-1" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
                       {group.serialNumbers.length > 0 ? (
                         <>
-                          <p className="text-[10px] font-semibold mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Seri Numaraları ({group.serialNumbers.length}/{group.totalQuantity})</p>
+                          <p className="text-[10px] font-semibold mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Tekil Takip ({group.serialNumbers.length}/{group.totalQuantity})</p>
                           <div className="flex flex-wrap gap-1.5">
                             {group.serialNumbers.map(sn => (
                               <span key={sn.id} className="cihaz-pressed inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono" style={{ borderRadius: 8 }}>
-                                {sn.serialNumber}
+                                {sn.serialNumber || '—'}
+                                {sn.hucreNumarasi ? <span style={{ color: '#7C3AED', fontWeight: 600 }}>H:{sn.hucreNumarasi}</span> : null}
                                 <span style={{ color: 'var(--dashboard-muted)' }}>({format(sn.createdAt, 'dd.MM.yy', { locale: tr })})</span>
                                 {sn.address ? <span style={{ color: 'var(--dashboard-muted)' }}>[{sn.address}]</span> : null}
                                 <button onClick={(e) => { e.stopPropagation(); deleteSerialFromDepot(group, sn); }} className="ml-0.5 p-0.5 rounded hover:bg-black/5"><Trash2 className="w-2.5 h-2.5" style={{ color: '#B91C1C' }} /></button>
@@ -2494,6 +2512,9 @@ export default function YedekParcaTransferPage() {
                         </td>
                         <td className={cn('px-4 py-3 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
                           {item.serialNumber || '—'}
+                          {(item as any).hucreNumarasi && (
+                            <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#7C3AED' }}>H:{(item as any).hucreNumarasi}</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {item.status === 'in_stock' && (
@@ -2766,6 +2787,9 @@ export default function YedekParcaTransferPage() {
                         </td>
                         <td className={cn('px-4 py-3 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
                           {item.serialNumber || '—'}
+                          {(item as any).hucreNumarasi && (
+                            <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#7C3AED' }}>H:{(item as any).hucreNumarasi}</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {item.status === 'in_stock' && (
