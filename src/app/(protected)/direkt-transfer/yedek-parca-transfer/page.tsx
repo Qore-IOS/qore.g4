@@ -2087,7 +2087,7 @@ export default function YedekParcaTransferPage() {
                         </PopoverTrigger>
                         <PopoverContent className="w-[320px] p-0">
                           <Command>
-                            <CommandInput placeholder="Seri no ara…" />
+                            <CommandInput placeholder="Seri/Hücre ara…" />
                             <CommandList>
                               <CommandEmpty>Bulunamadı.</CommandEmpty>
                               <CommandGroup heading={`${selectedProduct.stokKodu}`}>
