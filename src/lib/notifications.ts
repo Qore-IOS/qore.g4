@@ -23,6 +23,8 @@ export type NotificationType =
   | "fault_opened"
   | "fault_transferred"
   | "fault_closed"
+  | "user_request_created"
+  | "user_request_completed"
   | "custom";
 
 export type ResourceType =
@@ -437,6 +439,56 @@ export async function emitSparePartTransfer(params: {
       targetUid: params.targetUid,
       targetName: params.targetName,
       items: params.items,
+    },
+  });
+}
+
+export async function emitUserRequestCreated(params: {
+  actor: Actor;
+  requestId: string;
+  title: string;
+  assignedToUid: string;
+  assignedToName: string;
+  category: string;
+  priority: string;
+}) {
+  await createNotification({
+    type: "user_request_created",
+    title: "Yeni Kullanıcı Talebi",
+    message: `${params.actor.name} size bir talep gönderdi: "${params.title}"`,
+    href: "/kullanici-talepleri",
+    actor: params.actor,
+    targets: [`user:${params.assignedToUid}`],
+    meta: {
+      requestId: params.requestId,
+      requestTitle: params.title,
+      assignedToUid: params.assignedToUid,
+      assignedToName: params.assignedToName,
+      category: params.category,
+      priority: params.priority,
+    },
+  });
+}
+
+export async function emitUserRequestCompleted(params: {
+  actor: Actor;
+  requestId: string;
+  title: string;
+  requestCreatorUid: string;
+  requestCreatorName: string;
+}) {
+  await createNotification({
+    type: "user_request_completed",
+    title: "Talebiniz Tamamlandı",
+    message: `"${params.title}" başlıklı talebiniz ${params.actor.name} tarafından tamamlandı.`,
+    href: "/kullanici-talepleri",
+    actor: params.actor,
+    targets: [`user:${params.requestCreatorUid}`],
+    meta: {
+      requestId: params.requestId,
+      requestTitle: params.title,
+      requestCreatorUid: params.requestCreatorUid,
+      requestCreatorName: params.requestCreatorName,
     },
   });
 }

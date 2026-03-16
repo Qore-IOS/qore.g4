@@ -12,6 +12,8 @@ type NotificationType =
   | 'lab_count_completed'
   | 'fault_opened'
   | 'fault_closed'
+  | 'user_request_created'
+  | 'user_request_completed'
   | 'custom';
 
 export type ResourceType =

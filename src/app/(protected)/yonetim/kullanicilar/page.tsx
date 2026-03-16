@@ -32,6 +32,8 @@ type NotificationTypeUI =
   | 'lab_count_completed'
   | 'fault_opened'
   | 'fault_closed'
+  | 'user_request_created'
+  | 'user_request_completed'
   | 'custom';
 
 
@@ -46,6 +48,8 @@ const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
     { key: 'fault_opened', label: 'Arıza Kaydı Açıldı' },
     { key: 'fault_closed', label: 'Arıza Kaydı Kapandı' },
     { key: 'stock_threshold', label: 'Stok Eşik Uyarısı' },
+    { key: 'user_request_created', label: 'Kullanıcı Talebi (Yeni Talep)' },
+    { key: 'user_request_completed', label: 'Kullanıcı Talebi (Tamamlandı)' },
 ];
 
 
