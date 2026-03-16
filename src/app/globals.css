@@ -36,6 +36,16 @@
     
     --radius: 1rem;
 
+    /* Dock & z-index layout contract */
+    --dock-h: 56px;
+    --dock-gap: 16px;
+    --z-content: 1;
+    --z-sticky: 100;
+    --z-dock: 500;
+    --z-modal-overlay: 900;
+    --z-modal: 1000;
+    --z-float: 1200;
+
     /* Dashboard neumorphic tokens (light mode) */
     --dashboard-bg: #E9E7E3;
     --dashboard-surface: #F3F2EF;
@@ -1376,6 +1386,61 @@
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
   }
+}
+
+/* Dock item styling */
+.dock-item-wrapper {
+  @apply w-9 h-9 rounded-xl transition-colors duration-150;
+}
+
+.dock-item-wrapper:hover {
+  @apply bg-black/[0.04];
+}
+
+.dark .dock-item-wrapper:hover {
+  @apply bg-white/[0.06];
+}
+
+.dock-item-wrapper.active {
+  @apply bg-black/[0.06];
+}
+
+.dark .dock-item-wrapper.active {
+  @apply bg-white/[0.08];
+}
+
+.dock-item-icon {
+  @apply w-[18px] h-[18px] text-gray-700 transition-colors;
+}
+
+.dark .dock-item-icon {
+  @apply text-gray-300;
+}
+
+.dock-item-wrapper.active .dock-item-icon {
+  @apply text-amber-600;
+}
+
+.dark .dock-item-wrapper.active .dock-item-icon {
+  @apply text-amber-400;
+}
+
+/* Dock tooltip styling - renders via portal above everything */
+.dock-tooltip {
+  @apply rounded-lg px-3 py-1.5 text-xs font-medium;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+  color: #1a1a1a;
+}
+
+.dark .dock-tooltip {
+  background: rgba(30, 30, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+  color: #e5e5e5;
 }
 
 /* Ensure dialogs with glass-card maintain fixed positioning */

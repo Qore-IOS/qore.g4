@@ -203,7 +203,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         {!isMobile && !isTeknisyen && (
           <div
-             className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50"
+             className="fixed left-1/2 -translate-x-1/2"
+             style={{ bottom: 'var(--dock-gap)', zIndex: 'var(--z-dock)' } as React.CSSProperties}
              onMouseEnter={handleMouseEnter}
              onMouseLeave={handleMouseLeave}
           >

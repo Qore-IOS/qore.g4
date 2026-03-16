@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChevronRight } from 'lucide-react';
@@ -438,12 +439,13 @@ const DockItem = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 10, scale: 0.9 }}
               transition={{ duration: 0.15 }}
-              className="absolute bottom-full mb-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
+              className="absolute bottom-full mb-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl bg-white/90 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] min-w-[180px]"
               style={{
                 maxHeight: 'calc(100vh - 120px)',
                 bottom: '100%',
-                marginBottom: '4px'
-              }}
+                marginBottom: '4px',
+                zIndex: 'var(--z-float)',
+              } as React.CSSProperties}
             >
               {/* Invisible bridge to prevent gap between submenu and icon */}
               <div className="absolute -bottom-2 left-0 right-0 h-3" />
@@ -461,7 +463,7 @@ const DockItem = ({
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
+                      className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                       onClick={(e) => handleNavigate(e, sub.href)}
                     >
                       <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
@@ -477,10 +479,11 @@ const DockItem = ({
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -10 }}
                       transition={{ duration: 0.15 }}
-                      className="absolute left-full top-0 ml-1 flex flex-col items-start gap-1 p-1.5 rounded-lg bg-popover border border-border shadow-lg min-w-[160px] z-50"
+                      className="absolute left-full top-0 ml-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl bg-white/90 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] min-w-[180px]"
                       style={{
-                        maxHeight: 'calc(100vh - 120px)'
-                      }}
+                        maxHeight: 'calc(100vh - 120px)',
+                        zIndex: 'var(--z-float)',
+                      } as React.CSSProperties}
                     >
                       {/* Invisible bridge for nested menu */}
                       <div className="absolute -left-2 top-0 bottom-0 w-3" />
@@ -494,7 +497,7 @@ const DockItem = ({
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-auto py-1.5 rounded-md w-full justify-start px-2 text-sm hover:bg-accent/80"
+                            className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                             onClick={(e) => handleNavigate(e, nestedSub.href)}
                           >
                             <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
@@ -529,16 +532,17 @@ const DockItem = ({
             </motion.div>
           </TooltipTrigger>
           {!isLiquidMode && (
-            <TooltipContent
-              side="bottom"
-              align="center"
-              sideOffset={20}
-              collisionPadding={0}
-              avoidCollisions={false}
-              className="glass-card z-[100]"
-            >
-              <p>{item.label}</p>
-            </TooltipContent>
+            <TooltipPrimitive.Portal>
+              <TooltipContent
+                side="top"
+                align="center"
+                sideOffset={12}
+                className="dock-tooltip"
+                style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}
+              >
+                <p>{item.label}</p>
+              </TooltipContent>
+            </TooltipPrimitive.Portal>
           )}
         </Tooltip>
       </div>
@@ -554,7 +558,7 @@ const DockItem = ({
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={!isLiquidMode && isHovered ? { scale: 1.2, y: -8 } : { scale: 1, y: 0 }}
+        animate={!isLiquidMode && isHovered ? { scale: 1.15, y: -6 } : { scale: 1, y: 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
           isActive && item.type === 'nav' && 'active',
@@ -574,9 +578,17 @@ const DockItem = ({
         {itemContent}
       </TooltipTrigger>
       {!isLiquidMode && (
-        <TooltipContent side="top" align="center" className="mb-2 glass-card">
-          <p>{item.label}</p>
-        </TooltipContent>
+        <TooltipPrimitive.Portal>
+          <TooltipContent
+            side="top"
+            align="center"
+            sideOffset={12}
+            className="dock-tooltip"
+            style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}
+          >
+            <p>{item.label}</p>
+          </TooltipContent>
+        </TooltipPrimitive.Portal>
       )}
     </Tooltip>
   );
@@ -604,9 +616,11 @@ const DockLogo = () => {
           <Image src={logoSrc} alt="Qore AI" width={28} height={28} className="object-contain" />
         </motion.button>
       </TooltipTrigger>
-      <TooltipContent side="top" align="center" className="mb-2 glass-card">
-        <p>Qore AI</p>
-      </TooltipContent>
+      <TooltipPrimitive.Portal>
+        <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
+          <p>Qore AI</p>
+        </TooltipContent>
+      </TooltipPrimitive.Portal>
     </Tooltip>
   );
 };
@@ -693,9 +707,11 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
         <motion.div
           ref={dockRef}
           className={cn(
-            "relative flex h-14 items-center gap-3 p-3 rounded-full transition-shadow duration-300",
-            "bg-[#e0e0e0] shadow-[9px_9px_18px_#bebebe,-9px_-9px_18px_#ffffff]",
-            "dark:bg-black/20 dark:shadow-[0_4px_30px_rgba(0,0,0,0.1)] dark:border dark:border-white/10 dark:backdrop-blur-md",
+            "relative flex h-14 items-center gap-2.5 px-3 py-2 rounded-2xl transition-shadow duration-300",
+            "bg-white/80 backdrop-blur-xl border border-gray-200/60",
+            "shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
+            "dark:bg-black/30 dark:backdrop-blur-xl dark:border-white/[0.08]",
+            "dark:shadow-[0_4px_24px_rgba(0,0,0,0.2),0_1px_4px_rgba(0,0,0,0.1)]",
             isLiquidMode && isMouseInDock && "[&_*]:!cursor-none !cursor-none"
           )}
           animate={{
@@ -709,7 +725,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           onMouseLeave={handleMouseLeave}
         >
           {/* Content wrapper for position reference */}
-          <div ref={dockContentRef} className="relative flex items-center gap-3">
+          <div ref={dockContentRef} className="relative flex items-center gap-2.5">
             {/* Liquid Glass Selector */}
             {isLiquidMode && (
               <AnimatePresence>
@@ -738,7 +754,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
               />
             ))}
           </div>
-          <div className="mx-2">
+          <div className="ml-1">
             <ThemeToggleDock />
           </div>
         </motion.div>
