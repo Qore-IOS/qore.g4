@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
@@ -17,6 +17,36 @@ import { Button } from '@/components/ui/button';
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock"
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
+
+// Apple-like gradient color map for dock icons
+const ICON_GRADIENTS: Record<string, string> = {
+  'dashboard':             'bg-gradient-to-br from-blue-500 to-blue-600',
+  'planner':               'bg-gradient-to-br from-purple-500 to-indigo-600',
+  'arama':                 'bg-gradient-to-br from-teal-400 to-teal-600',
+  'mal-kabul':             'bg-gradient-to-br from-green-500 to-emerald-600',
+  'siparisler':            'bg-gradient-to-br from-orange-400 to-orange-600',
+  'direkt-transfer':       'bg-gradient-to-br from-indigo-500 to-indigo-600',
+  'stok-yonetimi':         'bg-gradient-to-br from-emerald-500 to-green-600',
+  'depo-sayim':            'bg-gradient-to-br from-cyan-500 to-cyan-600',
+  'route-planlayici':      'bg-gradient-to-br from-pink-500 to-rose-600',
+  'laboratuvar-yonetimi':  'bg-gradient-to-br from-violet-500 to-purple-600',
+  'urun-kullanim':         'bg-gradient-to-br from-amber-500 to-amber-600',
+  'sarf-dagitim':          'bg-gradient-to-br from-rose-500 to-pink-600',
+  'numune-arsivi':         'bg-gradient-to-br from-slate-500 to-slate-600',
+  'cihazdan-cikan-kit':    'bg-gradient-to-br from-red-500 to-red-600',
+  'is-analizi':            'bg-gradient-to-br from-sky-500 to-sky-600',
+  'verimlilik-hesaplama':  'bg-gradient-to-br from-lime-500 to-green-600',
+  'total-verimlilik':      'bg-gradient-to-br from-fuchsia-500 to-fuchsia-600',
+  'cihaz-yonetimi-ana':    'bg-gradient-to-br from-yellow-500 to-amber-600',
+  'raporlama':             'bg-gradient-to-br from-blue-400 to-indigo-500',
+  'personel-islemleri':    'bg-gradient-to-br from-teal-500 to-cyan-600',
+  'tanimlar':              'bg-gradient-to-br from-gray-500 to-gray-600',
+  'satin-alma':            'bg-gradient-to-br from-orange-500 to-red-500',
+  'kullanici-talepleri':   'bg-gradient-to-br from-green-500 to-teal-600',
+  'yonetim':               'bg-gradient-to-br from-gray-600 to-gray-700',
+  'notifications':         'bg-gradient-to-br from-red-500 to-rose-600',
+  'logout':                'bg-gradient-to-br from-red-500 to-red-600',
+};
 
 interface DockProps {
   items: DockItemData[];
@@ -422,6 +452,57 @@ const DockItem = ({
 
   const hasSubItems = item.subItems && item.subItems.length > 0;
 
+  // Viewport-aware submenu positioning
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const nestedSubmenuRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const iconRef = useRef<HTMLDivElement>(null);
+
+  // Adjust main submenu position to stay within viewport
+  useEffect(() => {
+    if (!isHovered || !submenuRef.current || !iconRef.current) return;
+    const menu = submenuRef.current;
+    const rect = menu.getBoundingClientRect();
+    const vw = window.innerWidth;
+
+    // Reset any previous transforms
+    menu.style.transform = '';
+
+    // Clamp horizontally
+    if (rect.right > vw - 8) {
+      const overflow = rect.right - vw + 8;
+      menu.style.transform = `translateX(-${overflow}px)`;
+    } else if (rect.left < 8) {
+      menu.style.transform = `translateX(${8 - rect.left}px)`;
+    }
+  }, [isHovered]);
+
+  // Adjust nested submenu: flip to left if overflows right
+  useEffect(() => {
+    if (!activeSubMenu) return;
+    const el = nestedSubmenuRefs.current.get(activeSubMenu);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Flip horizontally if overflows right
+    if (rect.right > vw - 8) {
+      el.style.left = 'auto';
+      el.style.right = '100%';
+      el.style.marginLeft = '0';
+      el.style.marginRight = '4px';
+    }
+    // Clamp vertically
+    if (rect.bottom > vh - 8) {
+      const overflow = rect.bottom - vh + 8;
+      el.style.top = `-${overflow}px`;
+    }
+  }, [activeSubMenu]);
+
+  const gradient = ICON_GRADIENTS[item.key] || 'bg-gradient-to-br from-gray-500 to-gray-600';
+
+  const submenuSurface = "bg-white/80 dark:bg-black/30 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]";
+
   // For items with submenus, use a different structure
   // Tooltip wraps only the icon, not the submenu
   if (hasSubItems) {
@@ -435,13 +516,15 @@ const DockItem = ({
         <AnimatePresence>
           {isHovered && (
             <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.9 }}
+              ref={submenuRef}
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.9 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
               transition={{ duration: 0.15 }}
-              className="absolute bottom-full mb-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl bg-white/90 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] min-w-[180px]"
+              className={cn("absolute bottom-full mb-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl min-w-[180px]", submenuSurface)}
               style={{
                 maxHeight: 'calc(100vh - 120px)',
+                overflowY: 'auto',
                 bottom: '100%',
                 marginBottom: '4px',
                 zIndex: 'var(--z-float)',
@@ -457,31 +540,33 @@ const DockItem = ({
                   onMouseLeave={handleSubMenuLeave}
                 >
                   <motion.div
-                    whileHover={{ scale: 1.02, x: 2 }}
+                    whileHover={{ scale: 1.01, x: 1 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 20 }}
                   >
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                      className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
                       onClick={(e) => handleNavigate(e, sub.href)}
                     >
                       <sub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
                       <span className="truncate">{sub.label}</span>
-                      {sub.subItems && <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0" />}
+                      {sub.subItems && <ChevronRight className="w-3.5 h-3.5 ml-auto flex-shrink-0 opacity-50" />}
                     </Button>
                   </motion.div>
                   {/* Nested Sub-Menu */}
                   <AnimatePresence>
                   {activeSubMenu === sub.key && sub.subItems && (
                     <motion.div
-                      initial={{ opacity: 0, x: -10 }}
+                      ref={(el) => { if (el) nestedSubmenuRefs.current.set(sub.key, el); }}
+                      initial={{ opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -10 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute left-full top-0 ml-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl bg-white/90 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] min-w-[180px]"
+                      exit={{ opacity: 0, x: -8 }}
+                      transition={{ duration: 0.12 }}
+                      className={cn("absolute left-full top-0 ml-1 flex flex-col items-start gap-0.5 p-1.5 rounded-xl min-w-[180px]", submenuSurface)}
                       style={{
                         maxHeight: 'calc(100vh - 120px)',
+                        overflowY: 'auto',
                         zIndex: 'var(--z-float)',
                       } as React.CSSProperties}
                     >
@@ -490,14 +575,14 @@ const DockItem = ({
                       {sub.subItems.map(nestedSub => (
                         <motion.div
                           key={nestedSub.key}
-                          whileHover={{ scale: 1.02, x: 2 }}
+                          whileHover={{ scale: 1.01, x: 1 }}
                           transition={{ type: 'spring', stiffness: 400, damping: 20 }}
                           className="w-full"
                         >
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                            className="h-auto py-2 rounded-lg w-full justify-start px-2.5 text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
                             onClick={(e) => handleNavigate(e, nestedSub.href)}
                           >
                             <nestedSub.icon className="w-4 h-4 mr-2 flex-shrink-0" />
@@ -514,11 +599,11 @@ const DockItem = ({
           )}
         </AnimatePresence>
 
-        {/* Tooltip wraps ONLY the icon */}
-        <Tooltip>
+        {/* Tooltip wraps ONLY the icon - HIDDEN when submenu is open */}
+        <Tooltip open={!isLiquidMode && !isHovered ? undefined : false}>
           <TooltipTrigger asChild>
             <motion.div
-              ref={onRefSet}
+              ref={(el) => { if (onRefSet) onRefSet(el); (iconRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
               animate={!isLiquidMode && isHovered ? { scale: 1.1 } : { scale: 1 }}
               className={cn(
                 'dock-item-wrapper flex items-center justify-center cursor-pointer',
@@ -528,10 +613,12 @@ const DockItem = ({
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
               onClick={(e) => handleNavigate(e, item.href)}
             >
-              <item.icon className={cn("dock-item-icon", item.key === 'logout' && 'text-destructive')} />
+              <div className={cn("dock-icon-bg", gradient)}>
+                <item.icon className="dock-item-icon" />
+              </div>
             </motion.div>
           </TooltipTrigger>
-          {!isLiquidMode && (
+          {!isLiquidMode && !isHovered && (
             <TooltipPrimitive.Portal>
               <TooltipContent
                 side="top"
@@ -552,7 +639,7 @@ const DockItem = ({
   // For items without submenus, tooltip on top
   const itemContent = (
     <div
-      ref={onRefSet}
+      ref={(el) => { if (onRefSet) onRefSet(el as HTMLDivElement | null); }}
       className="relative flex flex-col items-center"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -567,7 +654,9 @@ const DockItem = ({
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
         onClick={(e) => handleNavigate(e, item.href)}
       >
-        <item.icon className={cn("dock-item-icon", item.key === 'logout' && 'text-destructive')} />
+        <div className={cn("dock-icon-bg", gradient)}>
+          <item.icon className={cn("dock-item-icon", item.key === 'logout' && '!text-white')} />
+        </div>
       </motion.div>
     </div>
   );
@@ -707,7 +796,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
         <motion.div
           ref={dockRef}
           className={cn(
-            "relative flex h-14 items-center gap-2.5 px-3 py-2 rounded-2xl transition-shadow duration-300",
+            "relative flex h-14 items-center gap-0.5 px-2.5 py-2 rounded-2xl transition-shadow duration-300",
             "bg-white/80 backdrop-blur-xl border border-gray-200/60",
             "shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
             "dark:bg-black/30 dark:backdrop-blur-xl dark:border-white/[0.08]",
@@ -725,7 +814,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           onMouseLeave={handleMouseLeave}
         >
           {/* Content wrapper for position reference */}
-          <div ref={dockContentRef} className="relative flex items-center gap-2.5">
+          <div ref={dockContentRef} className="relative flex items-center gap-0.5">
             {/* Liquid Glass Selector */}
             {isLiquidMode && (
               <AnimatePresence>
