@@ -66,6 +66,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  emitUserRequestCreated,
+  emitUserRequestCompleted,
+} from "@/lib/notifications";
 
 // ─── Helpers ────────────────────────────────────────────────
 function tsToDate(ts: TimestampLike): Date | null {
@@ -745,6 +749,18 @@ function RequestDetail({
         updateData.resolvedByName = null;
       }
       await updateDoc(doc(db, "userRequests", request.id), updateData);
+
+      // Notify the request creator when completed
+      if (newStatus === "done" && liveRequest.createdBy) {
+        emitUserRequestCompleted({
+          actor: { uid, name: userName },
+          requestId: request.id,
+          title: liveRequest.title,
+          requestCreatorUid: liveRequest.createdBy,
+          requestCreatorName: liveRequest.createdByName || "",
+        }).catch(console.error);
+      }
+
       toast({ title: newStatus === "done" ? "Talep tamamlandı" : "Talep tekrar açıldı" });
     } catch {
       toast({ title: "Hata", description: "Durum güncellenirken hata oluştu", variant: "destructive" });
@@ -1145,7 +1161,7 @@ function CreateRequestModal({
       }
 
       // Create request document
-      await addDoc(collection(db, "userRequests"), {
+      const docRef = await addDoc(collection(db, "userRequests"), {
         title: title.trim(),
         description: description.trim(),
         images: imageUrls,
@@ -1160,6 +1176,17 @@ function CreateRequestModal({
         updatedAt: serverTimestamp(),
         unreadByUser: false,
       });
+
+      // Notify assigned admin
+      emitUserRequestCreated({
+        actor: { uid, name: userName },
+        requestId: docRef.id,
+        title: title.trim(),
+        assignedToUid: assignedTo,
+        assignedToName: assignedAdmin?.name || "",
+        category,
+        priority,
+      }).catch(console.error);
 
       toast({ title: "Talebin alındı" });
       onOpenChange(false);
