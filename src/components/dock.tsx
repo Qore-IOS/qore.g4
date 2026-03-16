@@ -18,34 +18,35 @@ import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock"
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
 
-// Apple-like gradient color map for dock icons
-const ICON_GRADIENTS: Record<string, string> = {
-  'dashboard':             'bg-gradient-to-br from-blue-500 to-blue-600',
-  'planner':               'bg-gradient-to-br from-purple-500 to-indigo-600',
-  'arama':                 'bg-gradient-to-br from-teal-400 to-teal-600',
-  'mal-kabul':             'bg-gradient-to-br from-green-500 to-emerald-600',
-  'siparisler':            'bg-gradient-to-br from-orange-400 to-orange-600',
-  'direkt-transfer':       'bg-gradient-to-br from-indigo-500 to-indigo-600',
-  'stok-yonetimi':         'bg-gradient-to-br from-emerald-500 to-green-600',
-  'depo-sayim':            'bg-gradient-to-br from-cyan-500 to-cyan-600',
-  'route-planlayici':      'bg-gradient-to-br from-pink-500 to-rose-600',
-  'laboratuvar-yonetimi':  'bg-gradient-to-br from-violet-500 to-purple-600',
-  'urun-kullanim':         'bg-gradient-to-br from-amber-500 to-amber-600',
-  'sarf-dagitim':          'bg-gradient-to-br from-rose-500 to-pink-600',
-  'numune-arsivi':         'bg-gradient-to-br from-slate-500 to-slate-600',
-  'cihazdan-cikan-kit':    'bg-gradient-to-br from-red-500 to-red-600',
-  'is-analizi':            'bg-gradient-to-br from-sky-500 to-sky-600',
-  'verimlilik-hesaplama':  'bg-gradient-to-br from-lime-500 to-green-600',
-  'total-verimlilik':      'bg-gradient-to-br from-fuchsia-500 to-fuchsia-600',
-  'cihaz-yonetimi-ana':    'bg-gradient-to-br from-yellow-500 to-amber-600',
-  'raporlama':             'bg-gradient-to-br from-blue-400 to-indigo-500',
-  'personel-islemleri':    'bg-gradient-to-br from-teal-500 to-cyan-600',
-  'tanimlar':              'bg-gradient-to-br from-gray-500 to-gray-600',
-  'satin-alma':            'bg-gradient-to-br from-orange-500 to-red-500',
-  'kullanici-talepleri':   'bg-gradient-to-br from-green-500 to-teal-600',
-  'yonetim':               'bg-gradient-to-br from-gray-600 to-gray-700',
-  'notifications':         'bg-gradient-to-br from-red-500 to-rose-600',
-  'logout':                'bg-gradient-to-br from-red-500 to-red-600',
+// Apple-like colorful icon colors - applied directly to the icon SVG via CSS gradient text
+// Each icon gets a unique vibrant color pair for a 3D gradient feel
+const ICON_COLORS: Record<string, [string, string]> = {
+  'dashboard':             ['#3b82f6', '#1d4ed8'],   // blue
+  'planner':               ['#8b5cf6', '#6d28d9'],   // purple
+  'arama':                 ['#14b8a6', '#0d9488'],   // teal
+  'mal-kabul':             ['#22c55e', '#16a34a'],   // green
+  'siparisler':            ['#f97316', '#ea580c'],   // orange
+  'direkt-transfer':       ['#6366f1', '#4f46e5'],   // indigo
+  'stok-yonetimi':         ['#10b981', '#059669'],   // emerald
+  'depo-sayim':            ['#06b6d4', '#0891b2'],   // cyan
+  'route-planlayici':      ['#ec4899', '#db2777'],   // pink
+  'laboratuvar-yonetimi':  ['#8b5cf6', '#7c3aed'],   // violet
+  'urun-kullanim':         ['#f59e0b', '#d97706'],   // amber
+  'sarf-dagitim':          ['#f43f5e', '#e11d48'],   // rose
+  'numune-arsivi':         ['#64748b', '#475569'],   // slate
+  'cihazdan-cikan-kit':    ['#ef4444', '#dc2626'],   // red
+  'is-analizi':            ['#0ea5e9', '#0284c7'],   // sky
+  'verimlilik-hesaplama':  ['#84cc16', '#65a30d'],   // lime
+  'total-verimlilik':      ['#d946ef', '#c026d3'],   // fuchsia
+  'cihaz-yonetimi-ana':    ['#eab308', '#ca8a04'],   // yellow
+  'raporlama':             ['#60a5fa', '#4f46e5'],   // blue-indigo
+  'personel-islemleri':    ['#14b8a6', '#06b6d4'],   // teal-cyan
+  'tanimlar':              ['#6b7280', '#4b5563'],   // gray
+  'satin-alma':            ['#f97316', '#ef4444'],   // orange-red
+  'kullanici-talepleri':   ['#22c55e', '#14b8a6'],   // green-teal
+  'yonetim':               ['#6b7280', '#374151'],   // gray-dark
+  'notifications':         ['#ef4444', '#f43f5e'],   // red-rose
+  'logout':                ['#ef4444', '#dc2626'],   // red
 };
 
 interface DockProps {
@@ -499,9 +500,19 @@ const DockItem = ({
     }
   }, [activeSubMenu]);
 
-  const gradient = ICON_GRADIENTS[item.key] || 'bg-gradient-to-br from-gray-500 to-gray-600';
+  const iconColors = ICON_COLORS[item.key] || ['#6b7280', '#4b5563'];
+  const iconGradientStyle = {
+    background: `linear-gradient(135deg, ${iconColors[0]}, ${iconColors[1]})`,
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.15))',
+  } as React.CSSProperties;
 
   const submenuSurface = "bg-white/80 dark:bg-black/30 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]";
+
+  // Fast spring for snappy animations
+  const fastSpring = { type: 'spring' as const, stiffness: 600, damping: 25 };
 
   // For items with submenus, use a different structure
   // Tooltip wraps only the icon, not the submenu
@@ -610,12 +621,10 @@ const DockItem = ({
                 isActive && item.type === 'nav' && 'active',
                 isLiquidMode && isLiquidHovered && 'z-20'
               )}
-              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+              transition={fastSpring}
               onClick={(e) => handleNavigate(e, item.href)}
             >
-              <div className={cn("dock-icon-bg", gradient)}>
-                <item.icon className="dock-item-icon" />
-              </div>
+              <item.icon className="dock-item-icon" style={iconGradientStyle} />
             </motion.div>
           </TooltipTrigger>
           {!isLiquidMode && !isHovered && (
@@ -645,18 +654,16 @@ const DockItem = ({
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={!isLiquidMode && isHovered ? { scale: 1.15, y: -6 } : { scale: 1, y: 0 }}
+        animate={!isLiquidMode && isHovered ? { scale: 1.15, y: -4 } : { scale: 1, y: 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
           isActive && item.type === 'nav' && 'active',
           isLiquidMode && isLiquidHovered && 'z-20'
         )}
-        transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+        transition={fastSpring}
         onClick={(e) => handleNavigate(e, item.href)}
       >
-        <div className={cn("dock-icon-bg", gradient)}>
-          <item.icon className={cn("dock-item-icon", item.key === 'logout' && '!text-white')} />
-        </div>
+        <item.icon className="dock-item-icon" style={iconGradientStyle} />
       </motion.div>
     </div>
   );
@@ -696,9 +703,9 @@ const DockLogo = () => {
     <Tooltip>
       <TooltipTrigger asChild>
         <motion.button
-          whileHover={{ scale: 1.15, y: -4 }}
+          whileHover={{ scale: 1.12, y: -3 }}
           whileTap={{ scale: 0.95 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 10 }}
+          transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           onClick={openAI}
           className="flex items-center justify-center h-10 w-10 px-2 cursor-pointer rounded-full hover:bg-white/10 transition-colors"
         >
