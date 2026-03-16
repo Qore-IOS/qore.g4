@@ -9,8 +9,9 @@ export default function PageShell({ className, children }: React.PropsWithChildr
       // Desktop padding
       'md:px-3',
       // Mobile padding handled via CSS variables in MobileResponsiveFix
-      // Bottom safe area for mobile dock
+      // Bottom safe area for mobile dock + desktop dock clearance
       'pb-[env(safe-area-inset-bottom)]',
+      'md:pb-[calc(var(--dock-h)+var(--dock-gap)+24px)]',
       className
     )}>
       {children}
