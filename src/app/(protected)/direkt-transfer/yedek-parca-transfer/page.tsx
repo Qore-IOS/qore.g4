@@ -805,7 +805,9 @@ export default function YedekParcaTransferPage() {
     return filteredDepoStok.slice(start, start + DEPO_STOK_PER_PAGE);
   }, [filteredDepoStok, depoStokPage]);
 
-  // Handle serial number change - if serial entered, qty must be 1
+  const hucreFormatRegex = /^[A-Za-z]\d{4}$/;
+
+  // Handle serial/cell tracking change - if value entered, qty must be 1
   const handleTransferSerialChange = (value: string) => {
     setSerialNumber(value);
     if (value.trim()) {
@@ -821,11 +823,16 @@ export default function YedekParcaTransferPage() {
     }
 
     const trackingInput = serialNumber.trim();
+    const normalizedTrackingInput = trackingInput.toUpperCase();
     const selectedEntry = trackingInput
-      ? selectedProduct.serialNumbers.find(s => s.serialNumber === trackingInput || s.hucreNumarasi === trackingInput)
+      ? selectedProduct.serialNumbers.find(s =>
+        s.serialNumber === trackingInput ||
+        (s.hucreNumarasi || '').toUpperCase() === normalizedTrackingInput
+      )
       : undefined;
+    const isManualHucreInput = !!trackingInput && hucreFormatRegex.test(normalizedTrackingInput) && !selectedEntry;
     const resolvedSerial = selectedEntry?.serialNumber || '';
-    const resolvedHucre = selectedEntry?.hucreNumarasi || '';
+    const resolvedHucre = selectedEntry?.hucreNumarasi || (isManualHucreInput ? normalizedTrackingInput : '');
     const qty = trackingInput ? 1 : Math.max(1, Math.floor(transferQuantity));
 
     // Check for duplicate serial number in current rows
@@ -848,9 +855,9 @@ export default function YedekParcaTransferPage() {
       return;
     }
 
-    // If serial/hücre selected, verify it exists in depot
-    if (trackingInput && !selectedEntry) {
-      toast({ title: 'Uyarı', description: 'Bu seri veya hücre numarası depoda bulunamadı.', variant: 'default' });
+    // Manual hücre girişi (format doğruysa) depoda kayıtlı olmasa da kabul edilir
+    if (trackingInput && !selectedEntry && !isManualHucreInput) {
+      toast({ title: 'Uyarı', description: 'Bu seri numarası depoda bulunamadı. Hücre için 1 harf + 4 rakam formatını kullanın (örn: A1234).', variant: 'default' });
       return;
     }
 
@@ -922,6 +929,23 @@ export default function YedekParcaTransferPage() {
           );
           if (depoItem) {
             batch.delete(doc(db, 'yedekParcaDepoStok', depoItem.id));
+          } else if (row.hucreNumarasi && !row.serialNumber) {
+            // Depoya hücre ile giriş yapılmamış olsa bile manuel hücre transferinde depodan 1 adet düş
+            const fallbackEntry = depoStok
+              .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber && !d.hucreNumarasi)
+              .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+
+            if (!fallbackEntry) {
+              throw new Error(`Manual hucre transfer fallback stock not found for ${row.stokKodu}`);
+            }
+
+            if (fallbackEntry.quantity <= 1) {
+              batch.delete(doc(db, 'yedekParcaDepoStok', fallbackEntry.id));
+            } else {
+              batch.update(doc(db, 'yedekParcaDepoStok', fallbackEntry.id), {
+                quantity: fallbackEntry.quantity - 1,
+              });
+            }
           }
 
           const hucreData = row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {};
@@ -2033,7 +2057,7 @@ export default function YedekParcaTransferPage() {
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No / Hücre</label>
                   <div className="flex gap-1.5">
-                    <Input placeholder="Seri no veya hücre" value={serialNumber} onChange={(e) => handleTransferSerialChange(e.target.value)} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs flex-1" style={{ borderRadius: 10 }} />
+                    <Input placeholder="Seri no veya hücre (örn: A1234)" value={serialNumber} onChange={(e) => handleTransferSerialChange(e.target.value)} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs flex-1" style={{ borderRadius: 10 }} />
                     {selectedProduct.serialNumbers.length > 0 && (
                       <Popover open={serialSelectOpen} onOpenChange={setSerialSelectOpen}>
                         <PopoverTrigger asChild>
@@ -2043,7 +2067,7 @@ export default function YedekParcaTransferPage() {
                         </PopoverTrigger>
                         <PopoverContent className="w-[320px] p-0">
                           <Command>
-                            <CommandInput placeholder="Seri no ara…" />
+                            <CommandInput placeholder="Seri/Hücre ara…" />
                             <CommandList>
                               <CommandEmpty>Bulunamadı.</CommandEmpty>
                               <CommandGroup heading={`${selectedProduct.stokKodu}`}>
@@ -2066,7 +2090,7 @@ export default function YedekParcaTransferPage() {
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Adet</label>
                   <Input type="number" min={1} max={selectedProduct.totalQuantity} value={serialNumber.trim() ? 1 : transferQuantity} onChange={(e) => setTransferQuantity(Math.max(1, parseInt(e.target.value) || 1))} disabled={!!serialNumber.trim()} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs" style={{ borderRadius: 10 }} />
-                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{serialNumber.trim() ? 'Tekil takip (seri/hücre) → adet 1' : `Depoda: ${selectedProduct.totalQuantity}`}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{serialNumber.trim() ? 'Tekil takip (seri/hücre) → adet 1 · Hücre formatı: 1 harf + 4 rakam' : `Depoda: ${selectedProduct.totalQuantity}`}</p>
                 </div>
                 <div className="flex items-end">
                   <button onClick={addTransferRow} disabled={!selectedStokKodu || !selectedUserId} className="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all disabled:opacity-40" style={{ background: 'var(--dashboard-accent)' }}>
