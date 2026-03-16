@@ -53,6 +53,19 @@ type FaultPartChange = {
   addedByName: string;
 };
 
+type FaultHucreDegisimi = {
+  id: string;
+  stokKodu: string;
+  stokAdi: string;
+  personalStockId: string;
+  hucreNumarasi: string;        // Takılan hücre
+  removedHucreNumarasi?: string; // Çıkan hücre
+  description?: string;
+  addedAt: Date;
+  addedByUid: string;
+  addedByName: string;
+};
+
 // Status config - liste sayfasıyla tutarlı
 const STATUS_CONFIG: Record<DeviceFaultStatus, { label: string; variant: 'destructive' | 'default' | 'secondary' | 'outline'; icon: React.ReactNode; className?: string }> = {
   'atama_bekliyor': {
@@ -210,6 +223,15 @@ export default function FaultDetailPage() {
   const removedPartImageInputRef = useRef<HTMLInputElement>(null);
   const usedPartImageInputRef = useRef<HTMLInputElement>(null);
   const [faultPartChanges, setFaultPartChanges] = useState<FaultPartChange[]>([]);
+
+  // Hücre değişimi state
+  const [faultHucreDegisimleri, setFaultHucreDegisimleri] = useState<FaultHucreDegisimi[]>([]);
+  const [isHucreDegisimiModalOpen, setIsHucreDegisimiModalOpen] = useState(false);
+  const [hucreDegisimiSelectedItem, setHucreDegisimiSelectedItem] = useState<PersonalStockItem | null>(null);
+  const [hucreDegisimiRemovedHucre, setHucreDegisimiRemovedHucre] = useState('');
+  const [hucreDegisimiDescription, setHucreDegisimiDescription] = useState('');
+  const [hucreDegisimiSearchQuery, setHucreDegisimiSearchQuery] = useState('');
+  const [isSavingHucre, setIsSavingHucre] = useState(false);
   const [isSavingPart, setIsSavingPart] = useState(false);
 
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
@@ -436,6 +458,23 @@ export default function FaultDetailPage() {
       }));
     });
     return () => unsub();
+  }, [params?.id]);
+
+  // Arızaya eklenen hücre değişimlerini çek
+  useEffect(() => {
+    if (!params?.id) return;
+    const q2 = query(collection(db, 'deviceFaultReports', params.id, 'hucreDegisimleri'), orderBy('addedAt', 'asc'));
+    const unsub2 = onSnapshot(q2, (ss) => {
+      setFaultHucreDegisimleri(ss.docs.map(d => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          ...data,
+          addedAt: data.addedAt?.toDate ? data.addedAt.toDate() : new Date(),
+        } as FaultHucreDegisimi;
+      }));
+    });
+    return () => unsub2();
   }, [params?.id]);
 
   // Konum doğrulama durumunu kontrol et
@@ -793,6 +832,50 @@ export default function FaultDetailPage() {
   const openPartModal = () => {
     resetPartModalState();
     setIsPartModalOpen(true);
+  };
+
+  const addFaultHucreDegisimi = async () => {
+    if (!fault || !currentUser || !hucreDegisimiSelectedItem) return;
+    const hn = (hucreDegisimiSelectedItem as any).hucreNumarasi || '';
+    const removedHn = hucreDegisimiRemovedHucre.trim().toUpperCase();
+    if (removedHn && !/^[A-Za-z]\d{4}$/.test(removedHn)) {
+      toast({ title: 'Geçersiz Format', description: 'Çıkan hücre numarası 1 harf + 4 rakamdan oluşmalıdır.', variant: 'destructive' });
+      return;
+    }
+    setIsSavingHucre(true);
+    try {
+      const item = hucreDegisimiSelectedItem;
+      await addDoc(collection(db, 'deviceFaultReports', fault.id, 'hucreDegisimleri'), {
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        personalStockId: item.id,
+        hucreNumarasi: hn,
+        removedHucreNumarasi: removedHn || '',
+        description: hucreDegisimiDescription.trim() || '',
+        addedAt: serverTimestamp(),
+        addedByUid: currentUser.uid,
+        addedByName: currentUserProfile?.name || 'Bilinmeyen',
+      });
+      // Log to history
+      await addDoc(collection(db, 'deviceFaultReports', fault.id, 'history'), {
+        type: 'note',
+        actorUid: currentUser.uid,
+        actorName: currentUserProfile?.name || 'Bilinmeyen',
+        description: `Hücre değişimi eklendi: ${item.stokAdi} (Takılan: H:${hn}${removedHn ? `, Çıkan: H:${removedHn}` : ''})${hucreDegisimiDescription.trim() ? ` - ${hucreDegisimiDescription.trim()}` : ''}`,
+        timestamp: serverTimestamp(),
+      });
+      toast({ title: 'Hücre Değişimi Eklendi' });
+      setIsHucreDegisimiModalOpen(false);
+      setHucreDegisimiSelectedItem(null);
+      setHucreDegisimiRemovedHucre('');
+      setHucreDegisimiDescription('');
+      setHucreDegisimiSearchQuery('');
+    } catch (err) {
+      console.error('Error adding hücre değişimi:', err);
+      toast({ title: 'Hata', description: 'Hücre değişimi eklenemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingHucre(false);
+    }
   };
 
   const addFaultPartChange = async () => {
@@ -1714,6 +1797,63 @@ export default function FaultDetailPage() {
             );
           })()}
 
+          {/* Hücre Değişimleri */}
+          {(() => {
+            const normalized = normalizeStatus(fault.status);
+            const isActiveIntervention = normalized === 'mudahale_ediliyor' || normalized === 'mudahale_bekliyor';
+            const isOwnClosedFault = normalized === 'cozuldu' && (
+              fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid || fault.assignedToUid === currentUser?.uid
+            );
+            const showHucreDegisimi = isActiveIntervention || isOwnClosedFault;
+            if (!showHucreDegisimi && faultHucreDegisimleri.length === 0) return null;
+
+            return (
+              <div className="space-y-3 pt-4 border-t">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium flex items-center gap-2">
+                    <Wrench className="h-4 w-4" />
+                    Hücre Değişimleri
+                    {faultHucreDegisimleri.length > 0 && (
+                      <Badge variant="secondary">{faultHucreDegisimleri.length}</Badge>
+                    )}
+                  </p>
+                  {showHucreDegisimi && (
+                    <Button variant="outline" size="sm" onClick={() => setIsHucreDegisimiModalOpen(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Hücre Değişimi Ekle
+                    </Button>
+                  )}
+                </div>
+                {faultHucreDegisimleri.length > 0 ? (
+                  <div className="space-y-2">
+                    {faultHucreDegisimleri.map(hd => (
+                      <div key={hd.id} className="p-3 border rounded-lg bg-muted/30 text-sm space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">{hd.stokAdi}</p>
+                            <p className="text-xs font-mono text-muted-foreground">{hd.stokKodu}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs">
+                          <span>Takılan: <span className="font-mono font-semibold" style={{ color: '#7C3AED' }}>H:{hd.hucreNumarasi}</span></span>
+                          {hd.removedHucreNumarasi && (
+                            <span>Çıkan: <span className="font-mono font-semibold text-amber-600">H:{hd.removedHucreNumarasi}</span></span>
+                          )}
+                        </div>
+                        {hd.description && <p className="text-xs text-muted-foreground">{hd.description}</p>}
+                        <p className="text-xs text-muted-foreground">
+                          {hd.addedByName} - {hd.addedAt ? format(hd.addedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Henüz hücre değişimi eklenmedi.</p>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="space-y-2 pt-4 border-t">
             <p className="font-medium">Arıza Geçmişi</p>
             <Table>
@@ -1897,6 +2037,124 @@ export default function FaultDetailPage() {
             <Button onClick={handleSaveResolvedEdit} disabled={isSavingResolved}>
               {isSavingResolved ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Kaydet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hücre Değişimi Dialog */}
+      <Dialog open={isHucreDegisimiModalOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsHucreDegisimiModalOpen(false);
+          setHucreDegisimiSelectedItem(null);
+          setHucreDegisimiRemovedHucre('');
+          setHucreDegisimiDescription('');
+          setHucreDegisimiSearchQuery('');
+        }
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Hücre Değişimi Ekle</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Stok seçimi */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Hücre Numaralı Stok Seçimi</Label>
+              <Input
+                placeholder="Stok kodu, adı veya hücre numarası ile ara..."
+                value={hucreDegisimiSearchQuery}
+                onChange={(e) => setHucreDegisimiSearchQuery(e.target.value)}
+              />
+              <ScrollArea className="h-48 border rounded-md">
+                <div className="p-2 space-y-1">
+                  {(() => {
+                    const hucreItems = personalStock.filter(p =>
+                      p.hucreNumarasi && p.hucreNumarasi.trim() !== ''
+                    );
+                    const query = hucreDegisimiSearchQuery.toLowerCase().trim();
+                    const filtered = query
+                      ? hucreItems.filter(p =>
+                          p.stokKodu.toLowerCase().includes(query) ||
+                          p.stokAdi.toLowerCase().includes(query) ||
+                          (p.hucreNumarasi || '').toLowerCase().includes(query)
+                        )
+                      : hucreItems;
+                    if (filtered.length === 0) {
+                      return (
+                        <p className="text-sm text-muted-foreground p-2">
+                          {hucreItems.length === 0
+                            ? 'Stoğunuzda hücre numaralı ürün bulunmuyor.'
+                            : 'Aramanızla eşleşen ürün bulunamadı.'}
+                        </p>
+                      );
+                    }
+                    return filtered.map(item => (
+                      <div
+                        key={item.id}
+                        className={`p-2 rounded-md cursor-pointer text-sm transition-colors ${
+                          hucreDegisimiSelectedItem?.id === item.id
+                            ? 'bg-primary/10 border border-primary'
+                            : 'hover:bg-muted'
+                        }`}
+                        onClick={() => setHucreDegisimiSelectedItem(item)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">{item.stokAdi}</p>
+                            <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
+                          </div>
+                          <Badge variant="outline" style={{ color: '#7C3AED', borderColor: '#7C3AED' }} className="font-mono">
+                            H:{item.hucreNumarasi}
+                          </Badge>
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </ScrollArea>
+              {hucreDegisimiSelectedItem && (
+                <p className="text-xs text-primary">
+                  Seçilen: {hucreDegisimiSelectedItem.stokAdi} — <span className="font-mono" style={{ color: '#7C3AED' }}>H:{hucreDegisimiSelectedItem.hucreNumarasi}</span>
+                </p>
+              )}
+            </div>
+
+            {/* Çıkan hücre numarası */}
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Çıkan Hücre Numarası (Opsiyonel)</Label>
+              <Input
+                placeholder="Örn: A1234"
+                value={hucreDegisimiRemovedHucre}
+                onChange={(e) => {
+                  const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+                  setHucreDegisimiRemovedHucre(val);
+                }}
+                maxLength={5}
+                className="font-mono"
+              />
+              {hucreDegisimiRemovedHucre && !/^[A-Za-z]\d{4}$/.test(hucreDegisimiRemovedHucre) && (
+                <p className="text-xs text-destructive">Format: 1 harf + 4 rakam (Örn: A1234)</p>
+              )}
+            </div>
+
+            {/* Açıklama */}
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Açıklama (Opsiyonel)</Label>
+              <Input
+                placeholder="Değişim ile ilgili açıklama..."
+                value={hucreDegisimiDescription}
+                onChange={(e) => setHucreDegisimiDescription(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsHucreDegisimiModalOpen(false)}>İptal</Button>
+            <Button
+              onClick={addFaultHucreDegisimi}
+              disabled={!hucreDegisimiSelectedItem || isSavingHucre}
+            >
+              {isSavingHucre ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Hücre Değişimi Ekle
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -44,7 +44,8 @@ interface StokGirisRow {
   anaBirim?: string;
   cihazGrubu: string;
   serialNumber: string;
-  quantity: number; // seri numarası varsa 1, yoksa kullanıcının girdiği adet
+  hucreNumarasi: string; // Hücre numarası (1 harf + 4 rakam) - opsiyonel tekil takip
+  quantity: number; // seri numarası veya hücre numarası varsa 1, yoksa kullanıcının girdiği adet
   address: string;
 }
 
@@ -71,6 +72,7 @@ export default function YedekParcaStokGirisPage() {
   const [manualStokKodu, setManualStokKodu] = useState('');
   const [manualStokAdi, setManualStokAdi] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
+  const [hucreNumarasi, setHucreNumarasi] = useState('');
   const [quantity, setQuantity] = useState<number>(1);
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState('');
@@ -137,6 +139,20 @@ export default function YedekParcaStokGirisPage() {
     return spareParts.find(p => p.id === selectedProductId);
   }, [spareParts, selectedProductId]);
 
+  // Hücre numarası format doğrulama (1 harf + 4 rakam, örn: A1234)
+  const validateHucreNumarasi = (value: string): boolean => {
+    if (!value) return true;
+    return /^[A-Za-z]\d{4}$/.test(value);
+  };
+
+  const handleHucreNumarasiChange = (value: string) => {
+    const upper = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+    setHucreNumarasi(upper);
+    if (upper.trim()) {
+      setQuantity(1);
+    }
+  };
+
   // Seri numarası girildiğinde adet otomatik 1 olmalı
   const handleSerialNumberChange = (value: string) => {
     setSerialNumber(value);
@@ -155,11 +171,24 @@ export default function YedekParcaStokGirisPage() {
     }
 
     const sn = serialNumber.trim();
-    const qty = sn ? 1 : Math.max(1, Math.floor(quantity));
+    const hn = hucreNumarasi.trim();
+    const qty = (sn || hn) ? 1 : Math.max(1, Math.floor(quantity));
+
+    // Hücre numarası format kontrolü
+    if (hn && !validateHucreNumarasi(hn)) {
+      toast({ title: 'Geçersiz Format', description: 'Hücre numarası 1 harf + 4 rakamdan oluşmalıdır (örn: A1234).', variant: 'destructive' });
+      return;
+    }
 
     // Seri numarası kontrolü
     if (sn && rows.some(r => r.serialNumber === sn)) {
       toast({ title: 'Uyarı', description: 'Bu seri numarası zaten listede var.', variant: 'default' });
+      return;
+    }
+
+    // Hücre numarası mükerrer kontrolü
+    if (hn && rows.some(r => r.hucreNumarasi === hn)) {
+      toast({ title: 'Uyarı', description: 'Bu hücre numarası zaten listede var.', variant: 'default' });
       return;
     }
 
@@ -174,24 +203,26 @@ export default function YedekParcaStokGirisPage() {
       anaBirim: selectedProduct?.anaBirim || 'Adet',
       cihazGrubu: selectedProduct?.cihazGrubu || '',
       serialNumber: sn,
+      hucreNumarasi: hn,
       quantity: qty,
       address: address.trim(),
     };
 
     setRows(prev => [...prev, newRow]);
     setSerialNumber('');
+    setHucreNumarasi('');
     setQuantity(1);
     setManualStokKodu('');
     setManualStokAdi('');
     setSelectedProductId('');
     setAddress('');
+
+    const label = sn ? `SN: ${sn}` : hn ? `Hücre: ${hn}` : `x${qty}`;
     toast({
       title: 'Eklendi',
-      description: sn
-        ? `${rowStokAdi} (SN: ${sn}) listeye eklendi.`
-        : `${rowStokAdi} x${qty} listeye eklendi.`,
+      description: `${rowStokAdi} (${label}) listeye eklendi.`,
     });
-  }, [selectedProduct, serialNumber, quantity, rows, toast, manualStokKodu, manualStokAdi]);
+  }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, manualStokKodu, manualStokAdi]);
 
   const findMissingCardsFromRows = useCallback((targetRows: StokGirisRow[]) => {
     const existingCodes = new Set(allProductCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
@@ -243,12 +274,12 @@ export default function YedekParcaStokGirisPage() {
     try {
       const XLSX = await import('xlsx');
       const templateData = [
-        ['Stok Kodu', 'Seri Numarası', 'Adet', 'Adres'],
-        ['ORN-001', 'SN123456', 1, 'A-01-01'],
-        ['ORN-002', '', 5, 'B-02-03'],
+        ['Stok Kodu', 'Seri Numarası', 'Adet', 'Adres', 'Hücre Numarası'],
+        ['ORN-001', 'SN123456', 1, 'A-01-01', ''],
+        ['ORN-002', '', 5, 'B-02-03', 'A1234'],
       ];
       const ws = XLSX.utils.aoa_to_sheet(templateData);
-      ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 20 }];
+      ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 20 }, { wch: 18 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Stok Girişi');
       XLSX.writeFile(wb, 'yedek_parca_stok_giris_sablon.xlsx');
@@ -310,12 +341,14 @@ export default function YedekParcaStokGirisPage() {
         const rawSeriNo = row[1] != null ? String(row[1]).trim() : '';
         const rawAdet = row[2] != null ? Number(row[2]) : undefined;
         const rawAddress = row[3] != null ? String(row[3]).trim() : '';
+        const rawHucreNo = row[4] != null ? String(row[4]).trim().toUpperCase() : '';
 
         const stokKoduUpper = rawStokKodu.toUpperCase();
         const product = productMap.get(stokKoduUpper);
 
         if (!product) {
           notFoundProducts.add(rawStokKodu);
+          const isTracked = !!rawSeriNo || !!rawHucreNo;
           parsedRows.push({
             id: `excel_${i}_${Date.now()}`,
             productCodeId: '',
@@ -324,7 +357,8 @@ export default function YedekParcaStokGirisPage() {
             anaBirim: 'Adet',
             cihazGrubu: '',
             serialNumber: rawSeriNo || '',
-            quantity: rawSeriNo ? 1 : (rawAdet && rawAdet >= 1 ? Math.floor(rawAdet) : 1),
+            hucreNumarasi: rawHucreNo || '',
+            quantity: isTracked ? 1 : (rawAdet && rawAdet >= 1 ? Math.floor(rawAdet) : 1),
             address: rawAddress,
           });
           continue;
@@ -351,12 +385,14 @@ export default function YedekParcaStokGirisPage() {
             anaBirim: product.anaBirim || 'Adet',
             cihazGrubu: product.cihazGrubu || '',
             serialNumber: rawSeriNo,
+            hucreNumarasi: rawHucreNo || '',
             quantity: 1,
             address: rawAddress,
           });
         } else {
-          // Seri numarası yoksa adet zorunlu
-          const adet = rawAdet && rawAdet >= 1 ? Math.floor(rawAdet) : 1;
+          // Seri numarası yoksa, hücre numarası kontrolü
+          const isTracked = !!rawHucreNo;
+          const adet = isTracked ? 1 : (rawAdet && rawAdet >= 1 ? Math.floor(rawAdet) : 1);
           parsedRows.push({
             id: `excel_${i}_${Date.now()}`,
             productCodeId: product.id,
@@ -365,6 +401,7 @@ export default function YedekParcaStokGirisPage() {
             anaBirim: product.anaBirim || 'Adet',
             cihazGrubu: product.cihazGrubu || '',
             serialNumber: '',
+            hucreNumarasi: rawHucreNo || '',
             quantity: adet,
             address: rawAddress,
           });
@@ -465,42 +502,39 @@ export default function YedekParcaStokGirisPage() {
       const now = new Date();
 
       for (const row of rows) {
-        if (row.serialNumber) {
-          const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
-          batch.set(stockRef, {
-            productCodeId: row.productCodeId,
-            stokKodu: row.stokKodu,
-            stokAdi: row.stokAdi,
-            anaBirim: row.anaBirim || 'Adet',
-            cihazGrubu: row.cihazGrubu || '',
-            serialNumber: row.serialNumber,
-            quantity: 1,
-            address: row.address || '',
-            createdAt: Timestamp.fromDate(now),
-            createdByUid: currentUserProfile?.uid || '',
-            createdByName: currentUserProfile?.name || '',
-          });
-        } else {
-          const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
-          batch.set(stockRef, {
-            productCodeId: row.productCodeId,
-            stokKodu: row.stokKodu,
-            stokAdi: row.stokAdi,
-            anaBirim: row.anaBirim || 'Adet',
-            cihazGrubu: row.cihazGrubu || '',
-            serialNumber: '',
-            quantity: row.quantity,
-            address: row.address || '',
-            createdAt: Timestamp.fromDate(now),
-            createdByUid: currentUserProfile?.uid || '',
-            createdByName: currentUserProfile?.name || '',
-          });
-        }
+        const isTracked = !!row.serialNumber || !!row.hucreNumarasi;
+        const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
+        batch.set(stockRef, {
+          productCodeId: row.productCodeId,
+          stokKodu: row.stokKodu,
+          stokAdi: row.stokAdi,
+          anaBirim: row.anaBirim || 'Adet',
+          cihazGrubu: row.cihazGrubu || '',
+          serialNumber: row.serialNumber || '',
+          ...(row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {}),
+          quantity: isTracked ? 1 : row.quantity,
+          address: row.address || '',
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
       }
 
       await batch.commit();
 
       for (const row of rows) {
+        const isTracked = !!row.serialNumber || !!row.hucreNumarasi;
+        let notes = '';
+        if (row.serialNumber && row.hucreNumarasi) {
+          notes = `Seri numaralı ve hücre numaralı stok girişi: SN:${row.serialNumber}, Hücre:${row.hucreNumarasi}`;
+        } else if (row.serialNumber) {
+          notes = `Seri numaralı stok girişi: ${row.serialNumber}`;
+        } else if (row.hucreNumarasi) {
+          notes = `Hücre numaralı stok girişi: ${row.hucreNumarasi}`;
+        } else {
+          notes = `${row.quantity} ${row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'} stok girişi`;
+        }
+
         await addDoc(collection(db, 'yedekParcaDepoLog'), {
           action: 'stok_giris',
           productCodeId: row.productCodeId,
@@ -509,11 +543,10 @@ export default function YedekParcaStokGirisPage() {
           anaBirim: row.anaBirim || 'Adet',
           cihazGrubu: row.cihazGrubu || '',
           serialNumber: row.serialNumber || '',
-          quantity: row.serialNumber ? 1 : row.quantity,
+          ...(row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {}),
+          quantity: isTracked ? 1 : row.quantity,
           address: row.address || '',
-          notes: row.serialNumber
-            ? `Seri numaralı stok girişi: ${row.serialNumber}`
-            : `${row.quantity} ${row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'} stok girişi`,
+          notes,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -687,7 +720,7 @@ export default function YedekParcaStokGirisPage() {
         <section className="cihaz-card p-4 sm:p-5 space-y-4">
           <p className="cihaz-section-label">Yeni Ürün Ekle</p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-3">
             {/* Product selector */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Yedek Parça *</label>
@@ -773,7 +806,22 @@ export default function YedekParcaStokGirisPage() {
               />
             </div>
 
-
+            {/* Hücre Numarası */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Hücre No (Opsiyonel)</label>
+              <Input
+                placeholder="Örn: A1234"
+                value={hucreNumarasi}
+                onChange={(e) => handleHucreNumarasiChange(e.target.value)}
+                disabled={!canAddRow}
+                maxLength={5}
+                className="cihaz-pressed !border-0 !ring-0 h-10"
+                style={{ borderRadius: 12 }}
+              />
+              {hucreNumarasi && !validateHucreNumarasi(hucreNumarasi) && (
+                <p className="text-[10px]" style={{ color: '#B91C1C' }}>1 harf + 4 rakam (örn: A1234)</p>
+              )}
+            </div>
 
             {/* Address */}
             <div className="space-y-1.5">
@@ -794,13 +842,13 @@ export default function YedekParcaStokGirisPage() {
               <Input
                 type="number"
                 min={1}
-                value={serialNumber.trim() ? 1 : quantity}
+                value={(serialNumber.trim() || hucreNumarasi.trim()) ? 1 : quantity}
                 onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                disabled={!canAddRow || !!serialNumber.trim()}
+                disabled={!canAddRow || !!serialNumber.trim() || !!hucreNumarasi.trim()}
                 className="cihaz-pressed !border-0 !ring-0 h-10"
                 style={{ borderRadius: 12 }}
               />
-              {serialNumber.trim() && <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Seri no varsa adet 1.</p>}
+              {(serialNumber.trim() || hucreNumarasi.trim()) && <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Seri/hücre no varsa adet 1.</p>}
             </div>
 
             {/* Add button */}
@@ -987,6 +1035,7 @@ export default function YedekParcaStokGirisPage() {
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                   <th className="px-3 py-2.5 text-left font-semibold hidden sm:table-cell" style={{ color: 'var(--dashboard-muted)' }}>Grup</th>
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
+                  <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Hücre No</th>
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adres</th>
                   <th className="px-3 py-2.5 text-right font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adet</th>
                   <th className="px-2 py-2.5 w-8"></th>
@@ -1003,6 +1052,7 @@ export default function YedekParcaStokGirisPage() {
                       ) : <span style={{ color: 'var(--dashboard-muted)' }}>—</span>}
                     </td>
                     <td className="px-3 py-2.5 font-mono" style={{ color: row.serialNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.serialNumber || '—'}</td>
+                    <td className="px-3 py-2.5 font-mono" style={{ color: row.hucreNumarasi ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.hucreNumarasi || '—'}</td>
                     <td className="px-3 py-2.5" style={{ color: row.address ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.address || '—'}</td>
                     <td className="px-3 py-2.5 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity} {row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'}</td>
                     <td className="px-2 py-2.5">
