@@ -592,8 +592,9 @@ export function checkStockAvailability(
  * @param rules - Min/Max rules for the laboratory
  * @param depoStok - Current depot stock
  * @param productCodes - Product code definitions
- * @param labName - Laboratory name to filter stock
+ * @param labName - Laboratory name to filter stock (fallback for legacy records)
  * @param depotId - Depot ID to check stock
+ * @param labId - Laboratory ID to filter stock (preferred over labName)
  * @returns Calculation results
  */
 export function calculateMinMaxOrder(
@@ -601,7 +602,8 @@ export function calculateMinMaxOrder(
   depoStok: DepoStokItem[],
   productCodes: ProductCode[],
   labName: string,
-  depotId: string
+  depotId: string,
+  labId?: string
 ): MinMaxCalculationItem[] {
   const results: MinMaxCalculationItem[] = [];
 
@@ -609,9 +611,9 @@ export function calculateMinMaxOrder(
     const stokKodu = rule.stokKodu;
     if (!stokKodu) continue;
 
-    // Count current stock at lab
+    // Count current stock at lab (prefer ID match, fallback to name for legacy records)
     const labStockCount = depoStok.filter(
-      st => st.isShipped && st.hedefKurum === labName && st.stokKodu === stokKodu
+      st => st.isShipped && (labId ? (st.hedefKurumId === labId || (!st.hedefKurumId && st.hedefKurum === labName)) : st.hedefKurum === labName) && st.stokKodu === stokKodu
     ).length;
 
     // Get max value
@@ -663,7 +665,7 @@ export function generateBulkOrderRows(
     .map(rule => {
       const have = isLab
         ? depoStok.filter(
-            st => st.isShipped && st.hedefKurum === entityName && st.stokKodu === rule.stokKodu
+            st => st.isShipped && (st.hedefKurumId === entityId || (!st.hedefKurumId && st.hedefKurum === entityName)) && st.stokKodu === rule.stokKodu
           ).length
         : depoStok.filter(
             st => st.depotId === entityId && !st.isShipped && st.stokKodu === rule.stokKodu
