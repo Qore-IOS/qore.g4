@@ -1391,7 +1391,17 @@ export interface PurchasingTaskDefinition {
 
 export type UserRequestCategory = 'bug' | 'improvement' | 'feature' | 'design';
 export type UserRequestPriority = 'low' | 'normal' | 'urgent';
-export type UserRequestStatus = 'open' | 'done';
+export type UserRequestStatus = 'open' | 'reviewing' | 'done';
+
+export interface UserRequestComment {
+  id: string;
+  text: string;
+  authorUid: string;
+  authorName: string;
+  authorRole: 'user' | 'admin' | 'admin_developer';
+  images?: string[];
+  createdAt: TimestampLike;
+}
 
 export interface UserRequest {
   id: string;
@@ -1411,5 +1421,7 @@ export interface UserRequest {
   resolvedBy?: string; // uid
   resolvedByName?: string;
   adminNote?: string;
+  reopenReason?: string;
+  comments?: UserRequestComment[];
   unreadByUser: boolean;
 }

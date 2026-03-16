@@ -42,6 +42,12 @@ import {
   MessageSquarePlus,
   LifeBuoy,
   AlertCircle,
+  Eye,
+  Send,
+  RotateCcw,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +63,7 @@ import type {
   UserRequestCategory,
   UserRequestPriority,
   UserRequestStatus,
+  UserRequestComment,
   TimestampLike,
 } from "@/lib/types";
 import {
@@ -109,7 +116,14 @@ const PRIORITY_LABELS: Record<UserRequestPriority, string> = {
 
 const STATUS_LABELS: Record<UserRequestStatus, string> = {
   open: "Açık",
+  reviewing: "İnceleniyor",
   done: "Tamamlandı",
+};
+
+const PRIORITY_SORT_ORDER: Record<UserRequestPriority, number> = {
+  urgent: 0,
+  normal: 1,
+  low: 2,
 };
 
 // ─── Main Panel ─────────────────────────────────────────────
@@ -122,7 +136,7 @@ export default function KullaniciTalepPanel() {
   const isDark = resolvedTheme === "dark";
   const uid = currentUserProfile?.uid || "";
 
-  // Tab state for admin-developer
+  // Tab state
   const [activeTab, setActiveTab] = useState<TabView>("my-requests");
 
   // Detail view state
@@ -149,70 +163,79 @@ export default function KullaniciTalepPanel() {
         isDark={isDark}
         uid={uid}
         userName={currentUserProfile?.name || ""}
+        userRole={currentUserProfile?.role || "user"}
       />
     );
   }
 
   return (
-    <div className="flex flex-col w-full max-w-4xl mx-auto px-3 md:px-4 py-4 gap-4">
-      {/* Header */}
+    <div className="flex flex-col w-full max-w-5xl mx-auto px-3 md:px-4 py-4 gap-4">
+      {/* Header - matches orders/transfer panel style */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <LifeBuoy className={cn("w-6 h-6", isDark ? "text-amber-400" : "text-amber-600")} />
-          <h1 className={cn("text-xl md:text-2xl font-bold", isDark ? "text-white" : "text-gray-900")}>
-            Talepler
-          </h1>
+          <div className={cn(
+            "w-10 h-10 rounded-xl flex items-center justify-center",
+            isDark ? "bg-amber-500/15" : "bg-amber-50 border border-amber-200/50"
+          )}>
+            <LifeBuoy className={cn("w-5 h-5", isDark ? "text-amber-400" : "text-amber-600")} />
+          </div>
+          <div>
+            <h1 className={cn("text-xl md:text-2xl font-bold tracking-tight", isDark ? "text-white" : "text-gray-900")}>
+              Talepler
+            </h1>
+          </div>
         </div>
         <Button
           onClick={() => setIsCreateOpen(true)}
-          className="rounded-full gap-2 bg-amber-500 hover:bg-amber-600 text-white shadow-lg"
+          className="rounded-xl gap-2 bg-amber-500 hover:bg-amber-600 text-white shadow-md hover:shadow-lg transition-all h-10 px-4"
         >
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">Talep Aç</span>
         </Button>
       </div>
 
-      {/* Admin-Developer tabs */}
-      {isAdminDeveloper && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => setActiveTab("my-requests")}
-            className={cn(
-              "px-4 py-2 rounded-full text-sm font-medium transition-all",
-              activeTab === "my-requests"
-                ? isDark
-                  ? "bg-white/15 text-white border border-white/20"
-                  : "bg-white shadow-[2px_2px_6px_#bebebe,-2px_-2px_6px_#ffffff] text-gray-900"
-                : isDark
-                ? "text-white/60 hover:text-white/80"
-                : "text-gray-500 hover:text-gray-700"
-            )}
-          >
-            Taleplerim
-          </button>
-          <button
-            onClick={() => setActiveTab("all-requests")}
-            className={cn(
-              "px-4 py-2 rounded-full text-sm font-medium transition-all",
-              activeTab === "all-requests"
-                ? isDark
-                  ? "bg-white/15 text-white border border-white/20"
-                  : "bg-white shadow-[2px_2px_6px_#bebebe,-2px_-2px_6px_#ffffff] text-gray-900"
-                : isDark
-                ? "text-white/60 hover:text-white/80"
-                : "text-gray-500 hover:text-gray-700"
-            )}
-          >
-            Tüm Talepler
-          </button>
-        </div>
-      )}
+      {/* Tabs - consistent with orders panel tabs */}
+      <div className={cn(
+        "flex rounded-xl p-1 gap-1",
+        isDark ? "bg-white/5 border border-white/10" : "bg-gray-100 border border-gray-200/50"
+      )}>
+        <button
+          onClick={() => setActiveTab("my-requests")}
+          className={cn(
+            "flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-all",
+            activeTab === "my-requests"
+              ? isDark
+                ? "bg-white/10 text-white shadow-sm"
+                : "bg-white text-gray-900 shadow-sm"
+              : isDark
+              ? "text-white/50 hover:text-white/70"
+              : "text-gray-500 hover:text-gray-700"
+          )}
+        >
+          Taleplerim
+        </button>
+        <button
+          onClick={() => setActiveTab("all-requests")}
+          className={cn(
+            "flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-all",
+            activeTab === "all-requests"
+              ? isDark
+                ? "bg-white/10 text-white shadow-sm"
+                : "bg-white text-gray-900 shadow-sm"
+              : isDark
+              ? "text-white/50 hover:text-white/70"
+              : "text-gray-500 hover:text-gray-700"
+          )}
+        >
+          Tüm Talepler
+        </button>
+      </div>
 
       {/* Content */}
       {activeTab === "my-requests" ? (
         <MyRequestsList uid={uid} isDark={isDark} onOpenDetail={(r) => openDetail(r, "my")} onCreateNew={() => setIsCreateOpen(true)} />
       ) : (
-        <AllRequestsList isDark={isDark} onOpenDetail={(r) => openDetail(r, "admin")} />
+        <AllRequestsList uid={uid} isDark={isDark} onOpenDetail={(r) => openDetail(r, "admin")} isAdminDeveloper={isAdminDeveloper} />
       )}
 
       {/* Create Modal */}
@@ -223,6 +246,48 @@ export default function KullaniciTalepPanel() {
         userName={currentUserProfile?.name || "Kullanıcı"}
         isDark={isDark}
       />
+    </div>
+  );
+}
+
+// ─── KPI Stats Bar ─────────────────────────────────────────
+function KpiStats({
+  requests,
+  isDark,
+}: {
+  requests: UserRequest[];
+  isDark: boolean;
+}) {
+  const openCount = requests.filter((r) => r.status === "open").length;
+  const reviewingCount = requests.filter((r) => r.status === "reviewing").length;
+  const doneCount = requests.filter((r) => r.status === "done").length;
+  const urgentCount = requests.filter((r) => r.priority === "urgent" && r.status !== "done").length;
+
+  const stats = [
+    { label: "Açık", value: openCount, color: isDark ? "text-amber-400" : "text-amber-600", bg: isDark ? "bg-amber-500/10" : "bg-amber-50" },
+    { label: "İnceleniyor", value: reviewingCount, color: isDark ? "text-blue-400" : "text-blue-600", bg: isDark ? "bg-blue-500/10" : "bg-blue-50" },
+    { label: "Tamamlandı", value: doneCount, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-500/10" : "bg-emerald-50" },
+  ];
+
+  if (urgentCount > 0) {
+    stats.push({ label: "Acil", value: urgentCount, color: isDark ? "text-red-400" : "text-red-600", bg: isDark ? "bg-red-500/10" : "bg-red-50" });
+  }
+
+  return (
+    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+      {stats.map((s) => (
+        <div
+          key={s.label}
+          className={cn(
+            "flex flex-col items-center justify-center py-3 rounded-xl border",
+            s.bg,
+            isDark ? "border-white/5" : "border-gray-200/50"
+          )}
+        >
+          <span className={cn("text-xl font-bold tabular-nums", s.color)}>{s.value}</span>
+          <span className={cn("text-[11px] font-medium mt-0.5", isDark ? "text-white/50" : "text-gray-500")}>{s.label}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -241,7 +306,7 @@ function MyRequestsList({
 }) {
   const [requests, setRequests] = useState<UserRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "open" | "done">("all");
+  const [filter, setFilter] = useState<"all" | "open" | "reviewing" | "done">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
@@ -262,15 +327,17 @@ function MyRequestsList({
   const filtered = useMemo(() => {
     let list = requests;
     if (filter === "open") list = list.filter((r) => r.status === "open");
+    if (filter === "reviewing") list = list.filter((r) => r.status === "reviewing");
     if (filter === "done") list = list.filter((r) => r.status === "done");
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter((r) => r.title.toLowerCase().includes(q));
+      list = list.filter((r) => r.title.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q));
     }
     return list;
   }, [requests, filter, searchQuery]);
 
   const openCount = requests.filter((r) => r.status === "open").length;
+  const reviewingCount = requests.filter((r) => r.status === "reviewing").length;
   const doneCount = requests.filter((r) => r.status === "done").length;
 
   if (loading) {
@@ -283,25 +350,36 @@ function MyRequestsList({
 
   return (
     <div className="flex flex-col gap-3">
+      {/* KPI Stats */}
+      <KpiStats requests={requests} isDark={isDark} />
+
       {/* Segment control + search */}
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-        <div className="flex gap-1.5">
-          {(["all", "open", "done"] as const).map((f) => (
+      <div className={cn(
+        "flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between p-3 rounded-xl",
+        isDark ? "bg-white/[0.03] border border-white/5" : "bg-white/50 border border-gray-200/50"
+      )}>
+        <div className="flex gap-1.5 flex-wrap">
+          {([
+            { key: "all" as const, label: `Tümü (${requests.length})` },
+            { key: "open" as const, label: `Açık (${openCount})` },
+            { key: "reviewing" as const, label: `İnceleniyor (${reviewingCount})` },
+            { key: "done" as const, label: `Tamamlandı (${doneCount})` },
+          ]).map(({ key, label }) => (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
+              key={key}
+              onClick={() => setFilter(key)}
               className={cn(
-                "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
-                filter === f
+                "px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                filter === key
                   ? isDark
                     ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                     : "bg-amber-100 text-amber-700 border border-amber-200"
                   : isDark
-                  ? "text-white/50 hover:text-white/70"
-                  : "text-gray-400 hover:text-gray-600"
+                  ? "text-white/50 hover:text-white/70 hover:bg-white/5"
+                  : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
               )}
             >
-              {f === "all" ? `Tümü (${requests.length})` : f === "open" ? `Açık (${openCount})` : `Tamamlandı (${doneCount})`}
+              {label}
             </button>
           ))}
         </div>
@@ -312,8 +390,8 @@ function MyRequestsList({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className={cn(
-              "pl-9 h-9 rounded-full text-sm w-full sm:w-56",
-              isDark ? "bg-white/5 border-white/10 text-white placeholder:text-white/40" : ""
+              "pl-9 h-9 rounded-lg text-sm w-full sm:w-56 border-0",
+              isDark ? "bg-white/5 text-white placeholder:text-white/40" : "bg-gray-100 placeholder:text-gray-400"
             )}
           />
         </div>
@@ -339,18 +417,23 @@ function MyRequestsList({
   );
 }
 
-// ─── All Requests List (Admin-Developer) ────────────────────
+// ─── All Requests List ──────────────────────────────────────
 function AllRequestsList({
+  uid,
   isDark,
   onOpenDetail,
+  isAdminDeveloper,
 }: {
+  uid: string;
   isDark: boolean;
   onOpenDetail: (r: UserRequest) => void;
+  isAdminDeveloper: boolean;
 }) {
   const [requests, setRequests] = useState<UserRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "open" | "done">("all");
+  const [filter, setFilter] = useState<"all" | "open" | "reviewing" | "done">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<UserRequestCategory | "all">("all");
   const [priorityFilter, setPriorityFilter] = useState<UserRequestPriority | "all">("all");
 
@@ -370,6 +453,7 @@ function AllRequestsList({
   const filtered = useMemo(() => {
     let list = requests;
     if (filter === "open") list = list.filter((r) => r.status === "open");
+    if (filter === "reviewing") list = list.filter((r) => r.status === "reviewing");
     if (filter === "done") list = list.filter((r) => r.status === "done");
     if (categoryFilter !== "all") list = list.filter((r) => r.category === categoryFilter);
     if (priorityFilter !== "all") list = list.filter((r) => r.priority === priorityFilter);
@@ -382,10 +466,24 @@ function AllRequestsList({
           r.createdByName?.toLowerCase().includes(q)
       );
     }
+    // Sort: open requests by priority (urgent first), then by date
+    list = [...list].sort((a, b) => {
+      if (a.status !== "done" && b.status === "done") return -1;
+      if (a.status === "done" && b.status !== "done") return 1;
+      if (a.status !== "done" && b.status !== "done") {
+        const pa = PRIORITY_SORT_ORDER[a.priority] ?? 1;
+        const pb = PRIORITY_SORT_ORDER[b.priority] ?? 1;
+        if (pa !== pb) return pa - pb;
+      }
+      const dateA = tsToDate(a.createdAt)?.getTime() ?? 0;
+      const dateB = tsToDate(b.createdAt)?.getTime() ?? 0;
+      return dateB - dateA;
+    });
     return list;
   }, [requests, filter, searchQuery, categoryFilter, priorityFilter]);
 
   const openCount = requests.filter((r) => r.status === "open").length;
+  const reviewingCount = requests.filter((r) => r.status === "reviewing").length;
   const doneCount = requests.filter((r) => r.status === "done").length;
 
   if (loading) {
@@ -398,93 +496,152 @@ function AllRequestsList({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Status filter */}
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap gap-1.5 items-center">
-          {(["all", "open", "done"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
-                filter === f
-                  ? isDark
-                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                    : "bg-amber-100 text-amber-700 border border-amber-200"
-                  : isDark
-                  ? "text-white/50 hover:text-white/70"
-                  : "text-gray-400 hover:text-gray-600"
-              )}
-            >
-              {f === "all" ? `Tümü (${requests.length})` : f === "open" ? `Açık (${openCount})` : `Tamamlandı (${doneCount})`}
-            </button>
-          ))}
+      {/* KPI Stats */}
+      <KpiStats requests={requests} isDark={isDark} />
 
-          <div className="w-px h-5 bg-gray-300 dark:bg-white/10 mx-1" />
+      {/* Primary filters */}
+      <div className={cn(
+        "flex flex-col gap-2 p-3 rounded-xl",
+        isDark ? "bg-white/[0.03] border border-white/5" : "bg-white/50 border border-gray-200/50"
+      )}>
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+          <div className="flex gap-1.5 flex-wrap">
+            {([
+              { key: "all" as const, label: `Tümü (${requests.length})` },
+              { key: "open" as const, label: `Açık (${openCount})` },
+              { key: "reviewing" as const, label: `İnceleniyor (${reviewingCount})` },
+              { key: "done" as const, label: `Tamamlandı (${doneCount})` },
+            ]).map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setFilter(key)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                  filter === key
+                    ? isDark
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                      : "bg-amber-100 text-amber-700 border border-amber-200"
+                    : isDark
+                    ? "text-white/50 hover:text-white/70 hover:bg-white/5"
+                    : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-          {/* Category chips */}
-          {(["all", "bug", "improvement", "feature", "design"] as const).map((c) => (
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 sm:flex-none">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                placeholder="Başlık, açıklama veya kullanıcı..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={cn(
+                  "pl-9 h-9 rounded-lg text-sm w-full sm:w-64 border-0",
+                  isDark ? "bg-white/5 text-white placeholder:text-white/40" : "bg-gray-100 placeholder:text-gray-400"
+                )}
+              />
+            </div>
             <button
-              key={c}
-              onClick={() => setCategoryFilter(c)}
+              onClick={() => setShowAdvanced(!showAdvanced)}
               className={cn(
-                "px-2.5 py-1 rounded-full text-xs transition-all",
-                categoryFilter === c
+                "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
+                showAdvanced
                   ? isDark
-                    ? "bg-white/10 text-white border border-white/20"
+                    ? "bg-white/10 text-white"
                     : "bg-gray-200 text-gray-800"
                   : isDark
-                  ? "text-white/40 hover:text-white/60"
-                  : "text-gray-400 hover:text-gray-600"
+                  ? "text-white/40 hover:text-white/60 hover:bg-white/5"
+                  : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
               )}
             >
-              {c === "all" ? "Tüm Kategoriler" : CATEGORY_LABELS[c]}
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filtre
+              {showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 items-center">
-          {/* Priority chips */}
-          {(["all", "low", "normal", "urgent"] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPriorityFilter(p)}
-              className={cn(
-                "px-2.5 py-1 rounded-full text-xs transition-all",
-                priorityFilter === p
-                  ? isDark
-                    ? "bg-white/10 text-white border border-white/20"
-                    : "bg-gray-200 text-gray-800"
-                  : isDark
-                  ? "text-white/40 hover:text-white/60"
-                  : "text-gray-400 hover:text-gray-600"
-              )}
-            >
-              {p === "all" ? "Tüm Öncelikler" : PRIORITY_LABELS[p]}
-            </button>
-          ))}
-
-          <div className="flex-1" />
-
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <Input
-              placeholder="Başlık, açıklama veya kullanıcı..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={cn(
-                "pl-9 h-9 rounded-full text-sm w-full sm:w-64",
-                isDark ? "bg-white/5 border-white/10 text-white placeholder:text-white/40" : ""
-              )}
-            />
           </div>
         </div>
+
+        {/* Advanced filters */}
+        <AnimatePresence>
+          {showAdvanced && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className={cn(
+                "flex flex-col gap-2 pt-2 mt-2",
+                isDark ? "border-t border-white/5" : "border-t border-gray-200/50"
+              )}>
+                {/* Category */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={cn("text-[11px] font-medium w-16 shrink-0", isDark ? "text-white/40" : "text-gray-400")}>
+                    Kategori
+                  </span>
+                  {(["all", "bug", "improvement", "feature", "design"] as const).map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setCategoryFilter(c)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
+                        categoryFilter === c
+                          ? isDark
+                            ? "bg-white/10 text-white border border-white/20"
+                            : "bg-gray-800 text-white"
+                          : isDark
+                          ? "text-white/40 hover:text-white/60 hover:bg-white/5"
+                          : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      )}
+                    >
+                      {c === "all" ? "Tümü" : CATEGORY_LABELS[c]}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Priority */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={cn("text-[11px] font-medium w-16 shrink-0", isDark ? "text-white/40" : "text-gray-400")}>
+                    Öncelik
+                  </span>
+                  {(["all", "low", "normal", "urgent"] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setPriorityFilter(p)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
+                        priorityFilter === p
+                          ? isDark
+                            ? "bg-white/10 text-white border border-white/20"
+                            : "bg-gray-800 text-white"
+                          : isDark
+                          ? "text-white/40 hover:text-white/60 hover:bg-white/5"
+                          : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      )}
+                    >
+                      {p === "all" ? "Tümü" : PRIORITY_LABELS[p]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Request list */}
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <LifeBuoy className={cn("w-12 h-12", isDark ? "text-white/20" : "text-gray-300")} />
+          <div className={cn(
+            "w-14 h-14 rounded-xl flex items-center justify-center",
+            isDark ? "bg-white/5" : "bg-gray-100"
+          )}>
+            <Search className={cn("w-6 h-6", isDark ? "text-white/20" : "text-gray-300")} />
+          </div>
           <p className={cn("text-sm", isDark ? "text-white/40" : "text-gray-400")}>
             Talep bulunamadı
           </p>
@@ -518,24 +675,25 @@ function RequestCard({
   onClick: () => void;
   showUser: boolean;
 }) {
-  const isOpen = request.status === "open";
-
   return (
     <motion.button
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       onClick={onClick}
       className={cn(
-        "w-full text-left p-4 rounded-2xl transition-all duration-200 group",
+        "w-full text-left p-4 rounded-xl transition-all duration-200 group relative",
         isDark
-          ? "bg-white/5 hover:bg-white/8 border border-white/10"
-          : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff] hover:shadow-[2px_2px_4px_#bebebe,-2px_-2px_4px_#ffffff]"
+          ? "bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.08]"
+          : "bg-white hover:bg-gray-50 border border-gray-200/70 shadow-sm hover:shadow-md"
       )}
     >
       <div className="flex items-start gap-3">
         {/* Thumbnail */}
         {request.images?.[0] && (
-          <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-black/10">
+          <div className={cn(
+            "w-12 h-12 rounded-lg overflow-hidden shrink-0",
+            isDark ? "bg-white/5" : "bg-gray-100"
+          )}>
             <img
               src={request.images[0]}
               alt=""
@@ -559,7 +717,7 @@ function RequestCard({
           {/* Description preview */}
           {request.description && (
             <p className={cn(
-              "text-xs mt-1 line-clamp-2",
+              "text-xs mt-1 line-clamp-1",
               isDark ? "text-white/50" : "text-gray-500"
             )}>
               {request.description}
@@ -567,59 +725,71 @@ function RequestCard({
           )}
 
           {/* Meta row */}
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
             <CategoryChip category={request.category} isDark={isDark} />
             <PriorityChip priority={request.priority} isDark={isDark} />
-            {showUser && (
-              <span className={cn("text-xs", isDark ? "text-white/40" : "text-gray-400")}>
+            {showUser && request.createdByName && (
+              <span className={cn(
+                "text-[11px] px-2 py-0.5 rounded-md",
+                isDark ? "bg-white/5 text-white/50" : "bg-gray-100 text-gray-500"
+              )}>
                 {request.createdByName}
               </span>
             )}
             {request.assignedToName && (
-              <span className={cn("text-xs px-2 py-0.5 rounded-full", isDark ? "bg-blue-500/15 text-blue-400" : "bg-blue-50 text-blue-600")}>
-                Atanan: {request.assignedToName}
+              <span className={cn(
+                "text-[11px] px-2 py-0.5 rounded-md",
+                isDark ? "bg-blue-500/10 text-blue-400" : "bg-blue-50 text-blue-600"
+              )}>
+                Sorumlu: {request.assignedToName}
               </span>
             )}
-            <span className={cn("text-xs ml-auto", isDark ? "text-white/30" : "text-gray-400")}>
+            <span className={cn("text-[11px] ml-auto tabular-nums", isDark ? "text-white/30" : "text-gray-400")}>
               {formatDate(request.createdAt)}
-              {request.updatedAt && request.updatedAt !== request.createdAt && (
-                <> • Gncl: {formatDate(request.updatedAt)}</>
-              )}
             </span>
           </div>
-
-          {/* Unread dot */}
-          {request.unreadByUser && (
-            <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-amber-500" />
-          )}
         </div>
 
         <ChevronRight className={cn(
           "w-4 h-4 shrink-0 mt-1 transition-transform group-hover:translate-x-0.5",
-          isDark ? "text-white/20" : "text-gray-300"
+          isDark ? "text-white/15" : "text-gray-300"
         )} />
       </div>
+
+      {/* Unread indicator */}
+      {request.unreadByUser && (
+        <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+      )}
     </motion.button>
   );
 }
 
 // ─── Chips ──────────────────────────────────────────────────
 function StatusChip({ status, isDark }: { status: UserRequestStatus; isDark: boolean }) {
-  const isOpen = status === "open";
+  const config = {
+    open: {
+      icon: <Clock className="w-3 h-3" />,
+      dark: "bg-amber-500/15 text-amber-400 border-amber-500/20",
+      light: "bg-amber-50 text-amber-700 border-amber-200",
+    },
+    reviewing: {
+      icon: <Eye className="w-3 h-3" />,
+      dark: "bg-blue-500/15 text-blue-400 border-blue-500/20",
+      light: "bg-blue-50 text-blue-700 border-blue-200",
+    },
+    done: {
+      icon: <CheckCircle2 className="w-3 h-3" />,
+      dark: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
+      light: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    },
+  }[status];
+
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium shrink-0",
-        isOpen
-          ? isDark
-            ? "bg-amber-500/20 text-amber-400"
-            : "bg-amber-100 text-amber-700"
-          : isDark
-          ? "bg-emerald-500/20 text-emerald-400"
-          : "bg-emerald-100 text-emerald-700"
-      )}
-    >
-      {isOpen ? <Clock className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
+    <span className={cn(
+      "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium shrink-0 border",
+      isDark ? config.dark : config.light
+    )}>
+      {config.icon}
       {STATUS_LABELS[status]}
     </span>
   );
@@ -627,35 +797,36 @@ function StatusChip({ status, isDark }: { status: UserRequestStatus; isDark: boo
 
 function CategoryChip({ category, isDark }: { category: UserRequestCategory; isDark: boolean }) {
   return (
-    <span
-      className={cn(
-        "px-2 py-0.5 rounded-full text-[10px] font-medium",
-        isDark ? "bg-white/8 text-white/60" : "bg-gray-200 text-gray-600"
-      )}
-    >
+    <span className={cn(
+      "px-2 py-0.5 rounded-md text-[10px] font-medium",
+      isDark ? "bg-white/[0.06] text-white/60 border border-white/[0.08]" : "bg-gray-100 text-gray-600 border border-gray-200/50"
+    )}>
       {CATEGORY_LABELS[category] || category}
     </span>
   );
 }
 
 function PriorityChip({ priority, isDark }: { priority: UserRequestPriority; isDark: boolean }) {
+  const config = {
+    urgent: {
+      dark: "bg-red-500/15 text-red-400 border-red-500/20",
+      light: "bg-red-50 text-red-600 border-red-200",
+    },
+    normal: {
+      dark: "bg-blue-500/10 text-blue-400 border-blue-500/15",
+      light: "bg-blue-50 text-blue-600 border-blue-200",
+    },
+    low: {
+      dark: "bg-white/[0.04] text-white/40 border-white/[0.06]",
+      light: "bg-gray-50 text-gray-500 border-gray-200",
+    },
+  }[priority];
+
   return (
-    <span
-      className={cn(
-        "px-2 py-0.5 rounded-full text-[10px] font-medium",
-        priority === "urgent"
-          ? isDark
-            ? "bg-red-500/20 text-red-400"
-            : "bg-red-100 text-red-600"
-          : priority === "normal"
-          ? isDark
-            ? "bg-blue-500/15 text-blue-400"
-            : "bg-blue-50 text-blue-600"
-          : isDark
-          ? "bg-white/5 text-white/40"
-          : "bg-gray-100 text-gray-500"
-      )}
-    >
+    <span className={cn(
+      "px-2 py-0.5 rounded-md text-[10px] font-medium border",
+      isDark ? config.dark : config.light
+    )}>
       {PRIORITY_LABELS[priority] || priority}
     </span>
   );
@@ -664,21 +835,27 @@ function PriorityChip({ priority, isDark }: { priority: UserRequestPriority; isD
 // ─── Empty State ────────────────────────────────────────────
 function EmptyState({ isDark, onCreateNew }: { isDark: boolean; onCreateNew: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 gap-4">
-      <div
-        className={cn(
-          "w-16 h-16 rounded-full flex items-center justify-center",
-          isDark ? "bg-white/5" : "bg-gray-200"
-        )}
-      >
-        <MessageSquarePlus className={cn("w-8 h-8", isDark ? "text-white/20" : "text-gray-400")} />
+    <div className={cn(
+      "flex flex-col items-center justify-center py-16 gap-4 rounded-xl",
+      isDark ? "bg-white/[0.02] border border-white/5" : "bg-gray-50/50 border border-gray-200/30"
+    )}>
+      <div className={cn(
+        "w-16 h-16 rounded-xl flex items-center justify-center",
+        isDark ? "bg-white/5" : "bg-gray-100"
+      )}>
+        <MessageSquarePlus className={cn("w-8 h-8", isDark ? "text-white/20" : "text-gray-300")} />
       </div>
-      <p className={cn("text-sm", isDark ? "text-white/40" : "text-gray-400")}>
-        Henüz talep yok
-      </p>
+      <div className="text-center">
+        <p className={cn("text-sm font-medium", isDark ? "text-white/50" : "text-gray-500")}>
+          Henüz talebin yok
+        </p>
+        <p className={cn("text-xs mt-1", isDark ? "text-white/30" : "text-gray-400")}>
+          Bir hata, iyileştirme veya özellik talebi oluşturun
+        </p>
+      </div>
       <Button
         onClick={onCreateNew}
-        className="rounded-full gap-2 bg-amber-500 hover:bg-amber-600 text-white"
+        className="rounded-xl gap-2 bg-amber-500 hover:bg-amber-600 text-white mt-1"
       >
         <Plus className="w-4 h-4" />
         Talep Aç
@@ -696,6 +873,7 @@ function RequestDetail({
   isDark,
   uid,
   userName,
+  userRole,
 }: {
   request: UserRequest;
   onBack: () => void;
@@ -704,11 +882,15 @@ function RequestDetail({
   isDark: boolean;
   uid: string;
   userName: string;
+  userRole: string;
 }) {
   const { toast } = useToast();
   const [liveRequest, setLiveRequest] = useState<UserRequest>(request);
   const [adminNote, setAdminNote] = useState(request.adminNote || "");
   const [updating, setUpdating] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [showReopenModal, setShowReopenModal] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
 
   // Listen to live updates
   useEffect(() => {
@@ -720,7 +902,7 @@ function RequestDetail({
     return () => unsub();
   }, [request.id]);
 
-  // Mark as read if user is viewing their own request with unread update
+  // Mark as read
   useEffect(() => {
     if (source === "my" && liveRequest.unreadByUser && liveRequest.createdBy === uid) {
       updateDoc(doc(db, "userRequests", request.id), { unreadByUser: false }).catch(() => {});
@@ -729,11 +911,9 @@ function RequestDetail({
 
   const isAssignedAdmin = liveRequest.assignedTo === uid;
 
-  const toggleStatus = async () => {
-    if (!isAssignedAdmin) return;
+  const changeStatus = async (newStatus: UserRequestStatus) => {
     setUpdating(true);
     try {
-      const newStatus: UserRequestStatus = liveRequest.status === "open" ? "done" : "open";
       const updateData: Record<string, any> = {
         status: newStatus,
         updatedAt: serverTimestamp(),
@@ -743,14 +923,13 @@ function RequestDetail({
         updateData.resolvedAt = serverTimestamp();
         updateData.resolvedBy = uid;
         updateData.resolvedByName = userName;
-      } else {
+      } else if (newStatus === "open") {
         updateData.resolvedAt = null;
         updateData.resolvedBy = null;
         updateData.resolvedByName = null;
       }
       await updateDoc(doc(db, "userRequests", request.id), updateData);
 
-      // Notify the request creator when completed
       if (newStatus === "done" && liveRequest.createdBy) {
         emitUserRequestCompleted({
           actor: { uid, name: userName },
@@ -761,9 +940,71 @@ function RequestDetail({
         }).catch(console.error);
       }
 
-      toast({ title: newStatus === "done" ? "Talep tamamlandı" : "Talep tekrar açıldı" });
+      toast({ title: STATUS_LABELS[newStatus] + " olarak güncellendi" });
     } catch {
       toast({ title: "Hata", description: "Durum güncellenirken hata oluştu", variant: "destructive" });
+    }
+    setUpdating(false);
+  };
+
+  const handleReopenRequest = async () => {
+    if (!reopenReason.trim()) {
+      toast({ title: "Lütfen bir sebep yazın", variant: "destructive" });
+      return;
+    }
+    setUpdating(true);
+    try {
+      // Add reopen to comments
+      const newComment: UserRequestComment = {
+        id: Date.now().toString(),
+        text: `Tekrar açma sebebi: ${reopenReason.trim()}`,
+        authorUid: uid,
+        authorName: userName,
+        authorRole: userRole as any,
+        createdAt: new Date(),
+      };
+      const existingComments = liveRequest.comments || [];
+      await updateDoc(doc(db, "userRequests", request.id), {
+        status: "open",
+        reopenReason: reopenReason.trim(),
+        resolvedAt: null,
+        resolvedBy: null,
+        resolvedByName: null,
+        updatedAt: serverTimestamp(),
+        unreadByUser: source !== "my",
+        comments: [...existingComments, newComment],
+      });
+      toast({ title: "Talep tekrar açıldı" });
+      setShowReopenModal(false);
+      setReopenReason("");
+    } catch {
+      toast({ title: "Hata", variant: "destructive" });
+    }
+    setUpdating(false);
+  };
+
+  const addComment = async () => {
+    if (!commentText.trim()) return;
+    setUpdating(true);
+    try {
+      const newComment: UserRequestComment = {
+        id: Date.now().toString(),
+        text: commentText.trim(),
+        authorUid: uid,
+        authorName: userName,
+        authorRole: userRole as any,
+        createdAt: new Date(),
+      };
+      const existingComments = liveRequest.comments || [];
+      await updateDoc(doc(db, "userRequests", request.id), {
+        comments: [...existingComments, newComment],
+        updatedAt: serverTimestamp(),
+        unreadByUser: source !== "my",
+      });
+      setCommentText("");
+      toast({ title: "Yorum eklendi" });
+    } catch {
+      toast({ title: "Hata", variant: "destructive" });
     }
     setUpdating(false);
   };
@@ -788,66 +1029,141 @@ function RequestDetail({
     });
   };
 
+  // Build activity feed
+  const activityItems = useMemo(() => {
+    const items: { type: string; label: string; date: string; icon: React.ReactNode; color: string }[] = [];
+
+    items.push({
+      type: "created",
+      label: `${liveRequest.createdByName || "Kullanıcı"} tarafından oluşturuldu`,
+      date: formatDate(liveRequest.createdAt),
+      icon: <Plus className="w-3 h-3" />,
+      color: "amber",
+    });
+
+    if (liveRequest.assignedToName) {
+      items.push({
+        type: "assigned",
+        label: `${liveRequest.assignedToName} kişisine atandı`,
+        date: "",
+        icon: <ChevronRight className="w-3 h-3" />,
+        color: "blue",
+      });
+    }
+
+    // Comments
+    if (liveRequest.comments?.length) {
+      for (const comment of liveRequest.comments) {
+        items.push({
+          type: "comment",
+          label: `${comment.authorName}: ${comment.text}`,
+          date: formatDate(comment.createdAt),
+          icon: <MessageSquarePlus className="w-3 h-3" />,
+          color: comment.authorRole === "user" ? "gray" : "purple",
+        });
+      }
+    }
+
+    if (liveRequest.status === "reviewing") {
+      items.push({
+        type: "reviewing",
+        label: "İnceleniyor",
+        date: "",
+        icon: <Eye className="w-3 h-3" />,
+        color: "blue",
+      });
+    }
+
+    if (liveRequest.resolvedAt) {
+      items.push({
+        type: "resolved",
+        label: `Tamamlandı${liveRequest.resolvedByName ? ` (${liveRequest.resolvedByName})` : ""}`,
+        date: formatDate(liveRequest.resolvedAt),
+        icon: <CheckCircle2 className="w-3 h-3" />,
+        color: "emerald",
+      });
+    }
+
+    if (liveRequest.reopenReason) {
+      items.push({
+        type: "reopened",
+        label: `Tekrar açıldı: ${liveRequest.reopenReason}`,
+        date: "",
+        icon: <RotateCcw className="w-3 h-3" />,
+        color: "orange",
+      });
+    }
+
+    return items;
+  }, [liveRequest]);
+
+  const cardClass = cn(
+    "p-5 rounded-xl",
+    isDark
+      ? "bg-white/[0.04] border border-white/[0.08]"
+      : "bg-white border border-gray-200/70 shadow-sm"
+  );
+
   return (
     <div className="flex flex-col w-full max-w-3xl mx-auto px-3 md:px-4 py-4 gap-4">
       {/* Back button */}
       <button
         onClick={onBack}
         className={cn(
-          "flex items-center gap-2 text-sm font-medium transition-colors w-fit",
-          isDark ? "text-white/60 hover:text-white" : "text-gray-500 hover:text-gray-900"
+          "flex items-center gap-2 text-sm font-medium transition-colors w-fit rounded-lg px-3 py-2 -ml-3",
+          isDark ? "text-white/60 hover:text-white hover:bg-white/5" : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
         )}
       >
         <ArrowLeft className="w-4 h-4" />
         Geri
       </button>
 
-      {/* Header */}
-      <div
-        className={cn(
-          "p-5 rounded-2xl",
-          isDark
-            ? "bg-white/5 border border-white/10"
-            : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff]"
-        )}
-      >
+      {/* Header Card */}
+      <div className={cardClass}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 flex-wrap mb-2">
               <StatusChip status={liveRequest.status} isDark={isDark} />
+              <PriorityChip priority={liveRequest.priority} isDark={isDark} />
               <button
                 onClick={copyId}
                 className={cn(
-                  "flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full transition-colors",
+                  "flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md transition-colors",
                   isDark
                     ? "bg-white/5 text-white/40 hover:text-white/60"
-                    : "bg-gray-200 text-gray-400 hover:text-gray-600"
+                    : "bg-gray-100 text-gray-400 hover:text-gray-600"
                 )}
               >
                 <Copy className="w-3 h-3" />
                 {request.id.slice(0, 8)}
               </button>
             </div>
-            <h2 className={cn("text-lg font-bold", isDark ? "text-white" : "text-gray-900")}>
+            <h2 className={cn("text-lg font-bold leading-snug", isDark ? "text-white" : "text-gray-900")}>
               {liveRequest.title}
             </h2>
           </div>
         </div>
 
-        {/* Meta chips */}
+        {/* Meta info */}
         <div className="flex items-center gap-2 flex-wrap mb-4">
           <CategoryChip category={liveRequest.category} isDark={isDark} />
-          <PriorityChip priority={liveRequest.priority} isDark={isDark} />
-          {source === "admin" && (
-            <span className={cn("text-xs", isDark ? "text-white/40" : "text-gray-400")}>
-              {liveRequest.createdByName}
-            </span>
-          )}
+          <span className={cn("text-xs", isDark ? "text-white/40" : "text-gray-400")}>
+            Açan: {liveRequest.createdByName}
+          </span>
           {liveRequest.assignedToName && (
-            <span className={cn("text-xs px-2 py-0.5 rounded-full", isDark ? "bg-blue-500/15 text-blue-400" : "bg-blue-50 text-blue-600")}>
-              Atanan: {liveRequest.assignedToName}
+            <span className={cn(
+              "text-xs px-2 py-0.5 rounded-md",
+              isDark ? "bg-blue-500/10 text-blue-400" : "bg-blue-50 text-blue-600"
+            )}>
+              Sorumlu: {liveRequest.assignedToName}
             </span>
           )}
+          <span className={cn("text-xs ml-auto tabular-nums", isDark ? "text-white/30" : "text-gray-400")}>
+            {formatDate(liveRequest.createdAt)}
+            {liveRequest.updatedAt && liveRequest.updatedAt !== liveRequest.createdAt && (
+              <> &middot; Gncl: {formatDate(liveRequest.updatedAt)}</>
+            )}
+          </span>
         </div>
 
         {/* Description */}
@@ -866,7 +1182,10 @@ function RequestDetail({
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-xl overflow-hidden aspect-video bg-black/10 hover:opacity-80 transition-opacity"
+                className={cn(
+                  "rounded-lg overflow-hidden aspect-video hover:opacity-80 transition-opacity",
+                  isDark ? "bg-white/5" : "bg-gray-100"
+                )}
               >
                 <img src={url} alt="" className="w-full h-full object-cover" />
               </a>
@@ -875,81 +1194,125 @@ function RequestDetail({
         )}
       </div>
 
-      {/* Timeline */}
-      <div
-        className={cn(
-          "p-5 rounded-2xl",
-          isDark
-            ? "bg-white/5 border border-white/10"
-            : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff]"
-        )}
-      >
-        <h3 className={cn("text-sm font-semibold mb-3", isDark ? "text-white/70" : "text-gray-700")}>
-          Zaman Çizelgesi
+      {/* Activity Feed */}
+      <div className={cardClass}>
+        <h3 className={cn("text-sm font-semibold mb-4", isDark ? "text-white/70" : "text-gray-700")}>
+          Aktivite Akışı
         </h3>
-        <div className="flex flex-col gap-3">
-          <TimelineItem
-            label="Oluşturuldu"
-            date={formatDate(liveRequest.createdAt)}
-            isDark={isDark}
-            isFirst
-          />
-          {liveRequest.assignedToName && (
-            <TimelineItem
-              label={`Atanan: ${liveRequest.assignedToName}`}
-              date=""
-              isDark={isDark}
+        <div className="flex flex-col gap-0">
+          {activityItems.map((item, i) => {
+            const isLast = i === activityItems.length - 1;
+            const colorMap: Record<string, string> = {
+              amber: isDark ? "bg-amber-500 text-amber-950" : "bg-amber-400 text-white",
+              blue: isDark ? "bg-blue-500 text-blue-950" : "bg-blue-400 text-white",
+              emerald: isDark ? "bg-emerald-500 text-emerald-950" : "bg-emerald-400 text-white",
+              purple: isDark ? "bg-purple-500 text-purple-950" : "bg-purple-400 text-white",
+              gray: isDark ? "bg-gray-500 text-gray-950" : "bg-gray-400 text-white",
+              orange: isDark ? "bg-orange-500 text-orange-950" : "bg-orange-400 text-white",
+            };
+
+            return (
+              <div key={i} className="flex gap-3 relative">
+                {/* Timeline line */}
+                {!isLast && (
+                  <div className={cn(
+                    "absolute left-[11px] top-[22px] bottom-0 w-px",
+                    isDark ? "bg-white/10" : "bg-gray-200"
+                  )} />
+                )}
+                {/* Dot */}
+                <div className={cn(
+                  "w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 mt-0.5 z-10",
+                  colorMap[item.color] || colorMap.gray
+                )}>
+                  {item.icon}
+                </div>
+                {/* Content */}
+                <div className={cn("flex-1 pb-4", isLast && "pb-0")}>
+                  <p className={cn("text-sm", isDark ? "text-white/80" : "text-gray-800")}>
+                    {item.label}
+                  </p>
+                  {item.date && (
+                    <p className={cn("text-[11px] mt-0.5 tabular-nums", isDark ? "text-white/30" : "text-gray-400")}>
+                      {item.date}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Add comment */}
+        <div className={cn(
+          "mt-4 pt-4",
+          isDark ? "border-t border-white/5" : "border-t border-gray-100"
+        )}>
+          <div className="flex gap-2">
+            <textarea
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Yorum ekle..."
+              rows={2}
+              className={cn(
+                "flex-1 rounded-lg px-3 py-2 text-sm resize-none transition-all",
+                isDark
+                  ? "bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:border-amber-500/50 focus:outline-none"
+                  : "bg-gray-50 border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-amber-400 focus:outline-none"
+              )}
             />
-          )}
-          {liveRequest.resolvedAt && (
-            <TimelineItem
-              label={`Tamamlandı${liveRequest.resolvedByName ? ` (${liveRequest.resolvedByName} tarafından)` : ""}`}
-              date={formatDate(liveRequest.resolvedAt)}
-              isDark={isDark}
-              isCompleted
-            />
-          )}
+            <Button
+              onClick={addComment}
+              disabled={updating || !commentText.trim()}
+              size="sm"
+              className="rounded-lg self-end bg-amber-500 hover:bg-amber-600 text-white h-9 px-3"
+            >
+              {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Admin actions - only assigned admin can manage */}
+      {/* Admin actions */}
       {isAssignedAdmin && (
-        <div
-          className={cn(
-            "p-5 rounded-2xl",
-            isDark
-              ? "bg-white/5 border border-white/10"
-              : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff]"
-          )}
-        >
-          <h3 className={cn("text-sm font-semibold mb-3", isDark ? "text-white/70" : "text-gray-700")}>
+        <div className={cardClass}>
+          <h3 className={cn("text-sm font-semibold mb-4", isDark ? "text-white/70" : "text-gray-700")}>
             Yönetim
           </h3>
 
           <div className="flex flex-col gap-3">
-            <Button
-              onClick={toggleStatus}
-              disabled={updating}
-              className={cn(
-                "rounded-full gap-2",
-                liveRequest.status === "open"
-                  ? "bg-emerald-500 hover:bg-emerald-600 text-white"
-                  : "bg-amber-500 hover:bg-amber-600 text-white"
-              )}
-            >
-              {updating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : liveRequest.status === "open" ? (
-                <CheckCircle2 className="w-4 h-4" />
-              ) : (
-                <Clock className="w-4 h-4" />
-              )}
-              {liveRequest.status === "open" ? "Tamamlandı Olarak İşaretle" : "Tekrar Aç"}
-            </Button>
+            {/* Status change */}
+            <div className="flex flex-col gap-2">
+              <label className={cn("text-[11px] font-medium", isDark ? "text-white/40" : "text-gray-500")}>
+                Durum Değiştir
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {(["open", "reviewing", "done"] as UserRequestStatus[]).map((s) => (
+                  <Button
+                    key={s}
+                    onClick={() => changeStatus(s)}
+                    disabled={updating || liveRequest.status === s}
+                    variant={liveRequest.status === s ? "default" : "outline"}
+                    size="sm"
+                    className={cn(
+                      "rounded-lg gap-1.5",
+                      liveRequest.status === s && s === "open" && "bg-amber-500 text-white",
+                      liveRequest.status === s && s === "reviewing" && "bg-blue-500 text-white",
+                      liveRequest.status === s && s === "done" && "bg-emerald-500 text-white",
+                    )}
+                  >
+                    {s === "open" && <Clock className="w-3.5 h-3.5" />}
+                    {s === "reviewing" && <Eye className="w-3.5 h-3.5" />}
+                    {s === "done" && <CheckCircle2 className="w-3.5 h-3.5" />}
+                    {STATUS_LABELS[s]}
+                  </Button>
+                ))}
+              </div>
+            </div>
 
             {/* Admin note */}
             <div className="flex flex-col gap-2">
-              <label className={cn("text-xs font-medium", isDark ? "text-white/50" : "text-gray-500")}>
+              <label className={cn("text-[11px] font-medium", isDark ? "text-white/40" : "text-gray-500")}>
                 Admin Notu
               </label>
               <textarea
@@ -958,17 +1321,17 @@ function RequestDetail({
                 placeholder="İsteğe bağlı admin notu..."
                 rows={3}
                 className={cn(
-                  "w-full rounded-xl px-4 py-3 text-sm resize-none transition-all",
+                  "w-full rounded-lg px-3 py-2 text-sm resize-none transition-all",
                   isDark
-                    ? "bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:border-amber-500/50"
-                    : "bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-amber-400"
+                    ? "bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:border-amber-500/50 focus:outline-none"
+                    : "bg-gray-50 border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-amber-400 focus:outline-none"
                 )}
               />
               <Button
                 onClick={saveAdminNote}
                 disabled={updating}
                 variant="outline"
-                className="rounded-full self-end"
+                className="rounded-lg self-end"
                 size="sm"
               >
                 {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Notu Kaydet"}
@@ -978,16 +1341,34 @@ function RequestDetail({
         </div>
       )}
 
-      {/* Show admin note to request creator (read-only) */}
+      {/* User actions for completed requests */}
+      {source === "my" && liveRequest.status === "done" && (
+        <div className={cardClass}>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className={cn("text-sm font-semibold", isDark ? "text-white/70" : "text-gray-700")}>
+                Talep tamamlandı
+              </h3>
+              <p className={cn("text-xs mt-0.5", isDark ? "text-white/40" : "text-gray-400")}>
+                Sorun devam ediyorsa tekrar açabilirsiniz
+              </p>
+            </div>
+            <Button
+              onClick={() => setShowReopenModal(true)}
+              variant="outline"
+              size="sm"
+              className="rounded-lg gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Tekrar Aç
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Show admin note to user */}
       {source === "my" && liveRequest.adminNote && (
-        <div
-          className={cn(
-            "p-5 rounded-2xl",
-            isDark
-              ? "bg-white/5 border border-white/10"
-              : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff]"
-          )}
-        >
+        <div className={cardClass}>
           <h3 className={cn("text-sm font-semibold mb-2", isDark ? "text-white/70" : "text-gray-700")}>
             Admin Notu
           </h3>
@@ -996,42 +1377,51 @@ function RequestDetail({
           </p>
         </div>
       )}
-    </div>
-  );
-}
 
-function TimelineItem({
-  label,
-  date,
-  isDark,
-  isFirst,
-  isCompleted,
-}: {
-  label: string;
-  date: string;
-  isDark: boolean;
-  isFirst?: boolean;
-  isCompleted?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="flex flex-col items-center">
-        <div
-          className={cn(
-            "w-3 h-3 rounded-full mt-0.5",
-            isCompleted
-              ? "bg-emerald-500"
-              : isDark
-              ? "bg-amber-500"
-              : "bg-amber-400"
-          )}
-        />
-        {!isCompleted && <div className={cn("w-px h-6", isDark ? "bg-white/10" : "bg-gray-300")} />}
-      </div>
-      <div className="flex-1">
-        <p className={cn("text-sm font-medium", isDark ? "text-white/80" : "text-gray-800")}>{label}</p>
-        <p className={cn("text-xs", isDark ? "text-white/40" : "text-gray-400")}>{date}</p>
-      </div>
+      {/* Reopen Modal */}
+      <Dialog open={showReopenModal} onOpenChange={setShowReopenModal}>
+        <DialogContent className={cn(
+          "max-w-md rounded-xl",
+          isDark ? "bg-gray-900 border-white/10" : ""
+        )}>
+          <DialogHeader>
+            <DialogTitle className={cn("text-base", isDark ? "text-white" : "")}>
+              Talebi Tekrar Aç
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <label className={cn("text-xs font-medium", isDark ? "text-white/60" : "text-gray-600")}>
+              Neden tekrar açıyorsunuz? <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={reopenReason}
+              onChange={(e) => setReopenReason(e.target.value)}
+              placeholder="Sorun devam ediyor çünkü..."
+              rows={3}
+              className={cn(
+                "w-full rounded-lg px-3 py-2 text-sm resize-none transition-all",
+                isDark
+                  ? "bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:border-amber-500/50 focus:outline-none"
+                  : "bg-gray-50 border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-amber-400 focus:outline-none"
+              )}
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowReopenModal(false)} className="rounded-lg" size="sm">
+                Vazgeç
+              </Button>
+              <Button
+                onClick={handleReopenRequest}
+                disabled={updating || !reopenReason.trim()}
+                className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white gap-1.5"
+                size="sm"
+              >
+                {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                Tekrar Aç
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1051,9 +1441,10 @@ function CreateRequestModal({
   isDark: boolean;
 }) {
   const { toast } = useToast();
+  const [mode, setMode] = useState<"quick" | "detail">("quick");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<UserRequestCategory>("bug");
+  const [category, setCategory] = useState<UserRequestCategory>("improvement");
   const [priority, setPriority] = useState<UserRequestPriority>("normal");
   const [images, setImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
@@ -1075,9 +1466,10 @@ function CreateRequestModal({
   // Reset form when modal opens
   useEffect(() => {
     if (open) {
+      setMode("quick");
       setTitle("");
       setDescription("");
-      setCategory("bug");
+      setCategory("improvement");
       setPriority("normal");
       setImages([]);
       setImagePreviews([]);
@@ -1085,7 +1477,7 @@ function CreateRequestModal({
     }
   }, [open]);
 
-  // Handle clipboard paste for images
+  // Handle clipboard paste
   useEffect(() => {
     if (!open) return;
     const handlePaste = (e: ClipboardEvent) => {
@@ -1094,9 +1486,7 @@ function CreateRequestModal({
       for (const item of items) {
         if (item.type.startsWith("image/") && images.length < 3) {
           const file = item.getAsFile();
-          if (file) {
-            addImage(file);
-          }
+          if (file) addImage(file);
         }
       }
     };
@@ -1119,11 +1509,8 @@ function CreateRequestModal({
     if (!files) return;
     for (const file of files) {
       if (images.length >= 3) break;
-      if (file.type.startsWith("image/")) {
-        addImage(file);
-      }
+      if (file.type.startsWith("image/")) addImage(file);
     }
-    // Reset input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -1141,12 +1528,8 @@ function CreateRequestModal({
       toast({ title: "Başlık en fazla 100 karakter olabilir", variant: "destructive" });
       return;
     }
-    if (!assignedTo) {
-      toast({ title: "İlgilenecek kişi seçilmelidir", variant: "destructive" });
-      return;
-    }
 
-    const assignedAdmin = adminUsers.find((u) => u.uid === assignedTo);
+    const assignedAdmin = assignedTo ? adminUsers.find((u) => u.uid === assignedTo) : null;
 
     setSubmitting(true);
     try {
@@ -1160,7 +1543,6 @@ function CreateRequestModal({
         imageUrls.push(url);
       }
 
-      // Create request document
       const docRef = await addDoc(collection(db, "userRequests"), {
         title: title.trim(),
         description: description.trim(),
@@ -1170,23 +1552,26 @@ function CreateRequestModal({
         status: "open",
         createdBy: uid,
         createdByName: userName,
-        assignedTo: assignedTo,
+        assignedTo: assignedTo || "",
         assignedToName: assignedAdmin?.name || "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         unreadByUser: false,
+        comments: [],
       });
 
-      // Notify assigned admin
-      emitUserRequestCreated({
-        actor: { uid, name: userName },
-        requestId: docRef.id,
-        title: title.trim(),
-        assignedToUid: assignedTo,
-        assignedToName: assignedAdmin?.name || "",
-        category,
-        priority,
-      }).catch(console.error);
+      // Notify assigned admin if one was selected
+      if (assignedTo) {
+        emitUserRequestCreated({
+          actor: { uid, name: userName },
+          requestId: docRef.id,
+          title: title.trim(),
+          assignedToUid: assignedTo,
+          assignedToName: assignedAdmin?.name || "",
+          category,
+          priority,
+        }).catch(console.error);
+      }
 
       toast({ title: "Talebin alındı" });
       onOpenChange(false);
@@ -1201,18 +1586,55 @@ function CreateRequestModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "max-w-lg rounded-3xl p-0 overflow-hidden",
+          "max-w-lg rounded-xl p-0 overflow-hidden",
           isDark
-            ? "bg-black/90 backdrop-blur-xl border-white/10"
-            : "bg-[#e0e0e0] border-gray-200"
+            ? "bg-gray-900 border-white/10"
+            : "bg-white border-gray-200"
         )}
       >
-        <div className="p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
+        <div className="p-5 flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className={cn("text-lg font-bold", isDark ? "text-white" : "text-gray-900")}>
               Yeni Talep Aç
             </DialogTitle>
           </DialogHeader>
+
+          {/* Mode toggle */}
+          <div className={cn(
+            "flex rounded-lg p-0.5",
+            isDark ? "bg-white/5" : "bg-gray-100"
+          )}>
+            <button
+              onClick={() => setMode("quick")}
+              className={cn(
+                "flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all",
+                mode === "quick"
+                  ? isDark
+                    ? "bg-white/10 text-white shadow-sm"
+                    : "bg-white text-gray-900 shadow-sm"
+                  : isDark
+                  ? "text-white/50"
+                  : "text-gray-500"
+              )}
+            >
+              Hızlı
+            </button>
+            <button
+              onClick={() => setMode("detail")}
+              className={cn(
+                "flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all",
+                mode === "detail"
+                  ? isDark
+                    ? "bg-white/10 text-white shadow-sm"
+                    : "bg-white text-gray-900 shadow-sm"
+                  : isDark
+                  ? "text-white/50"
+                  : "text-gray-500"
+              )}
+            >
+              Detaylı
+            </button>
+          </div>
 
           {/* Title */}
           <div className="flex flex-col gap-1.5">
@@ -1223,14 +1645,14 @@ function CreateRequestModal({
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value.slice(0, 100))}
-                placeholder="Kısa bir başlık yazın (örn: Sipariş tablosu başlık dondurma)"
+                placeholder="Kısa bir başlık yazın"
                 className={cn(
-                  "h-11 rounded-xl pr-14",
-                  isDark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30" : ""
+                  "h-11 rounded-lg pr-14",
+                  isDark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30" : "border-gray-200"
                 )}
               />
               <span className={cn(
-                "absolute right-3 top-1/2 -translate-y-1/2 text-[10px]",
+                "absolute right-3 top-1/2 -translate-y-1/2 text-[10px] tabular-nums",
                 isDark ? "text-white/30" : "text-gray-400"
               )}>
                 {title.length}/100
@@ -1241,65 +1663,20 @@ function CreateRequestModal({
           {/* Description */}
           <div className="flex flex-col gap-1.5">
             <label className={cn("text-xs font-medium", isDark ? "text-white/60" : "text-gray-600")}>
-              Açıklama
+              Açıklama {mode === "quick" && <span className={cn("text-[10px]", isDark ? "text-white/30" : "text-gray-400")}>(opsiyonel)</span>}
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ne bekliyorsunuz? Nerede oluyor? Adımlar?"
-              rows={4}
+              placeholder={`Beklenen: ...\nOlan: ...\nAdımlar: 1) ...`}
+              rows={mode === "quick" ? 3 : 5}
               className={cn(
-                "w-full rounded-xl px-4 py-3 text-sm resize-none transition-all",
+                "w-full rounded-lg px-3 py-2.5 text-sm resize-none transition-all",
                 isDark
                   ? "bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:border-amber-500/50 focus:outline-none"
-                  : "bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-amber-400 focus:outline-none"
+                  : "bg-gray-50 border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-amber-400 focus:outline-none"
               )}
             />
-          </div>
-
-          {/* Image upload */}
-          <div className="flex flex-col gap-2">
-            <label className={cn("text-xs font-medium", isDark ? "text-white/60" : "text-gray-600")}>
-              Görsel Ekle ({images.length}/3)
-            </label>
-            <div className="flex gap-2 flex-wrap">
-              {imagePreviews.map((preview, i) => (
-                <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden group">
-                  <img src={preview} alt="" className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => removeImage(i)}
-                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-                  >
-                    <Trash2 className="w-4 h-4 text-white" />
-                  </button>
-                </div>
-              ))}
-              {images.length < 3 && (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className={cn(
-                    "w-20 h-20 rounded-xl flex flex-col items-center justify-center gap-1 transition-all",
-                    isDark
-                      ? "bg-white/5 border border-dashed border-white/20 hover:border-white/40 text-white/40"
-                      : "bg-white border border-dashed border-gray-300 hover:border-gray-400 text-gray-400"
-                  )}
-                >
-                  <ImagePlus className="w-5 h-5" />
-                  <span className="text-[9px]">Ekle</span>
-                </button>
-              )}
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <p className={cn("text-[10px]", isDark ? "text-white/30" : "text-gray-400")}>
-              Yapıştır (Ctrl+V) ile de ekleyebilirsiniz
-            </p>
           </div>
 
           {/* Category */}
@@ -1313,14 +1690,14 @@ function CreateRequestModal({
                   key={c}
                   onClick={() => setCategory(c)}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
+                    "px-3 py-1.5 rounded-lg text-xs font-medium transition-all border",
                     category === c
                       ? isDark
-                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                        : "bg-amber-100 text-amber-700 border border-amber-200"
+                        ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                        : "bg-amber-50 text-amber-700 border-amber-200"
                       : isDark
-                      ? "bg-white/5 text-white/50 border border-white/10 hover:text-white/70"
-                      : "bg-white text-gray-500 border border-gray-200 hover:text-gray-700"
+                      ? "bg-white/[0.03] text-white/50 border-white/10 hover:text-white/70"
+                      : "bg-gray-50 text-gray-500 border-gray-200 hover:text-gray-700"
                   )}
                 >
                   {CATEGORY_LABELS[c]}
@@ -1340,18 +1717,18 @@ function CreateRequestModal({
                   key={p}
                   onClick={() => setPriority(p)}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
+                    "px-3 py-1.5 rounded-lg text-xs font-medium transition-all border",
                     priority === p
                       ? p === "urgent"
                         ? isDark
-                          ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                          : "bg-red-100 text-red-600 border border-red-200"
+                          ? "bg-red-500/20 text-red-400 border-red-500/30"
+                          : "bg-red-50 text-red-600 border-red-200"
                         : isDark
-                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                        : "bg-amber-100 text-amber-700 border border-amber-200"
+                        ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                        : "bg-amber-50 text-amber-700 border-amber-200"
                       : isDark
-                      ? "bg-white/5 text-white/50 border border-white/10 hover:text-white/70"
-                      : "bg-white text-gray-500 border border-gray-200 hover:text-gray-700"
+                      ? "bg-white/[0.03] text-white/50 border-white/10 hover:text-white/70"
+                      : "bg-gray-50 text-gray-500 border-gray-200 hover:text-gray-700"
                   )}
                 >
                   {PRIORITY_LABELS[p]}
@@ -1360,51 +1737,112 @@ function CreateRequestModal({
             </div>
           </div>
 
-          {/* Assigned Admin */}
-          <div className="flex flex-col gap-1.5">
-            <label className={cn("text-xs font-medium", isDark ? "text-white/60" : "text-gray-600")}>
-              İlgilenecek Kişi <span className="text-red-500">*</span>
-            </label>
-            <Select value={assignedTo} onValueChange={setAssignedTo}>
-              <SelectTrigger
-                className={cn(
-                  "h-11 rounded-xl",
-                  isDark ? "bg-white/5 border-white/10 text-white" : ""
-                )}
+          {/* Detail mode fields */}
+          <AnimatePresence>
+            {mode === "detail" && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden flex flex-col gap-4"
               >
-                <SelectValue placeholder="Bir admin seçin..." />
-              </SelectTrigger>
-              <SelectContent>
-                {adminUsers.map((admin) => (
-                  <SelectItem key={admin.uid} value={admin.uid}>
-                    {admin.name} ({admin.role === "admin_developer" ? "Admin-Geliştirici" : "Admin"})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+                {/* Image upload */}
+                <div className="flex flex-col gap-2">
+                  <label className={cn("text-xs font-medium", isDark ? "text-white/60" : "text-gray-600")}>
+                    Görsel Ekle ({images.length}/3)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {imagePreviews.map((preview, i) => (
+                      <div key={i} className="relative rounded-lg overflow-hidden aspect-video group">
+                        <img src={preview} alt="" className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => removeImage(i)}
+                          className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                        >
+                          <Trash2 className="w-4 h-4 text-white" />
+                        </button>
+                      </div>
+                    ))}
+                    {images.length < 3 && (
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className={cn(
+                          "rounded-lg flex flex-col items-center justify-center gap-1 transition-all aspect-video",
+                          isDark
+                            ? "bg-white/[0.03] border border-dashed border-white/15 hover:border-white/30 text-white/30"
+                            : "bg-gray-50 border border-dashed border-gray-300 hover:border-gray-400 text-gray-400"
+                        )}
+                      >
+                        <ImagePlus className="w-5 h-5" />
+                        <span className="text-[9px]">Sürükle / Yapıştır / Seç</span>
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  <p className={cn("text-[10px]", isDark ? "text-white/25" : "text-gray-400")}>
+                    Ctrl+V ile de ekleyebilirsiniz
+                  </p>
+                </div>
+
+                {/* Assigned Admin */}
+                <div className="flex flex-col gap-1.5">
+                  <label className={cn("text-xs font-medium", isDark ? "text-white/60" : "text-gray-600")}>
+                    Kime iletilecek? <span className={cn("text-[10px]", isDark ? "text-white/30" : "text-gray-400")}>(opsiyonel)</span>
+                  </label>
+                  <Select value={assignedTo} onValueChange={setAssignedTo}>
+                    <SelectTrigger className={cn(
+                      "h-10 rounded-lg",
+                      isDark ? "bg-white/5 border-white/10 text-white" : "border-gray-200"
+                    )}>
+                      <SelectValue placeholder="Sistem belirlesin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {adminUsers.map((admin) => (
+                        <SelectItem key={admin.uid} value={admin.uid}>
+                          {admin.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Submit */}
           <div className="flex gap-3 pt-2">
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
-              className="rounded-full flex-1"
+              className="rounded-lg flex-1"
               disabled={submitting}
             >
               Vazgeç
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={submitting || !title.trim() || !assignedTo}
-              className="rounded-full flex-1 gap-2 bg-amber-500 hover:bg-amber-600 text-white"
+              disabled={submitting || !title.trim()}
+              className="rounded-lg flex-1 gap-2 bg-amber-500 hover:bg-amber-600 text-white"
             >
               {submitting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Gönderiliyor...
+                </>
               ) : (
-                <Plus className="w-4 h-4" />
+                <>
+                  <Send className="w-4 h-4" />
+                  Talep Gönder
+                </>
               )}
-              Talep Gönder
             </Button>
           </div>
         </div>
