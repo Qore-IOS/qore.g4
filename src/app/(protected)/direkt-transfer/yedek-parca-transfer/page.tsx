@@ -2075,7 +2075,7 @@ export default function YedekParcaTransferPage() {
             {selectedProduct && (
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</label>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No / Hücre</label>
                   <div className="flex gap-1.5">
                     <Input placeholder="Seri no" value={serialNumber} onChange={(e) => handleTransferSerialChange(e.target.value)} className="cihaz-pressed !border-0 !ring-0 h-9 text-xs flex-1" style={{ borderRadius: 10 }} />
                     {selectedProduct.serialNumbers.length > 0 && (
