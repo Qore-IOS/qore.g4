@@ -11,7 +11,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Upload, Download, Loader2, Save, Trash2, SlidersHorizontal } from 'lucide-react';
+import { Upload, Download, Loader2, Save, Trash2, SlidersHorizontal, Clock } from 'lucide-react';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
@@ -30,6 +31,8 @@ interface RuleState {
     max: number | string;
     maxGun?: number | string;
     aylikTuketimLimiti?: number | string;
+    ortalamaTuketimSuresi?: number | string;
+    tuketimSuresiBirimi?: 'gun' | 'saat';
     enabled: boolean;
   }
 }
@@ -59,6 +62,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
               max: data.max ?? 0,
               maxGun: (data.maxGun ?? '') as string | number,
               aylikTuketimLimiti: (data.aylikTuketimLimiti ?? '') as string | number,
+              ortalamaTuketimSuresi: (data.ortalamaTuketimSuresi ?? '') as string | number,
+              tuketimSuresiBirimi: data.tuketimSuresiBirimi ?? 'gun',
               enabled: true
             };
           }
@@ -79,23 +84,30 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     setRules(prev => {
         const newRules = { ...prev };
         if (checked) {
-            newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '' }), enabled: true };
+            newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun' }), enabled: true };
         } else {
             if(newRules[stockCode]) {
               newRules[stockCode].enabled = false;
             } else {
-              newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', enabled: false };
+              newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: false };
             }
         }
         return newRules;
     });
   };
   
-  const handleRuleChange = (stockCode: string, field: 'min' | 'max' | 'maxGun' | 'aylikTuketimLimiti', value: string) => {
+  const handleRuleChange = (stockCode: string, field: 'min' | 'max' | 'maxGun' | 'aylikTuketimLimiti' | 'ortalamaTuketimSuresi', value: string) => {
     const numValue = value === '' ? '' : Number(value);
     setRules(prev => ({
         ...prev,
-        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', enabled: true }), [field]: numValue }
+        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), [field]: numValue }
+    }));
+  };
+
+  const handleBirimChange = (stockCode: string, birim: 'gun' | 'saat') => {
+    setRules(prev => ({
+        ...prev,
+        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), tuketimSuresiBirimi: birim }
     }));
   };
 
@@ -120,6 +132,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         const max = Number(row['max']);
         const maxGun = Number(row['max_gun'] || row['Max Gün']);
         const aylikTuketimLimiti = Number(row['aylik_tuketim_limiti'] || row['Aylık Tüketim Limiti']);
+        const ortalamaTuketimSuresi = Number(row['ortalama_tuketim_suresi'] || row['Ort. Tüketim Süresi']);
+        const tuketimBirimi = String(row['tuketim_birimi'] || row['Tüketim Birimi'] || '').toLowerCase();
 
         if (isNaN(min) || isNaN(max) || min < 0 || max < min) {
           skippedRows++;
@@ -131,6 +145,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           max,
           maxGun: isNaN(maxGun) ? '' : maxGun,
           aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti,
+          ortalamaTuketimSuresi: isNaN(ortalamaTuketimSuresi) ? '' : ortalamaTuketimSuresi,
+          tuketimSuresiBirimi: tuketimBirimi === 'saat' ? 'saat' : (rules[stockCode]?.tuketimSuresiBirimi ?? 'gun'),
           enabled: rules[stockCode]?.enabled ?? true
         };
         updatedRows++;
@@ -166,7 +182,9 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       min: rule.min,
       max: rule.max,
       'Max Gün': rule.maxGun,
-      'Aylık Tüketim Limiti': rule.aylikTuketimLimiti
+      'Aylık Tüketim Limiti': rule.aylikTuketimLimiti,
+      'Ort. Tüketim Süresi': rule.ortalamaTuketimSuresi,
+      'Tüketim Birimi': rule.tuketimSuresiBirimi === 'saat' ? 'Saat' : 'Gün',
     }));
 
     exportDataToExcel(dataToExport, `${target.name}_Mevcut_MinMax_Kurallari`, 'Kurallar', toast);
@@ -193,19 +211,25 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         const max = Number(rule.max);
         const maxGun = rule.maxGun === '' ? undefined : Number(rule.maxGun);
         const aylikTuketimLimiti = rule.aylikTuketimLimiti === '' ? undefined : Number(rule.aylikTuketimLimiti);
+        const ortalamaTuketimSuresi = rule.ortalamaTuketimSuresi === '' ? undefined : Number(rule.ortalamaTuketimSuresi);
+        const tuketimSuresiBirimi = rule.tuketimSuresiBirimi ?? 'gun';
 
         if (isNaN(min) || isNaN(max) || min < 0 || max < min || (maxGun !== undefined && (isNaN(maxGun) || maxGun < 0)) || (aylikTuketimLimiti !== undefined && isNaN(aylikTuketimLimiti))) {
           toast({ title: `Hata: ${stockCode}`, description: `Geçersiz değerler. Kayıt atlandı.`, variant: "destructive" });
           hasError = true;
-          continue; 
+          continue;
         }
-        
+
         const dataToSet: MinMaxRule = { stokKodu: stockCode, min, max };
         if (maxGun !== undefined) {
           dataToSet.maxGun = maxGun;
         }
         if (aylikTuketimLimiti !== undefined) {
           dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
+        }
+        if (ortalamaTuketimSuresi !== undefined) {
+          dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi;
+          dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi;
         }
 
         batch.set(ruleRef, dataToSet);
@@ -355,7 +379,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
               </div>
               <ScrollArea className="flex-1">
                 {isLoading && !Object.keys(rules).length ? <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin"/></div> :
-                <Table className="min-w-[860px]">
+                <Table className="min-w-[1060px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12">Aktif</TableHead>
@@ -364,6 +388,12 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                       <TableHead className="w-24">Max</TableHead>
                       <TableHead className="w-24">Max Gün</TableHead>
                       <TableHead className="w-32">Aylık Max Tüketim</TableHead>
+                      <TableHead className="w-44">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          Ort. Tüketim Süresi
+                        </div>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -420,12 +450,39 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                               placeholder={targetType === 'depot' ? 'N/A' : 'Limit'}
                             />
                           </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={isEnabled ? (rule?.ortalamaTuketimSuresi ?? '') : ''}
+                                onChange={e => handleRuleChange(product.stokKodu!, 'ortalamaTuketimSuresi', e.target.value)}
+                                disabled={!isEnabled}
+                                className="h-8 w-16"
+                                placeholder="Süre"
+                                min={0}
+                                step={0.5}
+                              />
+                              <Select
+                                value={isEnabled ? (rule?.tuketimSuresiBirimi ?? 'gun') : 'gun'}
+                                onValueChange={(val) => handleBirimChange(product.stokKodu!, val as 'gun' | 'saat')}
+                                disabled={!isEnabled}
+                              >
+                                <SelectTrigger className="h-8 w-[72px] text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="gun">Gün</SelectItem>
+                                  <SelectItem value="saat">Saat</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       );
                     })}
                     {selectedProducts.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                        <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
                           Seçilen ürün bulunamadı.
                         </TableCell>
                       </TableRow>

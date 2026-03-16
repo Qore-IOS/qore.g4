@@ -557,6 +557,8 @@ declare module "@/lib/types" {
     stokKodu: string;
     maxGun?: number;
     aylikTuketimLimiti?: number;
+    ortalamaTuketimSuresi?: number;
+    tuketimSuresiBirimi?: 'gun' | 'saat';
     [k: string]: unknown;
   }
 

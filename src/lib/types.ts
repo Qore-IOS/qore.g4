@@ -123,6 +123,10 @@ export interface MinMaxRule {
   max: number;
   maxGun?: number;
   aylikTuketimLimiti?: number; // Monthly consumption limit
+  /** Ortalama tüketim süresi (gün cinsinden). Örn: 1 kutu X ürün 5 günde tüketilir → 5 */
+  ortalamaTuketimSuresi?: number;
+  /** Tüketim süresi birimi: 'gun' (gün) veya 'saat' */
+  tuketimSuresiBirimi?: 'gun' | 'saat';
 }
 
 export interface User {
