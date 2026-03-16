@@ -1388,50 +1388,52 @@
   }
 }
 
-/* Dock item styling - Apple-like 3D gradient icons */
+/* Dock item styling - Apple-like colorful 3D icons */
 .dock-item-wrapper {
-  @apply w-10 h-10 rounded-[11px] transition-all duration-200 flex items-center justify-center;
+  @apply w-10 h-10 rounded-xl flex items-center justify-center;
   position: relative;
+  transition: background 0.15s ease;
 }
 
-.dock-item-wrapper .dock-icon-bg {
-  @apply w-9 h-9 rounded-[10px] flex items-center justify-center shadow-sm;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+.dock-item-wrapper:hover {
+  @apply bg-black/[0.04];
 }
 
-.dock-item-wrapper:hover .dock-icon-bg {
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.08);
+.dark .dock-item-wrapper:hover {
+  @apply bg-white/[0.06];
 }
 
-.dock-item-wrapper.active .dock-icon-bg {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), inset 0 1px 2px rgba(255, 255, 255, 0.25);
+.dock-item-wrapper.active {
+  @apply bg-black/[0.06];
+}
+
+.dark .dock-item-wrapper.active {
+  @apply bg-white/[0.08];
 }
 
 /* Active indicator dot below icon */
 .dock-item-wrapper.active::after {
   content: '';
   position: absolute;
-  bottom: -4px;
+  bottom: -3px;
   left: 50%;
   transform: translateX(-50%);
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: currentColor;
-  opacity: 0.6;
+  background: #f59e0b;
+  box-shadow: 0 0 4px rgba(245, 158, 11, 0.5);
 }
 
+/* Icon sizing - colorful gradient applied inline via style */
 .dock-item-icon {
-  @apply w-[18px] h-[18px] text-white transition-colors drop-shadow-sm;
+  @apply w-5 h-5;
+  transition: filter 0.15s ease;
 }
 
-/* Fallback for items without gradient bg (e.g. notifications bell) */
-.dock-item-icon.no-gradient {
-  @apply text-gray-700;
-}
-
-.dark .dock-item-icon.no-gradient {
-  @apply text-gray-300;
+/* Hover glow effect on icon */
+.dock-item-wrapper:hover .dock-item-icon {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2)) brightness(1.1);
 }
 
 /* Dock tooltip styling - renders via portal above everything */
