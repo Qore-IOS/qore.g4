@@ -1,6 +1,6 @@
 import type { Depot, User } from '@/lib/types';
 
-const PRIVILEGED_ROLES = new Set(['admin', 'admin_developer']);
+const PRIVILEGED_ROLES = new Set(['super_admin', 'admin', 'admin_developer']);
 
 export const canBypassDepotAssignment = (user?: User | null): boolean => {
   if (!user?.role) return false;

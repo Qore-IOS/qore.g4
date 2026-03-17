@@ -92,7 +92,7 @@ export default function TeknikServisPanel({
   const getDevicesForHospitals = (hospitalIds: string[]): Device[] =>
     devices.filter(d => hospitalIds.includes((d as any).hospitalId)).sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
 
-  const isAdmin = userRole === 'admin';
+  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
 
   const filteredHospitals = useMemo(() => {
     if (isAdmin || userAssignedLabs.length === 0) return hospitals;

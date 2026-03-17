@@ -451,7 +451,7 @@ export function useDock() {
 
         // Intersection filter for fault_opened: non-admin users must have matching role AND assigned lab
         const userRole = currentUserProfile?.role;
-        const userIsAdmin = userRole === 'admin';
+        const userIsAdmin = userRole === 'admin' || userRole === 'super_admin';
         const userAssignedLabs = currentUserProfile?.assignedLaboratories || [];
         const newItems = rawItems.filter((item) => {
           if (item.type !== 'fault_opened') return true; // only filter fault notifications
