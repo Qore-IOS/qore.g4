@@ -1069,32 +1069,6 @@ export default function DirektTransferPanel() {
               {selectedLabName ? `→ ${selectedLabName}` : isBorcMode && selectedCompany ? `→ ${selectedCompany} (Borç)` : ''}
             </p>
           </div>
-          {/* Transfer CTA + count in header */}
-          <div className="flex items-center gap-3">
-            {stepperState.totalAdet > 0 && (
-              <div className="flex items-baseline gap-1.5 mr-1">
-                <span className="text-2xl sm:text-3xl font-extrabold tabular-nums text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
-                <span className="text-xs font-medium text-[var(--dashboard-muted)]">adet</span>
-              </div>
-            )}
-            <button
-              onClick={handleCompleteDirectTransfer}
-              disabled={!isTransferReady || shipmentLoading}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 sm:px-5 sm:py-2.5 rounded-2xl text-sm font-bold transition-all",
-                isTransferReady && !shipmentLoading
-                  ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
-                  : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
-              )}
-            >
-              {shipmentLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Truck className="h-4 w-4" />
-              )}
-              <span className="hidden sm:inline">Transfer Et</span>
-            </button>
-          </div>
           {/* Secondary actions */}
           <div className="flex items-center gap-1.5">
             {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
@@ -1446,6 +1420,29 @@ export default function DirektTransferPanel() {
                   <span className="hidden sm:inline">Temizle</span>
                 </button>
               )}
+              {stepperState.totalAdet > 0 && (
+                <div className="flex items-baseline gap-1.5 ml-1">
+                  <span className="text-2xl sm:text-3xl font-extrabold tabular-nums text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
+                  <span className="text-xs font-medium text-[var(--dashboard-muted)]">adet</span>
+                </div>
+              )}
+              <button
+                onClick={handleCompleteDirectTransfer}
+                disabled={!isTransferReady || shipmentLoading}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 sm:px-5 sm:py-2.5 rounded-2xl text-sm font-bold transition-all",
+                  isTransferReady && !shipmentLoading
+                    ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
+                    : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+                )}
+              >
+                {shipmentLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Truck className="h-4 w-4" />
+                )}
+                <span className="hidden sm:inline">Transfer Et</span>
+              </button>
             </div>
 
             {/* ── Table header (desktop) ── */}
