@@ -9,11 +9,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell } from 'lucide-react';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { User as AppUser, Hospital, Depot, AppView, ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { useCompany } from '@/contexts/company-context';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
@@ -66,6 +67,7 @@ function cleanFirestoreData<T extends Record<string, any>>(data: T): Partial<T> 
 export default function KullaniciPanel() {
   const { toast } = useToast();
   const { signup } = useAuth();
+  const { activeCompanyId } = useCompany();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -78,11 +80,14 @@ export default function KullaniciPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
+      // company-scoped queries for users, hospitals, depots
+      const companyFilter = activeCompanyId ? where('companyId', '==', activeCompanyId) : null;
+
       const [uSnap, hSnap, dSnap, pSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes'))
+        getDocs(companyFilter ? query(collection(db, 'users'), companyFilter) : collection(db, 'users')),
+        getDocs(companyFilter ? query(collection(db, 'hospitals'), companyFilter) : collection(db, 'hospitals')),
+        getDocs(companyFilter ? query(collection(db, 'depots'), companyFilter) : collection(db, 'depots')),
+        getDocs(collection(db, 'productCodes')), // shared - no company filter
       ]);
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
@@ -96,7 +101,7 @@ export default function KullaniciPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, activeCompanyId]);
 
   useEffect(() => {
     fetchData();
@@ -142,6 +147,8 @@ export default function KullaniciPanel() {
       phoneNumber: currentUser.phoneNumber || '',
       notificationsEnabled: currentUser.notificationsEnabled ?? false,
       notificationPreferences: currentUser.notificationsEnabled ? (currentUser.notificationPreferences || []) : [],
+      // Multi-tenancy: assign user to active company
+      companyId: currentUser.companyId || activeCompanyId || undefined,
     };
     
     const payload = cleanFirestoreData(userData);

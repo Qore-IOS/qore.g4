@@ -2,19 +2,22 @@
 'use client';
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Warehouse, Building, Pill, MapPin, Users, Barcode, Moon, Sun, LogOut, Beaker, QrCode, History, BookText, AlertTriangle, UserCog, Shield, Send, Star } from 'lucide-react';
+import { Warehouse, Building, Pill, MapPin, Users, Barcode, Moon, Sun, LogOut, Beaker, QrCode, History, BookText, AlertTriangle, UserCog, Shield, Send, Star, Building2 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { createNotification } from '@/lib/notifications';
+import { useCompany } from '@/contexts/company-context';
+import { CompanySwitcher } from '@/components/company-switcher';
 
 export default function YonetimPanel() {
   const router = useRouter();
   const { setTheme } = useTheme();
-  const { logout, isAdmin, currentUserProfile } = useAuth();
+  const { logout, isAdmin, currentUserProfile, isSuperAdmin } = useAuth();
   const { toast } = useToast();
+  const { activeCompanyId, activeCompany } = useCompany();
 
   if (!isAdmin) {
     return (
@@ -57,6 +60,7 @@ export default function YonetimPanel() {
     { name: 'Tanımlar', icon: BookText, path: '/yonetim/tanimlar' },
     { name: 'Personel Yönetimi', icon: UserCog, path: '/yonetim/personel-yonetimi' },
     { name: 'Envanter Yönetimi', icon: Warehouse, path: '/yonetim/envanter-yonetimi' },
+    { name: 'Şirket Yönetimi', icon: Building2, path: '/yonetim/sirketler' },
   ];
 
   return (
@@ -106,6 +110,29 @@ export default function YonetimPanel() {
           </CardContent>
         </Card>
 
+
+      {/* Active Company Info */}
+      <Card className="shadow-lg border-primary/20 bg-primary/5">
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Building2 className="h-5 w-5 text-primary" />
+              <div>
+                <p className="text-sm font-medium">
+                  Aktif Şirket: <span className="font-mono text-primary">{activeCompanyId}</span>
+                  {activeCompany?.displayName && (
+                    <span className="text-muted-foreground font-normal ml-1">— {activeCompany.displayName}</span>
+                  )}
+                </p>
+                {isSuperAdmin && (
+                  <p className="text-xs text-amber-400">Süper Admin modunda — şirketler arası geçiş yapabilirsiniz</p>
+                )}
+              </div>
+            </div>
+            <CompanySwitcher />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Dashboard Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

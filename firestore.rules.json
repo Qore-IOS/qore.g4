@@ -2,14 +2,19 @@
   "rules": {
     "users": {
       "$uid": {
-        "allow read, write": "if request.auth != null && (request.auth.uid == $uid || get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin')"
+        "allow read, write": "if request.auth != null && (request.auth.uid == $uid || get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true)"
+      }
+    },
+    "companies": {
+      "$companyId": {
+        "allow read": "if request.auth != null;",
+        "allow write": "if request.auth != null && (get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true);"
       }
     },
     "deviceFaultReports": {
       "allow read": "if true;",
       "allow write": "if request.auth != null;"
     },
-    // Sadece bildirimleri ve diğer gerekli koleksiyonları yetkilendirilmiş kullanıcılara aç
     "notifications/{notificationId}": {
       "allow read, write": "if request.auth != null;"
     },
@@ -21,6 +26,18 @@
     },
     "deviceLabPools/{poolId}": {
         "allow read, write": "if request.auth != null;"
+    },
+    "productCodes": {
+      "$docId": {
+        "allow read": "if request.auth != null;",
+        "allow write": "if request.auth != null && (get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true);"
+      }
+    },
+    "barcodeFormats": {
+      "$docId": {
+        "allow read": "if request.auth != null;",
+        "allow write": "if request.auth != null && (get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true);"
+      }
     }
   }
 }

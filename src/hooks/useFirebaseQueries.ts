@@ -8,6 +8,9 @@
  *
  * Önceki yaklaşım: Her component mount'ta tam collection listener
  * Yeni yaklaşım: Paylaşılan cache + configurable polling
+ *
+ * Multi-tenancy: Tüm tenant-scoped sorgular activeCompanyId ile filtrelenir.
+ * Ortak veriler (productCodes, barcodeFormats) filtrelenmez.
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -26,6 +29,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { useEffect, useRef } from 'react';
+import { useCompany } from '@/contexts/company-context';
 import type {
   Hospital,
   Depot,
@@ -78,10 +82,14 @@ export function useProductCodes() {
  * Depots - Used in 12+ places
  */
 export function useDepots() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['depots'],
+    queryKey: ['depots', activeCompanyId],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'depots'));
+      const q = activeCompanyId
+        ? query(collection(db, 'depots'), where('companyId', '==', activeCompanyId))
+        : collection(db, 'depots');
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
     },
     staleTime: 60 * 60 * 1000,
@@ -94,10 +102,14 @@ export function useDepots() {
  * Hospitals/Laboratories - Used in 10+ places
  */
 export function useHospitals() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['hospitals'],
+    queryKey: ['hospitals', activeCompanyId],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'hospitals'));
+      const q = activeCompanyId
+        ? query(collection(db, 'hospitals'), where('companyId', '==', activeCompanyId))
+        : collection(db, 'hospitals');
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
     },
     staleTime: 60 * 60 * 1000,
@@ -110,10 +122,14 @@ export function useHospitals() {
  * Devices
  */
 export function useDevices() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['devices'],
+    queryKey: ['devices', activeCompanyId],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'devices'));
+      const q = activeCompanyId
+        ? query(collection(db, 'devices'), where('companyId', '==', activeCompanyId))
+        : collection(db, 'devices');
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
     },
     staleTime: 30 * 60 * 1000, // 30 minutes
@@ -126,10 +142,14 @@ export function useDevices() {
  * Lab Pools
  */
 export function useLabPools() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['labPools'],
+    queryKey: ['labPools', activeCompanyId],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'labPools'));
+      const q = activeCompanyId
+        ? query(collection(db, 'labPools'), where('companyId', '==', activeCompanyId))
+        : collection(db, 'labPools');
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool));
     },
     staleTime: 60 * 60 * 1000,
@@ -157,10 +177,14 @@ export function useBarcodeFormatsQuery() {
  * Address Definitions
  */
 export function useAddressDefinitions() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['addressDefinitions'],
+    queryKey: ['addressDefinitions', activeCompanyId],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'addressDefinitions'));
+      const q = activeCompanyId
+        ? query(collection(db, 'addressDefinitions'), where('companyId', '==', activeCompanyId))
+        : collection(db, 'addressDefinitions');
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AddressDefinition));
     },
     staleTime: 60 * 60 * 1000,
@@ -169,13 +193,17 @@ export function useAddressDefinitions() {
 }
 
 /**
- * Users
+ * Users - company-scoped (super admins see all via their active company)
  */
 export function useUsers() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['users'],
+    queryKey: ['users', activeCompanyId],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'users'));
+      const q = activeCompanyId
+        ? query(collection(db, 'users'), where('companyId', '==', activeCompanyId))
+        : collection(db, 'users');
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ uid: d.id, ...processTimestamp(d.data()) } as AppUser));
     },
     staleTime: 30 * 60 * 1000,
@@ -192,11 +220,14 @@ export function useUsers() {
  * No polling - invalidated via metadata listener when stock changes
  */
 export function useDepoStokByDepot(depotId: string | null) {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['depoStok', depotId],
+    queryKey: ['depoStok', depotId, activeCompanyId],
     queryFn: async () => {
       if (!depotId) return [];
-      const q = query(collection(db, 'depoStok'), where('depotId', '==', depotId));
+      const constraints = [where('depotId', '==', depotId)];
+      if (activeCompanyId) constraints.push(where('companyId', '==', activeCompanyId));
+      const q = query(collection(db, 'depoStok'), ...constraints);
       const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
@@ -212,10 +243,14 @@ export function useDepoStokByDepot(depotId: string | null) {
  * No polling - invalidated via metadata listener when stock changes
  */
 export function useAllDepoStok() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['depoStok', 'all'],
+    queryKey: ['depoStok', 'all', activeCompanyId],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'depoStok'));
+      const q = activeCompanyId
+        ? query(collection(db, 'depoStok'), where('companyId', '==', activeCompanyId))
+        : collection(db, 'depoStok');
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -237,9 +272,10 @@ export function useLabStock(
   options: { enabled?: boolean } = {}
 ) {
   const { enabled: externalEnabled = true } = options;
+  const { activeCompanyId } = useCompany();
 
   return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(',')],
+    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(','), activeCompanyId],
     queryFn: async () => {
       if (labIds.length === 0) return [];
       // We can only use 'in' with up to 30 values
@@ -247,22 +283,24 @@ export function useLabStock(
       const names = labNames.slice(0, 30);
 
       // Query by hedefKurumId
-      const idQuery = query(
-        collection(db, 'depoStok'),
+      const idConstraints = [
         where('hedefKurumId', 'in', ids),
-        where('isShipped', '==', true)
-      );
+        where('isShipped', '==', true),
+        ...(activeCompanyId ? [where('companyId', '==', activeCompanyId)] : []),
+      ];
+      const idQuery = query(collection(db, 'depoStok'), ...idConstraints);
       const idSnap = await getDocs(idQuery);
       const idResults = idSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
 
       // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
       let legacyResults: DepoStokItem[] = [];
       if (names.length > 0) {
-        const nameQuery = query(
-          collection(db, 'depoStok'),
+        const nameConstraints = [
           where('hedefKurum', 'in', names),
-          where('isShipped', '==', true)
-        );
+          where('isShipped', '==', true),
+          ...(activeCompanyId ? [where('companyId', '==', activeCompanyId)] : []),
+        ];
+        const nameQuery = query(collection(db, 'depoStok'), ...nameConstraints);
         const nameSnap = await getDocs(nameQuery);
         legacyResults = nameSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       }
@@ -290,13 +328,18 @@ export function useLabStock(
  * Consumption Records - Recent only (last 500)
  */
 export function useRecentConsumption(limitCount = 500) {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['tuketimKayitlari', 'recent', limitCount],
+    queryKey: ['tuketimKayitlari', 'recent', limitCount, activeCompanyId],
     queryFn: async () => {
+      const constraints = [
+        orderBy('consumptionTimestamp', 'desc'),
+        limit(limitCount),
+        ...(activeCompanyId ? [where('companyId', '==', activeCompanyId)] : []),
+      ];
       const q = query(
         collection(db, 'tuketimKayitlari'),
-        orderBy('consumptionTimestamp', 'desc'),
-        limit(limitCount)
+        ...constraints
       );
       const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
@@ -392,14 +435,16 @@ export async function fetchConsumptionByDateRange(
  * Shipments - Recent only
  */
 export function useRecentShipments(limitCount = 200) {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['shipments', 'recent', limitCount],
+    queryKey: ['shipments', 'recent', limitCount, activeCompanyId],
     queryFn: async () => {
-      const q = query(
-        collection(db, 'shipments'),
+      const constraints = [
         orderBy('createdAt', 'desc'),
-        limit(limitCount)
-      );
+        limit(limitCount),
+        ...(activeCompanyId ? [where('companyId', '==', activeCompanyId)] : []),
+      ];
+      const q = query(collection(db, 'shipments'), ...constraints);
       const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment));
     },
@@ -561,15 +606,17 @@ import type { DutyShift } from '@/lib/types';
  * Considers startTime/endTime fields for accurate time-based filtering
  */
 export function useActiveDutyShifts() {
+  const { activeCompanyId } = useCompany();
   return useQuery({
-    queryKey: ['dutyShifts', 'active'],
+    queryKey: ['dutyShifts', 'active', activeCompanyId],
     queryFn: async () => {
       const now = new Date();
+      const constraints = [
+        where('status', '==', 'active'),
+        ...(activeCompanyId ? [where('companyId', '==', activeCompanyId)] : []),
+      ];
       const snap = await getDocs(
-        query(
-          collection(db, 'dutyShifts'),
-          where('status', '==', 'active')
-        )
+        query(collection(db, 'dutyShifts'), ...constraints)
       );
       // Filter to only include shifts where current datetime is within range (including startTime/endTime)
       return snap.docs

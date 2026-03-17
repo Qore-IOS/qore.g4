@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/contexts/auth-context";
 import { QueryProvider } from "@/contexts/query-context";
+import { CompanyProviderWrapper } from "@/components/company-provider-wrapper";
 import { Toaster } from "@/components/ui/toaster";
 import MobileResponsiveFix from "@/components/responsive/MobileResponsiveFix";
 import React from "react";
@@ -46,11 +47,13 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <QueryProvider>
-              <MobileResponsiveFix />
-              {children}
-              <Toaster />
-            </QueryProvider>
+            <CompanyProviderWrapper>
+              <QueryProvider>
+                <MobileResponsiveFix />
+                {children}
+                <Toaster />
+              </QueryProvider>
+            </CompanyProviderWrapper>
           </AuthProvider>
         </ThemeProvider>
         {/* PDF.js is loaded lazily where needed - see src/lib/pdf.ts */}

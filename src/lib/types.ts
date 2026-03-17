@@ -129,6 +129,27 @@ export interface MinMaxRule {
   tuketimSuresiBirimi?: 'gun' | 'saat';
 }
 
+// ============================================================================
+// MULTI-TENANCY: Company (Tenant) definition
+// ============================================================================
+export interface Company {
+  id: string;
+  name: string;           // Short identifier e.g. "ISLAB2"
+  displayName: string;    // Full display name e.g. "ISLAB Tıbbi Sistemler"
+  isLegacy?: boolean;     // true for the migration (ISLAB2) company
+  isActive: boolean;
+  createdAt: TimestampLike;
+  createdBy: string;      // userId of creator
+  description?: string;
+  logoUrl?: string;
+  settings?: {
+    allowedDomains?: string[];
+    maxUsers?: number;
+    country?: string;
+    timezone?: string;
+  };
+}
+
 export interface User {
   uid: string;
   email: string | null;
@@ -146,6 +167,9 @@ export interface User {
   notificationPreferences?: string[]; // Array of notification types
   themePreference?: 'light' | 'dark' | 'system'; // User's theme preference stored in Firestore
   lastSelectedLabId?: string; // Last selected laboratory ID for teknisyen users (persisted in Firestore)
+  // Multi-tenancy fields
+  companyId?: string;       // Primary company this user belongs to
+  isSuperAdmin?: boolean;   // Super admin can access all companies' data
 }
 
 export interface ScannedItem {
@@ -522,6 +546,8 @@ export type AppView =
   | 'nobet-yonetimi'
   | 'satin-alma'
   | 'kullanici-talepleri'
+  | 'sirketler'
+  | 'route-planlayici'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';

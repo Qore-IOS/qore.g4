@@ -31,6 +31,7 @@ interface AuthContextType {
   isLoadingAuth: boolean;
   isAdmin: boolean;
   isAdminDeveloper: boolean;
+  isSuperAdmin: boolean;
   permissions: AppView[];
   isOrbAnimationEnabled: boolean;
   toggleOrbAnimation: () => void;
@@ -60,6 +61,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAdminDeveloper, setIsAdminDeveloper] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
@@ -167,6 +169,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
               setIsAdmin(userData.role === 'admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
               setIsAdminDeveloper(userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
+              setIsSuperAdmin(userData.isSuperAdmin === true || user.uid === ADMIN_USER_UID);
               setPermissions(userPermissions);
 
               // Force dark mode for 'user' role, otherwise apply user's preference
@@ -210,6 +213,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setCurrentUserProfile(null);
         setIsAdmin(false);
         setIsAdminDeveloper(false);
+        setIsSuperAdmin(false);
         setPermissions([]);
       }
       setIsLoadingAuth(false);
@@ -397,6 +401,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     isLoadingAuth,
     isAdmin,
     isAdminDeveloper,
+    isSuperAdmin,
     permissions,
     isOrbAnimationEnabled,
     toggleOrbAnimation,

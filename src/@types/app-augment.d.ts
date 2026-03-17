@@ -39,10 +39,39 @@ declare module "@/lib/types" {
     | "cihaz-yonetimi"
     | "miad-uyarilari"
     | "verimlilik"
-    | "numune-arsivi";
+    | "numune-arsivi"
+    | "sirketler"
+    | "route-planlayici"
+    | "planner"
+    | "satin-alma"
+    | "kullanici-talepleri"
+    | "nobet-yonetimi"
+    | "teknik-servis"
+    | "aplikasyon-paneli"
+    | "tanimlar"
+    | "personel-islemleri";
+
+  // ---------- Multi-Tenancy ----------
+  export interface Company {
+    id: string;
+    name: string;
+    displayName: string;
+    isLegacy?: boolean;
+    isActive: boolean;
+    createdAt: TimestampLike;
+    createdBy: string;
+    description?: string;
+    logoUrl?: string;
+    settings?: {
+      allowedDomains?: string[];
+      maxUsers?: number;
+      country?: string;
+      timezone?: string;
+    };
+  }
 
   export interface User {
-    id: ID;
+    id?: ID;
     uid?: string;
     displayName?: string;
     email?: string | null;
@@ -61,6 +90,9 @@ declare module "@/lib/types" {
     notificationsEnabled?: boolean;
     notificationPreferences?: string[];
     themePreference?: 'light' | 'dark' | 'system';
+    // Multi-tenancy fields
+    companyId?: string;
+    isSuperAdmin?: boolean;
   }
 
   // ---------- Master Data ----------
