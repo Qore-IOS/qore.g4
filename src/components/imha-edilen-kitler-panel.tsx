@@ -1,22 +1,18 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, writeBatch, doc } from 'firebase/firestore';
+import { collection, getDocs, query, where, writeBatch, doc, orderBy, limit, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Trash2, Upload, Camera, Download, Eye } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import type { Hospital, Depot, ProductCode, DepoStokItem } from '@/lib/types';
+import { Loader2, Trash2, Upload, Camera, Download, History, ScanLine, FileSpreadsheet, Package, AlertTriangle, ShieldAlert, ClipboardList, Info, X, ChevronDown } from 'lucide-react';
+import type { Hospital, Depot, ProductCode, DepoStokItem, DestroyedKitRecord } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { playFeedback, generateId } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -24,8 +20,10 @@ import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
 import * as XLSX from 'xlsx';
-import { serverTimestamp } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
     ssr: false,
@@ -79,7 +77,7 @@ export default function ImhaEdilenKitlerPanel() {
     const [selectedDepotId, setSelectedDepotId] = useState<string>('');
     const [selectedLabId, setSelectedLabId] = useState<string>('');
 
-    // Destroyed Items List (local state before saving)
+    // Destroyed Items List
     const [destroyedItems, setDestroyedItems] = useState<DestroyedItem[]>([]);
 
     // Barcode scanning
@@ -93,20 +91,47 @@ export default function ImhaEdilenKitlerPanel() {
     const [pendingItem, setPendingItem] = useState<DestroyedItem | null>(null);
     const [remainingTestsInput, setRemainingTestsInput] = useState<string>('');
 
-    // Fetch master data
+    // Scan feedback
+    const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+    const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const flashScanFeedback = useCallback((type: 'success' | 'error', message: string) => {
+        if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+        setScanFeedback({ type, message });
+        scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 2500);
+    }, []);
+
+    // Recent records
+    const [recentRecords, setRecentRecords] = useState<DestroyedKitRecord[]>([]);
+
+    // Active input method
+    const [activeMethod, setActiveMethod] = useState<'barcode' | 'camera' | 'excel'>('barcode');
+
+    // Excel upload state
+    const [excelFileName, setExcelFileName] = useState<string>('');
+    const [excelRowCount, setExcelRowCount] = useState<number>(0);
+
+    // Expanded items in list
+    const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+
+    // Fetch master data + recent records
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
             try {
-                const [hospitalsSnap, depotsSnap, productsSnap] = await Promise.all([
+                const [hospitalsSnap, depotsSnap, productsSnap, recentSnap] = await Promise.all([
                     getDocs(collection(db, 'hospitals')),
                     getDocs(collection(db, 'depots')),
                     getDocs(collection(db, 'productCodes')),
+                    getDocs(query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'), limit(5))),
                 ]);
 
                 setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
                 setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
                 setProducts(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+                setRecentRecords(recentSnap.docs.map(d => {
+                    const data = d.data();
+                    return { id: d.id, ...data, resolvedAt: (data.resolvedAt as Timestamp)?.toDate() } as DestroyedKitRecord;
+                }));
             } catch (error) {
                 console.error("Error fetching master data:", error);
                 toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -117,14 +142,12 @@ export default function ImhaEdilenKitlerPanel() {
         fetchData();
     }, [toast]);
 
-    // Get selected source name
     const selectedSourceName = useMemo(() => {
-        if (selectedSourceType === 'depot') {
-            return depots.find(d => d.id === selectedDepotId)?.name || '';
-        } else {
-            return hospitals.find(h => h.id === selectedLabId)?.name || '';
-        }
+        if (selectedSourceType === 'depot') return depots.find(d => d.id === selectedDepotId)?.name || '';
+        return hospitals.find(h => h.id === selectedLabId)?.name || '';
     }, [selectedSourceType, selectedDepotId, selectedLabId, depots, hospitals]);
+
+    const selectedSourceId = selectedSourceType === 'depot' ? selectedDepotId : selectedLabId;
 
     // Handle remaining tests dialog confirmation
     const handleRemainingTestsConfirm = () => {
@@ -134,25 +157,21 @@ export default function ImhaEdilenKitlerPanel() {
         const itemWithRemainingTests = { ...pendingItem, remainingTests };
 
         if (pendingItem.isGroup) {
-            // Group item
             setDestroyedItems(prev => {
                 const existing = prev.find(item => item.key === pendingItem.key && item.isGroup);
                 if (existing) {
                     return prev.map(item =>
-                        item.key === pendingItem.key
-                            ? { ...item, adet: item.adet + 1 }
-                            : item
+                        item.key === pendingItem.key ? { ...item, adet: item.adet + 1 } : item
                     );
                 }
                 return [itemWithRemainingTests, ...prev];
             });
         } else {
-            // Serial item
             setDestroyedItems(prev => [itemWithRemainingTests, ...prev]);
         }
 
         playFeedback();
-        toast({ title: 'Ürün Eklendi', description: `${pendingItem.stokAdi} imha listesine eklendi.` });
+        flashScanFeedback('success', `${pendingItem.stokAdi} imha listesine eklendi.`);
 
         setIsRemainingTestsDialogOpen(false);
         setPendingItem(null);
@@ -189,8 +208,6 @@ export default function ImhaEdilenKitlerPanel() {
         );
         const snap = await getDocs(q);
         const allItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
-        // Lot okutulduğunda sadece seri numarası OLMAYAN kayıtları döndür
-        // Bu sayede seri nolu kayıtlar sadece seri no okutulduğunda işlem görür
         return allItems.filter(item => !item.seriNumarasi || item.seriNumarasi.trim() === '');
     }, []);
 
@@ -198,10 +215,9 @@ export default function ImhaEdilenKitlerPanel() {
     const handleScan = useCallback(async (raw: string, source: 'hid' | 'camera' = 'hid') => {
         if (!raw) return;
 
-        const sourceId = selectedSourceType === 'depot' ? selectedDepotId : selectedLabId;
-        if (!sourceId) {
+        if (!selectedSourceId) {
             playFeedback(true);
-            toast({ title: 'Uyarı', description: 'Önce bir depo veya laboratuvar seçin.', variant: 'destructive' });
+            flashScanFeedback('error', 'Önce bir depo veya laboratuvar seçin.');
             return;
         }
 
@@ -222,14 +238,14 @@ export default function ImhaEdilenKitlerPanel() {
 
         if (!resolveResult || !resolveResult.parsed) {
             playFeedback(true);
-            toast({ title: 'Ayrıştırma Hatası', description: 'Barkod tanımlı formatlarla eşleşmiyor.', variant: 'destructive' });
+            flashScanFeedback('error', 'Barkod tanımlı formatlarla eşleşmiyor.');
             return;
         }
 
         const resolved = resolveResult.parsed;
         if (!resolveResult.product || !resolved.stokKodu) {
             playFeedback(true);
-            toast({ title: 'Ürün Bulunamadı', description: 'Barkoddan bir ürün çözümlenemedi.', variant: 'destructive' });
+            flashScanFeedback('error', 'Barkoddan bir ürün çözümlenemedi.');
             return;
         }
 
@@ -243,11 +259,10 @@ export default function ImhaEdilenKitlerPanel() {
         // Check for duplicate serial
         if (seri && destroyedItems.some(item => item.stokKodu === stokKodu && item.seriNumarasi === seri)) {
             playFeedback(true);
-            toast({ title: 'Mükerrer Seri No', description: 'Bu seri no zaten listeye eklendi.', variant: 'default' });
+            flashScanFeedback('error', `SN ${seri} zaten listeye eklendi.`);
             return;
         }
 
-        // Determine tracking mode based on what the barcode contains
         const matchedFormat = resolved.matchedFormatId
             ? barcodeFormats.find(f => f.id === resolved.matchedFormatId)
             : undefined;
@@ -256,39 +271,23 @@ export default function ImhaEdilenKitlerPanel() {
         if (mode === 'serial') {
             if (!seri) {
                 playFeedback(true);
-                toast({ title: 'Seri Eksik', description: 'Seri no takipli üründe barkod seri içermiyor.', variant: 'destructive' });
+                flashScanFeedback('error', 'Seri no takipli üründe barkod seri içermiyor.');
                 return;
             }
 
-            // Check stock
-            const items = await countStockBySerial(stokKodu, seri, sourceId, selectedSourceType);
+            const items = await countStockBySerial(stokKodu, seri, selectedSourceId, selectedSourceType);
             if (items.length === 0) {
-                toast({
-                    title: 'Stok Bulunamadı',
-                    description: `Seri No ${seri} seçilen ${selectedSourceType === 'depot' ? 'depoda' : 'laboratuvarda'} bulunamadı. Yine de eklenecek.`,
-                    variant: 'default'
-                });
+                flashScanFeedback('error', `SN ${seri} stokta bulunamadı. Yine de eklenecek.`);
             }
 
-            // Prepare item and show dialog
             const newItem: DestroyedItem = {
-                id: generateId(),
-                stokKodu,
-                stokAdi,
-                lotNumarasi: lot,
-                miad,
-                seriNumarasi: seri,
-                adet: 1,
-                sourceType: 'barcode',
-                key: generateId(),
-                isGroup: false,
+                id: generateId(), stokKodu, stokAdi, lotNumarasi: lot, miad, seriNumarasi: seri,
+                adet: 1, sourceType: 'barcode', key: generateId(), isGroup: false,
                 ...(selectedSourceType === 'depot'
                     ? { depotId: selectedDepotId, depotName: selectedSourceName }
-                    : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName }
-                )
+                    : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName })
             };
 
-            // Set default remaining tests to package quantity or 1
             const defaultRemainingTests = product.ambalajDegeri || 1;
             setPendingItem(newItem);
             setRemainingTestsInput(String(defaultRemainingTests));
@@ -299,52 +298,35 @@ export default function ImhaEdilenKitlerPanel() {
         if (mode === 'lot_barcode' || mode === 'lot_manual') {
             if (!lot) {
                 playFeedback(true);
-                toast({ title: 'Lot Eksik', description: 'Lot bilgisi gerekli fakat bulunamadı.', variant: 'destructive' });
+                flashScanFeedback('error', 'Lot bilgisi gerekli fakat bulunamadı.');
                 return;
             }
 
-            // Check stock
-            const items = await countStockByLot(stokKodu, lot, sourceId, selectedSourceType);
+            const items = await countStockByLot(stokKodu, lot, selectedSourceId, selectedSourceType);
             if (items.length === 0) {
-                toast({
-                    title: 'Stok Bulunamadı',
-                    description: `Lot ${lot} seçilen ${selectedSourceType === 'depot' ? 'depoda' : 'laboratuvarda'} bulunamadı. Yine de eklenecek.`,
-                    variant: 'default'
-                });
+                flashScanFeedback('error', `Lot ${lot} stokta bulunamadı. Yine de eklenecek.`);
             }
 
-            // Prepare item and show dialog
             const key = `${stokKodu}__${lot}`;
             const existing = destroyedItems.find(item => item.key === key && item.isGroup);
 
             if (existing) {
-                // If group already exists, just increment without showing dialog
                 setDestroyedItems(prev =>
                     prev.map(item => item.key === key ? { ...item, adet: item.adet + 1 } : item)
                 );
                 playFeedback();
-                toast({ title: 'Ürün Eklendi', description: `${stokAdi} (Lot: ${lot}) imha listesine eklendi.` });
+                flashScanFeedback('success', `${stokAdi} (Lot: ${lot}) eklendi.`);
                 return;
             }
 
             const newItem: DestroyedItem = {
-                id: generateId(),
-                stokKodu,
-                stokAdi,
-                lotNumarasi: lot,
-                miad,
-                seriNumarasi: '',
-                adet: 1,
-                sourceType: 'barcode',
-                key,
-                isGroup: true,
+                id: generateId(), stokKodu, stokAdi, lotNumarasi: lot, miad, seriNumarasi: '',
+                adet: 1, sourceType: 'barcode', key, isGroup: true,
                 ...(selectedSourceType === 'depot'
                     ? { depotId: selectedDepotId, depotName: selectedSourceName }
-                    : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName }
-                )
+                    : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName })
             };
 
-            // Set default remaining tests to package quantity or 1
             const defaultRemainingTests = product.ambalajDegeri || 1;
             setPendingItem(newItem);
             setRemainingTestsInput(String(defaultRemainingTests));
@@ -357,41 +339,30 @@ export default function ImhaEdilenKitlerPanel() {
         const existing = destroyedItems.find(item => item.key === key && item.isGroup);
 
         if (existing) {
-            // If group already exists, just increment without showing dialog
             setDestroyedItems(prev =>
                 prev.map(item => item.key === key ? { ...item, adet: item.adet + 1 } : item)
             );
             playFeedback();
-            toast({ title: 'Ürün Eklendi', description: `${stokAdi} imha listesine eklendi.` });
+            flashScanFeedback('success', `${stokAdi} eklendi.`);
             return;
         }
 
         const newItem: DestroyedItem = {
-            id: generateId(),
-            stokKodu,
-            stokAdi,
-            lotNumarasi: '',
-            miad: '',
-            seriNumarasi: '',
-            adet: 1,
-            sourceType: 'barcode',
-            key,
-            isGroup: true,
+            id: generateId(), stokKodu, stokAdi, lotNumarasi: '', miad: '', seriNumarasi: '',
+            adet: 1, sourceType: 'barcode', key, isGroup: true,
             ...(selectedSourceType === 'depot'
                 ? { depotId: selectedDepotId, depotName: selectedSourceName }
-                : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName }
-            )
+                : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName })
         };
 
-        // Set default remaining tests to package quantity or 1
         const defaultRemainingTests = product.ambalajDegeri || 1;
         setPendingItem(newItem);
         setRemainingTestsInput(String(defaultRemainingTests));
         setIsRemainingTestsDialogOpen(true);
-    }, [selectedSourceType, selectedDepotId, selectedLabId, selectedFormatId, barcodeFormats, products, destroyedItems, parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode, toast, selectedSourceName, countStockBySerial, countStockByLot]);
+    }, [selectedSourceType, selectedDepotId, selectedLabId, selectedSourceId, selectedFormatId, barcodeFormats, products, destroyedItems, parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode, selectedSourceName, countStockBySerial, countStockByLot, flashScanFeedback]);
 
     useHidScanner({
-        enabled: true,
+        enabled: !isRemainingTestsDialogOpen && !isCameraScannerOpen,
         onScan: ({ raw }) => {
             if (raw) handleScan(raw.trim(), 'hid');
         },
@@ -407,8 +378,7 @@ export default function ImhaEdilenKitlerPanel() {
         const file = event.target.files?.[0];
         if (!file) return;
 
-        const sourceId = selectedSourceType === 'depot' ? selectedDepotId : selectedLabId;
-        if (!sourceId) {
+        if (!selectedSourceId) {
             toast({ title: 'Uyarı', description: 'Önce bir depo veya laboratuvar seçin.', variant: 'destructive' });
             return;
         }
@@ -419,7 +389,6 @@ export default function ImhaEdilenKitlerPanel() {
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-            // Expected columns: stok kodu, lot, miad, seri no, kalan test
             let addedCount = 0;
             for (const row of jsonData) {
                 const stokKodu = row['stok kodu'] || row['Stok Kodu'] || row['STOK KODU'];
@@ -431,51 +400,32 @@ export default function ImhaEdilenKitlerPanel() {
                 if (!stokKodu) continue;
 
                 const product = products.find(p => p.stokKodu === stokKodu);
-                if (!product) {
-                    console.warn(`Ürün bulunamadı: ${stokKodu}`);
-                    continue;
-                }
+                if (!product) continue;
 
                 const stokAdi = product.stokAdi ?? '';
 
-                // Check for duplicate serial
-                if (seri && destroyedItems.some(item => item.stokKodu === stokKodu && item.seriNumarasi === seri)) {
-                    continue; // Skip duplicate
-                }
+                if (seri && destroyedItems.some(item => item.stokKodu === stokKodu && item.seriNumarasi === seri)) continue;
 
-                // Parse remaining tests or use default
                 let remainingTests: number | undefined;
                 if (kalanTest) {
                     const parsed = parseInt(String(kalanTest), 10);
-                    if (!isNaN(parsed)) {
-                        remainingTests = parsed;
-                    }
+                    if (!isNaN(parsed)) remainingTests = parsed;
                 } else {
-                    // Default to package quantity or 1
                     remainingTests = product.ambalajDegeri || 1;
                 }
 
                 const newItem: DestroyedItem = {
-                    id: generateId(),
-                    stokKodu,
-                    stokAdi,
-                    lotNumarasi: lot,
-                    miad,
-                    seriNumarasi: seri,
-                    adet: 1,
-                    remainingTests,
-                    sourceType: 'excel',
+                    id: generateId(), stokKodu, stokAdi, lotNumarasi: lot, miad, seriNumarasi: seri,
+                    adet: 1, remainingTests, sourceType: 'excel',
                     key: seri ? generateId() : `${stokKodu}__${lot}`,
                     isGroup: !seri,
                     ...(selectedSourceType === 'depot'
                         ? { depotId: selectedDepotId, depotName: selectedSourceName }
-                        : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName }
-                    )
+                        : { laboratoryId: selectedLabId, laboratoryName: selectedSourceName })
                 };
 
                 setDestroyedItems(prev => {
                     if (!seri && lot) {
-                        // Group by lot
                         const existing = prev.find(item => item.key === newItem.key && item.isGroup);
                         if (existing) {
                             return prev.map(item => item.key === newItem.key ? { ...item, adet: item.adet + 1 } : item);
@@ -487,16 +437,21 @@ export default function ImhaEdilenKitlerPanel() {
                 addedCount++;
             }
 
-            toast({ title: 'Excel Yüklendi', description: `${addedCount} ürün imha listesine eklendi.` });
+            setExcelFileName(file.name);
+            setExcelRowCount(addedCount);
+            flashScanFeedback('success', `${addedCount} ürün excel'den eklendi.`);
         } catch (error) {
             console.error('Excel parse error:', error);
             toast({ title: 'Hata', description: 'Excel dosyası okunamadı.', variant: 'destructive' });
         }
+
+        // Reset file input
+        event.target.value = '';
     };
 
-    // Download excel template
     const handleDownloadTemplate = () => {
         const template = [
+            { 'stok kodu': 'ÖRNEK-001', 'lot': '123456', 'miad': '31.12.2026', 'seri no': 'SN001', 'kalan test': '100' },
             { 'stok kodu': '', 'lot': '', 'miad': '', 'seri no': '', 'kalan test': '' }
         ];
         const ws = XLSX.utils.json_to_sheet(template);
@@ -514,7 +469,6 @@ export default function ImhaEdilenKitlerPanel() {
 
         setSubmitting(true);
         try {
-            // STEP 1: Group items by source and collection
             const sourceGroups: Record<string, DestroyedItem[]> = {};
             destroyedItems.forEach(item => {
                 const sourceId = item.depotId || item.laboratoryId;
@@ -524,18 +478,14 @@ export default function ImhaEdilenKitlerPanel() {
                 sourceGroups[key].push(item);
             });
 
-            // STEP 2: Fetch all stocks in parallel (one query per source)
             const stockQueries = Object.entries(sourceGroups).map(async ([key, items]) => {
                 const sourceType = key.startsWith('depot') ? 'depot' : 'laboratory';
                 const sourceId = items[0].depotId || items[0].laboratoryId;
                 const collectionName = sourceType === 'depot' ? 'depoStok' : 'labStock';
                 const idField = sourceType === 'depot' ? 'depotId' : 'laboratoryId';
 
-                // Get unique stock codes for this source
                 const uniqueStockCodes = Array.from(new Set(items.map(i => i.stokKodu)));
 
-                // Fetch all relevant stock items for all products
-                // Note: Firestore 'in' operator supports max 10 values
                 const stockPromises = [];
                 for (let i = 0; i < uniqueStockCodes.length; i += 10) {
                     const chunk = uniqueStockCodes.slice(i, i + 10);
@@ -558,47 +508,37 @@ export default function ImhaEdilenKitlerPanel() {
 
             const stockResults = await Promise.all(stockQueries);
 
-            // STEP 3: Process deletions and create records
             const batches: any[] = [writeBatch(db)];
             let currentBatchIndex = 0;
             let operationCount = 0;
 
             for (const { items, stockItems, sourceType, collectionName } of stockResults) {
                 for (const item of items) {
-                    // Check if we need a new batch (Firestore limit: 500 operations)
-                    if (operationCount >= 450) { // Leave some margin
+                    if (operationCount >= 450) {
                         currentBatchIndex++;
                         batches.push(writeBatch(db));
                         operationCount = 0;
                     }
 
                     const currentBatch = batches[currentBatchIndex];
-
-                    // Find matching stock items
                     let toDelete: DepoStokItem[] = [];
 
                     if (item.seriNumarasi) {
-                        // Match by serial
                         toDelete = stockItems.filter(s =>
-                            s.stokKodu === item.stokKodu &&
-                            s.seriNumarasi === item.seriNumarasi
+                            s.stokKodu === item.stokKodu && s.seriNumarasi === item.seriNumarasi
                         );
                     } else if (item.lotNumarasi && item.isGroup) {
-                        // Match by lot
                         const matched = stockItems.filter(s =>
-                            s.stokKodu === item.stokKodu &&
-                            s.lotNumarasi === item.lotNumarasi
+                            s.stokKodu === item.stokKodu && s.lotNumarasi === item.lotNumarasi
                         );
                         toDelete = matched.slice(0, item.adet);
                     }
 
-                    // Delete stock items
                     toDelete.forEach(stockItem => {
                         currentBatch.delete(doc(db, collectionName, stockItem.id));
                         operationCount++;
                     });
 
-                    // Create destroyed kit record
                     const destroyedKitRef = doc(collection(db, 'destroyedKitsReports'));
                     currentBatch.set(destroyedKitRef, {
                         id: destroyedKitRef.id,
@@ -627,12 +567,11 @@ export default function ImhaEdilenKitlerPanel() {
                 }
             }
 
-            // STEP 4: Commit all batches in parallel
             await Promise.all(batches.map(b => b.commit()));
 
             toast({
                 title: 'İmha Tamamlandı',
-                description: `${destroyedItems.length} ürün imha edildi ve stoktan düşüldü. (${batches.length} batch işlem)`
+                description: `${destroyedItems.reduce((s, i) => s + i.adet, 0)} adet ürün imha edildi ve stoktan düşüldü.`
             });
             setDestroyedItems([]);
         } catch (error) {
@@ -646,36 +585,28 @@ export default function ImhaEdilenKitlerPanel() {
     // Group destroyed items
     const groupedDestroyedItems = useMemo(() => {
         const groups: Record<string, GroupedDestroyedItem> = {};
-
         destroyedItems.forEach(item => {
             const groupKey = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
             if (!groups[groupKey]) {
                 groups[groupKey] = {
-                    key: groupKey,
-                    stokKodu: item.stokKodu,
-                    stokAdi: item.stokAdi,
-                    lotNumarasi: item.lotNumarasi || '',
-                    miad: item.miad || '',
-                    adet: 0,
-                    remainingTests: item.remainingTests,
-                    serials: [],
-                    sourceType: item.sourceType,
+                    key: groupKey, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
+                    lotNumarasi: item.lotNumarasi || '', miad: item.miad || '',
+                    adet: 0, remainingTests: item.remainingTests,
+                    serials: [], sourceType: item.sourceType,
                 };
             }
             groups[groupKey].adet += item.adet;
             if (!item.isGroup && item.seriNumarasi) {
                 groups[groupKey].serials.push({
-                    id: item.id,
-                    seriNumarasi: item.seriNumarasi,
-                    remainingTests: item.remainingTests
+                    id: item.id, seriNumarasi: item.seriNumarasi, remainingTests: item.remainingTests
                 });
             }
         });
-
         return Object.values(groups).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi));
     }, [destroyedItems]);
 
-    // Remove item
+    const totalItemCount = destroyedItems.reduce((sum, item) => sum + item.adet, 0);
+
     const removeDestroyedItem = (itemId: string, isGroup: boolean | undefined) => {
         if (isGroup) {
             setDestroyedItems(prev => prev.filter(item => item.key !== itemId));
@@ -684,40 +615,58 @@ export default function ImhaEdilenKitlerPanel() {
         }
     };
 
+    const toggleExpand = (key: string) => {
+        setExpandedItems(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key); else next.add(key);
+            return next;
+        });
+    };
+
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
-                <Loader2 className="h-8 w-8 animate-spin" />
+            <div className="cihaz-shell flex items-center justify-center min-h-screen">
+                <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
             </div>
         );
     }
 
     return (
-        <div className="p-4 space-y-4">
-            <BackButton fallback="/raporlama" />
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                        <CardTitle className="flex items-center gap-2">
-                            <Trash2 className="h-6 w-6 text-destructive" />
-                            İmha Edilen Kitler - Giriş
-                        </CardTitle>
-                        <CardDescription>
-                            Barkod okutarak veya excel ile yükleyerek imha işlemlerini gerçekleştirin.
-                        </CardDescription>
-                    </div>
-                    <Button variant="outline" onClick={() => router.push('/raporlama/imha-edilen-kitler/liste')}>
-                        <Eye className="mr-2 h-4 w-4" />
-                        İmha Olan Kitleri Göster
-                    </Button>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                    {/* Source Selection */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                            <Label>Kaynak Tipi</Label>
+        <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
+            {/* ══════════════════════ HEADER ══════════════════════ */}
+            <div className="flex items-center gap-3">
+                <BackButton fallback="/raporlama" aria-label="Geri dön" />
+                <div className="flex-1 min-w-0">
+                    <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+                        <ShieldAlert className="h-5 w-5 text-red-500" />
+                        İmha Kaydı
+                    </h1>
+                    <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+                        {selectedSourceName ? `${selectedSourceName}` : 'Kaynak seçin'} · Kritik işlem · Log tutulur · Stoktan düşülür
+                    </p>
+                </div>
+                <button
+                    onClick={() => router.push('/raporlama/imha-edilen-kitler/liste')}
+                    className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                >
+                    <History className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">İmha Geçmişi</span>
+                </button>
+            </div>
+
+            {/* ══════════════════════ MAIN CONTENT ══════════════════════ */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
+                {/* ── LEFT COLUMN: İşlem Ayarları + Yöntem ── */}
+                <div className="space-y-4">
+                    {/* İşlem Ayarları Card */}
+                    <div className="cihaz-card p-4 sm:p-5 space-y-4">
+                        <p className="cihaz-overline text-[10px] sm:text-xs">İşlem Ayarları</p>
+
+                        {/* Kaynak Tipi */}
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Kaynak Tipi</label>
                             <Select value={selectedSourceType} onValueChange={(v) => setSelectedSourceType(v as 'depot' | 'laboratory')}>
-                                <SelectTrigger>
+                                <SelectTrigger className="cihaz-pressed border-none h-10">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -727,157 +676,361 @@ export default function ImhaEdilenKitlerPanel() {
                             </Select>
                         </div>
 
-                        {selectedSourceType === 'laboratory' && (
-                            <div className="space-y-2">
-                                <Label>Laboratuvar</Label>
+                        {/* Kaynak Seçimi */}
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">
+                                {selectedSourceType === 'laboratory' ? 'Laboratuvar' : 'Depo'}
+                            </label>
+                            {selectedSourceType === 'laboratory' ? (
                                 <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="cihaz-pressed border-none h-10">
                                         <SelectValue placeholder="Laboratuvar seçin" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {hospitals.map(h => (
-                                            <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
-                                        ))}
+                                        {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
-                            </div>
-                        )}
-
-                        {selectedSourceType === 'depot' && (
-                            <div className="space-y-2">
-                                <Label>Depo</Label>
+                            ) : (
                                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="cihaz-pressed border-none h-10">
                                         <SelectValue placeholder="Depo seçin" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {depots.map(d => (
-                                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                                        ))}
+                                        {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
+                            )}
+                        </div>
+
+                        {/* Barkod Formatı */}
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Barkod Formatı</label>
+                            <BarcodeFormatSelect
+                                value={selectedFormatId || '__auto__'}
+                                onChange={v => setSelectedFormatId(v)}
+                                disabled={formatsLoading}
+                            />
+                            <p className="text-[10px] text-[var(--dashboard-muted)]">Okutulan barkod aktif format tanımlarına göre otomatik çözülür.</p>
+                        </div>
+                    </div>
+
+                    {/* Giriş Yöntemi Card */}
+                    <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
+                        <p className="cihaz-overline text-[10px] sm:text-xs">Giriş Yöntemi</p>
+
+                        <div className="grid grid-cols-3 gap-2">
+                            <button
+                                onClick={() => setActiveMethod('barcode')}
+                                className={cn(
+                                    "cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 text-center",
+                                    activeMethod === 'barcode' && "ring-2 ring-[var(--dashboard-accent)]"
+                                )}
+                            >
+                                <ScanLine className="h-5 w-5 text-[var(--dashboard-accent)]" />
+                                <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Barkod</span>
+                            </button>
+                            <button
+                                onClick={() => { setActiveMethod('camera'); setIsCameraScannerOpen(true); }}
+                                className={cn(
+                                    "cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 text-center",
+                                    activeMethod === 'camera' && "ring-2 ring-[var(--dashboard-accent)]"
+                                )}
+                            >
+                                <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
+                                <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Kamera</span>
+                            </button>
+                            <button
+                                onClick={() => setActiveMethod('excel')}
+                                className={cn(
+                                    "cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 text-center",
+                                    activeMethod === 'excel' && "ring-2 ring-[var(--dashboard-accent)]"
+                                )}
+                            >
+                                <FileSpreadsheet className="h-5 w-5 text-[var(--dashboard-accent)]" />
+                                <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Excel</span>
+                            </button>
+                        </div>
+
+                        {/* Dynamic content based on method */}
+                        {activeMethod === 'barcode' && (
+                            <div className={cn(
+                                "p-3 rounded-xl transition-all duration-300",
+                                scanFeedback?.type === 'success' ? "ring-2 ring-green-500/60 bg-green-50/60 dark:bg-green-950/20"
+                                : scanFeedback?.type === 'error' ? "ring-2 ring-red-500/60 bg-red-50/60 dark:bg-red-950/20"
+                                : "cihaz-pressed"
+                            )}>
+                                <div className="flex items-center justify-between mb-1">
+                                    <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Barkod Okutun</p>
+                                    {scanFeedback && (
+                                        <span className={cn(
+                                            "text-[10px] font-bold uppercase tracking-wide",
+                                            scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
+                                        )}>
+                                            {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
+                                        </span>
+                                    )}
+                                </div>
+                                {scanFeedback ? (
+                                    <p className={cn(
+                                        "text-sm font-semibold truncate",
+                                        scanFeedback.type === 'success' ? "text-green-700 dark:text-green-400" : "text-red-600"
+                                    )}>
+                                        {scanFeedback.message}
+                                    </p>
+                                ) : (
+                                    <p className="text-xs text-[var(--dashboard-muted)]">
+                                        {selectedSourceId ? 'HID tarayıcı ile barkod okutun...' : 'Önce kaynak seçin'}
+                                    </p>
+                                )}
                             </div>
                         )}
 
-                        <div className="flex items-end gap-2">
-                            <Button
-                                variant="outline"
-                                onClick={() => setIsCameraScannerOpen(true)}
-                                disabled={!selectedSourceName}
-                            >
-                                <Camera className="mr-2 h-4 w-4" />
-                                Kamera ile Tara
-                            </Button>
-                        </div>
-                    </div>
-
-                    {/* Barcode Format Selection */}
-                    <BarcodeFormatSelect
-                        value={selectedFormatId || '__auto__'}
-                        onChange={v => setSelectedFormatId(v)}
-                        disabled={formatsLoading}
-                    />
-
-                    {/* Excel Upload */}
-                    <div className="space-y-2">
-                        <Label>Excel ile Yükleme</Label>
-                        <div className="flex gap-2">
-                            <Button variant="outline" onClick={handleDownloadTemplate}>
-                                <Download className="mr-2 h-4 w-4" />
-                                Şablon İndir
-                            </Button>
-                            <label htmlFor="excel-upload">
-                                <Button variant="outline" disabled={!selectedSourceName} asChild>
-                                    <span>
-                                        <Upload className="mr-2 h-4 w-4" />
-                                        Excel Yükle
-                                    </span>
-                                </Button>
-                            </label>
-                            <input
-                                id="excel-upload"
-                                type="file"
-                                accept=".xlsx,.xls"
-                                className="hidden"
-                                onChange={handleExcelUpload}
-                            />
-                        </div>
-                    </div>
-
-                    {/* Destroyed Items List */}
-                    {destroyedItems.length > 0 && (
-                        <>
-                            <div className="flex justify-between items-center">
-                                <Label>İmha Edilecek Ürünler ({destroyedItems.reduce((sum, item) => sum + item.adet, 0)} Adet)</Label>
-                                <Button onClick={handleSubmit} disabled={submitting}>
-                                    {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    İmha Et ve Stoktan Düş
-                                </Button>
+                        {activeMethod === 'excel' && (
+                            <div className="space-y-3">
+                                <div className="cihaz-pressed p-3 rounded-xl space-y-2">
+                                    <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Toplu İmha Girişi</p>
+                                    <p className="text-xs text-[var(--dashboard-muted)]">Excel ile birden fazla ürünü tek seferde imha kaydı olarak ekleyin.</p>
+                                    <div className="flex gap-2 pt-1">
+                                        <button onClick={handleDownloadTemplate} className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium">
+                                            <Download className="h-3.5 w-3.5" />
+                                            Şablon İndir
+                                        </button>
+                                        <label htmlFor="excel-upload-redesign">
+                                            <span className={cn(
+                                                "cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium cursor-pointer",
+                                                !selectedSourceId && "opacity-40 cursor-not-allowed"
+                                            )}>
+                                                <Upload className="h-3.5 w-3.5" />
+                                                Dosya Seç
+                                            </span>
+                                        </label>
+                                        <input
+                                            id="excel-upload-redesign"
+                                            type="file"
+                                            accept=".xlsx,.xls"
+                                            className="hidden"
+                                            onChange={handleExcelUpload}
+                                            disabled={!selectedSourceId}
+                                        />
+                                    </div>
+                                </div>
+                                {excelFileName && (
+                                    <div className="flex items-center gap-2 p-2 rounded-lg bg-green-50 dark:bg-green-950/20 text-green-700 dark:text-green-400 text-xs">
+                                        <FileSpreadsheet className="h-3.5 w-3.5" />
+                                        <span className="font-medium">{excelFileName}</span>
+                                        <span className="text-[var(--dashboard-muted)]">· {excelRowCount} satır eklendi</span>
+                                    </div>
+                                )}
                             </div>
+                        )}
 
-                            <ScrollArea className="h-96 border rounded-md p-2">
-                                <Accordion type="multiple" className="w-full">
-                                    {groupedDestroyedItems.map(group => (
-                                        <AccordionItem value={group.key} key={group.key}>
-                                            <AccordionTrigger>
-                                                <div className="flex-1 text-left font-medium">
-                                                    {group.stokAdi} <span className="text-xs text-muted-foreground">({group.stokKodu})</span>
+                        {activeMethod === 'camera' && (
+                            <div className="cihaz-pressed p-3 rounded-xl">
+                                <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Kamera Tarama</p>
+                                <p className="text-xs text-[var(--dashboard-muted)] mt-1">Kamera tarayıcı penceresini açmak için yukarıdaki butona tıklayın.</p>
+                                <button
+                                    onClick={() => setIsCameraScannerOpen(true)}
+                                    disabled={!selectedSourceId}
+                                    className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium mt-2 disabled:opacity-40"
+                                >
+                                    <Camera className="h-3.5 w-3.5" />
+                                    Kamerayı Aç
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Son İşlemler - Mini Panel */}
+                    {recentRecords.length > 0 && (
+                        <div className="cihaz-card p-4 sm:p-5 space-y-3">
+                            <p className="cihaz-overline text-[10px] sm:text-xs">Son 5 İmha İşlemi</p>
+                            <div className="space-y-2">
+                                {recentRecords.map((r, idx) => {
+                                    const resolvedDate = r.resolvedAt instanceof Date ? r.resolvedAt : new Date(r.resolvedAt);
+                                    return (
+                                        <div key={r.id || idx} className="flex items-center gap-3 py-1.5 border-b border-[var(--dashboard-stroke)] last:border-0">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs font-medium text-[var(--dashboard-text)] truncate">{r.stokAdi}</p>
+                                                <p className="text-[10px] text-[var(--dashboard-muted)]">
+                                                    {r.laboratoryName || r.depotName || '-'} · {r.sourceType === 'fault' ? 'Arıza' : 'Manuel'}
+                                                </p>
+                                            </div>
+                                            <span className="text-xs font-semibold text-[var(--dashboard-accent)]">{r.testCount}</span>
+                                            <span className="text-[10px] text-[var(--dashboard-muted)] whitespace-nowrap">
+                                                {resolvedDate ? format(resolvedDate, 'dd.MM HH:mm', { locale: tr }) : '-'}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* ── RIGHT COLUMN: İmha Listesi ── */}
+                <div className="cihaz-card-strong flex flex-col overflow-hidden">
+                    {/* List Header */}
+                    <div className="flex items-center gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]">
+                        <div className="flex-1 min-w-0">
+                            <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
+                                İmha Listesi
+                            </h2>
+                            <p className="text-[10px] text-[var(--dashboard-muted)]">Stoktan düşülecek ürünler</p>
+                        </div>
+                        {totalItemCount > 0 && (
+                            <div className="flex items-center gap-3">
+                                <div className="text-right">
+                                    <span className="text-2xl font-bold text-[var(--dashboard-accent)]">{totalItemCount}</span>
+                                    <span className="text-xs text-[var(--dashboard-muted)] ml-1">adet</span>
+                                </div>
+                                <button
+                                    onClick={handleSubmit}
+                                    disabled={submitting || totalItemCount === 0}
+                                    className={cn(
+                                        "flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-semibold transition-all",
+                                        "disabled:opacity-40 disabled:cursor-not-allowed",
+                                        "bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-lg shadow-red-600/30"
+                                    )}
+                                >
+                                    {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    <ShieldAlert className="h-4 w-4" />
+                                    İmha Et
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Table header */}
+                    {groupedDestroyedItems.length > 0 && (
+                        <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_80px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+                            <span>Ürün</span>
+                            <span>Lot</span>
+                            <span>Miad</span>
+                            <span className="text-right">Kalan Test</span>
+                            <span className="text-right">Adet</span>
+                            <span></span>
+                        </div>
+                    )}
+
+                    {/* List body */}
+                    <div className="flex-1 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+                        {groupedDestroyedItems.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-[40vh] text-center px-4">
+                                <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                                    <Package className="h-6 w-6 text-[var(--dashboard-muted)]" />
+                                </div>
+                                <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">İmha listesi boş</p>
+                                <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun, kamera ile tarayın veya Excel yükleyin</p>
+                            </div>
+                        ) : (
+                            <div>
+                                {groupedDestroyedItems.map(group => (
+                                    <div key={group.key} className="border-b border-[var(--dashboard-stroke)] last:border-0">
+                                        {/* Desktop row */}
+                                        <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5 hover:bg-[var(--dashboard-surface-2)] transition-colors">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</span>
+                                                    <span className={cn(
+                                                        "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium",
+                                                        group.sourceType === 'excel' ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                                                    )}>
+                                                        {group.sourceType === 'excel' ? 'Excel' : 'Barkod'}
+                                                    </span>
                                                 </div>
-                                                <div className="flex-1 text-left text-sm">Lot: {group.lotNumarasi || '-'}</div>
-                                                <div className="flex-1 text-left text-sm">Miad: {group.miad || '-'}</div>
-                                                <div className="flex-1 text-left text-sm">
-                                                    {group.remainingTests !== undefined ? `Kalan Test: ${group.remainingTests}` : '-'}
+                                            </div>
+                                            <span className="text-xs text-[var(--dashboard-text)]">{group.lotNumarasi || '-'}</span>
+                                            <span className="text-xs text-[var(--dashboard-text)]">{group.miad || '-'}</span>
+                                            <span className="text-xs text-right text-[var(--dashboard-muted)]">
+                                                {group.remainingTests !== undefined ? group.remainingTests : '-'}
+                                            </span>
+                                            <span className="text-sm font-bold text-right text-[var(--dashboard-accent)]">{group.adet}</span>
+                                            <div className="flex justify-end">
+                                                <button
+                                                    onClick={() => removeDestroyedItem(group.key, true)}
+                                                    className="p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Mobile row */}
+                                        <div className="sm:hidden px-4 py-3">
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
+                                                    <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
+                                                    <div className="flex flex-wrap gap-1.5 mt-1">
+                                                        {group.lotNumarasi && (
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
+                                                                Lot: {group.lotNumarasi}
+                                                            </span>
+                                                        )}
+                                                        {group.miad && (
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
+                                                                SKT: {group.miad}
+                                                            </span>
+                                                        )}
+                                                        <span className={cn(
+                                                            "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium",
+                                                            group.sourceType === 'excel' ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                                                        )}>
+                                                            {group.sourceType === 'excel' ? 'Excel' : 'Barkod'}
+                                                        </span>
+                                                    </div>
                                                 </div>
-                                                <div className="font-bold flex items-center gap-2">
-                                                    <span>{group.adet} Adet</span>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            removeDestroyedItem(group.key, true);
-                                                        }}
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-lg font-bold text-[var(--dashboard-accent)]">{group.adet}</span>
+                                                    <button
+                                                        onClick={() => removeDestroyedItem(group.key, true)}
+                                                        className="p-1.5 rounded-lg hover:bg-red-100"
                                                     >
-                                                        <Trash2 className="h-4 w-4 text-destructive" />
-                                                    </Button>
+                                                        <Trash2 className="h-4 w-4 text-red-500" />
+                                                    </button>
                                                 </div>
-                                            </AccordionTrigger>
-                                            <AccordionContent className="p-2 bg-muted/50">
-                                                {group.serials.length > 0 ? (
-                                                    <ul className="space-y-1">
+                                            </div>
+                                        </div>
+
+                                        {/* Expandable serial details */}
+                                        {group.serials.length > 0 && (
+                                            <>
+                                                <button
+                                                    onClick={() => toggleExpand(group.key)}
+                                                    className="w-full px-5 py-1 text-[10px] text-[var(--dashboard-muted)] hover:bg-[var(--dashboard-surface-2)] flex items-center gap-1"
+                                                >
+                                                    <ChevronDown className={cn("h-3 w-3 transition-transform", expandedItems.has(group.key) && "rotate-180")} />
+                                                    {group.serials.length} seri no
+                                                </button>
+                                                {expandedItems.has(group.key) && (
+                                                    <div className="px-5 pb-2 space-y-1">
                                                         {group.serials.map(serial => (
-                                                            <li key={serial.id} className="flex justify-between items-center text-xs font-mono">
-                                                                <span>
+                                                            <div key={serial.id} className="flex items-center justify-between py-1 px-2 rounded-lg bg-[var(--dashboard-surface-2)] text-xs">
+                                                                <span className="font-mono text-[var(--dashboard-text)]">
                                                                     {serial.seriNumarasi}
                                                                     {serial.remainingTests !== undefined && (
-                                                                        <span className="ml-2 text-muted-foreground">
-                                                                            (Kalan Test: {serial.remainingTests})
-                                                                        </span>
+                                                                        <span className="ml-2 text-[var(--dashboard-muted)]">({serial.remainingTests} test)</span>
                                                                     )}
                                                                 </span>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="h-6 w-6"
-                                                                    onClick={() => removeDestroyedItem(serial.id, false)}
-                                                                >
-                                                                    <Trash2 className="h-3 w-3 text-destructive" />
-                                                                </Button>
-                                                            </li>
+                                                                <button onClick={() => removeDestroyedItem(serial.id, false)} className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30">
+                                                                    <Trash2 className="h-3 w-3 text-red-500" />
+                                                                </button>
+                                                            </div>
                                                         ))}
-                                                    </ul>
-                                                ) : (
-                                                    <p className="text-xs text-muted-foreground">Bu grup manuel olarak eklendi, seri numarası detayı yok.</p>
+                                                    </div>
                                                 )}
-                                            </AccordionContent>
-                                        </AccordionItem>
-                                    ))}
-                                </Accordion>
-                            </ScrollArea>
-                        </>
-                    )}
-                </CardContent>
-            </Card>
+                                            </>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* ══════════════════════ MODALS ══════════════════════ */}
 
             {/* Camera Scanner Dialog */}
             <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
@@ -904,22 +1057,26 @@ export default function ImhaEdilenKitlerPanel() {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
+                        {pendingItem && (
+                            <div className="p-3 rounded-xl bg-[var(--dashboard-surface-2)] text-xs space-y-1">
+                                <p className="font-medium text-[var(--dashboard-text)]">{pendingItem.stokAdi}</p>
+                                {pendingItem.lotNumarasi && <p className="text-[var(--dashboard-muted)]">Lot: {pendingItem.lotNumarasi}</p>}
+                                {pendingItem.seriNumarasi && <p className="text-[var(--dashboard-muted)]">Seri: {pendingItem.seriNumarasi}</p>}
+                            </div>
+                        )}
                         <div className="space-y-2">
-                            <Label htmlFor="remaining-tests">Kalan Test Adeti</Label>
+                            <label className="text-xs font-medium text-[var(--dashboard-text)]">Kalan Test Adeti</label>
                             <Input
-                                id="remaining-tests"
                                 type="number"
                                 min="0"
                                 value={remainingTestsInput}
                                 onChange={(e) => setRemainingTestsInput(e.target.value)}
                                 placeholder="Test adedini girin"
                                 onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handleRemainingTestsConfirm();
-                                    }
+                                    if (e.key === 'Enter') { e.preventDefault(); handleRemainingTestsConfirm(); }
                                 }}
                                 autoFocus
+                                className="h-10"
                             />
                         </div>
                     </div>
@@ -931,8 +1088,8 @@ export default function ImhaEdilenKitlerPanel() {
                         }}>
                             İptal
                         </Button>
-                        <Button onClick={handleRemainingTestsConfirm}>
-                            Onayla
+                        <Button onClick={handleRemainingTestsConfirm} className="bg-red-600 hover:bg-red-700 text-white">
+                            Onayla ve Ekle
                         </Button>
                     </DialogFooter>
                 </DialogContent>
