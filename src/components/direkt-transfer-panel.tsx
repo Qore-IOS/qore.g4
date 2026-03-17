@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState, Suspense, ChangeEvent } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, Suspense, ChangeEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption, TransferTemplate } from '@/lib/types';
@@ -272,6 +272,15 @@ export default function DirektTransferPanel() {
     seriNumarasi?: string;
   } | null>(null);
 
+  // Scan feedback: flash green/red on son okutulan area
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashScanFeedback = useCallback((type: 'success' | 'error', message: string) => {
+    if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+    setScanFeedback({ type, message });
+    scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 2500);
+  }, []);
+
   const selectedLabName = useMemo(() => hospitals.find(l => l.id === selectedLabId)?.name || '', [hospitals, selectedLabId]);
 
   // Computed counts for last scanned product
@@ -385,13 +394,11 @@ export default function DirektTransferPanel() {
   const addDirectTransferItem = useCallback((itemToAdd: DepoStokItem) => {
     setDirectTransferItems(prevItems => {
         if (prevItems.some(item => item.id === itemToAdd.id)) {
-            toast({ title: 'Uyarı', description: 'Bu ürün zaten listeye eklendi.', variant: 'default' });
             return prevItems;
         }
         return [{...itemToAdd, adet: 1, key: itemToAdd.id, isGroup: false}, ...prevItems];
     });
-    toast({ title: "Ürün Eklendi", description: `${itemToAdd.stokAdi} transfer listesine eklendi.`});
-  }, [toast]);
+  }, []);
 
   const depotName = useMemo(() => depots.find(d => d.id === selectedDepotId)?.name || '', [depots, selectedDepotId]);
 
@@ -430,13 +437,13 @@ export default function DirektTransferPanel() {
           await handleScan(serial, 'bulk_item');
         }
         setIsBulkScanMode(false);
-        toast({ title: 'Toplu barkod okundu', description: `${decodedBulk.length} barkod transfer listesine işlendi.` });
+        flashScanFeedback('success', `${decodedBulk.length} barkod transfer listesine işlendi.`);
         return;
       }
 
       if (isBulkScanMode && source !== 'bulk_item') {
         playFeedback(true);
-        toast({ title: 'Toplu barkod bekleniyor', description: 'Bu modda sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar okunabilir.', variant: 'destructive' });
+        flashScanFeedback('error', 'Bu modda sadece toplu barkodlar okunabilir.');
         return;
       }
       
@@ -457,14 +464,14 @@ export default function DirektTransferPanel() {
 
       if (!resolveResult || !resolveResult.parsed) {
         playFeedback(true);
-        toast({ title: 'Ayrıştırma Hatası', description: 'Barkod tanımlı formatlarla eşleşmiyor.', variant: 'destructive' });
+        flashScanFeedback('error', 'Barkod tanımlı formatlarla eşleşmiyor.');
         return;
       }
 
       const resolved = resolveResult.parsed;
       if (!resolveResult.product || !resolved.stokKodu) {
         playFeedback(true);
-        toast({ title: 'Ürün Bulunamadı', description: 'Barkoddan bir ürün çözümlenemedi.', variant: 'destructive' });
+        flashScanFeedback('error', 'Barkoddan bir ürün çözümlenemedi.');
         return;
       }
       const product = resolveResult.product;
@@ -477,7 +484,7 @@ export default function DirektTransferPanel() {
       // Check for duplicate - must match both stokKodu AND seriNumarasi since same serial can exist for different products
       if (seri && directTransferItems.some(item => item.stokKodu === stokKodu && item.seriNumarasi === seri)) {
           playFeedback(true);
-          toast({ title: 'Uyarı', description: 'Bu ürün zaten listeye eklendi.', variant: 'default' });
+          flashScanFeedback('error', 'Bu ürün zaten listeye eklendi.');
           return;
       }
 
@@ -493,22 +500,23 @@ export default function DirektTransferPanel() {
       if (mode === 'serial') {
         if (!seri) {
           playFeedback(true);
-          toast({ title: 'Seri Eksik', description: 'Seri no takipli üründe barkod seri içermiyor.', variant: 'destructive' });
+          flashScanFeedback('error', `${stokAdi}: Seri no takipli üründe barkod seri içermiyor.`);
           return;
         }
         const items = countStockBySerial(stokKodu, seri);
         if (items.length === 0) {
           playFeedback(true);
-          toast({ title: 'Depoda Bulunamadı', description: `Seri No ${seri} bu depoda yok.`, variant: 'destructive' });
+          flashScanFeedback('error', `Seri No ${seri} bu depoda bulunamadı.`);
           return;
         }
         if (alreadyQueued(stokKodu, undefined, seri) >= items.length) {
           playFeedback(true);
-          toast({ title: 'Yetersiz Stok', description: `Seri No ${seri} için yeterli stok yok.`, variant: 'destructive' });
+          flashScanFeedback('error', `Seri No ${seri} için yeterli stok yok.`);
           return;
         }
         addDirectTransferItem(items[0]);
         setLastScannedProduct({ stokKodu, stokAdi, lotNumarasi: lot, miad, seriNumarasi: seri });
+        flashScanFeedback('success', `${stokAdi} eklendi.`);
         playFeedback();
         return;
       }
@@ -516,19 +524,19 @@ export default function DirektTransferPanel() {
       if (mode === 'lot_barcode') {
         if (!lot) {
           playFeedback(true);
-          toast({ title: 'Lot Eksik', description: 'Lot barkodu gerekli fakat bulunamadı.', variant: 'destructive' });
+          flashScanFeedback('error', `${stokAdi}: Lot barkodu gerekli fakat bulunamadı.`);
           return;
         }
         const items = countStockByLot(stokKodu, lot);
         if (items.length === 0) {
           playFeedback(true);
-          toast({ title: 'Depoda Bulunamadı', description: `${stokKodu} (Lot: ${lot}) bu depoda yok.`, variant: 'destructive' });
+          flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) bu depoda bulunamadı.`);
           return;
         }
         const queued = alreadyQueued(stokKodu, lot);
         if (queued >= items.length) {
           playFeedback(true);
-          toast({ title: 'Yetersiz Stok', description: `${stokKodu} (Lot: ${lot}) için en fazla ${items.length} gönderilebilir.`, variant: 'destructive' });
+          flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) için en fazla ${items.length} gönderilebilir.`);
           return;
         }
         upsertGroupedRow(
@@ -536,6 +544,7 @@ export default function DirektTransferPanel() {
           1
         );
         setLastScannedProduct({ stokKodu, stokAdi, lotNumarasi: lot, miad });
+        flashScanFeedback('success', `${stokAdi} eklendi.`);
         playFeedback();
         return;
       }
@@ -543,13 +552,13 @@ export default function DirektTransferPanel() {
       const items = countStockByCode(stokKodu);
       if (items.length === 0) {
         playFeedback(true);
-        toast({ title: 'Depoda Bulunamadı', description: `${stokKodu} bu depoda yok.`, variant: 'destructive' });
+        flashScanFeedback('error', `${stokKodu} bu depoda bulunamadı.`);
         return;
       }
       const queued = alreadyQueued(stokKodu);
       if (queued >= items.length) {
         playFeedback(true);
-        toast({ title: 'Yetersiz Stok', description: `${stokKodu} için en fazla ${items.length} gönderilebilir.`, variant: 'destructive' });
+        flashScanFeedback('error', `${stokKodu} için en fazla ${items.length} gönderilebilir.`);
         return;
       }
       upsertGroupedRow(
@@ -557,9 +566,10 @@ export default function DirektTransferPanel() {
         1
       );
       setLastScannedProduct({ stokKodu, stokAdi });
+      flashScanFeedback('success', `${stokAdi} eklendi.`);
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback]
   );
   
   useHidScanner({
@@ -1238,25 +1248,57 @@ export default function DirektTransferPanel() {
             {/* ─── Add Methods Card ─── */}
             <div className="cihaz-card p-4 sm:p-5 space-y-3">
               {/* Last scanned feedback - at top of Ürün Ekle card */}
-              {lastScannedProduct && (
-                <div className="cihaz-pressed p-3 space-y-1 -mt-1 mb-1">
-                  <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
-                  <p className="text-sm font-bold text-[var(--dashboard-text)] truncate">{lastScannedProduct.stokAdi}</p>
-                  <p className="text-[11px] text-[var(--dashboard-muted)]">
-                    {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
-                    {lastScannedProduct.miad && ` · Miad: ${lastScannedProduct.miad}`}
-                    {lastScannedProduct.seriNumarasi && ` · Seri: ${lastScannedProduct.seriNumarasi}`}
-                  </p>
-                  <div className="flex gap-4 pt-1">
-                    <div>
-                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Bu Lot</span>
-                    </div>
-                    <div>
-                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{totalCountForProduct}</span>
-                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Toplam</span>
-                    </div>
+              {(lastScannedProduct || scanFeedback) && (
+                <div className={cn(
+                  "p-3 space-y-1 -mt-1 mb-1 rounded-xl transition-all duration-300",
+                  scanFeedback?.type === 'success'
+                    ? "ring-2 ring-green-500/60 bg-green-50/60 dark:bg-green-950/20"
+                    : scanFeedback?.type === 'error'
+                    ? "ring-2 ring-red-500/60 bg-red-50/60 dark:bg-red-950/20"
+                    : "cihaz-pressed"
+                )}>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
+                    {scanFeedback && (
+                      <span className={cn(
+                        "text-[10px] font-bold uppercase tracking-wide",
+                        scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
+                      )}>
+                        {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
+                      </span>
+                    )}
                   </div>
+                  {scanFeedback?.type === 'error' && !lastScannedProduct ? (
+                    <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
+                  ) : (
+                    <>
+                      <p className={cn(
+                        "text-sm font-bold truncate",
+                        scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
+                      )}>
+                        {scanFeedback?.type === 'error' ? scanFeedback.message : lastScannedProduct?.stokAdi}
+                      </p>
+                      {lastScannedProduct && scanFeedback?.type !== 'error' && (
+                        <>
+                          <p className="text-[11px] text-[var(--dashboard-muted)]">
+                            {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
+                            {lastScannedProduct.miad && ` · Miad: ${lastScannedProduct.miad}`}
+                            {lastScannedProduct.seriNumarasi && ` · Seri: ${lastScannedProduct.seriNumarasi}`}
+                          </p>
+                          <div className="flex gap-4 pt-1">
+                            <div>
+                              <span className="text-lg font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
+                              <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Bu Lot</span>
+                            </div>
+                            <div>
+                              <span className="text-lg font-bold text-[var(--dashboard-accent)]">{totalCountForProduct}</span>
+                              <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Toplam</span>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
               <p className="cihaz-section-label">Ürün Ekle</p>
