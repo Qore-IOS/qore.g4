@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { CheckSquare, Loader2, Info, Search, ShieldCheck, Trash2, Nfc } from 'lucide-react';
-import { collection, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
@@ -38,67 +38,54 @@ export default function KullanimDogrulamaPanel() {
   const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>('');
   const [nfcInput, setNfcInput] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLabsLoading, setIsLabsLoading] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
 
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
   const [verificationGroups, setVerificationGroups] = useState<NfcVerificationGroup[]>([]);
 
   const { toast } = useToast();
 
   const NFC_INPUT_ID = 'nfc-tag-input';
 
-  // Fetch panel data
-  const fetchPanelData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [laboratoriesSnap, productsSnap, consumptionSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'tuketimKayitlari')),
-      ]);
+  // Fetch laboratories and product codes on mount (lightweight)
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      setIsLabsLoading(true);
+      try {
+        const [laboratoriesSnap, productsSnap] = await Promise.all([
+          getDocs(collection(db, 'hospitals')),
+          getDocs(collection(db, 'productCodes')),
+        ]);
 
-      setLaboratories(
-        laboratoriesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Laboratory))
-      );
+        setLaboratories(
+          laboratoriesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Laboratory))
+        );
 
-      const products = productsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as ProductCode));
-      setProductCodes(products);
+        const products = productsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as ProductCode));
+        setProductCodes(products);
 
-      const consumptionItems = consumptionSnap.docs.map((doc) => {
-        const data = doc.data();
-        Object.keys(data).forEach((key) => {
-          if (data[key] instanceof Timestamp) {
-            data[key] = data[key].toDate();
-          }
+        kullanimDogrulamaLogger.info('Laboratuvarlar ve ürün kodları yüklendi', {
+          laboratories: laboratoriesSnap.docs.length,
+          products: productsSnap.docs.length,
         });
-        return { id: doc.id, ...data } as ConsumptionRecord;
-      });
-      setTuketimKayitlari(consumptionItems);
+      } catch (error) {
+        kullanimDogrulamaLogger.error('Temel veriler yüklenemedi', error);
+        toast({
+          title: 'Veri Hatası',
+          description: 'Laboratuvar listesi yüklenemedi.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsLabsLoading(false);
+      }
+    };
 
-      kullanimDogrulamaLogger.info('Panel verileri yüklendi', {
-        laboratories: laboratoriesSnap.docs.length,
-        products: productsSnap.docs.length,
-        consumptions: consumptionSnap.docs.length,
-      });
-    } catch (error) {
-      kullanimDogrulamaLogger.error('Panel verileri yüklenemedi', error);
-      toast({
-        title: 'Veri Hatası',
-        description: 'Doğrulama paneli için veriler yüklenemedi.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    fetchInitialData();
   }, [toast]);
 
-  useEffect(() => {
-    fetchPanelData();
-  }, [fetchPanelData]);
-
-  // Build verification groups when lab changes
+  // Fetch consumption data when lab changes
   useEffect(() => {
     if (!selectedLaboratoryId) {
       setVerificationGroups([]);
@@ -108,51 +95,88 @@ export default function KullanimDogrulamaPanel() {
     const laboratory = laboratories.find((h) => h.id === selectedLaboratoryId);
     if (!laboratory) return;
 
-    // Find serial-tracked product codes
-    const serialTrackedCodes = new Set(
-      productCodes
-        .filter((p) => p.trackingMode === 'serial')
-        .map((p) => p.stokKodu)
-    );
+    const fetchConsumptionData = async () => {
+      setIsDataLoading(true);
+      try {
+        // Find serial-tracked product codes
+        const serialTrackedCodes = new Set(
+          productCodes
+            .filter((p) => p.trackingMode === 'serial')
+            .map((p) => p.stokKodu)
+        );
 
-    // Filter consumptions: this lab, normal usage, serial-tracked products
-    const relevantConsumptions = tuketimKayitlari.filter(
-      (record) =>
-        record.laboratoryName === laboratory.name &&
-        record.consumptionType === 'normal_kullanim' &&
-        serialTrackedCodes.has(record.stokKodu)
-    );
+        // Fetch consumption records filtered by laboratory name
+        const consumptionQuery = query(
+          collection(db, 'tuketimKayitlari'),
+          where('laboratoryName', '==', laboratory.name),
+          where('consumptionType', '==', 'normal_kullanim')
+        );
+        const consumptionSnap = await getDocs(consumptionQuery);
 
-    // Group by product (stokKodu)
-    const grouped: Record<string, NfcVerificationGroup> = {};
+        const consumptionItems = consumptionSnap.docs.map((doc) => {
+          const data = doc.data();
+          Object.keys(data).forEach((key) => {
+            if (data[key] instanceof Timestamp) {
+              data[key] = data[key].toDate();
+            }
+          });
+          return { id: doc.id, ...data } as ConsumptionRecord;
+        });
 
-    relevantConsumptions.forEach((record) => {
-      const key = record.stokKodu;
-      if (!grouped[key]) {
-        grouped[key] = {
-          stokKodu: record.stokKodu,
-          stokAdi: record.stokAdi,
-          tuketilenAdet: 0,
-          okutulanNfcler: [],
-          bosKutuOkutuldu: false,
-          consumptionRecordIds: [],
-          tuketilenSeriNolar: [],
-        };
+        // Filter for serial-tracked products only
+        const relevantConsumptions = consumptionItems.filter(
+          (record) => serialTrackedCodes.has(record.stokKodu)
+        );
+
+        kullanimDogrulamaLogger.info('Tüketim kayıtları yüklendi', {
+          laboratoryName: laboratory.name,
+          total: consumptionSnap.docs.length,
+          serialTracked: relevantConsumptions.length,
+        });
+
+        // Group by product (stokKodu)
+        const grouped: Record<string, NfcVerificationGroup> = {};
+
+        relevantConsumptions.forEach((record) => {
+          const key = record.stokKodu;
+          if (!grouped[key]) {
+            grouped[key] = {
+              stokKodu: record.stokKodu,
+              stokAdi: record.stokAdi,
+              tuketilenAdet: 0,
+              okutulanNfcler: [],
+              bosKutuOkutuldu: false,
+              consumptionRecordIds: [],
+              tuketilenSeriNolar: [],
+            };
+          }
+          grouped[key].tuketilenAdet += 1;
+          if (!grouped[key].consumptionRecordIds.includes(record.id)) {
+            grouped[key].consumptionRecordIds.push(record.id);
+          }
+          if (record.seriNumarasi && !grouped[key].tuketilenSeriNolar.includes(record.seriNumarasi)) {
+            grouped[key].tuketilenSeriNolar.push(record.seriNumarasi);
+          }
+        });
+
+        setVerificationGroups(
+          Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi))
+        );
+      } catch (error) {
+        kullanimDogrulamaLogger.error('Tüketim verileri yüklenemedi', error);
+        toast({
+          title: 'Veri Hatası',
+          description: 'Tüketim kayıtları yüklenemedi.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsDataLoading(false);
       }
-      grouped[key].tuketilenAdet += 1;
-      if (!grouped[key].consumptionRecordIds.includes(record.id)) {
-        grouped[key].consumptionRecordIds.push(record.id);
-      }
-      if (record.seriNumarasi && !grouped[key].tuketilenSeriNolar.includes(record.seriNumarasi)) {
-        grouped[key].tuketilenSeriNolar.push(record.seriNumarasi);
-      }
-    });
+    };
 
-    setVerificationGroups(
-      Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi))
-    );
+    fetchConsumptionData();
     setNfcInput('');
-  }, [selectedLaboratoryId, tuketimKayitlari, laboratories, productCodes]);
+  }, [selectedLaboratoryId, laboratories, productCodes, toast]);
 
   // Filtered groups for search
   const filteredGroups = useMemo(() => {
@@ -319,8 +343,8 @@ export default function KullanimDogrulamaPanel() {
                 setSearchTerm('');
               }}
             >
-              <SelectTrigger id="lab-select-nfc" className="w-full md:w-1/2 lg:w-1/3 rounded-md">
-                <SelectValue placeholder="Doğrulama yapılacak laboratuvarı seçin" />
+              <SelectTrigger id="lab-select-nfc" className="w-full md:w-1/2 lg:w-1/3 rounded-md" disabled={isLabsLoading}>
+                <SelectValue placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'} />
               </SelectTrigger>
               <SelectContent>
                 {laboratories.map((h) => (
@@ -371,7 +395,7 @@ export default function KullanimDogrulamaPanel() {
                     onChange={(e) => setNfcInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     className="flex-grow rounded-md h-10 font-mono"
-                    disabled={!selectedLaboratoryId || verificationGroups.length === 0}
+                    disabled={!selectedLaboratoryId || isDataLoading || verificationGroups.length === 0}
                   />
                   <Button
                     onClick={handleNfcScan}
@@ -383,7 +407,7 @@ export default function KullanimDogrulamaPanel() {
                   </Button>
                 </div>
 
-                {isLoading ? (
+                {isDataLoading ? (
                   <div className="flex justify-center items-center py-6">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
