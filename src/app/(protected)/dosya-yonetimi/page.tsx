@@ -282,19 +282,19 @@ export default function DosyaYonetimiPage() {
   };
 
   return (
-    <div className="space-y-6 pb-8">
+    <div className="dashboard-neu-page min-h-screen p-4 md:p-6 lg:p-8">
       {/* ─── Header ───────────────────────────────────────── */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 mb-6">
         <BackButton />
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-500/10">
-            <FolderOpen className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          </div>
+          <span className="dashboard-panel-icon flex items-center justify-center w-10 h-10 rounded-full shrink-0">
+            <FolderOpen className="w-5 h-5" />
+          </span>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--dashboard-text)' }}>
               Dosya Yönetimi
             </h1>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
               Dosyalarınızı yükleyin ve yönetin. Yüklenen dosyalar 1 hafta sonra otomatik olarak silinir.
             </p>
           </div>
@@ -302,16 +302,16 @@ export default function DosyaYonetimiPage() {
       </div>
 
       {/* ─── İrsaliye Yönetimi Section ──────────────────────── */}
-      <div className="rounded-2xl border border-border/60 bg-card/40 dark:bg-card/20 backdrop-blur-sm overflow-hidden">
+      <div className="glass-card rounded-3xl overflow-hidden" style={{ borderRadius: '24px' }}>
         {/* Section Header */}
         <div className="px-6 pt-6 pb-4">
           <div className="flex items-center gap-3 mb-1">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-orange-500/10">
-              <FileText className="w-4 h-4 text-orange-600 dark:text-orange-400" />
-            </div>
+            <span className="dashboard-panel-icon flex items-center justify-center w-8 h-8 rounded-full shrink-0">
+              <FileText className="w-4 h-4" />
+            </span>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">İrsaliye Yönetimi</h2>
-              <p className="text-sm text-muted-foreground">
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--dashboard-text)' }}>İrsaliye Yönetimi</h2>
+              <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
                 İrsaliye PDF veya Excel dosyalarını yükleyin. Bu dosyalar Mal Kabul &gt; İrsaliye OCR panelinden &quot;Dosyalardan Seç&quot; seçeneği ile kullanılabilir.
               </p>
             </div>
@@ -324,40 +324,39 @@ export default function DosyaYonetimiPage() {
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
-            className={`flex flex-col items-center justify-center w-full py-10 px-6 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
-              isDragging
-                ? 'border-primary bg-primary/5 dark:bg-primary/10 scale-[1.01]'
-                : 'border-border/60 hover:border-primary/40 hover:bg-muted/20 dark:hover:bg-muted/10'
-            } ${uploading ? 'pointer-events-none' : ''}`}
+            className="flex flex-col items-center justify-center w-full py-10 px-6 rounded-2xl cursor-pointer transition-all duration-200"
+            style={{
+              background: 'var(--dashboard-surface-2)',
+              border: isDragging ? '2px dashed var(--dashboard-accent)' : '2px dashed var(--dashboard-stroke)',
+              boxShadow: isDragging ? 'var(--dashboard-pressed)' : 'none',
+              transform: isDragging ? 'scale(1.005)' : 'scale(1)',
+              pointerEvents: uploading ? 'none' : 'auto',
+            }}
           >
             {uploading ? (
               <div className="flex flex-col items-center gap-3">
-                <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
-                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                </div>
+                <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full">
+                  <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
+                </span>
                 <div className="text-center">
-                  <p className="text-sm font-medium text-foreground">Yükleniyor... %{Math.round(uploadProgress)}</p>
+                  <p className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>Yükleniyor... %{Math.round(uploadProgress)}</p>
                   <Progress value={uploadProgress} className="w-48 mt-2" />
                 </div>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3">
-                <div className={`flex items-center justify-center w-12 h-12 rounded-xl transition-colors duration-200 ${
-                  isDragging ? 'bg-primary/10' : 'bg-muted/30 dark:bg-muted/10'
-                }`}>
-                  <FileUp className={`w-6 h-6 transition-colors duration-200 ${
-                    isDragging ? 'text-primary' : 'text-muted-foreground/60'
-                  }`} />
-                </div>
+                <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full">
+                  <FileUp className="w-6 h-6" style={{ color: isDragging ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }} />
+                </span>
                 <div className="text-center">
-                  <p className="text-sm font-medium text-foreground">
+                  <p className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>
                     Dosya yüklemek için tıklayın veya sürükleyin
                   </p>
                   <div className="flex items-center justify-center gap-2 mt-2">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-medium">PDF</span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-medium">XLSX</span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-medium">XLS</span>
-                    <span className="text-xs text-muted-foreground ml-1">Maks. 20MB</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>PDF</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>XLSX</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>XLS</span>
+                    <span className="text-xs ml-1" style={{ color: 'var(--dashboard-muted)' }}>Maks. 20MB</span>
                   </div>
                 </div>
               </div>
@@ -374,46 +373,45 @@ export default function DosyaYonetimiPage() {
         </div>
 
         {/* ─── File List ──────────────────────────────────── */}
-        <div className="border-t border-border/40">
+        <div style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
           <div className="px-6 py-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-foreground">
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>
               Yüklenen Dosyalar
-              <span className="ml-1.5 text-xs font-normal text-muted-foreground">({dosyalar.length})</span>
+              <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--dashboard-muted)' }}>({dosyalar.length})</span>
             </h3>
           </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-muted)' }} />
             </div>
           ) : dosyalar.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-6">
-              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-muted/30 dark:bg-muted/10 mb-3">
-                <FolderOpen className="w-6 h-6 text-muted-foreground/40" />
-              </div>
-              <p className="text-sm font-medium text-muted-foreground">Henüz dosya yüklenmedi</p>
-              <p className="text-xs text-muted-foreground/60 mt-1">PDF veya Excel yükleyerek başlayın</p>
+              <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full mb-3">
+                <FolderOpen className="w-6 h-6" style={{ color: 'var(--dashboard-muted)', opacity: 0.5 }} />
+              </span>
+              <p className="text-sm font-medium" style={{ color: 'var(--dashboard-muted)' }}>Henüz dosya yüklenmedi</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--dashboard-muted)', opacity: 0.6 }}>PDF veya Excel yükleyerek başlayın</p>
             </div>
           ) : (
-            <div className="divide-y divide-border/30 max-h-[400px] overflow-y-auto">
+            <div className="max-h-[400px] overflow-y-auto">
               {dosyalar.map((dosya) => (
                 <div
                   key={dosya.id}
-                  className="flex items-center justify-between px-6 py-3 hover:bg-muted/10 dark:hover:bg-muted/5 transition-colors"
+                  className="flex items-center justify-between px-6 py-3 transition-colors hover:opacity-80"
+                  style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className={`flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                      dosya.fileType === 'pdf' ? 'bg-red-500/10' : 'bg-green-500/10'
-                    }`}>
+                    <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full shrink-0">
                       {dosya.fileType === 'pdf' ? (
                         <FileText className="h-4 w-4 text-red-500" />
                       ) : (
                         <FileSpreadsheet className="h-4 w-4 text-green-600" />
                       )}
-                    </div>
+                    </span>
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm truncate text-foreground">{dosya.fileName}</p>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                      <p className="font-medium text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{dosya.fileName}</p>
+                      <div className="flex items-center gap-3 text-xs mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
                         <span>{formatFileSize(dosya.fileSize)}</span>
                         <span className="hidden sm:inline">{dosya.uploadedByName}</span>
                         <span className="flex items-center gap-1">
@@ -455,8 +453,8 @@ export default function DosyaYonetimiPage() {
         </div>
 
         {/* Footer note */}
-        <div className="px-6 py-3 border-t border-border/30 bg-muted/5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="px-6 py-3" style={{ borderTop: '1px solid var(--dashboard-stroke)', background: 'var(--dashboard-surface-2)' }}>
+          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             <span>Yüklenen dosyalar 1 hafta sonra otomatik olarak sistemden ve veritabanından silinir.</span>
           </div>
