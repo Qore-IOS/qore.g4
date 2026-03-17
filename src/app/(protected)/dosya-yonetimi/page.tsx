@@ -15,16 +15,8 @@ import {
   where,
   getDocs,
 } from 'firebase/firestore';
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import {
   FileText,
@@ -36,8 +28,11 @@ import {
   Clock,
   Download,
   ArrowLeft,
+  FileUp,
+  AlertCircle,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import BackButton from '@/components/BackButton';
 
 interface IrsaliyeDosya {
   id: string;
@@ -63,6 +58,7 @@ export default function DosyaYonetimiPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Listen to irsaliye files in real-time
   useEffect(() => {
@@ -125,9 +121,8 @@ export default function DosyaYonetimiPage() {
     cleanupExpired();
   }, [toast]);
 
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !currentUser) return;
+  const processFile = useCallback(async (file: File) => {
+    if (!currentUser) return;
 
     const allowedTypes = [
       'application/pdf',
@@ -141,18 +136,16 @@ export default function DosyaYonetimiPage() {
         description: 'Sadece PDF ve Excel (.xlsx, .xls) dosyaları yüklenebilir.',
         variant: 'destructive',
       });
-      e.target.value = '';
       return;
     }
 
-    const maxSize = 20 * 1024 * 1024; // 20 MB
+    const maxSize = 20 * 1024 * 1024;
     if (file.size > maxSize) {
       toast({
         title: 'Dosya Çok Büyük',
         description: 'Maksimum dosya boyutu 20 MB olabilir.',
         variant: 'destructive',
       });
-      e.target.value = '';
       return;
     }
 
@@ -216,16 +209,37 @@ export default function DosyaYonetimiPage() {
       });
       setUploading(false);
     }
-
-    e.target.value = '';
   }, [currentUser, currentUserProfile, toast]);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processFile(file);
+    e.target.value = '';
+  }, [processFile]);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) await processFile(file);
+  }, [processFile]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
 
   const handleDelete = useCallback(async (dosya: IrsaliyeDosya) => {
     if (!currentUser) return;
 
     setDeleting(dosya.id);
     try {
-      // Delete from Storage
       try {
         await fetch('/api/storage/delete-file', {
           method: 'POST',
@@ -235,10 +249,7 @@ export default function DosyaYonetimiPage() {
       } catch {
         // File may already be deleted
       }
-
-      // Delete from Firestore
       await deleteDoc(doc(db, 'irsaliyeDosyalari', dosya.id));
-
       toast({
         title: 'Silindi',
         description: `${dosya.fileName} başarıyla silindi.`,
@@ -271,141 +282,186 @@ export default function DosyaYonetimiPage() {
   };
 
   return (
-    <div className="container mx-auto p-4 md:p-6 space-y-6">
+    <div className="space-y-6 pb-8">
+      {/* ─── Header ───────────────────────────────────────── */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.back()}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <FolderOpen className="h-7 w-7 text-primary" />
-            Dosya Yönetimi
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Dosyalarınızı yükleyin ve yönetin. Yüklenen dosyalar 1 hafta sonra otomatik olarak silinir.
-          </p>
+        <BackButton />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-500/10">
+            <FolderOpen className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+              Dosya Yönetimi
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Dosyalarınızı yükleyin ve yönetin. Yüklenen dosyalar 1 hafta sonra otomatik olarak silinir.
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Invoice Management Section */}
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle className="text-xl font-headline flex items-center gap-2">
-            <FileText className="h-6 w-6 text-primary" />
-            İrsaliye Yönetimi
-          </CardTitle>
-          <CardDescription>
-            İrsaliye PDF veya Excel dosyalarını yükleyin. Bu dosyalar Mal Kabul &gt; İrsaliye OCR
-            panelinden &quot;Dosyalardan Seç&quot; seçeneği ile kullanılabilir.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Upload Area */}
-          <div className="flex flex-col items-center">
-            <label className="flex flex-col items-center justify-center w-full max-w-lg h-40 border-2 border-dashed rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-600 transition-colors">
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                {uploading ? (
-                  <>
-                    <Loader2 className="w-10 h-10 mb-3 text-primary animate-spin" />
-                    <p className="text-sm text-muted-foreground mb-2">Yükleniyor... %{Math.round(uploadProgress)}</p>
-                    <Progress value={uploadProgress} className="w-48" />
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-10 h-10 mb-3 text-slate-400" />
-                    <p className="mb-1 text-sm text-slate-500 dark:text-slate-400">
-                      <span className="font-semibold">PDF veya Excel yüklemek için tıklayın</span>
-                    </p>
-                    <p className="text-xs text-slate-400">PDF, XLSX, XLS (Maks. 20MB)</p>
-                  </>
-                )}
+      {/* ─── İrsaliye Yönetimi Section ──────────────────────── */}
+      <div className="rounded-2xl border border-border/60 bg-card/40 dark:bg-card/20 backdrop-blur-sm overflow-hidden">
+        {/* Section Header */}
+        <div className="px-6 pt-6 pb-4">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-orange-500/10">
+              <FileText className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">İrsaliye Yönetimi</h2>
+              <p className="text-sm text-muted-foreground">
+                İrsaliye PDF veya Excel dosyalarını yükleyin. Bu dosyalar Mal Kabul &gt; İrsaliye OCR panelinden &quot;Dosyalardan Seç&quot; seçeneği ile kullanılabilir.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ─── Upload Area ────────────────────────────────── */}
+        <div className="px-6 pb-4">
+          <label
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            className={`flex flex-col items-center justify-center w-full py-10 px-6 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
+              isDragging
+                ? 'border-primary bg-primary/5 dark:bg-primary/10 scale-[1.01]'
+                : 'border-border/60 hover:border-primary/40 hover:bg-muted/20 dark:hover:bg-muted/10'
+            } ${uploading ? 'pointer-events-none' : ''}`}
+          >
+            {uploading ? (
+              <div className="flex flex-col items-center gap-3">
+                <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
+                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-foreground">Yükleniyor... %{Math.round(uploadProgress)}</p>
+                  <Progress value={uploadProgress} className="w-48 mt-2" />
+                </div>
               </div>
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                accept=".pdf,.xlsx,.xls"
-                onChange={handleFileUpload}
-                disabled={uploading}
-              />
-            </label>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <div className={`flex items-center justify-center w-12 h-12 rounded-xl transition-colors duration-200 ${
+                  isDragging ? 'bg-primary/10' : 'bg-muted/30 dark:bg-muted/10'
+                }`}>
+                  <FileUp className={`w-6 h-6 transition-colors duration-200 ${
+                    isDragging ? 'text-primary' : 'text-muted-foreground/60'
+                  }`} />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-foreground">
+                    Dosya yüklemek için tıklayın veya sürükleyin
+                  </p>
+                  <div className="flex items-center justify-center gap-2 mt-2">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-medium">PDF</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-medium">XLSX</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-medium">XLS</span>
+                    <span className="text-xs text-muted-foreground ml-1">Maks. 20MB</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".pdf,.xlsx,.xls"
+              onChange={handleFileUpload}
+              disabled={uploading}
+            />
+          </label>
+        </div>
+
+        {/* ─── File List ──────────────────────────────────── */}
+        <div className="border-t border-border/40">
+          <div className="px-6 py-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">
+              Yüklenen Dosyalar
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">({dosyalar.length})</span>
+            </h3>
           </div>
 
-          {/* File List */}
-          <div className="border rounded-lg overflow-hidden">
-            <div className="p-3 border-b bg-slate-50 dark:bg-slate-800 font-semibold flex justify-between items-center">
-              <span>Yüklenen Dosyalar ({dosyalar.length})</span>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-            <ScrollArea className="max-h-[400px]">
-              {loading ? (
-                <div className="flex items-center justify-center py-10">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
-              ) : dosyalar.length === 0 ? (
-                <div className="text-center text-muted-foreground py-10">
-                  Henüz dosya yüklenmedi.
-                </div>
-              ) : (
-                <div className="divide-y">
-                  {dosyalar.map((dosya) => (
-                    <div
-                      key={dosya.id}
-                      className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        {dosya.fileType === 'pdf' ? (
-                          <FileText className="h-8 w-8 text-red-500 shrink-0" />
-                        ) : (
-                          <FileSpreadsheet className="h-8 w-8 text-green-600 shrink-0" />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium text-sm truncate">{dosya.fileName}</p>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            <span>{formatFileSize(dosya.fileSize)}</span>
-                            <span>{dosya.uploadedByName}</span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {getRemainingDays(dosya.expiresAt)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => window.open(dosya.downloadURL, '_blank')}
-                          title="İndir"
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => handleDelete(dosya)}
-                          disabled={deleting === dosya.id}
-                          title="Sil"
-                        >
-                          {deleting === dosya.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </Button>
+          ) : dosyalar.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-6">
+              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-muted/30 dark:bg-muted/10 mb-3">
+                <FolderOpen className="w-6 h-6 text-muted-foreground/40" />
+              </div>
+              <p className="text-sm font-medium text-muted-foreground">Henüz dosya yüklenmedi</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">PDF veya Excel yükleyerek başlayın</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border/30 max-h-[400px] overflow-y-auto">
+              {dosyalar.map((dosya) => (
+                <div
+                  key={dosya.id}
+                  className="flex items-center justify-between px-6 py-3 hover:bg-muted/10 dark:hover:bg-muted/5 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className={`flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
+                      dosya.fileType === 'pdf' ? 'bg-red-500/10' : 'bg-green-500/10'
+                    }`}>
+                      {dosya.fileType === 'pdf' ? (
+                        <FileText className="h-4 w-4 text-red-500" />
+                      ) : (
+                        <FileSpreadsheet className="h-4 w-4 text-green-600" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm truncate text-foreground">{dosya.fileName}</p>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                        <span>{formatFileSize(dosya.fileSize)}</span>
+                        <span className="hidden sm:inline">{dosya.uploadedByName}</span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {getRemainingDays(dosya.expiresAt)}
+                        </span>
                       </div>
                     </div>
-                  ))}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg"
+                      onClick={() => window.open(dosya.downloadURL, '_blank')}
+                      title="İndir"
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-500/10"
+                      onClick={() => handleDelete(dosya)}
+                      disabled={deleting === dosya.id}
+                      title="Sil"
+                    >
+                      {deleting === dosya.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
-              )}
-            </ScrollArea>
-          </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-          <p className="text-xs text-muted-foreground text-center">
-            Yüklenen dosyalar 1 hafta sonra otomatik olarak sistemden ve veritabanından silinir.
-          </p>
-        </CardContent>
-      </Card>
+        {/* Footer note */}
+        <div className="px-6 py-3 border-t border-border/30 bg-muted/5">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>Yüklenen dosyalar 1 hafta sonra otomatik olarak sistemden ve veritabanından silinir.</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
