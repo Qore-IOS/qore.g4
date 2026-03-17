@@ -1,96 +1,94 @@
-/**
- * @fileoverview Usage Verification Panel Component
- * @description Enterprise-grade panel for verifying product consumption through
- * disposal barcode scanning. Ensures proper kit disposal verification in laboratory environments.
- * @module components/kullanim-dogrulama-panel
- * @version 2.0.0
- */
-
 'use client';
-import React, { useState, useMemo, useEffect, ChangeEvent, KeyboardEvent, Suspense, useCallback } from 'react';
-import type { Laboratory, ProductCode, ConsumptionRecord, VerificationItemGroup, AppView } from '@/lib/types';
+
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
-import { CheckSquare, Recycle, Loader2, Info, Search, Barcode } from 'lucide-react';
-import { DISPOSAL_BARCODE_LENGTH, DISPOSAL_LOT_LENGTH } from '@/lib/constants';
+import { Badge } from '@/components/ui/badge';
+import { CheckSquare, Loader2, Info, Search, ShieldCheck, Trash2, Nfc } from 'lucide-react';
 import { collection, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
 
+// NFC tag format regex: xx:xx:xx:xx:xx:xx:xx:xx (each xx is 2 hex chars)
+const NFC_TAG_REGEX = /^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){7}$/;
 
-/**
- * Usage Verification Panel Component
- *
- * Provides functionality for verifying that consumed products have been properly
- * disposed of by scanning disposal kit barcodes. The panel displays consumption
- * records grouped by product, lot, and expiry date, allowing verification of
- * each consumed item.
- *
- * @example
- * ```tsx
- * <KullanimDogrulamaPanel />
- * ```
- */
+/** A single NFC verification group for a product consumed with serial tracking */
+interface NfcVerificationGroup {
+  stokKodu: string;
+  stokAdi: string;
+  /** Total number of consumptions for this product (serial-tracked) */
+  tuketilenAdet: number;
+  /** Unique NFC serial tags scanned so far for this product */
+  okutulanNfcler: string[];
+  /** Whether the empty box NFC has been scanned */
+  bosKutuOkutuldu: boolean;
+  /** The original consumption record IDs */
+  consumptionRecordIds: string[];
+  /** The serial numbers from consumption records */
+  tuketilenSeriNolar: string[];
+}
+
 export default function KullanimDogrulamaPanel() {
   const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>('');
-  const [disposalBarcode, setDisposalBarcode] = useState<string>('');
-  const [verificationItems, setVerificationItems] = useState<VerificationItemGroup[]>([]);
+  const [nfcInput, setNfcInput] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
+  const [verificationGroups, setVerificationGroups] = useState<NfcVerificationGroup[]>([]);
+
   const { toast } = useToast();
 
-  /** Input element ID for disposal barcode scanner field */
-  const DISPOSAL_BARCODE_INPUT_ID = "disposal-barcode-input";
+  const NFC_INPUT_ID = 'nfc-tag-input';
 
-  /**
-   * Fetches all required data for the verification panel
-   * Loads laboratories, product codes, and consumption records from Firestore
-   */
+  // Fetch panel data
   const fetchPanelData = useCallback(async () => {
     setIsLoading(true);
-    const startTime = performance.now();
-
     try {
       const [laboratoriesSnap, productsSnap, consumptionSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'tuketimKayitlari'))
+        getDocs(collection(db, 'tuketimKayitlari')),
       ]);
 
-      setLaboratories(laboratoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Laboratory)));
-      setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
+      setLaboratories(
+        laboratoriesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Laboratory))
+      );
 
-      const consumptionItems = consumptionSnap.docs.map(doc => {
-          const data = doc.data();
-           Object.keys(data).forEach(key => {
-              if (data[key] instanceof Timestamp) {
-                  data[key] = data[key].toDate();
-              }
-          });
-          return { id: doc.id, ...data } as ConsumptionRecord;
+      const products = productsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as ProductCode));
+      setProductCodes(products);
+
+      const consumptionItems = consumptionSnap.docs.map((doc) => {
+        const data = doc.data();
+        Object.keys(data).forEach((key) => {
+          if (data[key] instanceof Timestamp) {
+            data[key] = data[key].toDate();
+          }
+        });
+        return { id: doc.id, ...data } as ConsumptionRecord;
       });
       setTuketimKayitlari(consumptionItems);
 
-      const duration = performance.now() - startTime;
-      kullanimDogrulamaLogger.performance('Panel verileri yüklendi', duration, {
-        laboratoriesCount: laboratoriesSnap.docs.length,
-        productsCount: productsSnap.docs.length,
-        consumptionCount: consumptionSnap.docs.length,
+      kullanimDogrulamaLogger.info('Panel verileri yüklendi', {
+        laboratories: laboratoriesSnap.docs.length,
+        products: productsSnap.docs.length,
+        consumptions: consumptionSnap.docs.length,
       });
-
     } catch (error) {
       kullanimDogrulamaLogger.error('Panel verileri yüklenemedi', error);
-      toast({ title: "Veri Hatası", description: "Doğrulama paneli için veriler yüklenemedi.", variant: "destructive" });
+      toast({
+        title: 'Veri Hatası',
+        description: 'Doğrulama paneli için veriler yüklenemedi.',
+        variant: 'destructive',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -100,160 +98,235 @@ export default function KullanimDogrulamaPanel() {
     fetchPanelData();
   }, [fetchPanelData]);
 
+  // Build verification groups when lab changes
   useEffect(() => {
-    if (selectedLaboratoryId) {
-      const laboratory = laboratories.find(h => h.id === selectedLaboratoryId);
-      if (!laboratory) return;
-
-      const laboratoryName = laboratory.name;
-      const relevantConsumptions = tuketimKayitlari.filter(
-        record => record.laboratoryName === laboratoryName && record.consumptionType === 'normal_kullanim'
-      );
-
-      const grouped: Record<string, VerificationItemGroup> = {};
-
-      relevantConsumptions.forEach(record => {
-        const key = `${record.stokKodu}-${record.lotNumarasi}-${record.miad}`;
-        if (!grouped[key]) {
-          grouped[key] = {
-            stokKodu: record.stokKodu,
-            stokAdi: record.stokAdi,
-            lotNumarasi: record.lotNumarasi,
-            miad: record.miad,
-            tuketilenAdet: 0,
-            dogrulananAdet: 0, 
-            originalRecordIds: [],
-          };
-        }
-        grouped[key].tuketilenAdet += 1;
-        if (!grouped[key].originalRecordIds.includes(record.id)) {
-            grouped[key].originalRecordIds.push(record.id);
-        }
-      });
-      
-      const currentVerificationState = verificationItems.reduce((acc, item) => {
-        const key = `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
-        acc[key] = item.dogrulananAdet;
-        return acc;
-      }, {} as Record<string, number>);
-
-
-      Object.keys(grouped).forEach(key => {
-        if(currentVerificationState[key] && currentVerificationState[key] <= grouped[key].tuketilenAdet) {
-          grouped[key].dogrulananAdet = currentVerificationState[key];
-        }
-      });
-      
-      setVerificationItems(Object.values(grouped).sort((a,b) => a.stokAdi.localeCompare(b.stokAdi)));
-    } else {
-      setVerificationItems([]);
+    if (!selectedLaboratoryId) {
+      setVerificationGroups([]);
+      return;
     }
-    setDisposalBarcode(''); 
-  }, [selectedLaboratoryId, tuketimKayitlari, laboratories]); 
-  
-  const filteredVerificationItems = useMemo(() => {
-    if (!searchTerm) return verificationItems;
-    return verificationItems.filter(item => 
-        item.stokAdi.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.stokKodu.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.lotNumarasi.toLowerCase().includes(searchTerm.toLowerCase())
+
+    const laboratory = laboratories.find((h) => h.id === selectedLaboratoryId);
+    if (!laboratory) return;
+
+    // Find serial-tracked product codes
+    const serialTrackedCodes = new Set(
+      productCodes
+        .filter((p) => p.trackingMode === 'serial')
+        .map((p) => p.stokKodu)
     );
-  }, [verificationItems, searchTerm]);
 
+    // Filter consumptions: this lab, normal usage, serial-tracked products
+    const relevantConsumptions = tuketimKayitlari.filter(
+      (record) =>
+        record.laboratoryName === laboratory.name &&
+        record.consumptionType === 'normal_kullanim' &&
+        serialTrackedCodes.has(record.stokKodu)
+    );
 
-  /**
-   * Handles disposal barcode scanning and verification
-   * Validates barcode format, finds matching consumption record, and updates verification count
-   * @param barcodeToProcess - Optional barcode to process, defaults to current input value
-   */
-  const handleDisposalScan = (barcodeToProcess?: string) => {
-    const currentBarcode = (barcodeToProcess || disposalBarcode).trim();
+    // Group by product (stokKodu)
+    const grouped: Record<string, NfcVerificationGroup> = {};
+
+    relevantConsumptions.forEach((record) => {
+      const key = record.stokKodu;
+      if (!grouped[key]) {
+        grouped[key] = {
+          stokKodu: record.stokKodu,
+          stokAdi: record.stokAdi,
+          tuketilenAdet: 0,
+          okutulanNfcler: [],
+          bosKutuOkutuldu: false,
+          consumptionRecordIds: [],
+          tuketilenSeriNolar: [],
+        };
+      }
+      grouped[key].tuketilenAdet += 1;
+      if (!grouped[key].consumptionRecordIds.includes(record.id)) {
+        grouped[key].consumptionRecordIds.push(record.id);
+      }
+      if (record.seriNumarasi && !grouped[key].tuketilenSeriNolar.includes(record.seriNumarasi)) {
+        grouped[key].tuketilenSeriNolar.push(record.seriNumarasi);
+      }
+    });
+
+    setVerificationGroups(
+      Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi))
+    );
+    setNfcInput('');
+  }, [selectedLaboratoryId, tuketimKayitlari, laboratories, productCodes]);
+
+  // Filtered groups for search
+  const filteredGroups = useMemo(() => {
+    if (!searchTerm) return verificationGroups;
+    const term = searchTerm.toLowerCase();
+    return verificationGroups.filter(
+      (g) =>
+        g.stokAdi.toLowerCase().includes(term) || g.stokKodu.toLowerCase().includes(term)
+    );
+  }, [verificationGroups, searchTerm]);
+
+  // Handle NFC scan
+  const handleNfcScan = useCallback(() => {
+    const tag = nfcInput.trim().toLowerCase();
 
     if (!selectedLaboratoryId) {
-      kullanimDogrulamaLogger.warn('Laboratuvar seçilmeden barkod okutulmaya çalışıldı');
-      toast({ title: "Uyarı", description: "Lütfen önce bir laboratuvar seçin.", variant: "default" });
+      toast({ title: 'Uyarı', description: 'Lütfen önce bir laboratuvar seçin.' });
+      setNfcInput('');
       return;
     }
-    if (!currentBarcode) {
-      toast({ title: "Uyarı", description: "Lütfen imha barkodunu okutun.", variant: "default" });
+
+    if (!tag) {
+      toast({ title: 'Uyarı', description: 'Lütfen NFC etiketini okutun.' });
       return;
     }
-    if (currentBarcode.length !== DISPOSAL_BARCODE_LENGTH) {
-      kullanimDogrulamaLogger.warn('Geçersiz barkod uzunluğu', {
-        expected: DISPOSAL_BARCODE_LENGTH,
-        received: currentBarcode.length,
+
+    if (!NFC_TAG_REGEX.test(tag)) {
+      kullanimDogrulamaLogger.warn('Geçersiz NFC formatı', { tag });
+      toast({
+        title: 'Hata',
+        description: `Geçersiz NFC formatı. Beklenen: xx:xx:xx:xx:xx:xx:xx:xx — Girilen: ${tag}`,
+        variant: 'destructive',
       });
-      toast({ title: "Hata", description: `İmha barkodu ${DISPOSAL_BARCODE_LENGTH} hane olmalıdır. Girilen: ${currentBarcode.length}`, variant: "destructive" });
-      setDisposalBarcode('');
+      setNfcInput('');
       return;
     }
 
-    const kitLotNumber = currentBarcode.substring(0, DISPOSAL_LOT_LENGTH);
+    // Check if this NFC tag was already scanned in any group
+    const alreadyScanned = verificationGroups.some((g) => g.okutulanNfcler.includes(tag));
+    if (alreadyScanned) {
+      kullanimDogrulamaLogger.warn('Zaten okutulmuş NFC etiketi', { tag });
+      toast({
+        title: 'Tekrar Okutma',
+        description: `Bu NFC etiketi (${tag}) zaten okutulmuş.`,
+        variant: 'destructive',
+      });
+      setNfcInput('');
+      document.getElementById(NFC_INPUT_ID)?.focus();
+      return;
+    }
 
-    let itemWasFoundAndUpdated = false;
-    let updatedItemDetailsForToast: VerificationItemGroup | null = null;
+    // Try to match to a group that still needs NFC scans
+    let matched = false;
 
-    setVerificationItems(prevItems =>
-      prevItems.map(item => {
-        if (!itemWasFoundAndUpdated && item.lotNumarasi === kitLotNumber && item.dogrulananAdet < item.tuketilenAdet) {
-          itemWasFoundAndUpdated = true;
-          updatedItemDetailsForToast = { ...item, dogrulananAdet: item.dogrulananAdet + 1 };
-          return { ...item, dogrulananAdet: item.dogrulananAdet + 1 };
+    setVerificationGroups((prev) =>
+      prev.map((group) => {
+        if (!matched && group.okutulanNfcler.length < group.tuketilenAdet) {
+          matched = true;
+          const updated = {
+            ...group,
+            okutulanNfcler: [...group.okutulanNfcler, tag],
+          };
+          kullanimDogrulamaLogger.info('NFC doğrulandı', {
+            stokKodu: group.stokKodu,
+            tag,
+            count: updated.okutulanNfcler.length,
+            total: group.tuketilenAdet,
+          });
+          toast({
+            title: 'NFC Okutuldu',
+            description: `${group.stokAdi} — ${updated.okutulanNfcler.length}/${group.tuketilenAdet} seri doğrulandı.`,
+          });
+          return updated;
         }
-        return item;
+        return group;
       })
     );
 
-    if (itemWasFoundAndUpdated && updatedItemDetailsForToast) {
-      kullanimDogrulamaLogger.info('İmha doğrulandı', {
-        stokKodu: updatedItemDetailsForToast.stokKodu,
-        lotNumarasi: updatedItemDetailsForToast.lotNumarasi,
-        dogrulananAdet: updatedItemDetailsForToast.dogrulananAdet,
-        tuketilenAdet: updatedItemDetailsForToast.tuketilenAdet,
+    if (!matched) {
+      toast({
+        title: 'Eşleşme Yok',
+        description: 'Doğrulanmayı bekleyen ürün bulunamadı veya tüm ürünler zaten doğrulanmış.',
       });
-      toast({ title: "Doğrulandı", description: `${updatedItemDetailsForToast.stokAdi} (Lot: ${updatedItemDetailsForToast.lotNumarasi}) için 1 adet imha doğrulandı.` });
-    } else {
-      const alreadyFullyVerifiedItem = verificationItems.find(item => item.lotNumarasi === kitLotNumber && item.dogrulananAdet === item.tuketilenAdet);
-      if(alreadyFullyVerifiedItem){
-          kullanimDogrulamaLogger.debug('Zaten tamamen doğrulanmış lot', { kitLotNumber });
-          toast({ title: "Zaten Doğrulanmış", description: `${alreadyFullyVerifiedItem.stokAdi} (Lot: ${kitLotNumber}) için tüm tüketimler zaten doğrulanmış.`, variant: "default", duration: 5000 });
-      } else {
-        kullanimDogrulamaLogger.warn('Eşleşen lot bulunamadı', { kitLotNumber });
-        toast({ title: "Uyarı", description: `Okutulan kit lot numarası (${kitLotNumber}) ile eşleşen veya doğrulanmamış tüketim bulunamadı.`, variant: "default", duration: 5000 });
-      }
     }
 
-    setDisposalBarcode('');
-    document.getElementById(DISPOSAL_BARCODE_INPUT_ID)?.focus();
-  };
-  
-  const handleDisposalKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
+    setNfcInput('');
+    document.getElementById(NFC_INPUT_ID)?.focus();
+  }, [nfcInput, selectedLaboratoryId, verificationGroups, toast]);
+
+  // Handle empty box NFC scan
+  const handleEmptyBoxScan = useCallback(
+    (stokKodu: string) => {
+      setVerificationGroups((prev) =>
+        prev.map((group) => {
+          if (group.stokKodu === stokKodu) {
+            if (group.okutulanNfcler.length < group.tuketilenAdet) {
+              toast({
+                title: 'Uyarı',
+                description: `Önce tüm seri numaralarını okutmanız gerekiyor. (${group.okutulanNfcler.length}/${group.tuketilenAdet})`,
+                variant: 'destructive',
+              });
+              return group;
+            }
+            kullanimDogrulamaLogger.info('Boş kutu okutuldu', { stokKodu });
+            toast({
+              title: 'Boş Kutu Doğrulandı',
+              description: `${group.stokAdi} — boş kutu çöpe atıldı olarak işaretlendi.`,
+            });
+            return { ...group, bosKutuOkutuldu: true };
+          }
+          return group;
+        })
+      );
+    },
+    [toast]
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-        e.preventDefault();
-        handleDisposalScan();
+      e.preventDefault();
+      handleNfcScan();
     }
-  }
+  };
+
+  // Overall progress
+  const overallProgress = useMemo(() => {
+    if (verificationGroups.length === 0) return { nfc: 0, box: 0, total: 0 };
+    const totalNfc = verificationGroups.reduce((s, g) => s + g.tuketilenAdet, 0);
+    const scannedNfc = verificationGroups.reduce((s, g) => s + g.okutulanNfcler.length, 0);
+    const totalBoxes = verificationGroups.length;
+    const scannedBoxes = verificationGroups.filter((g) => g.bosKutuOkutuldu).length;
+    const totalSteps = totalNfc + totalBoxes;
+    const doneSteps = scannedNfc + scannedBoxes;
+    return {
+      nfc: totalNfc > 0 ? Math.round((scannedNfc / totalNfc) * 100) : 0,
+      box: totalBoxes > 0 ? Math.round((scannedBoxes / totalBoxes) * 100) : 0,
+      total: totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0,
+    };
+  }, [verificationGroups]);
 
   return (
-    <div className="space-y-6" role="main" aria-label="Kullanım doğrulama paneli">
-      <Card className="shadow-md rounded-lg" role="region" aria-labelledby="verification-title">
+    <div className="space-y-6">
+      <Card className="shadow-md rounded-lg">
         <CardHeader>
-          <CardTitle id="verification-title" className="text-xl flex items-center">
-            <Recycle className="mr-2 h-6 w-6 text-green-600" aria-hidden="true" />
-            Kullanım Sağlama (İmha Doğrulama)
+          <CardTitle className="text-xl flex items-center">
+            <ShieldCheck className="mr-2 h-6 w-6 text-green-600" />
+            Kullanım Doğrulama (NFC Seri No Doğrulama)
           </CardTitle>
-          <CardDescription>Kullanılan ürünlerin kitlerinin imha edildiğini doğrulayın. İmha kiti barkodunu okutun.</CardDescription>
+          <CardDescription>
+            Seri numarası takipli ürünlerin tüketim doğrulaması. Her tüketilen ürün için eşsiz NFC
+            seri etiketi okutun, ardından boş kutuyu okutarak çöpe atın.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Laboratory selection */}
           <div>
-            <label htmlFor="laboratory-select-verification" className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
-            <Select value={selectedLaboratoryId} onValueChange={(value) => { setSelectedLaboratoryId(value); setSearchTerm(''); }}>
-              <SelectTrigger id="laboratory-select-verification" className="w-full md:w-1/2 lg:w-1/3 rounded-md" aria-label="Doğrulama yapılacak laboratuvarı seçin">
+            <label htmlFor="lab-select-nfc" className="block text-sm font-medium mb-1">
+              Laboratuvar Seçin
+            </label>
+            <Select
+              value={selectedLaboratoryId}
+              onValueChange={(value) => {
+                setSelectedLaboratoryId(value);
+                setSearchTerm('');
+              }}
+            >
+              <SelectTrigger id="lab-select-nfc" className="w-full md:w-1/2 lg:w-1/3 rounded-md">
                 <SelectValue placeholder="Doğrulama yapılacak laboratuvarı seçin" />
               </SelectTrigger>
               <SelectContent>
-                {laboratories.map(h => (
-                  <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+                {laboratories.map((h) => (
+                  <SelectItem key={h.id} value={h.id}>
+                    {h.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -263,102 +336,170 @@ export default function KullanimDogrulamaPanel() {
             <Card className="border-border dark:border-input rounded-lg p-4 mt-4">
               <CardHeader className="px-0 pt-0 pb-3">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                    <CardTitle className="text-lg">Doğrulanacak Kullanımlar</CardTitle>
-                     <Input
-                        type="search"
-                        placeholder="Stok adı, kodu veya lot ile ara..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="max-w-xs rounded-md h-9"
-                    />
+                  <CardTitle className="text-lg">Doğrulanacak Kullanımlar</CardTitle>
+                  <Input
+                    type="search"
+                    placeholder="Ürün adı veya kodu ile ara..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="max-w-xs rounded-md h-9"
+                  />
                 </div>
               </CardHeader>
               <CardContent className="px-0 pb-0">
-              <div className="flex items-center space-x-2 mb-4" role="search">
-                <Input
-                  id={DISPOSAL_BARCODE_INPUT_ID}
-                  placeholder={`İmha Kiti Barkodu (${DISPOSAL_BARCODE_LENGTH} hane)`}
-                  value={disposalBarcode}
-                  onChange={(e) => setDisposalBarcode(e.target.value)}
-                  onKeyPress={handleDisposalKeyPress}
-                  maxLength={DISPOSAL_BARCODE_LENGTH}
-                  className="flex-grow rounded-md h-10"
-                  disabled={!selectedLaboratoryId || verificationItems.length === 0}
-                  aria-label="İmha kiti barkodu girin"
-                  aria-describedby="barcode-hint"
-                />
-                <span id="barcode-hint" className="sr-only">
-                  Barkod {DISPOSAL_BARCODE_LENGTH} haneli olmalıdır
-                </span>
-                <Button
-                  onClick={() => handleDisposalScan()}
-                  className="rounded-md h-10"
-                  disabled={!disposalBarcode}
-                  aria-label="Barkodu doğrula"
-                >
-                  <Barcode className="mr-2 h-5 w-5" aria-hidden="true" />
-                  Doğrula
-                </Button>
-              </div>
-
-              {isLoading ? (
-                  <div className="flex justify-center items-center py-6" role="status" aria-label="Yükleniyor">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
-                    <span className="sr-only">Veriler yükleniyor...</span>
+                {/* Overall progress */}
+                {verificationGroups.length > 0 && (
+                  <div className="mb-4 p-3 bg-muted/50 rounded-lg space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">Genel İlerleme</span>
+                      <span className="font-mono">{overallProgress.total}%</span>
+                    </div>
+                    <Progress value={overallProgress.total} className="h-2" />
+                    <div className="flex gap-4 text-xs text-muted-foreground">
+                      <span>NFC Seri: {overallProgress.nfc}%</span>
+                      <span>Boş Kutu: {overallProgress.box}%</span>
+                    </div>
                   </div>
-              ) : verificationItems.length === 0 && !searchTerm ? (
-                 <div className="flex flex-col items-center justify-center py-6 text-muted-foreground" role="status">
-                  <Info className="h-10 w-10 mb-2" aria-hidden="true" />
-                  <p>Bu laboratuvar için doğrulanacak kullanım kaydı bulunmuyor.</p>
+                )}
+
+                {/* NFC input */}
+                <div className="flex items-center space-x-2 mb-4">
+                  <Input
+                    id={NFC_INPUT_ID}
+                    placeholder="NFC Etiketi (xx:xx:xx:xx:xx:xx:xx:xx)"
+                    value={nfcInput}
+                    onChange={(e) => setNfcInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="flex-grow rounded-md h-10 font-mono"
+                    disabled={!selectedLaboratoryId || verificationGroups.length === 0}
+                  />
+                  <Button
+                    onClick={handleNfcScan}
+                    className="rounded-md h-10"
+                    disabled={!nfcInput.trim()}
+                  >
+                    <Nfc className="mr-2 h-5 w-5" />
+                    Okut
+                  </Button>
                 </div>
-              ) : filteredVerificationItems.length === 0 && searchTerm ? (
-                <div className="flex flex-col items-center justify-center py-6 text-muted-foreground" role="status">
-                  <Search className="h-10 w-10 mb-2" aria-hidden="true" />
-                  <p>Arama kriterlerine uyan doğrulanacak kullanım yok.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto max-h-[500px]">
-                  <Table aria-label="Doğrulanacak kullanım kayıtları">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Stok Adı (Kodu)</TableHead>
-                        <TableHead>Lot Numarası</TableHead>
-                        <TableHead>Miad</TableHead>
-                        <TableHead className="text-center">Tüketilen</TableHead>
-                        <TableHead className="text-center">Doğrulanan</TableHead>
-                        <TableHead className="w-[150px]">İlerleme</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredVerificationItems.map(item => {
-                        const progressPercentage = item.tuketilenAdet > 0 ? (item.dogrulananAdet / item.tuketilenAdet) * 100 : 0;
-                        const isFullyVerified = item.dogrulananAdet === item.tuketilenAdet && item.tuketilenAdet > 0;
-                        return (
-                          <TableRow key={`${item.stokKodu}-${item.lotNumarasi}-${item.miad}`} className={isFullyVerified ? 'bg-green-500/10 dark:bg-green-500/20 opacity-70' : ''}>
-                            <TableCell>
-                              {item.stokAdi}
-                              <span className="block text-xs text-muted-foreground font-mono">({item.stokKodu})</span>
-                            </TableCell>
-                            <TableCell className="font-mono">{item.lotNumarasi}</TableCell>
-                            <TableCell>{item.miad}</TableCell>
-                            <TableCell className="text-center font-medium">{item.tuketilenAdet}</TableCell>
-                            <TableCell className="text-center font-semibold text-primary">{item.dogrulananAdet}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center space-x-2">
-                                <Progress value={progressPercentage} className="h-3 flex-grow rounded-md" />
-                                <span className="text-xs font-mono w-10 text-right">
-                                  {Math.round(progressPercentage)}%
+
+                {isLoading ? (
+                  <div className="flex justify-center items-center py-6">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                ) : verificationGroups.length === 0 && !searchTerm ? (
+                  <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                    <Info className="h-10 w-10 mb-2" />
+                    <p>
+                      Bu laboratuvarda seri numarası takipli tüketilmiş ürün bulunamadı.
+                    </p>
+                  </div>
+                ) : filteredGroups.length === 0 && searchTerm ? (
+                  <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                    <Search className="h-10 w-10 mb-2" />
+                    <p>Arama kriterlerine uyan ürün bulunamadı.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[500px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ürün Adı (Kodu)</TableHead>
+                          <TableHead className="text-center">Tüketilen</TableHead>
+                          <TableHead className="text-center">NFC Okutulan</TableHead>
+                          <TableHead className="w-[180px]">İlerleme</TableHead>
+                          <TableHead className="text-center">Boş Kutu</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredGroups.map((group) => {
+                          const nfcProgress =
+                            group.tuketilenAdet > 0
+                              ? (group.okutulanNfcler.length / group.tuketilenAdet) * 100
+                              : 0;
+                          const allNfcDone =
+                            group.okutulanNfcler.length === group.tuketilenAdet &&
+                            group.tuketilenAdet > 0;
+                          const fullyDone = allNfcDone && group.bosKutuOkutuldu;
+
+                          return (
+                            <TableRow
+                              key={group.stokKodu}
+                              className={
+                                fullyDone
+                                  ? 'bg-green-500/10 dark:bg-green-500/20 opacity-70'
+                                  : ''
+                              }
+                            >
+                              <TableCell>
+                                {group.stokAdi}
+                                <span className="block text-xs text-muted-foreground font-mono">
+                                  ({group.stokKodu})
                                 </span>
-                                {isFullyVerified && <CheckSquare className="h-5 w-5 text-green-600" />}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+                                {/* Show scanned NFC tags */}
+                                {group.okutulanNfcler.length > 0 && (
+                                  <div className="mt-1 flex flex-wrap gap-1">
+                                    {group.okutulanNfcler.map((tag) => (
+                                      <Badge
+                                        key={tag}
+                                        variant="secondary"
+                                        className="font-mono text-[10px]"
+                                      >
+                                        {tag}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center font-medium">
+                                {group.tuketilenAdet}
+                              </TableCell>
+                              <TableCell className="text-center font-semibold text-primary">
+                                {group.okutulanNfcler.length}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center space-x-2">
+                                  <Progress
+                                    value={nfcProgress}
+                                    className="h-3 flex-grow rounded-md"
+                                  />
+                                  <span className="text-xs font-mono w-10 text-right">
+                                    {Math.round(nfcProgress)}%
+                                  </span>
+                                  {allNfcDone && (
+                                    <CheckSquare className="h-4 w-4 text-green-600" />
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {group.bosKutuOkutuldu ? (
+                                  <Badge
+                                    variant="default"
+                                    className="bg-green-600 hover:bg-green-700"
+                                  >
+                                    <Trash2 className="mr-1 h-3 w-3" />
+                                    Atıldı
+                                  </Badge>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleEmptyBoxScan(group.stokKodu)}
+                                    disabled={!allNfcDone}
+                                    className="text-xs"
+                                  >
+                                    <Trash2 className="mr-1 h-3 w-3" />
+                                    Boş Kutu Okut
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
