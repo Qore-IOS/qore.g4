@@ -988,22 +988,34 @@ export default function DirektTransferPanel() {
 
   const removeTransferItem = (itemId: string, isGroup: boolean | undefined) => {
     if (isGroup) {
-      setDirectTransferItems(prev => prev.filter(item => item.key !== itemId));
+      // itemId is a composite group key: stokKodu-lotNumarasi-miad
+      // Match against the same composite key logic used in groupedTransferItems
+      setDirectTransferItems(prev => prev.filter(item => {
+        const compositeKey = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
+        return compositeKey !== itemId;
+      }));
     } else {
       setDirectTransferItems(prev => prev.filter(item => item.id !== itemId));
     }
+  };
+
+  const removeSerialFromGroup = (serialId: string) => {
+    setDirectTransferItems(prev => prev.filter(item => item.id !== serialId));
   };
 
   const handleGroupAdetChange = (groupKey: string, newAdetStr: string) => {
     const newAdet = parseInt(newAdetStr, 10);
     if (isNaN(newAdet) || newAdet < 0) return;
 
+    const makeCompositeKey = (item: TransferRow) => `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
+
     setDirectTransferItems(prev => {
-        const groupItems = prev.filter(item => item.key === groupKey);
-        if (groupItems.length > 0 && groupItems[0].isGroup) {
+        const groupItems = prev.filter(item => item.isGroup && makeCompositeKey(item) === groupKey);
+        if (groupItems.length > 0) {
             const updatedGroup = { ...groupItems[0], adet: newAdet };
-            return [updatedGroup, ...prev.filter(item => item.key !== groupKey)];
+            return [updatedGroup, ...prev.filter(item => !(item.isGroup && makeCompositeKey(item) === groupKey))];
         }
+        // For non-group items (serial-tracked), we can't change adet individually
         return prev;
     });
   };
@@ -1056,6 +1068,32 @@ export default function DirektTransferPanel() {
               {depotName ? `${depotName}` : 'Depo seçin'}{' '}
               {selectedLabName ? `→ ${selectedLabName}` : isBorcMode && selectedCompany ? `→ ${selectedCompany} (Borç)` : ''}
             </p>
+          </div>
+          {/* Transfer CTA + count in header */}
+          <div className="flex items-center gap-3">
+            {stepperState.totalAdet > 0 && (
+              <div className="flex items-baseline gap-1.5 mr-1">
+                <span className="text-2xl sm:text-3xl font-extrabold tabular-nums text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
+                <span className="text-xs font-medium text-[var(--dashboard-muted)]">adet</span>
+              </div>
+            )}
+            <button
+              onClick={handleCompleteDirectTransfer}
+              disabled={!isTransferReady || shipmentLoading}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 sm:px-5 sm:py-2.5 rounded-2xl text-sm font-bold transition-all",
+                isTransferReady && !shipmentLoading
+                  ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
+                  : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+              )}
+            >
+              {shipmentLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Truck className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Transfer Et</span>
+            </button>
           </div>
           {/* Secondary actions */}
           <div className="flex items-center gap-1.5">
@@ -1225,6 +1263,28 @@ export default function DirektTransferPanel() {
 
             {/* ─── Add Methods Card ─── */}
             <div className="cihaz-card p-4 sm:p-5 space-y-3">
+              {/* Last scanned feedback - at top of Ürün Ekle card */}
+              {lastScannedProduct && (
+                <div className="cihaz-pressed p-3 space-y-1 -mt-1 mb-1">
+                  <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
+                  <p className="text-sm font-bold text-[var(--dashboard-text)] truncate">{lastScannedProduct.stokAdi}</p>
+                  <p className="text-[11px] text-[var(--dashboard-muted)]">
+                    {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
+                    {lastScannedProduct.miad && ` · Miad: ${lastScannedProduct.miad}`}
+                    {lastScannedProduct.seriNumarasi && ` · Seri: ${lastScannedProduct.seriNumarasi}`}
+                  </p>
+                  <div className="flex gap-4 pt-1">
+                    <div>
+                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
+                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Bu Lot</span>
+                    </div>
+                    <div>
+                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{totalCountForProduct}</span>
+                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Toplam</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               <p className="cihaz-section-label">Ürün Ekle</p>
 
               {/* Scan buttons */}
@@ -1314,28 +1374,6 @@ export default function DirektTransferPanel() {
                 </AlertDialog>
               </div>
 
-              {/* Last scanned feedback */}
-              {lastScannedProduct && (
-                <div className="cihaz-pressed p-3 space-y-1">
-                  <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
-                  <p className="text-sm font-bold text-[var(--dashboard-text)] truncate">{lastScannedProduct.stokAdi}</p>
-                  <p className="text-[11px] text-[var(--dashboard-muted)]">
-                    {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
-                    {lastScannedProduct.miad && ` · Miad: ${lastScannedProduct.miad}`}
-                    {lastScannedProduct.seriNumarasi && ` · Seri: ${lastScannedProduct.seriNumarasi}`}
-                  </p>
-                  <div className="flex gap-4 pt-1">
-                    <div>
-                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Bu Lot</span>
-                    </div>
-                    <div>
-                      <span className="text-lg font-bold text-[var(--dashboard-accent)]">{totalCountForProduct}</span>
-                      <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Toplam</span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* ─── Manual Adder (collapsible drawer) ─── */}
@@ -1576,7 +1614,13 @@ export default function DirektTransferPanel() {
                                   <button onClick={() => handleGroupAdetChange(group.key, String(Math.max(1, group.adet - 1)))} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                                     <Minus className="h-3 w-3" />
                                   </button>
-                                  <span className="w-8 text-center text-sm font-bold">{group.adet}</span>
+                                  <Input
+                                    type="number"
+                                    value={group.adet}
+                                    onChange={(e: ChangeEvent<HTMLInputElement>) => handleGroupAdetChange(group.key, e.target.value)}
+                                    className="w-10 h-7 text-center text-xs font-bold border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    min="1"
+                                  />
                                   <button onClick={() => handleGroupAdetChange(group.key, String(group.adet + 1))} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                                     <Plus className="h-3 w-3" />
                                   </button>
@@ -1603,15 +1647,29 @@ export default function DirektTransferPanel() {
                             <AlertTriangle className="h-3 w-3" /> Maksimum: {available} adet (Depoda kalan stok)
                           </div>
                         )}
-                        {/* Serials sub-list */}
+                        {/* Serials sub-list with deletable chips */}
                         {group.serials.length > 0 && (
-                          <div className="px-4 sm:px-5 py-1.5 bg-[var(--dashboard-surface-2)]/50">
-                            <div className="text-[10px] font-mono grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-0.5 text-[var(--dashboard-muted)]">
+                          <div className="px-4 sm:px-5 py-2 bg-[var(--dashboard-surface-2)]/50">
+                            <div className="flex flex-wrap gap-1.5">
                               {group.serials.slice(0, 50).map(serial => (
-                                <span key={serial.id} className="truncate">{serial.seriNumarasi}</span>
+                                <span
+                                  key={serial.id}
+                                  className="group/chip inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] text-[10px] font-mono text-[var(--dashboard-muted)] hover:border-red-300 transition-colors"
+                                >
+                                  <span className="truncate max-w-[120px]">{serial.seriNumarasi}</span>
+                                  <button
+                                    onClick={() => removeSerialFromGroup(serial.id)}
+                                    className="w-3.5 h-3.5 rounded-full flex items-center justify-center opacity-40 hover:opacity-100 hover:bg-red-100 hover:text-red-600 transition-all"
+                                    title="Seri numarasını kaldır"
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </span>
                               ))}
                               {group.serials.length > 50 && (
-                                <span>+{group.serials.length - 50} daha...</span>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] text-[var(--dashboard-muted)]">
+                                  +{group.serials.length - 50} daha...
+                                </span>
                               )}
                             </div>
                           </div>
@@ -1623,38 +1681,16 @@ export default function DirektTransferPanel() {
               )}
             </div>
 
-            {/* ── Sticky CTA bar ── */}
-            <div className="sticky bottom-0 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-4 sm:px-5 py-3 flex items-center gap-3">
-              {/* Mini summary */}
-              <div className="flex gap-3 sm:gap-4 text-xs">
-                <div>
-                  <span className="text-[var(--dashboard-muted)]">Kalem</span>
-                  <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalKalem}</span>
-                </div>
-                <div>
-                  <span className="text-[var(--dashboard-muted)]">Adet</span>
-                  <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
-                </div>
+            {/* ── Mini summary bar ── */}
+            <div className="border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-4 sm:px-5 py-2.5 flex items-center gap-3 text-xs">
+              <div>
+                <span className="text-[var(--dashboard-muted)]">Kalem</span>
+                <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalKalem}</span>
               </div>
-              <div className="flex-1" />
-              {/* Transfer CTA */}
-              <button
-                onClick={handleCompleteDirectTransfer}
-                disabled={!isTransferReady || shipmentLoading}
-                className={cn(
-                  "flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all",
-                  isTransferReady && !shipmentLoading
-                    ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
-                    : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
-                )}
-              >
-                {shipmentLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Truck className="h-4 w-4" />
-                )}
-                {stepperState.totalAdet > 0 ? `${stepperState.totalAdet} Ürünü Transfer Et` : 'Transfer Et'}
-              </button>
+              <div>
+                <span className="text-[var(--dashboard-muted)]">Adet</span>
+                <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
+              </div>
             </div>
           </div>
         </div>
