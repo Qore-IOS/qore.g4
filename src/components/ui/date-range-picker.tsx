@@ -20,17 +20,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 interface DatePickerWithRangeProps extends React.HTMLAttributes<HTMLDivElement> {
   date: DateRange | undefined;
   setDate: ((value: DateRange | undefined) => void);
+  showAllOption?: boolean;
 }
 
 export function DatePickerWithRange({
   className,
   date,
-  setDate
+  setDate,
+  showAllOption = false,
 }: DatePickerWithRangeProps) {
 
   const handlePresetChange = (value: string) => {
     const now = new Date();
     switch (value) {
+      case 'all':
+        setDate(undefined);
+        break;
       case 'today':
         setDate({ from: now, to: now });
         break;
@@ -43,10 +48,11 @@ export function DatePickerWithRange({
       case 'thisMonth':
         setDate({ from: startOfMonth(now), to: endOfMonth(now) });
         break;
-      case 'lastMonth':
+      case 'lastMonth': {
         const lastMonth = subMonths(now, 1);
         setDate({ from: startOfMonth(lastMonth), to: endOfMonth(lastMonth) });
         break;
+      }
       default:
         setDate(undefined);
     }
@@ -75,7 +81,7 @@ export function DatePickerWithRange({
                 format(date.from, "LLL dd, y", { locale: tr })
               )
             ) : (
-              <span>Tarih aralığı seçin</span>
+              <span>{showAllOption ? 'Tüm Zamanlar' : 'Tarih aralığı seçin'}</span>
             )}
           </Button>
         </PopoverTrigger>
@@ -91,6 +97,9 @@ export function DatePickerWithRange({
           />
            <div className="flex flex-col space-y-2 border-l p-4">
               <h4 className="text-sm font-medium">Kestirmeler</h4>
+              {showAllOption && (
+                <Button variant="ghost" className="justify-start" onClick={() => handlePresetChange('all')}>Tümü</Button>
+              )}
               <Button variant="ghost" className="justify-start" onClick={() => handlePresetChange('today')}>Bugün</Button>
               <Button variant="ghost" className="justify-start" onClick={() => handlePresetChange('last7')}>Son 7 Gün</Button>
               <Button variant="ghost" className="justify-start" onClick={() => handlePresetChange('last30')}>Son 30 Gün</Button>
