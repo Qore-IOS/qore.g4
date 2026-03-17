@@ -1,8 +1,9 @@
 
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Archive, Loader2, Printer, Settings, History, Trash2, Nfc, Bot } from 'lucide-react';
+import { Archive, Loader2, Printer, Settings, History, Trash2, Nfc, Bot, Box, Grid3X3 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
@@ -29,6 +30,15 @@ import useHidScanner from '@/hooks/useHidScanner';
 import { playFeedback } from '@/lib/utils';
 import { generateLabelsPdf } from '@/lib/pdf/LabelGenerator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
+const SampleRack3D = dynamic(() => import('@/components/SampleRack3D'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[500px] rounded-xl border bg-gray-900 flex items-center justify-center">
+      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    </div>
+  ),
+});
 
 
 // Helper to convert index to A1-style position
@@ -64,6 +74,8 @@ export default function NumuneArsiviPage() {
   const [nextSequentialIndex, setNextSequentialIndex] = useState(0); // New state for "start from here"
   const [dialogOpen, setDialogOpen] = useState(false);
   const [clickedIndex, setClickedIndex] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | '3d'>('grid');
+  const [lastPlacedIndex, setLastPlacedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     async function fetchLaboratories() {
@@ -128,6 +140,7 @@ export default function NumuneArsiviPage() {
   const resetRack = useCallback(() => {
     setScannedSpecimens(Array(100).fill(null));
     setLastScannedInfo(null);
+    setLastPlacedIndex(null);
     setNextScanAction({ type: 'sequential' });
     setNextSequentialIndex(0); // Reset sequential index
   }, []);
@@ -218,7 +231,8 @@ export default function NumuneArsiviPage() {
     const newSpecimens = [...scannedSpecimens];
     newSpecimens[targetIndex] = barcode;
     setScannedSpecimens(newSpecimens);
-  
+    setLastPlacedIndex(targetIndex);
+
     const selectedLab = laboratories.find(l => l.id === selectedLabId);
     setLastScannedInfo({
         specimenId: barcode,
@@ -280,6 +294,28 @@ export default function NumuneArsiviPage() {
                           <CardDescription>Taranan numuneler buraya yerleştirilecek.</CardDescription>
                       </div>
                       <div className="flex items-center gap-2">
+                        <div className="flex items-center border rounded-lg overflow-hidden">
+                          <button
+                            onClick={() => setViewMode('grid')}
+                            className={cn(
+                              "p-1.5 transition-colors",
+                              viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                            )}
+                            title="Izgara Görünümü"
+                          >
+                            <Grid3X3 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('3d')}
+                            className={cn(
+                              "p-1.5 transition-colors",
+                              viewMode === '3d' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                            )}
+                            title="3D Görünüm"
+                          >
+                            <Box className="h-4 w-4" />
+                          </button>
+                        </div>
                         <Button variant="destructive" onClick={resetRack} disabled={scannedSpecimens.filter(s => s !== null).length === 0} className="h-8 px-3">
                           <Trash2 className="mr-2 h-4 w-4" />
                           Raftakileri Temizle
@@ -292,6 +328,18 @@ export default function NumuneArsiviPage() {
                   </div>
               </CardHeader>
               <CardContent>
+                {viewMode === '3d' ? (
+                  <div className="-mt-4">
+                    <SampleRack3D
+                      specimens={scannedSpecimens}
+                      lastPlacedIndex={lastPlacedIndex}
+                      onSlotClick={handleCellClick}
+                    />
+                    <p className="text-xs text-muted-foreground text-center mt-2">
+                      Fare ile döndür, kaydır ve yakınlaştır. Boş yuvaya tıklayarak atama yap.
+                    </p>
+                  </div>
+                ) : (
                  <TooltipProvider>
                   <div className="grid grid-cols-10 gap-2 p-2 border rounded-xl bg-background/50 -mt-4">
                       {Array.from({ length: 100 }).map((_, i) => {
@@ -305,8 +353,8 @@ export default function NumuneArsiviPage() {
                                 onClick={() => handleCellClick(i)}
                                 className={cn(
                                   "h-12 rounded-md flex items-center justify-center text-xs font-mono border transition-colors",
-                                  isFilled 
-                                    ? 'bg-green-500/20 border-green-500/50 text-green-700 dark:text-green-300 font-bold cursor-default' 
+                                  isFilled
+                                    ? 'bg-green-500/20 border-green-500/50 text-green-700 dark:text-green-300 font-bold cursor-default'
                                     : 'bg-muted/50 border-border hover:bg-muted cursor-pointer'
                                 )}
                               >
@@ -324,6 +372,7 @@ export default function NumuneArsiviPage() {
                       })}
                   </div>
                 </TooltipProvider>
+                )}
               </CardContent>
           </Card>
         </div>
