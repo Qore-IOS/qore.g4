@@ -331,6 +331,15 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   const [lastScannedProduct, setLastScannedProduct] = useState<ScanRow | null>(null);
   const [scanStatus, setScanStatus] = useState<'idle'|'success'|'error'>('idle');
+
+  // Scan feedback: flash green/red on son okutulan area (replaces toast for scan events)
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashScanFeedback = useCallback((type: 'success' | 'error', message: string) => {
+    if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+    setScanFeedback({ type, message });
+    scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 2500);
+  }, []);
   const [isPreCheckModalOpen, setIsPreCheckModalOpen] = useState(false);
   const [preCheckWarnings, setPreCheckWarnings] = useState<PreCheckWarning>({ shortShelfLife: [], maxOverload: [], usageRisk: [] });
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
@@ -484,7 +493,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       malKabulLogger.info('Bulk scan processed successfully', {
         itemCount: bulkBarcodes.length,
       }, { correlationId: scanCorrelationId });
-      toast({ title: 'Toplu barkod okundu', description: `${bulkBarcodes.length} ürün tek seferde işlendi.` });
+      flashScanFeedback('success', `${bulkBarcodes.length} ürün tek seferde işlendi.`);
       return;
     }
 
@@ -493,11 +502,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         payloadLength: trimmedData.length,
         payloadPreview: trimmedData.slice(0, 160),
       }, { correlationId: scanCorrelationId });
-      toast({
-        title: 'Toplu barkod bekleniyor',
-        description: 'Bu modda sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar okutulabilir.',
-        variant: 'destructive',
-      });
+      flashScanFeedback('error', 'Bu modda sadece toplu barkodlar okutulabilir.');
       return;
     }
 
@@ -543,7 +548,7 @@ export default function AnaPanel(props: AnaPanelProps) {
             if (isInSession || isInDepot) {
               playFeedback(true);
               const location = isInSession ? 'bu oturumda' : 'depoda';
-              toast({ title: 'Uyarı', description: `Seri numarası ${seriNumarasi} (${matchedProduct.stokAdi}) ${location} zaten mevcut.`, variant: 'default'});
+              flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) ${location} zaten mevcut.`);
               if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
               setIsProcessingScan(false);
               return;
@@ -581,7 +586,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         playFeedback();
         if (source === 'barcode') {
           setScanStatus('success');
-          toast({ title: `Okuma Başarılı`, description: `${matchedProduct.stokAdi} listeye eklendi.` });
+          flashScanFeedback('success', `${matchedProduct.stokAdi} listeye eklendi.`);
           setTimeout(() => setScanStatus('idle'), 3000);
         }
 
@@ -592,7 +597,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         payloadPreview: trimmedData.slice(0, 160),
       }, { correlationId: scanCorrelationId });
       playFeedback(true);
-      toast({ title: 'Ayrıştırma Hatası', description: err.message || 'Barkod işlenemedi.', variant: 'destructive' });
+      flashScanFeedback('error', err.message || 'Barkod işlenemedi.');
       if (source === 'barcode') {
         setScanStatus('error');
         setTimeout(() => setScanStatus('idle'), 3000);
@@ -600,7 +605,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     } finally {
       setIsProcessingScan(false);
     }
-  }, [toast, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
+  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
 
   useHidScanner({
     enabled: !isPreCheckModalOpen && !isProcessingScan && !isCameraScannerOpen && !showManualInline,
@@ -614,7 +619,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     if (trimmed) {
       processScan(trimmed, 'barcode');
     } else {
-      toast({ title: 'Kamera Tarama Hatası', description: 'Okunan veri boş görünüyor.', variant: 'destructive' });
+      flashScanFeedback('error', 'Okunan veri boş görünüyor.');
     }
     if (!isBatchScanning) {
       setIsCameraScannerOpen(false);
@@ -1205,15 +1210,38 @@ export default function AnaPanel(props: AnaPanelProps) {
 
       {/* ── KPI Row – 3 metric cards ── */}
       <div className="grid grid-cols-3 gap-3 sm:gap-4">
-        {/* KPI 1: Son Okutulan */}
-        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
-          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Son Okutulan</p>
-          {lastScannedProduct ? (
+        {/* KPI 1: Son Okutulan (with scan feedback) */}
+        <div className={cn(
+          "cihaz-card px-3 py-3 sm:px-4 sm:py-4 transition-all duration-300",
+          scanFeedback?.type === 'success' && "ring-2 ring-green-500/60 bg-green-50/60 dark:bg-green-950/20",
+          scanFeedback?.type === 'error' && "ring-2 ring-red-500/60 bg-red-50/60 dark:bg-red-950/20"
+        )}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="cihaz-overline text-[10px] sm:text-xs">Son Okutulan</p>
+            {scanFeedback && (
+              <span className={cn(
+                "text-[10px] font-bold uppercase tracking-wide",
+                scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
+              )}>
+                {scanFeedback.type === 'success' ? '✓' : '✗'}
+              </span>
+            )}
+          </div>
+          {scanFeedback?.type === 'error' && !lastScannedProduct ? (
+            <p className="text-xs font-bold text-red-600 truncate">{scanFeedback.message}</p>
+          ) : lastScannedProduct ? (
             <div className="space-y-0.5">
-              <p className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)] truncate">{lastScannedProduct.stokAdi || ''}</p>
-              <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">
-                {lastScannedProduct.seriNumarasi ? `SN: ${lastScannedProduct.seriNumarasi}` : `Lot: ${lastScannedProduct.lotNumarasi || '-'}`}
+              <p className={cn(
+                "text-sm sm:text-base font-semibold truncate",
+                scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
+              )}>
+                {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
               </p>
+              {scanFeedback?.type !== 'error' && (
+                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">
+                  {lastScannedProduct.seriNumarasi ? `SN: ${lastScannedProduct.seriNumarasi}` : `Lot: ${lastScannedProduct.lotNumarasi || '-'}`}
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-xs text-[var(--dashboard-muted)]">-</p>
@@ -1284,43 +1312,59 @@ export default function AnaPanel(props: AnaPanelProps) {
           </div>
         </div>
 
-        {/* Right: Last scanned detail + undo */}
-        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5">
-          <p className="cihaz-overline text-xs mb-3">Son Okutulan Detay</p>
-          {lastScannedProduct ? (
+        {/* Right: Last scanned detail + feedback */}
+        <div className={cn(
+          "cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 transition-all duration-300",
+          scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
+          scanFeedback?.type === 'error' && "ring-2 ring-red-500/60"
+        )}>
+          <div className="flex items-center justify-between mb-3">
+            <p className="cihaz-overline text-xs">Son Okutulan Detay</p>
+            {scanFeedback && (
+              <span className={cn(
+                "text-[10px] font-bold uppercase tracking-wide",
+                scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
+              )}>
+                {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
+              </span>
+            )}
+          </div>
+          {scanFeedback?.type === 'error' && !lastScannedProduct ? (
+            <div className="p-3 rounded-xl bg-red-50/60 dark:bg-red-950/20">
+              <p className="text-sm font-bold text-red-600">{scanFeedback.message}</p>
+            </div>
+          ) : lastScannedProduct ? (
             <div className="space-y-2">
               <div className="p-3 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-                <p className="font-semibold text-sm text-[var(--dashboard-text)]">{lastScannedProduct.stokAdi || ''}</p>
-                <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">{lastScannedProduct.stokKodu}</p>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {lastScannedProduct.seriNumarasi && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
-                      SN: {lastScannedProduct.seriNumarasi}
-                    </span>
-                  )}
-                  {lastScannedProduct.lotNumarasi && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
-                      Lot: {lastScannedProduct.lotNumarasi}
-                    </span>
-                  )}
-                  {lastScannedProduct.miad && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
-                      SKT: {lastScannedProduct.miad}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {/* Scan status indicator */}
-              {scanStatus !== 'idle' && (
-                <div className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all",
-                  scanStatus === 'success' && "bg-green-100 text-green-800",
-                  scanStatus === 'error' && "bg-red-100 text-red-800"
+                <p className={cn(
+                  "font-semibold text-sm",
+                  scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
                 )}>
-                  {scanStatus === 'success' ? <Package className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                  {scanStatus === 'success' ? 'Okuma başarılı' : 'Okuma hatası'}
-                </div>
-              )}
+                  {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
+                </p>
+                {scanFeedback?.type !== 'error' && (
+                  <>
+                    <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">{lastScannedProduct.stokKodu}</p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {lastScannedProduct.seriNumarasi && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
+                          SN: {lastScannedProduct.seriNumarasi}
+                        </span>
+                      )}
+                      {lastScannedProduct.lotNumarasi && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
+                          Lot: {lastScannedProduct.lotNumarasi}
+                        </span>
+                      )}
+                      {lastScannedProduct.miad && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
+                          SKT: {lastScannedProduct.miad}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-6 text-center">
@@ -1446,12 +1490,10 @@ export default function AnaPanel(props: AnaPanelProps) {
                 onClick={() => {
                   const next = !isBulkScanMode;
                   setIsBulkScanMode(next);
-                  toast({
-                    title: next ? 'Toplu barkod modu açık' : 'Toplu barkod modu kapalı',
-                    description: next
-                      ? 'Sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar kabul edilecek.'
-                      : 'Normal barkod okuma moduna dönüldü.',
-                  });
+                  flashScanFeedback(
+                    'success',
+                    next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.'
+                  );
                 }}
                 disabled={malKabulIsLoading}
                 className={cn(
