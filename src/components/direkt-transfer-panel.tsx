@@ -956,10 +956,7 @@ export default function DirektTransferPanel() {
     } as TransferRow));
 
     setDirectTransferItems(items);
-    toast({
-        title: 'Tüm Stok Eklendi',
-        description: `${items.length} adet ürün transfer listesine eklendi.`
-    });
+    flashScanFeedback('success', `${items.length} adet ürün transfer listesine eklendi.`);
   };
   
   const groupedTransferItems = useMemo(() => {
@@ -1326,12 +1323,10 @@ export default function DirektTransferPanel() {
                 onClick={() => {
                   const next = !isBulkScanMode;
                   setIsBulkScanMode(next);
-                  toast({
-                    title: next ? 'Toplu barkod modu açık' : 'Toplu barkod modu kapalı',
-                    description: next
-                      ? 'Sadece QORE_SERIAL_BULK_V1| ile başlayan toplu barkodlar kabul edilecek.'
-                      : 'Normal barkod okuma moduna dönüldü.',
-                  });
+                  flashScanFeedback(
+                    next ? 'success' : 'success',
+                    next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.'
+                  );
                 }}
                 disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
                 className={cn(
