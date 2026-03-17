@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query, Timestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, FileSpreadsheet, FileText, Search, X, History, User, ArrowUpDown, ArrowUp, ArrowDown, Filter } from 'lucide-react';
+import { Loader2, FileSpreadsheet, FileText, Search, X, History, User, ArrowUpDown, ArrowUp, ArrowDown, Filter, Check } from 'lucide-react';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import type { DateRange } from 'react-day-picker';
 import { addDays, format, startOfDay, endOfDay } from 'date-fns';
@@ -20,14 +20,9 @@ import { Input } from '@/components/ui/input';
 type SortKey = 'tarih' | 'kaynak' | 'urun' | 'lot' | 'giris' | 'adet' | 'kalan' | 'onaylayan';
 type SortDir = 'asc' | 'desc';
 
-/* ─── Column filter state ─── */
-interface ColumnFilters {
-    kaynak: string;
-    urun: string;
-    lot: string;
-    giris: string;
-    onaylayan: string;
-}
+/* ─── Column filter state: Set of selected values (empty = all selected) ─── */
+type ColumnFilterKey = 'kaynak' | 'urun' | 'giris' | 'onaylayan';
+type ColumnFiltersState = Record<ColumnFilterKey, Set<string>>;
 
 export default function ImhaEdilenKitlerListePanel() {
     const { toast } = useToast();
@@ -45,9 +40,9 @@ export default function ImhaEdilenKitlerListePanel() {
     const [sortKey, setSortKey] = useState<SortKey>('tarih');
     const [sortDir, setSortDir] = useState<SortDir>('desc');
 
-    /* ─── Column filters ─── */
-    const [columnFilters, setColumnFilters] = useState<ColumnFilters>({
-        kaynak: '', urun: '', lot: '', giris: '', onaylayan: '',
+    /* ─── Column filters (empty Set = no filter / all shown) ─── */
+    const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>({
+        kaynak: new Set(), urun: new Set(), giris: new Set(), onaylayan: new Set(),
     });
 
     useEffect(() => {
@@ -77,9 +72,19 @@ export default function ImhaEdilenKitlerListePanel() {
         fetchData();
     }, [toast]);
 
-    const filteredAndSortedRecords = useMemo(() => {
-        // Step 1: global filters (date, lab, source type)
-        let result = records.filter(record => {
+    /* ─── Helper: extract column value for a record ─── */
+    const getColValue = useCallback((r: DestroyedKitRecord, key: ColumnFilterKey): string => {
+        switch (key) {
+            case 'kaynak': return r.laboratoryName || r.depotName || '-';
+            case 'urun': return r.stokAdi || '-';
+            case 'giris': return r.sourceType === 'fault' ? 'Arıza' : r.sourceType === 'excel' ? 'Excel' : 'Barkod';
+            case 'onaylayan': return r.resolvedByName || '-';
+        }
+    }, []);
+
+    /* ─── Pre-filter records (date + lab + sourceType only) for unique value extraction ─── */
+    const preFilteredRecords = useMemo(() => {
+        return records.filter(record => {
             const resolvedAtDate = record.resolvedAt instanceof Date ? record.resolvedAt : new Date(record.resolvedAt);
             const isInDateRange = dateRange?.from && dateRange?.to && resolvedAtDate
                 ? (resolvedAtDate >= dateRange.from && resolvedAtDate <= dateRange.to)
@@ -90,34 +95,33 @@ export default function ImhaEdilenKitlerListePanel() {
                 || (sourceTypeFilter === 'manual' && (record.sourceType === 'barcode' || record.sourceType === 'excel'));
             return isInDateRange && matchesLab && matchesSourceType;
         });
+    }, [records, dateRange, labFilter, sourceTypeFilter]);
 
-        // Step 2: column text filters
+    /* ─── Unique values per column (for Excel-style checkbox list) ─── */
+    const uniqueValues = useMemo(() => {
+        const result: Record<ColumnFilterKey, string[]> = { kaynak: [], urun: [], giris: [], onaylayan: [] };
+        const sets: Record<ColumnFilterKey, Set<string>> = { kaynak: new Set(), urun: new Set(), giris: new Set(), onaylayan: new Set() };
+        for (const r of preFilteredRecords) {
+            for (const key of ['kaynak', 'urun', 'giris', 'onaylayan'] as ColumnFilterKey[]) {
+                sets[key].add(getColValue(r, key));
+            }
+        }
+        for (const key of ['kaynak', 'urun', 'giris', 'onaylayan'] as ColumnFilterKey[]) {
+            result[key] = Array.from(sets[key]).sort((a, b) => a.localeCompare(b, 'tr'));
+        }
+        return result;
+    }, [preFilteredRecords, getColValue]);
+
+    const filteredAndSortedRecords = useMemo(() => {
+        // Step 1: start from pre-filtered (date + lab + sourceType)
+        let result = [...preFilteredRecords];
+
+        // Step 2: column checkbox filters (empty set = all)
         const cf = columnFilters;
-        if (cf.kaynak) {
-            const q = cf.kaynak.toLowerCase();
-            result = result.filter(r => (r.laboratoryName || r.depotName || '').toLowerCase().includes(q));
-        }
-        if (cf.urun) {
-            const q = cf.urun.toLowerCase();
-            result = result.filter(r => r.stokAdi.toLowerCase().includes(q) || r.stokKodu.toLowerCase().includes(q));
-        }
-        if (cf.lot) {
-            const q = cf.lot.toLowerCase();
-            result = result.filter(r =>
-                (r.lotNumarasi || '').toLowerCase().includes(q) ||
-                (r.seriNumarasi || '').toLowerCase().includes(q)
-            );
-        }
-        if (cf.giris) {
-            const q = cf.giris.toLowerCase();
-            result = result.filter(r => {
-                const label = r.sourceType === 'fault' ? 'arıza' : r.sourceType === 'excel' ? 'excel' : 'barkod';
-                return label.includes(q) || (r.deviceModel || '').toLowerCase().includes(q);
-            });
-        }
-        if (cf.onaylayan) {
-            const q = cf.onaylayan.toLowerCase();
-            result = result.filter(r => (r.resolvedByName || '').toLowerCase().includes(q));
+        for (const key of ['kaynak', 'urun', 'giris', 'onaylayan'] as ColumnFilterKey[]) {
+            if (cf[key].size > 0) {
+                result = result.filter(r => cf[key].has(getColValue(r, key)));
+            }
         }
 
         // Step 3: sort
@@ -152,12 +156,12 @@ export default function ImhaEdilenKitlerListePanel() {
         });
 
         return result;
-    }, [records, dateRange, labFilter, sourceTypeFilter, columnFilters, sortKey, sortDir]);
+    }, [preFilteredRecords, columnFilters, sortKey, sortDir, getColValue]);
 
     const totalCount = filteredAndSortedRecords.reduce((sum, r) => sum + r.testCount, 0);
 
     const hasActiveFilters = labFilter !== 'all' || sourceTypeFilter !== 'all';
-    const hasColumnFilters = Object.values(columnFilters).some(v => v !== '');
+    const hasColumnFilters = Object.values(columnFilters).some(s => s.size > 0);
 
     const clearFilters = () => {
         setLabFilter('all');
@@ -166,7 +170,7 @@ export default function ImhaEdilenKitlerListePanel() {
             from: startOfDay(addDays(new Date(), -30)),
             to: endOfDay(new Date()),
         });
-        setColumnFilters({ kaynak: '', urun: '', lot: '', giris: '', onaylayan: '' });
+        setColumnFilters({ kaynak: new Set(), urun: new Set(), giris: new Set(), onaylayan: new Set() });
     };
 
     /* ─── Toggle sort ─── */
@@ -185,38 +189,128 @@ export default function ImhaEdilenKitlerListePanel() {
         return sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
     };
 
-    /* ─── Column filter popover ─── */
-    const ColumnFilterPopover = ({ colKey, placeholder }: { colKey: keyof ColumnFilters; placeholder: string }) => {
-        const value = columnFilters[colKey];
+    /* ─── Excel-style column filter popover with checkbox list ─── */
+    const ColumnFilterPopover = ({ colKey, label }: { colKey: ColumnFilterKey; label: string }) => {
+        const selected = columnFilters[colKey];
+        const allValues = uniqueValues[colKey];
+        const [search, setSearch] = useState('');
+        const isActive = selected.size > 0;
+
+        const filtered = search
+            ? allValues.filter(v => v.toLowerCase().includes(search.toLowerCase()))
+            : allValues;
+
+        const toggleValue = (val: string) => {
+            setColumnFilters(prev => {
+                const next = new Set(prev[colKey]);
+                if (next.has(val)) {
+                    next.delete(val);
+                } else {
+                    next.add(val);
+                }
+                return { ...prev, [colKey]: next };
+            });
+        };
+
+        const selectAll = () => {
+            setColumnFilters(prev => ({ ...prev, [colKey]: new Set() }));
+        };
+
+        const selectNone = () => {
+            // When "none" is pressed, keep only filtered items as selected (invert logic)
+            setColumnFilters(prev => ({ ...prev, [colKey]: new Set(allValues) }));
+        };
+
+        const selectOnlyFiltered = () => {
+            setColumnFilters(prev => ({ ...prev, [colKey]: new Set(filtered) }));
+        };
+
         return (
             <Popover>
                 <PopoverTrigger asChild>
                     <button
                         className={cn(
                             "p-1 rounded-md hover:bg-[var(--dashboard-surface)] transition-colors",
-                            value ? "text-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10" : "text-[var(--dashboard-muted)]"
+                            isActive ? "text-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10" : "text-[var(--dashboard-muted)]"
                         )}
                         onClick={e => e.stopPropagation()}
                     >
                         <Filter className="h-3 w-3" />
                     </button>
                 </PopoverTrigger>
-                <PopoverContent className="w-52 p-3 space-y-2" align="start" side="bottom" sideOffset={4}>
-                    <p className="text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">{placeholder.replace('...', '')}</p>
-                    <Input
-                        placeholder={placeholder}
-                        value={value}
-                        onChange={e => setColumnFilters(prev => ({ ...prev, [colKey]: e.target.value }))}
-                        className="h-8 text-xs"
-                        autoFocus
-                    />
-                    {value && (
-                        <button
-                            onClick={() => setColumnFilters(prev => ({ ...prev, [colKey]: '' }))}
-                            className="text-[10px] text-[var(--dashboard-accent)] font-medium hover:underline flex items-center gap-1"
-                        >
-                            <X className="h-2.5 w-2.5" /> Temizle
+                <PopoverContent className="w-56 p-0" align="start" side="bottom" sideOffset={4}>
+                    {/* Header */}
+                    <div className="px-3 pt-3 pb-2 border-b border-[var(--dashboard-stroke)]">
+                        <p className="text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide mb-2">{label}</p>
+                        <Input
+                            placeholder="Ara..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            className="h-7 text-xs"
+                            autoFocus
+                        />
+                    </div>
+
+                    {/* Select all / clear */}
+                    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--dashboard-stroke)]">
+                        <button onClick={selectAll} className="text-[10px] font-medium text-[var(--dashboard-accent)] hover:underline">
+                            Tümünü Seç
                         </button>
+                        <span className="text-[var(--dashboard-stroke)]">|</span>
+                        <button onClick={selectOnlyFiltered} className="text-[10px] font-medium text-[var(--dashboard-accent)] hover:underline">
+                            Sadece Bunları
+                        </button>
+                        <span className="text-[var(--dashboard-stroke)]">|</span>
+                        <button onClick={selectNone} className="text-[10px] font-medium text-[var(--dashboard-muted)] hover:underline">
+                            Temizle
+                        </button>
+                    </div>
+
+                    {/* Checkbox list */}
+                    <div className="max-h-48 overflow-y-auto py-1">
+                        {filtered.length === 0 ? (
+                            <p className="text-xs text-[var(--dashboard-muted)] px-3 py-2 text-center">Sonuç yok</p>
+                        ) : (
+                            filtered.map(val => {
+                                // If no filter active (empty set) → all are checked
+                                // If filter active → only items IN the set are checked
+                                const isChecked = selected.size === 0 || selected.has(val);
+                                return (
+                                    <button
+                                        key={val}
+                                        onClick={() => {
+                                            if (selected.size === 0) {
+                                                // First click when "all selected": select only this one
+                                                setColumnFilters(prev => ({ ...prev, [colKey]: new Set([val]) }));
+                                            } else {
+                                                toggleValue(val);
+                                            }
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--dashboard-surface-2)] transition-colors",
+                                            isChecked && "font-medium"
+                                        )}
+                                    >
+                                        <span className={cn(
+                                            "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                                            isChecked
+                                                ? "bg-[var(--dashboard-accent)] border-[var(--dashboard-accent)]"
+                                                : "border-[var(--dashboard-stroke)] bg-transparent"
+                                        )}>
+                                            {isChecked && <Check className="h-3 w-3 text-white" />}
+                                        </span>
+                                        <span className="truncate text-[var(--dashboard-text)]">{val}</span>
+                                    </button>
+                                );
+                            })
+                        )}
+                    </div>
+
+                    {/* Footer: count */}
+                    {isActive && (
+                        <div className="px-3 py-1.5 border-t border-[var(--dashboard-stroke)] text-[10px] text-[var(--dashboard-muted)]">
+                            {selected.size} / {allValues.length} seçili
+                        </div>
                     )}
                 </PopoverContent>
             </Popover>
@@ -224,9 +318,9 @@ export default function ImhaEdilenKitlerListePanel() {
     };
 
     /* ─── Sortable header cell ─── */
-    const SortableHeader = ({ col, label, align, filterKey, filterPlaceholder }: {
+    const SortableHeader = ({ col, label, align, filterKey }: {
         col: SortKey; label: string; align?: string;
-        filterKey?: keyof ColumnFilters; filterPlaceholder?: string;
+        filterKey?: ColumnFilterKey;
     }) => (
         <span className={cn("flex items-center gap-1.5 select-none", align)}>
             <button
@@ -239,8 +333,8 @@ export default function ImhaEdilenKitlerListePanel() {
                 {label}
                 <SortIcon col={col} />
             </button>
-            {filterKey && filterPlaceholder && (
-                <ColumnFilterPopover colKey={filterKey} placeholder={filterPlaceholder} />
+            {filterKey && (
+                <ColumnFilterPopover colKey={filterKey} label={label} />
             )}
         </span>
     );
@@ -623,13 +717,13 @@ export default function ImhaEdilenKitlerListePanel() {
                 {filteredAndSortedRecords.length > 0 && (
                     <div className="hidden sm:grid grid-cols-[100px_1fr_2fr_1fr_1fr_70px_70px_100px] gap-1 px-4 sm:px-5 py-2.5 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
                         <SortableHeader col="tarih" label="Tarih" />
-                        <SortableHeader col="kaynak" label="Kaynak" filterKey="kaynak" filterPlaceholder="Kaynak ara..." />
-                        <SortableHeader col="urun" label="Ürün" filterKey="urun" filterPlaceholder="Ürün ara..." />
-                        <SortableHeader col="lot" label="Lot / Seri" filterKey="lot" filterPlaceholder="Lot/Seri ara..." />
-                        <SortableHeader col="giris" label="Giriş" filterKey="giris" filterPlaceholder="Giriş tipi ara..." />
+                        <SortableHeader col="kaynak" label="Kaynak" filterKey="kaynak" />
+                        <SortableHeader col="urun" label="Ürün" filterKey="urun" />
+                        <SortableHeader col="lot" label="Lot / Seri" />
+                        <SortableHeader col="giris" label="Giriş" filterKey="giris" />
                         <SortableHeader col="adet" label="Adet" align="justify-end" />
                         <SortableHeader col="kalan" label="Kalan" align="justify-end" />
-                        <SortableHeader col="onaylayan" label="Onaylayan" filterKey="onaylayan" filterPlaceholder="Onaylayan ara..." />
+                        <SortableHeader col="onaylayan" label="Onaylayan" filterKey="onaylayan" />
                     </div>
                 )}
 
