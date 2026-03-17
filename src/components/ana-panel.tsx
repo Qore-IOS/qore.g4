@@ -654,6 +654,12 @@ export default function AnaPanel(props: AnaPanelProps) {
       .reduce((n, it) => n + (it.adet ?? 1), 0);
   }, [scannedItems, lastScannedProduct]);
 
+  const totalScannedQuantity = useMemo(() => {
+    return scannedItems
+      .filter(item => !item.isProcessed)
+      .reduce((n, item) => n + (item.isGroup ? (item.adet ?? 1) : 1), 0);
+  }, [scannedItems]);
+
   const groupedScannedItems = useMemo(() => {
     const grouped: Record<string, ScanRow> = {};
     scannedItems.forEach(item => {
@@ -1208,111 +1214,9 @@ export default function AnaPanel(props: AnaPanelProps) {
         </div>
       </header>
 
-      {/* ── KPI Row – 3 metric cards ── */}
+      {/* ── KPI / Action Row ── */}
       <div className="grid grid-cols-3 gap-3 sm:gap-4">
-        {/* KPI 1: Son Okutulan (with scan feedback) */}
-        <div className={cn(
-          "cihaz-card px-3 py-3 sm:px-4 sm:py-4 transition-all duration-300",
-          scanFeedback?.type === 'success' && "ring-2 ring-green-500/60 bg-green-50/60 dark:bg-green-950/20",
-          scanFeedback?.type === 'error' && "ring-2 ring-red-500/60 bg-red-50/60 dark:bg-red-950/20"
-        )}>
-          <div className="flex items-center justify-between mb-2">
-            <p className="cihaz-overline text-[10px] sm:text-xs">Son Okutulan</p>
-            {scanFeedback && (
-              <span className={cn(
-                "text-[10px] font-bold uppercase tracking-wide",
-                scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
-              )}>
-                {scanFeedback.type === 'success' ? '✓' : '✗'}
-              </span>
-            )}
-          </div>
-          {scanFeedback?.type === 'error' && !lastScannedProduct ? (
-            <p className="text-xs font-bold text-red-600 truncate">{scanFeedback.message}</p>
-          ) : lastScannedProduct ? (
-            <div className="space-y-0.5">
-              <p className={cn(
-                "text-sm sm:text-base font-semibold truncate",
-                scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
-              )}>
-                {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
-              </p>
-              {scanFeedback?.type !== 'error' && (
-                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">
-                  {lastScannedProduct.seriNumarasi ? `SN: ${lastScannedProduct.seriNumarasi}` : `Lot: ${lastScannedProduct.lotNumarasi || '-'}`}
-                </p>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-[var(--dashboard-muted)]">-</p>
-          )}
-        </div>
-
-        {/* KPI 2: Bu Lot / Ürün */}
-        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
-          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
-          <div className="flex items-baseline gap-1">
-            <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">lot</span>
-          </div>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
-            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">ürün</span>
-          </div>
-        </div>
-
-        {/* KPI 3: Toplam */}
-        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
-          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Toplam</p>
-          <div className="flex items-baseline gap-1">
-            <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-accent)]">{scannedItems.reduce((n, it) => n + (it.adet ?? 1), 0)}</span>
-            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">adet</span>
-          </div>
-          <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] mt-0.5">
-            {groupedScannedItems.length} grup
-          </p>
-        </div>
-      </div>
-
-      {/* ── STEP 2: İşlemler (Ürün Ekle) + Son Okutulan Detay ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr] gap-3 sm:gap-4">
-        {/* Left: Action tiles 2x2 */}
-        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5">
-          <p className="cihaz-overline text-xs mb-3">Ürün Ekle</p>
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-            <button
-              onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
-            >
-              <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
-              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
-            </button>
-            <button
-              onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
-              style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}
-            >
-              <Camera className="h-5 w-5" />
-              <span className="text-xs sm:text-sm font-medium">Seri Tarama</span>
-            </button>
-            <button
-              onClick={() => setShowManualInline(v => !v)}
-              className={cn("cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center", showManualInline && "cihaz-pressed")}
-            >
-              <PlusCircle className="h-5 w-5 text-[var(--dashboard-accent)]" />
-              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
-            </button>
-            <button
-              onClick={() => setIsOcrModalOpen(true)}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
-            >
-              <ScanLine className="h-5 w-5 text-[var(--dashboard-accent)]" />
-              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Right: Last scanned detail + feedback */}
+        {/* Son Okutulan Detay */}
         <div className={cn(
           "cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 transition-all duration-300",
           scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
@@ -1374,6 +1278,55 @@ export default function AnaPanel(props: AnaPanelProps) {
               <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun veya manuel ürün ekleyin</p>
             </div>
           )}
+        </div>
+
+        {/* KPI 2: Bu Lot / Ürün */}
+        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
+          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
+          <div className="flex items-baseline gap-1">
+            <span className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
+            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">lot</span>
+          </div>
+          <div className="flex items-baseline gap-1 mt-0.5">
+            <span className="text-xl sm:text-2xl font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
+            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">ürün</span>
+          </div>
+        </div>
+
+        {/* Ürün Ekle */}
+        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5">
+          <p className="cihaz-overline text-xs mb-3">Ürün Ekle</p>
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+            <button
+              onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+            >
+              <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
+            </button>
+            <button
+              onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+              style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}
+            >
+              <Camera className="h-5 w-5" />
+              <span className="text-xs sm:text-sm font-medium">Seri Tarama</span>
+            </button>
+            <button
+              onClick={() => setShowManualInline(v => !v)}
+              className={cn("cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center", showManualInline && "cihaz-pressed")}
+            >
+              <PlusCircle className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
+            </button>
+            <button
+              onClick={() => setIsOcrModalOpen(true)}
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+            >
+              <ScanLine className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1470,6 +1423,36 @@ export default function AnaPanel(props: AnaPanelProps) {
             <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">Stoğa eklenecek ürünlerin listesi</p>
           </div>
           <div className="flex-1" />
+          {!isSelectionMode && (
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="text-right">
+                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">Toplam Okutulan</p>
+                <p className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)] leading-none">{totalScannedQuantity}</p>
+                {commitInfo && (
+                  <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">Yazılıyor... ({commitInfo.commits} batch)</p>
+                )}
+              </div>
+              <button
+                onClick={handlePreCheckAndDogrulamasizMalKabul}
+                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0 || stepperState.readyCount === 0}
+                className={cn(
+                  "flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold transition-all",
+                  "disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none",
+                  stepperState.readyCount > 0
+                    ? "bg-green-600 hover:bg-green-700 active:bg-green-800 text-white shadow-lg shadow-green-600/30 hover:shadow-xl hover:shadow-green-600/40"
+                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+                )}
+                title={stepperState.readyCount === 0 ? 'Önce ürünlere adres ve irsaliye atayın' : undefined}
+              >
+                {(malKabulIsLoading || isLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
+                <Package className="h-4 w-4" />
+                {selectedItemsCount > 0
+                  ? `Seçilenleri Kabul Et (${selectedItemsCount})`
+                  : `Kabul Et ve Stoğa Ekle (${stepperState.readyCount})`
+                }
+              </button>
+            </div>
+          )}
           {/* Non-selection mode toolbar */}
           {!isSelectionMode && (
             <div className="flex flex-wrap gap-1.5 sm:gap-2">
@@ -1739,45 +1722,6 @@ export default function AnaPanel(props: AnaPanelProps) {
           )}
         </div>
 
-        {/* ── Primary CTA: Kabul Et ve Stoğa Ekle ── */}
-        {unprocessedScannedItems > 0 && (
-          <div className="px-4 py-3 sm:px-5 sm:py-4 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
-            <div className="flex items-center justify-between gap-3">
-              {/* Info text */}
-              <p className="text-xs text-[var(--dashboard-muted)] hidden sm:block">
-                {stepperState.readyCount > 0
-                  ? `${stepperState.readyCount} / ${unprocessedScannedItems} ürün kabule hazır (adres + irsaliye atanmış)`
-                  : 'Kabul için ürünlere adres ve irsaliye atayın.'
-                }
-              </p>
-              {commitInfo && (
-                <div className="flex items-center gap-2 text-xs text-[var(--dashboard-muted)]">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Yazılıyor... ({commitInfo.commits} batch)</span>
-                </div>
-              )}
-              <button
-                onClick={handlePreCheckAndDogrulamasizMalKabul}
-                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0 || stepperState.readyCount === 0}
-                className={cn(
-                  "flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-2xl text-sm sm:text-base font-semibold transition-all",
-                  "disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none",
-                  stepperState.readyCount > 0
-                    ? "bg-green-600 hover:bg-green-700 active:bg-green-800 text-white shadow-lg shadow-green-600/30 hover:shadow-xl hover:shadow-green-600/40"
-                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-                )}
-                title={stepperState.readyCount === 0 ? 'Önce ürünlere adres ve irsaliye atayın' : undefined}
-              >
-                {(malKabulIsLoading || isLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
-                <Package className="h-4 w-4" />
-                {selectedItemsCount > 0
-                  ? `Seçilenleri Kabul Et (${selectedItemsCount})`
-                  : `Kabul Et ve Stoğa Ekle (${stepperState.readyCount})`
-                }
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ══════════════════════ MODALS ══════════════════════ */}
