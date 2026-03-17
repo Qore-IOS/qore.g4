@@ -171,15 +171,13 @@ export default function ImhaEdilenKitlerListePanel() {
 
     /* ─── Toggle sort ─── */
     const toggleSort = useCallback((key: SortKey) => {
-        setSortKey(prev => {
-            if (prev === key) {
-                setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-                return key;
-            }
+        if (key === sortKey) {
+            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortKey(key);
             setSortDir(key === 'tarih' ? 'desc' : 'asc');
-            return key;
-        });
-    }, []);
+        }
+    }, [sortKey]);
 
     /* ─── Sort icon ─── */
     const SortIcon = ({ col }: { col: SortKey }) => {
@@ -193,24 +191,31 @@ export default function ImhaEdilenKitlerListePanel() {
         return (
             <Popover>
                 <PopoverTrigger asChild>
-                    <button className={cn("p-0.5 rounded hover:bg-[var(--dashboard-surface)]", value && "text-[var(--dashboard-accent)]")}>
-                        <Filter className="h-2.5 w-2.5" />
+                    <button
+                        className={cn(
+                            "p-1 rounded-md hover:bg-[var(--dashboard-surface)] transition-colors",
+                            value ? "text-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10" : "text-[var(--dashboard-muted)]"
+                        )}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <Filter className="h-3 w-3" />
                     </button>
                 </PopoverTrigger>
-                <PopoverContent className="w-48 p-2" align="start">
+                <PopoverContent className="w-52 p-3 space-y-2" align="start" side="bottom" sideOffset={4}>
+                    <p className="text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">{placeholder.replace('...', '')}</p>
                     <Input
                         placeholder={placeholder}
                         value={value}
                         onChange={e => setColumnFilters(prev => ({ ...prev, [colKey]: e.target.value }))}
-                        className="h-7 text-xs"
+                        className="h-8 text-xs"
                         autoFocus
                     />
                     {value && (
                         <button
                             onClick={() => setColumnFilters(prev => ({ ...prev, [colKey]: '' }))}
-                            className="text-[10px] text-[var(--dashboard-accent)] mt-1 hover:underline"
+                            className="text-[10px] text-[var(--dashboard-accent)] font-medium hover:underline flex items-center gap-1"
                         >
-                            Temizle
+                            <X className="h-2.5 w-2.5" /> Temizle
                         </button>
                     )}
                 </PopoverContent>
@@ -223,8 +228,14 @@ export default function ImhaEdilenKitlerListePanel() {
         col: SortKey; label: string; align?: string;
         filterKey?: keyof ColumnFilters; filterPlaceholder?: string;
     }) => (
-        <span className={cn("flex items-center gap-1 select-none", align)}>
-            <button onClick={() => toggleSort(col)} className="flex items-center gap-0.5 hover:text-[var(--dashboard-text)] transition-colors">
+        <span className={cn("flex items-center gap-1.5 select-none", align)}>
+            <button
+                onClick={() => toggleSort(col)}
+                className={cn(
+                    "flex items-center gap-1 px-1 py-0.5 rounded hover:bg-[var(--dashboard-surface)] transition-colors cursor-pointer",
+                    sortKey === col && "text-[var(--dashboard-text)] font-bold"
+                )}
+            >
                 {label}
                 <SortIcon col={col} />
             </button>
