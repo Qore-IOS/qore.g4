@@ -1160,6 +1160,12 @@ export default function AnaPanel(props: AnaPanelProps) {
   // Selection mode state
   const isSelectionMode = selectedItemsCount > 0;
 
+  // Total item count: sums adet for all items (correct for lot/qty grouped items)
+  const totalItemCount = useMemo(() =>
+    scannedItems.reduce((n, it) => n + (it.adet ?? 1), 0),
+    [scannedItems]
+  );
+
   return (
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
 
@@ -1214,9 +1220,9 @@ export default function AnaPanel(props: AnaPanelProps) {
         </div>
       </header>
 
-      {/* ── KPI / Action Row ── */}
-      <div className="grid grid-cols-3 gap-3 sm:gap-4">
-        {/* Son Okutulan Detay */}
+      {/* ── KPI Row – Son Okutulan Detay + Okuma Adetleri + Ürün Ekle ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        {/* Col 1: Son Okutulan Detay (with scan feedback) */}
         <div className={cn(
           "cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 transition-all duration-300",
           scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
@@ -1234,97 +1240,91 @@ export default function AnaPanel(props: AnaPanelProps) {
             )}
           </div>
           {scanFeedback?.type === 'error' && !lastScannedProduct ? (
-            <div className="p-3 rounded-xl bg-red-50/60 dark:bg-red-950/20">
-              <p className="text-sm font-bold text-red-600">{scanFeedback.message}</p>
-            </div>
+            <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
           ) : lastScannedProduct ? (
-            <div className="space-y-2">
-              <div className="p-3 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-                <p className={cn(
-                  "font-semibold text-sm",
-                  scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
-                )}>
-                  {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
-                </p>
-                {scanFeedback?.type !== 'error' && (
-                  <>
-                    <p className="text-xs text-[var(--dashboard-muted)] font-mono mt-1">{lastScannedProduct.stokKodu}</p>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {lastScannedProduct.seriNumarasi && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
-                          SN: {lastScannedProduct.seriNumarasi}
-                        </span>
-                      )}
-                      {lastScannedProduct.lotNumarasi && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
-                          Lot: {lastScannedProduct.lotNumarasi}
-                        </span>
-                      )}
-                      {lastScannedProduct.miad && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
-                          SKT: {lastScannedProduct.miad}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
+            <div className="space-y-1">
+              <p className={cn(
+                "text-sm sm:text-base font-semibold truncate",
+                scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
+              )}>
+                {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
+              </p>
+              {scanFeedback?.type !== 'error' && (
+                <>
+                  <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">{lastScannedProduct.stokKodu}</p>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {lastScannedProduct.seriNumarasi && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
+                        SN: {lastScannedProduct.seriNumarasi}
+                      </span>
+                    )}
+                    {lastScannedProduct.lotNumarasi && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
+                        Lot: {lastScannedProduct.lotNumarasi}
+                      </span>
+                    )}
+                    {lastScannedProduct.miad && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
+                        SKT: {lastScannedProduct.miad}
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-6 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-3">
-                <Package className="h-5 w-5 text-[var(--dashboard-muted)]" />
-              </div>
-              <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun veya manuel ürün ekleyin</p>
+            <div className="flex items-center gap-2 py-1">
+              <Package className="h-4 w-4 text-[var(--dashboard-muted)]" />
+              <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun</p>
             </div>
           )}
         </div>
 
-        {/* KPI 2: Bu Lot / Ürün */}
+        {/* Col 2: Okuma Adetleri (bigger fonts) */}
         <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
           <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
-          <div className="flex items-baseline gap-1">
+          <div className="flex items-baseline gap-1.5">
             <span className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">lot</span>
+            <span className="text-xs sm:text-sm text-[var(--dashboard-muted)]">lot</span>
           </div>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-xl sm:text-2xl font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
-            <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">ürün</span>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className="text-lg sm:text-xl font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
+            <span className="text-xs sm:text-sm text-[var(--dashboard-muted)]">ürün</span>
           </div>
         </div>
 
-        {/* Ürün Ekle */}
-        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5">
-          <p className="cihaz-overline text-xs mb-3">Ürün Ekle</p>
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+        {/* Col 3: Ürün Ekle (action tiles) */}
+        <div className="cihaz-card-strong px-3 py-3 sm:px-4 sm:py-4">
+          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Ürün Ekle</p>
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
             >
-              <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
-              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
+              <Camera className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
             </button>
             <button
               onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
               style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}
             >
-              <Camera className="h-5 w-5" />
-              <span className="text-xs sm:text-sm font-medium">Seri Tarama</span>
+              <Camera className="h-4 w-4" />
+              <span className="text-[10px] sm:text-xs font-medium">Seri Tarama</span>
             </button>
             <button
               onClick={() => setShowManualInline(v => !v)}
-              className={cn("cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center", showManualInline && "cihaz-pressed")}
+              className={cn("cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center", showManualInline && "cihaz-pressed")}
             >
-              <PlusCircle className="h-5 w-5 text-[var(--dashboard-accent)]" />
-              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
+              <PlusCircle className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
             </button>
             <button
               onClick={() => setIsOcrModalOpen(true)}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1.5 py-3 sm:py-4 text-center"
+              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
             >
-              <ScanLine className="h-5 w-5 text-[var(--dashboard-accent)]" />
-              <span className="text-xs sm:text-sm font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
+              <ScanLine className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
             </button>
           </div>
         </div>
