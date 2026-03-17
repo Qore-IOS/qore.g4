@@ -276,12 +276,63 @@ Focus on barcode utilities that power supply-chain operations:
 
 ## Common Development Tasks
 
-### Adding a New Panel
-1. Create component in `/src/components/panels`
-2. Add to `AppView` type in types.ts
-3. Register in main page.tsx switch statement
-4. Add to user permissions in admin panel
-5. Update navigation menu
+### Adding a New Panel (Multi-Tenancy Zorunlu)
+
+**Her yeni panel otomatik olarak şirkete özel (multi-tenant) olmalıdır.**
+Aşağıdaki adımları sırayla uygula — hiçbirini atlama:
+
+#### 1. Koleksiyonu tanımla
+`src/contexts/company-context.tsx` içindeki `TENANT_COLLECTIONS` setine ekle:
+```ts
+export const TENANT_COLLECTIONS = new Set([
+  // ... mevcut koleksiyonlar ...
+  'yeniKoleksiyonAdi',   // ← buraya ekle
+]);
+```
+
+#### 2. Firestore kuralını ekle
+`firestore.rules` dosyasına aşağıdaki şablonu ekle:
+```
+match /yeniKoleksiyonAdi/{docId} {
+  allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+  allow create: if isAuthenticated() && validCompanyOnCreate();
+  allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+}
+```
+
+#### 3. Yazma işlemleri — useCompanyFirestore kullan
+```ts
+// ❌ YANLIŞ — companyId unutulabilir
+import { addDoc, collection } from 'firebase/firestore';
+await addDoc(collection(db, 'yeniKoleksiyon'), { alan: 'değer' });
+
+// ✅ DOĞRU — companyId otomatik eklenir
+const { addDoc } = useCompanyFirestore();
+await addDoc('yeniKoleksiyon', { alan: 'değer' });
+```
+
+#### 4. Okuma sorguları — activeCompanyId ile filtrele
+```ts
+const { activeCompanyId } = useCompany();
+const q = query(
+  collection(db, 'yeniKoleksiyon'),
+  where('companyId', '==', activeCompanyId)
+);
+```
+
+#### 5. Panel bileşenini oluştur
+- `/src/components/panels` altında bileşen dosyasını oluştur
+- `AppView` tipine ekle (`src/lib/types.ts`)
+- `src/app/(protected)` veya ana `page.tsx` switch'ine kaydet
+- Kullanıcı yetki paneline ekle
+
+#### Özet kontrol listesi
+- [ ] `TENANT_COLLECTIONS`'a eklendi
+- [ ] `firestore.rules`'a kural eklendi
+- [ ] Yazma: `useCompanyFirestore()` kullanılıyor
+- [ ] Okuma: `where('companyId', '==', activeCompanyId)` var
+- [ ] `AppView` tipine eklendi
+- [ ] Navigasyon menüsüne eklendi
 
 ### Adding a New Data Model
 1. Define interface in `src/lib/types.ts`

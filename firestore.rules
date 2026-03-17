@@ -1,0 +1,463 @@
+rules_version = '2';
+
+// ============================================================
+// QORE - Firestore Security Rules
+// Multi-Tenancy: Her şirket yalnızca kendi verilerine erişir.
+//
+// Kural özeti:
+// - Paylaşılan koleksiyonlar (productCodes, barcodeFormats):
+//     Giriş yapmış herkes okuyabilir, yalnızca admin yazabilir.
+// - Şirkete özel koleksiyonlar (hospitals, orders, vb.):
+//     Sadece aynı companyId'ye sahip kullanıcılar okuyup yazabilir.
+//     SuperAdmin tüm şirketleri görebilir.
+// - companies koleksiyonu:
+//     Herkes okuyabilir, yalnızca admin veya superAdmin yazabilir.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Yardımcı fonksiyonlar ──────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userData() {
+      return get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userCompanyId() {
+      return userData().companyId;
+    }
+
+    function isSuperAdmin() {
+      return userData().isSuperAdmin == true;
+    }
+
+    function isAdmin() {
+      return userData().role == 'admin' || isSuperAdmin();
+    }
+
+    // Dökümanın companyId'si aktif kullanıcının şirketiyle eşleşiyor mu?
+    function sameCompany(docCompanyId) {
+      return isSuperAdmin() || userCompanyId() == docCompanyId;
+    }
+
+    // Yeni döküman oluşturulurken companyId doğru mu?
+    function validCompanyOnCreate() {
+      return isSuperAdmin() ||
+        request.resource.data.companyId == userCompanyId();
+    }
+
+    // ── Şirkete özel koleksiyonlar (genel kural) ──────────
+    // Tüm tenant koleksiyonları bu kurala girer.
+    // companyId eşleşmesi zorunlu.
+
+    match /hospitals/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /depots/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /depoStok/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /devices/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /deviceFaultReports/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /tuketimKayitlari/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /orders/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /shipments/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /transfers/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /borcTransfers/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /borcDepots/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /labPools/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /deviceLabPools/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /personalStock/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /poolWarehouseStock/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /consumableRequests/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /purchasingTasks/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /purchasingTaskDefinitions/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /stockCounts/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /depotCountSessions/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /depotBrandCountSessions/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /notifications/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /notificationLogs/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /pushTokens/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /addressDefinitions/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /deviceActionForms/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /teknikServisActionForms/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /aplikasyonActionForms/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /ejectedKitRecords/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /destroyedKitsReports/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /trashBinRecords/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /effecticiencyHistory/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /totalEfficiencyRecords/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /cihazUstuGecmisi/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /yedekParcaDepoStok/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /yedek_parca/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /partChanges/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /periodicPartChangeLogs/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /draftActionForms/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /minMaxHistory/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /archiveRacks/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /faultDefinitions/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /assetCategories/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /assets/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /assetHistory/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /config_hospitals/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /def_brands/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /def_deviceGroups/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /def_labGroups/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /def_mainUnits/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /def_productGroups/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /def_testGroups/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /overtimeRequests/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /dutyShifts/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /shiftSchedules/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /personnelAvailability/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /personnelHistoryLogs/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    }
+
+    match /personelGruplari/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    match /routes/{docId} {
+      allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && validCompanyOnCreate();
+      allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId) && isAdmin();
+    }
+
+    // ── Kullanıcılar ───────────────────────────────────────
+    // Kullanıcı kendi profilini okuyabilir/yazabilir.
+    // Admin aynı şirketteki kullanıcıları görebilir.
+    // SuperAdmin herkesi görebilir.
+
+    match /users/{uid} {
+      allow read: if isAuthenticated() &&
+        (request.auth.uid == uid ||
+         isAdmin() && sameCompany(resource.data.companyId) ||
+         isSuperAdmin());
+      allow create: if isAuthenticated() && isAdmin() && validCompanyOnCreate();
+      allow update: if isAuthenticated() &&
+        (request.auth.uid == uid ||
+         isAdmin() && sameCompany(resource.data.companyId));
+      allow delete: if isAuthenticated() && isAdmin() && sameCompany(resource.data.companyId);
+    }
+
+    // ── Şirketler (companies) ──────────────────────────────
+    // Herkes okuyabilir, yalnızca admin veya superAdmin yazabilir.
+
+    match /companies/{companyId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    // ── Paylaşılan koleksiyonlar ───────────────────────────
+    // Tüm şirketlerde ortak, companyId filtresi yok.
+
+    match /productCodes/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    match /barcodeFormats/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    // ── YENİ KOLEKSİYON ŞABLONU ───────────────────────────
+    // Yeni bir panel/koleksiyon eklerken aşağıdaki şablonu kullan:
+    //
+    // match /yeniKoleksiyonAdi/{docId} {
+    //   allow read: if isAuthenticated() && sameCompany(resource.data.companyId);
+    //   allow create: if isAuthenticated() && validCompanyOnCreate();
+    //   allow update, delete: if isAuthenticated() && sameCompany(resource.data.companyId);
+    // }
+    //
+    // Ve şunları da yap:
+    // 1. TENANT_COLLECTIONS setine ekle (company-context.tsx)
+    // 2. Yazma işlemlerinde useCompanyFirestore() hook'unu kullan
+    // 3. Okuma sorgularında where('companyId', '==', activeCompanyId) ekle
+  }
+}
