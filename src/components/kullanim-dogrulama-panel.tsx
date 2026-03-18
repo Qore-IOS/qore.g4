@@ -73,13 +73,10 @@ interface NfcVerificationGroup {
   tuketilenAdet: number;
   consumptionRecordIds: string[];
   tuketilenSeriNolar: string[];
-  knownRegisteredUids: string[];
-  expectedUids: string[];
-  pendingExpectedUids: string[];
   disposedUids: string[];
-  patternKeys: string[];
-  eksikUidTanimi: boolean;
-  eksikUidSayisi: number;
+  patternKey: string;
+  fixedSuffix: string;
+  eksikAileTanimi: boolean;
 }
 
 const DAY_RANGE_OPTIONS: Array<{ value: DayRangeOption; label: string }> = [
@@ -226,10 +223,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       .forEach((record) => {
         const key = `${record.stokKodu}__${record.lotNumarasi || ''}`;
         const definition = lotDefinitionsByKey[key];
-        const knownRegisteredUids = uniqueStrings([
-          ...(definition?.registeredTagUIDs || []),
-          definition?.sampleUid,
-        ]);
+        const patternKey = definition?.patternKey || (definition?.b3 && definition?.b4 ? `${definition.b3}:${definition.b4}` : '');
+        const fixedSuffix = (definition?.fixedSuffix || NFC_SUFFIX).toUpperCase();
 
         if (!grouped[key]) {
           grouped[key] = {
@@ -241,16 +236,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
             tuketilenAdet: 0,
             consumptionRecordIds: [],
             tuketilenSeriNolar: [],
-            knownRegisteredUids,
-            expectedUids: [],
-            pendingExpectedUids: [],
             disposedUids: [],
-            patternKeys: uniqueStrings([
-              definition?.patternKey,
-              definition?.b3 && definition?.b4 ? `${definition.b3}:${definition.b4}` : null,
-            ]),
-            eksikUidTanimi: knownRegisteredUids.length === 0,
-            eksikUidSayisi: 0,
+            patternKey,
+            fixedSuffix,
+            eksikAileTanimi: !patternKey,
           };
         }
 
@@ -268,12 +257,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
           .map((event) => event.uid)
       );
 
-      const expectedUids = group.knownRegisteredUids.slice(0, group.tuketilenAdet);
-      group.expectedUids = expectedUids;
-      group.disposedUids = disposedUids.filter((uid) => expectedUids.includes(uid));
-      group.pendingExpectedUids = expectedUids.filter((uid) => !group.disposedUids.includes(uid));
-      group.eksikUidTanimi = expectedUids.length === 0 || group.knownRegisteredUids.length < group.tuketilenAdet;
-      group.eksikUidSayisi = Math.max(group.tuketilenAdet - group.knownRegisteredUids.length, 0);
+      group.disposedUids = disposedUids;
       group.tuketilenSeriNolar = uniqueStrings(group.tuketilenSeriNolar);
     });
 
@@ -296,7 +280,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       return { expected: 0, verified: 0, total: 0 };
     }
 
-    const expected = verificationGroups.reduce((sum, group) => sum + group.expectedUids.length, 0);
+    const expected = verificationGroups.reduce((sum, group) => sum + group.tuketilenAdet, 0);
     const verified = verificationGroups.reduce((sum, group) => sum + group.disposedUids.length, 0);
 
     return {
@@ -475,6 +459,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
 
     setNfcInput(normalized);
     setIsWebNfcScanning(false);
+    setTimeout(() => {
+      document.getElementById(NFC_INPUT_ID)?.focus();
+    }, 0);
   }, [toast]);
 
   const startWebNfcScan = useCallback(async () => {
@@ -512,8 +499,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     }
   }, [handleDetectedNfcUid, toast]);
 
-  const handleNfcScan = useCallback(async () => {
-    const parsedUid = parseNfcUid(nfcInput);
+  const handleNfcScan = useCallback(async (rawUid?: string) => {
+    const sourceUid = rawUid ?? nfcInput;
+    const parsedUid = parseNfcUid(sourceUid);
 
     if (!selectedLaboratoryId) {
       toast({ title: 'Uyarı', description: 'Önce laboratuvar seçin.' });
@@ -554,27 +542,41 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         return;
       }
 
-      const exactGroup = verificationGroups.find((group) => group.pendingExpectedUids.includes(uid));
+      const familyGroup = verificationGroups.find((group) =>
+        !group.eksikAileTanimi &&
+        group.patternKey === parsedUid.patternKey &&
+        group.fixedSuffix === parsedUid.fixedSuffix
+      );
+
+      const exactGroup = verificationGroups.find((group) =>
+        !group.eksikAileTanimi &&
+        group.patternKey === parsedUid.patternKey &&
+        group.fixedSuffix === parsedUid.fixedSuffix &&
+        group.disposedUids.length < group.tuketilenAdet
+      );
+
       if (!exactGroup) {
-        const knownGroup = verificationGroups.find((group) => group.knownRegisteredUids.includes(uid));
-        if (knownGroup) {
+        if (familyGroup) {
           toast({
-            title: 'Beklenen İade Listesinde Değil',
-            description: `${uid} sistemde tanımlı ancak şu an ${knownGroup.stokAdi} / ${knownGroup.lotNumarasi} için beklenen iade listesinde değil.`,
+            title: 'Bekleyen Kutu Kalmadı',
+            description: `${familyGroup.stokAdi} / ${familyGroup.lotNumarasi} için tanımlı aile örüntüsü eşleşti ancak bekleyen boş kutu kalmamış görünüyor.`,
             variant: 'destructive',
           });
         } else {
-          const familyGroup = verificationGroups.find((group) => group.patternKeys.includes(parsedUid.patternKey));
-          if (familyGroup) {
+          const samePatternDifferentSuffix = verificationGroups.find((group) =>
+            !group.eksikAileTanimi && group.patternKey === parsedUid.patternKey
+          );
+
+          if (samePatternDifferentSuffix) {
             toast({
-              title: 'Aile Eşleşti, Seri Uyuşmadı',
-              description: `${uid} için aile deseni (${parsedUid.patternKey}) eşleşti ancak tam UID beklenen listede yok. B1:B2 seri alanını doğrulayın.`,
+              title: 'Aile Eşleşti, Suffix Uyuşmadı',
+              description: `${uid} için aile kodu (${parsedUid.patternKey}) eşleşti ancak sabit son 4 bayt beklenen ${samePatternDifferentSuffix.fixedSuffix} değeriyle uyuşmuyor.`,
               variant: 'destructive',
             });
           } else {
             toast({
-              title: 'UID Tanımlı Değil',
-              description: `${uid} daha önce bu ürün-lot için sisteme tanıtılmamış.`,
+              title: 'Aile Örüntüsü Tanımlı Değil',
+              description: `${uid} için ${parsedUid.patternKey}:${parsedUid.fixedSuffix} aile örüntüsü seçili laboratuvarın bekleyen tüketimlerinde bulunamadı.`,
               variant: 'destructive',
             });
           }
@@ -610,7 +612,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
 
       toast({
         title: 'Çöp Kutusu Kabul Etti',
-        description: `${exactGroup.stokAdi} için ${uid} kabul edildi.`,
+        description: `${exactGroup.stokAdi} için ${uid} aile örüntüsüne uygun olarak kabul edildi.`,
       });
       setNfcInput('');
       document.getElementById(NFC_INPUT_ID)?.focus();
@@ -621,6 +623,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         description: 'NFC doğrulama sonucu kaydedilemedi.',
         variant: 'destructive',
       });
+      setNfcInput('');
+      return;
     }
   }, [currentUserProfile?.name, currentUserProfile?.uid, hasFetchedData, laboratories, nfcInput, selectedLaboratoryId, toast, verificationGroups]);
 
@@ -650,8 +654,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
             <AlertTitle>Doğrulama mantığı</AlertTitle>
             <AlertDescription className="space-y-1">
               <p>1) UID formatı doğrulanır.</p>
-              <p>2) UID daha önce ürün-lot altında tanımlı mı kontrol edilir.</p>
-              <p>3) UID şu anda beklenen boş kutu listesinde mi kontrol edilir.</p>
+              <p>2) Ürün-lot için tanımlı B3:B4 aile kodu ve sabit son 4 bayt kontrol edilir.</p>
+              <p>3) B1:B2 seri alanı değişken kabul edilir; aynı tam UID ikinci kez kabul edilmez.</p>
               <p>4) UID daha önce disposed olmuşsa tekrar kabul edilmez.</p>
             </AlertDescription>
           </Alert>
@@ -759,10 +763,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                 {hasFetchedData && verificationGroups.length > 0 && (
                   <div className="p-3 bg-muted/50 rounded-lg space-y-2">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">Genel UID İlerlemesi</span>
-                      <span className="font-mono">
-                        {overallProgress.verified}/{overallProgress.expected} ({overallProgress.total}%)
-                      </span>
+                    <span className="font-medium">Genel Aile Doğrulama İlerlemesi</span>
+                    <span className="font-mono">
+                      {overallProgress.verified}/{overallProgress.expected} ({overallProgress.total}%)
+                    </span>
                     </div>
                     <Progress value={overallProgress.total} className="h-2" />
                   </div>
@@ -794,7 +798,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                   </Button>
 
                   <Button
-                    onClick={handleNfcScan}
+                    onClick={() => handleNfcScan()}
                     disabled={!nfcInput.trim() || !hasFetchedData || verificationGroups.length === 0}
                   >
                     <Nfc className="mr-2 h-4 w-4" />
@@ -845,7 +849,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                         <TableRow>
                           <TableHead>Ürün / Lot</TableHead>
                           <TableHead className="text-center">Tüketilen</TableHead>
-                          <TableHead className="text-center">Beklenen UID</TableHead>
+                          <TableHead className="text-center">Beklenen Aile</TableHead>
                           <TableHead className="text-center">Doğrulanan UID</TableHead>
                           <TableHead className="w-[220px]">İlerleme</TableHead>
                           <TableHead>Durum</TableHead>
@@ -853,10 +857,11 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                       </TableHeader>
                       <TableBody>
                         {filteredGroups.map((group) => {
-                          const progress = group.expectedUids.length > 0
-                            ? (group.disposedUids.length / group.expectedUids.length) * 100
+                          const progress = group.tuketilenAdet > 0
+                            ? (group.disposedUids.length / group.tuketilenAdet) * 100
                             : 0;
-                          const fullyDone = group.expectedUids.length > 0 && group.pendingExpectedUids.length === 0;
+                          const pendingCount = Math.max(group.tuketilenAdet - group.disposedUids.length, 0);
+                          const fullyDone = group.tuketilenAdet > 0 && pendingCount === 0;
 
                           return (
                             <TableRow
@@ -869,11 +874,11 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                                   {group.stokKodu} • Lot: {group.lotNumarasi || '-'}
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1">
-                                  {group.patternKeys.map((pattern) => (
-                                    <Badge key={pattern} variant="outline" className="font-mono text-[10px]">
-                                      Aile {pattern}
+                                  {group.patternKey && (
+                                    <Badge variant="outline" className="font-mono text-[10px]">
+                                      Aile {group.patternKey}
                                     </Badge>
-                                  ))}
+                                  )}
                                   {group.tuketilenSeriNolar.slice(0, 3).map((serial) => (
                                     <Badge key={serial} variant="secondary" className="font-mono text-[10px]">
                                       Seri {serial}
@@ -892,16 +897,15 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                               </TableCell>
 
                               <TableCell className="text-center">
-                                <span className="font-semibold">{group.expectedUids.length}</span>
+                                <span className="font-semibold">{group.tuketilenAdet}</span>
                                 <div className="mt-2 flex flex-wrap gap-1 justify-center">
-                                  {group.expectedUids.slice(0, 2).map((uid) => (
-                                    <Badge key={uid} variant="outline" className="font-mono text-[10px]">
-                                      {uid}
+                                  {group.patternKey ? (
+                                    <Badge variant="outline" className="font-mono text-[10px]">
+                                      {`??:??:${group.patternKey}:${group.fixedSuffix}`}
                                     </Badge>
-                                  ))}
-                                  {group.expectedUids.length > 2 && (
-                                    <Badge variant="outline" className="text-[10px]">
-                                      +{group.expectedUids.length - 2} UID
+                                  ) : (
+                                    <Badge variant="destructive" className="text-[10px]">
+                                      Aile tanımı yok
                                     </Badge>
                                   )}
                                 </div>
@@ -934,14 +938,12 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                               </TableCell>
 
                               <TableCell>
-                                {group.eksikUidTanimi ? (
+                                {group.eksikAileTanimi ? (
                                   <Alert variant="destructive" className="py-2">
                                     <AlertTriangle className="h-4 w-4" />
-                                    <AlertTitle className="text-xs">UID havuzu eksik</AlertTitle>
+                                    <AlertTitle className="text-xs">Aile tanımı eksik</AlertTitle>
                                     <AlertDescription className="text-xs">
-                                      {group.eksikUidSayisi > 0
-                                        ? `Bu lot için ${group.eksikUidSayisi} adet UID eksik. Sadece aile deseni ile kabul yapılmaz.`
-                                        : 'Bu lot için kayıtlı tam UID listesi yok. Sadece aile deseni ile kabul yapılmaz.'}
+                                      Bu lot için B3:B4 aile kodu tanımlı değil. Kullanım doğrulamada aile örüntüsü beklenir.
                                     </AlertDescription>
                                   </Alert>
                                 ) : fullyDone ? (
@@ -952,10 +954,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                                 ) : (
                                   <div className="space-y-1">
                                     <Badge variant="secondary">
-                                      Bekleyen: {group.pendingExpectedUids.length}
+                                      Bekleyen: {pendingCount}
                                     </Badge>
                                     <p className="text-xs text-muted-foreground">
-                                      Çöp kutusu yalnızca bekleyen UID listesindeki etiketleri kabul eder.
+                                      Beklenen örüntü: {`??:??:${group.patternKey}:${group.fixedSuffix}`}
                                     </p>
                                   </div>
                                 )}
