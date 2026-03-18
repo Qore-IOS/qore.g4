@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,47 +10,177 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { CheckSquare, Loader2, Info, Search, ShieldCheck, Trash2, Nfc } from 'lucide-react';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { CalendarClock, CheckSquare, Info, Loader2, Nfc, Search, ShieldCheck, Smartphone, Trash2, RefreshCcw, ScanLine, AlertTriangle } from 'lucide-react';
+import {
+  collection,
+  getDoc,
+  getDocs,
+  doc,
+  onSnapshot,
+  query,
+  setDoc,
+  Timestamp,
+  where,
+  serverTimestamp,
+} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
+import { useAuth } from '@/contexts/auth-context';
 
-// NFC tag format regex: xx:xx:xx:xx:xx:xx:xx:xx (each xx is 2 hex chars)
-const NFC_TAG_REGEX = /^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){7}$/;
+const NFC_TAG_REGEX = /^[0-9A-F]{2}(:[0-9A-F]{2}){7}$/;
+const NFC_INPUT_ID = 'nfc-tag-input';
+const NFC_SUFFIX = '53:01:04:E0';
 
-/** A single NFC verification group for a product consumed with serial tracking */
-interface NfcVerificationGroup {
-  stokKodu: string;
-  stokAdi: string;
-  /** Total number of consumptions for this product (serial-tracked) */
-  tuketilenAdet: number;
-  /** Unique NFC serial tags scanned so far for this product */
-  okutulanNfcler: string[];
-  /** Whether the empty box NFC has been scanned */
-  bosKutuOkutuldu: boolean;
-  /** The original consumption record IDs */
-  consumptionRecordIds: string[];
-  /** The serial numbers from consumption records */
-  tuketilenSeriNolar: string[];
+type DayRangeOption = '1' | '2' | '5' | '7' | '30' | 'all';
+
+interface KullanimDogrulamaPanelProps {
+  initialLaboratoryId?: string;
 }
 
-export default function KullanimDogrulamaPanel() {
-  const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>('');
+interface LotNfcDefinition {
+  stokKodu: string;
+  stokAdi?: string;
+  lotNumarasi: string;
+  sampleUid?: string;
+  patternKey?: string;
+  b3?: string;
+  b4?: string;
+  fixedSuffix?: string;
+  registeredTagUIDs?: string[];
+}
+
+interface NfcDisposalEvent {
+  id: string;
+  laboratoryId: string;
+  laboratoryName: string;
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  uid: string;
+  patternKey?: string;
+  fixedSuffix?: string;
+  consumptionRecordIds: string[];
+}
+
+interface NfcVerificationGroup {
+  id: string;
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  miad: string;
+  tuketilenAdet: number;
+  consumptionRecordIds: string[];
+  tuketilenSeriNolar: string[];
+  disposedUids: string[];
+  productIdentityKey: string;
+  eksikAileTanimi: boolean;
+}
+
+const DAY_RANGE_OPTIONS: Array<{ value: DayRangeOption; label: string }> = [
+  { value: '1', label: 'Son 1 gün' },
+  { value: '2', label: 'Son 2 gün' },
+  { value: '5', label: 'Son 5 gün' },
+  { value: '7', label: 'Son 7 gün' },
+  { value: '30', label: 'Son 30 gün' },
+  { value: 'all', label: 'Tüm geçmiş' },
+];
+
+const normalizeNfcUid = (raw: string): string | null => {
+  const hex = (raw || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (hex.length !== 16) return null;
+  return hex.match(/.{1,2}/g)?.join(':') ?? null;
+};
+
+const parseNfcUid = (raw: string) => {
+  const normalized = normalizeNfcUid(raw);
+  if (!normalized) return null;
+
+  const bytes = normalized.split(':');
+  if (bytes.length !== 8) return null;
+
+  return {
+    normalized,
+    serialField: `${bytes[0]}:${bytes[1]}`,
+    ignoredB3: bytes[2],
+    productIdentityKey: `${bytes[3]}:${bytes[4]}:${bytes[5]}:${bytes[6]}:${bytes[7]}`,
+    fixedSuffix: bytes.slice(4).join(':'),
+  };
+};
+
+const buildLotNfcDefinitionId = (stokKodu: string, lotNumarasi: string) =>
+  `${encodeURIComponent(stokKodu)}__${encodeURIComponent(lotNumarasi)}`;
+
+const buildDisposalEventId = (uid: string) => normalizeNfcUid(uid)?.replace(/:/g, '') ?? uid.replace(/[^0-9A-F]/gi, '').toUpperCase();
+
+const toDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (value instanceof Timestamp) return value.toDate();
+  if (typeof value === 'object' && value && 'toDate' in value && typeof (value as { toDate?: () => Date }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate();
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+};
+
+const getSinceDate = (range: DayRangeOption): Date | null => {
+  if (range === 'all') return null;
+  const days = Number(range);
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - (days - 1));
+  return date;
+};
+
+const uniqueStrings = (values: Array<string | undefined | null>) =>
+  Array.from(new Set(values.map((value) => (value || '').trim().toUpperCase()).filter(Boolean)));
+
+export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: KullanimDogrulamaPanelProps) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const { currentUserProfile } = useAuth();
+
+  const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>(initialLaboratoryId);
+  const [selectedRange, setSelectedRange] = useState<DayRangeOption>('1');
   const [nfcInput, setNfcInput] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [isLabsLoading, setIsLabsLoading] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isWebNfcScanning, setIsWebNfcScanning] = useState(false);
+  const [hasFetchedData, setHasFetchedData] = useState(false);
+  const [loadedRangeLabel, setLoadedRangeLabel] = useState<string>('');
+  const [activeSinceDate, setActiveSinceDate] = useState<Date | null>(null);
 
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [verificationGroups, setVerificationGroups] = useState<NfcVerificationGroup[]>([]);
+  const [consumptionRecords, setConsumptionRecords] = useState<ConsumptionRecord[]>([]);
+  const [lotDefinitionsByKey, setLotDefinitionsByKey] = useState<Record<string, LotNfcDefinition>>({});
+  const [disposalEvents, setDisposalEvents] = useState<NfcDisposalEvent[]>([]);
 
-  const { toast } = useToast();
+  const unsubscribeRefs = useRef<Array<() => void>>([]);
+  const scanBufferRef = useRef('');
+  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const processNfcScanRef = useRef<(rawUid?: string) => Promise<void>>(async () => {});
 
-  const NFC_INPUT_ID = 'nfc-tag-input';
+  const cleanupSubscriptions = () => {
+    unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
+    unsubscribeRefs.current = [];
+  };
 
-  // Fetch laboratories and product codes on mount (lightweight)
+  useEffect(() => () => {
+    unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
+    unsubscribeRefs.current = [];
+  }, []);
+
+  useEffect(() => {
+    setSelectedLaboratoryId(initialLaboratoryId || '');
+  }, [initialLaboratoryId]);
+
   useEffect(() => {
     const fetchInitialData = async () => {
       setIsLabsLoading(true);
@@ -60,21 +191,21 @@ export default function KullanimDogrulamaPanel() {
         ]);
 
         setLaboratories(
-          laboratoriesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Laboratory))
+          laboratoriesSnap.docs.map((item) => ({ id: item.id, ...item.data() } as Laboratory))
+        );
+        setProductCodes(
+          productsSnap.docs.map((item) => ({ id: item.id, ...item.data() } as ProductCode))
         );
 
-        const products = productsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as ProductCode));
-        setProductCodes(products);
-
-        kullanimDogrulamaLogger.info('Laboratuvarlar ve ürün kodları yüklendi', {
-          laboratories: laboratoriesSnap.docs.length,
-          products: productsSnap.docs.length,
+        kullanimDogrulamaLogger.info('Kullanım doğrulama temel verileri yüklendi', {
+          laboratoryCount: laboratoriesSnap.docs.length,
+          productCount: productsSnap.docs.length,
         });
       } catch (error) {
-        kullanimDogrulamaLogger.error('Temel veriler yüklenemedi', error);
+        kullanimDogrulamaLogger.error('Kullanım doğrulama temel verileri yüklenemedi', error);
         toast({
           title: 'Veri Hatası',
-          description: 'Laboratuvar listesi yüklenemedi.',
+          description: 'Laboratuvar ve ürün listesi yüklenemedi.',
           variant: 'destructive',
         });
       } finally {
@@ -85,237 +216,426 @@ export default function KullanimDogrulamaPanel() {
     fetchInitialData();
   }, [toast]);
 
-  // Fetch consumption data when lab changes
-  useEffect(() => {
-    if (!selectedLaboratoryId) {
-      setVerificationGroups([]);
-      return;
-    }
-
-    const laboratory = laboratories.find((h) => h.id === selectedLaboratoryId);
-    if (!laboratory) return;
-
-    const fetchConsumptionData = async () => {
-      setIsDataLoading(true);
-      try {
-        // Find serial-tracked product codes
-        const serialTrackedCodes = new Set(
-          productCodes
-            .filter((p) => p.trackingMode === 'serial')
-            .map((p) => p.stokKodu)
-        );
-
-        // Fetch consumption records filtered by laboratory name
-        const consumptionQuery = query(
-          collection(db, 'tuketimKayitlari'),
-          where('laboratoryName', '==', laboratory.name),
-          where('consumptionType', '==', 'normal_kullanim')
-        );
-        const consumptionSnap = await getDocs(consumptionQuery);
-
-        const consumptionItems = consumptionSnap.docs.map((doc) => {
-          const data = doc.data();
-          Object.keys(data).forEach((key) => {
-            if (data[key] instanceof Timestamp) {
-              data[key] = data[key].toDate();
-            }
-          });
-          return { id: doc.id, ...data } as ConsumptionRecord;
-        });
-
-        // Filter for serial-tracked products only
-        const relevantConsumptions = consumptionItems.filter(
-          (record) => serialTrackedCodes.has(record.stokKodu)
-        );
-
-        kullanimDogrulamaLogger.info('Tüketim kayıtları yüklendi', {
-          laboratoryName: laboratory.name,
-          total: consumptionSnap.docs.length,
-          serialTracked: relevantConsumptions.length,
-        });
-
-        // Group by product (stokKodu)
-        const grouped: Record<string, NfcVerificationGroup> = {};
-
-        relevantConsumptions.forEach((record) => {
-          const key = record.stokKodu;
-          if (!grouped[key]) {
-            grouped[key] = {
-              stokKodu: record.stokKodu,
-              stokAdi: record.stokAdi,
-              tuketilenAdet: 0,
-              okutulanNfcler: [],
-              bosKutuOkutuldu: false,
-              consumptionRecordIds: [],
-              tuketilenSeriNolar: [],
-            };
-          }
-          grouped[key].tuketilenAdet += 1;
-          if (!grouped[key].consumptionRecordIds.includes(record.id)) {
-            grouped[key].consumptionRecordIds.push(record.id);
-          }
-          if (record.seriNumarasi && !grouped[key].tuketilenSeriNolar.includes(record.seriNumarasi)) {
-            grouped[key].tuketilenSeriNolar.push(record.seriNumarasi);
-          }
-        });
-
-        setVerificationGroups(
-          Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi))
-        );
-      } catch (error) {
-        kullanimDogrulamaLogger.error('Tüketim verileri yüklenemedi', error);
-        toast({
-          title: 'Veri Hatası',
-          description: 'Tüketim kayıtları yüklenemedi.',
-          variant: 'destructive',
-        });
-      } finally {
-        setIsDataLoading(false);
-      }
-    };
-
-    fetchConsumptionData();
-    setNfcInput('');
-  }, [selectedLaboratoryId, laboratories, productCodes, toast]);
-
-  // Filtered groups for search
-  const filteredGroups = useMemo(() => {
-    if (!searchTerm) return verificationGroups;
-    const term = searchTerm.toLowerCase();
-    return verificationGroups.filter(
-      (g) =>
-        g.stokAdi.toLowerCase().includes(term) || g.stokKodu.toLowerCase().includes(term)
-    );
-  }, [verificationGroups, searchTerm]);
-
-  // Handle NFC scan
-  const handleNfcScan = useCallback(() => {
-    const tag = nfcInput.trim().toLowerCase();
-
-    if (!selectedLaboratoryId) {
-      toast({ title: 'Uyarı', description: 'Lütfen önce bir laboratuvar seçin.' });
-      setNfcInput('');
-      return;
-    }
-
-    if (!tag) {
-      toast({ title: 'Uyarı', description: 'Lütfen NFC etiketini okutun.' });
-      return;
-    }
-
-    if (!NFC_TAG_REGEX.test(tag)) {
-      kullanimDogrulamaLogger.warn('Geçersiz NFC formatı', { tag });
-      toast({
-        title: 'Hata',
-        description: `Geçersiz NFC formatı. Beklenen: xx:xx:xx:xx:xx:xx:xx:xx — Girilen: ${tag}`,
-        variant: 'destructive',
-      });
-      setNfcInput('');
-      return;
-    }
-
-    // Check if this NFC tag was already scanned in any group
-    const alreadyScanned = verificationGroups.some((g) => g.okutulanNfcler.includes(tag));
-    if (alreadyScanned) {
-      kullanimDogrulamaLogger.warn('Zaten okutulmuş NFC etiketi', { tag });
-      toast({
-        title: 'Tekrar Okutma',
-        description: `Bu NFC etiketi (${tag}) zaten okutulmuş.`,
-        variant: 'destructive',
-      });
-      setNfcInput('');
-      document.getElementById(NFC_INPUT_ID)?.focus();
-      return;
-    }
-
-    // Try to match to a group that still needs NFC scans
-    let matched = false;
-
-    setVerificationGroups((prev) =>
-      prev.map((group) => {
-        if (!matched && group.okutulanNfcler.length < group.tuketilenAdet) {
-          matched = true;
-          const updated = {
-            ...group,
-            okutulanNfcler: [...group.okutulanNfcler, tag],
-          };
-          kullanimDogrulamaLogger.info('NFC doğrulandı', {
-            stokKodu: group.stokKodu,
-            tag,
-            count: updated.okutulanNfcler.length,
-            total: group.tuketilenAdet,
-          });
-          toast({
-            title: 'NFC Okutuldu',
-            description: `${group.stokAdi} — ${updated.okutulanNfcler.length}/${group.tuketilenAdet} seri doğrulandı.`,
-          });
-          return updated;
-        }
-        return group;
-      })
-    );
-
-    if (!matched) {
-      toast({
-        title: 'Eşleşme Yok',
-        description: 'Doğrulanmayı bekleyen ürün bulunamadı veya tüm ürünler zaten doğrulanmış.',
-      });
-    }
-
-    setNfcInput('');
-    document.getElementById(NFC_INPUT_ID)?.focus();
-  }, [nfcInput, selectedLaboratoryId, verificationGroups, toast]);
-
-  // Handle empty box NFC scan
-  const handleEmptyBoxScan = useCallback(
-    (stokKodu: string) => {
-      setVerificationGroups((prev) =>
-        prev.map((group) => {
-          if (group.stokKodu === stokKodu) {
-            if (group.okutulanNfcler.length < group.tuketilenAdet) {
-              toast({
-                title: 'Uyarı',
-                description: `Önce tüm seri numaralarını okutmanız gerekiyor. (${group.okutulanNfcler.length}/${group.tuketilenAdet})`,
-                variant: 'destructive',
-              });
-              return group;
-            }
-            kullanimDogrulamaLogger.info('Boş kutu okutuldu', { stokKodu });
-            toast({
-              title: 'Boş Kutu Doğrulandı',
-              description: `${group.stokAdi} — boş kutu çöpe atıldı olarak işaretlendi.`,
-            });
-            return { ...group, bosKutuOkutuldu: true };
-          }
-          return group;
-        })
-      );
-    },
-    [toast]
+  const serialTrackedCodes = useMemo(
+    () => new Set(productCodes.filter((product) => product.trackingMode === 'serial').map((product) => product.stokKodu)),
+    [productCodes]
   );
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleNfcScan();
+  const verificationGroups: NfcVerificationGroup[] = useMemo(() => {
+    const grouped: Record<string, NfcVerificationGroup> = {};
+
+    consumptionRecords
+      .filter((record) => serialTrackedCodes.has(record.stokKodu))
+      .forEach((record) => {
+        const key = `${record.stokKodu}__${record.lotNumarasi || ''}`;
+        const definition = lotDefinitionsByKey[key];
+        const productIdentityKey = definition?.b4
+          ? `${definition.b4}:${(definition?.fixedSuffix || NFC_SUFFIX).toUpperCase()}`
+          : '';
+
+        if (!grouped[key]) {
+          grouped[key] = {
+            id: key,
+            stokKodu: record.stokKodu,
+            stokAdi: record.stokAdi,
+            lotNumarasi: record.lotNumarasi || '',
+            miad: record.miad,
+            tuketilenAdet: 0,
+            consumptionRecordIds: [],
+            tuketilenSeriNolar: [],
+            disposedUids: [],
+            productIdentityKey,
+            eksikAileTanimi: !productIdentityKey,
+          };
+        }
+
+        grouped[key].tuketilenAdet += 1;
+        grouped[key].consumptionRecordIds.push(record.id);
+        if (record.seriNumarasi) {
+          grouped[key].tuketilenSeriNolar.push(record.seriNumarasi);
+        }
+      });
+
+    Object.values(grouped).forEach((group) => {
+      const disposedUids = uniqueStrings(
+        disposalEvents
+          .filter((event) => event.stokKodu === group.stokKodu && event.lotNumarasi === group.lotNumarasi)
+          .map((event) => event.uid)
+      );
+
+      group.disposedUids = disposedUids;
+      group.tuketilenSeriNolar = uniqueStrings(group.tuketilenSeriNolar);
+    });
+
+    return Object.values(grouped).sort((left, right) => left.stokAdi.localeCompare(right.stokAdi, 'tr'));
+  }, [consumptionRecords, disposalEvents, lotDefinitionsByKey, serialTrackedCodes]);
+
+  const filteredGroups = !searchTerm
+    ? verificationGroups
+    : verificationGroups.filter((group) =>
+        [group.stokAdi, group.stokKodu, group.lotNumarasi]
+          .join(' ')
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase())
+      );
+
+  const expectedVerificationCount = verificationGroups.reduce((sum, group) => sum + group.tuketilenAdet, 0);
+  const verifiedVerificationCount = verificationGroups.reduce((sum, group) => sum + group.disposedUids.length, 0);
+  const overallProgress = {
+    expected: expectedVerificationCount,
+    verified: verifiedVerificationCount,
+    total:
+      expectedVerificationCount > 0
+        ? Math.round((verifiedVerificationCount / expectedVerificationCount) * 100)
+        : 0,
+  };
+
+  const syncLabUrl = (labId: string) => {
+    router.replace(labId ? `/kullanim-dogrulama/${labId}` : '/kullanim-dogrulama');
+  };
+
+  const hydrateLotDefinitions = async (records: ConsumptionRecord[]) => {
+    const keys = Array.from(
+      new Set(
+        records
+          .filter((record) => record.stokKodu && record.lotNumarasi)
+          .map((record) => `${record.stokKodu}__${record.lotNumarasi || ''}`)
+      )
+    );
+
+    if (keys.length === 0) {
+      setLotDefinitionsByKey({});
+      return;
+    }
+
+    try {
+      const entries = await Promise.all(
+        keys.map(async (key) => {
+          const [stokKodu, lotNumarasi] = key.split('__');
+          const definitionId = buildLotNfcDefinitionId(stokKodu, lotNumarasi);
+          const definitionSnap = await getDoc(doc(db, 'lotNfcDefinitions', definitionId));
+          return [key, definitionSnap.exists() ? (definitionSnap.data() as LotNfcDefinition) : null] as const;
+        })
+      );
+
+      setLotDefinitionsByKey(
+        entries.reduce<Record<string, LotNfcDefinition>>((accumulator, [key, value]) => {
+          if (value) accumulator[key] = value;
+          return accumulator;
+        }, {})
+      );
+    } catch (error) {
+      kullanimDogrulamaLogger.error('Lot NFC tanımları yüklenemedi', error);
+      toast({
+        title: 'NFC Tanım Hatası',
+        description: 'Tüketim kayıtlarına bağlı lot NFC tanımları yüklenemedi.',
+        variant: 'destructive',
+      });
     }
   };
 
-  // Overall progress
-  const overallProgress = useMemo(() => {
-    if (verificationGroups.length === 0) return { nfc: 0, box: 0, total: 0 };
-    const totalNfc = verificationGroups.reduce((s, g) => s + g.tuketilenAdet, 0);
-    const scannedNfc = verificationGroups.reduce((s, g) => s + g.okutulanNfcler.length, 0);
-    const totalBoxes = verificationGroups.length;
-    const scannedBoxes = verificationGroups.filter((g) => g.bosKutuOkutuldu).length;
-    const totalSteps = totalNfc + totalBoxes;
-    const doneSteps = scannedNfc + scannedBoxes;
-    return {
-      nfc: totalNfc > 0 ? Math.round((scannedNfc / totalNfc) * 100) : 0,
-      box: totalBoxes > 0 ? Math.round((scannedBoxes / totalBoxes) * 100) : 0,
-      total: totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0,
+  const handleFetchData = async () => {
+    if (!selectedLaboratoryId) {
+      toast({
+        title: 'Laboratuvar Seçin',
+        description: 'Önce doğrulama yapılacak laboratuvarı seçin.',
+      });
+      return;
+    }
+
+    const selectedLaboratory = laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId);
+    if (!selectedLaboratory) {
+      toast({
+        title: 'Laboratuvar Bulunamadı',
+        description: 'Seçilen laboratuvar bilgisi yüklenemedi.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    cleanupSubscriptions();
+    setIsDataLoading(true);
+    setConsumptionRecords([]);
+    setDisposalEvents([]);
+    setLotDefinitionsByKey({});
+    setHasFetchedData(false);
+    setSearchTerm('');
+
+    const sinceDate = getSinceDate(selectedRange);
+    setActiveSinceDate(sinceDate);
+    setLoadedRangeLabel(
+      selectedRange === 'all'
+        ? 'Tüm geçmiş'
+        : `Son ${selectedRange} gün`
+    );
+
+    try {
+      const consumptionConstraints = [
+        where('laboratoryId', '==', selectedLaboratoryId),
+        where('consumptionType', '==', 'normal_kullanim'),
+      ];
+
+      if (sinceDate) {
+        consumptionConstraints.push(where('consumptionTimestamp', '>=', Timestamp.fromDate(sinceDate)));
+      }
+
+      const consumptionQuery = query(collection(db, 'tuketimKayitlari'), ...consumptionConstraints);
+      const unsubscribeConsumption = onSnapshot(
+        consumptionQuery,
+        async (snapshot) => {
+          const records = snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as ConsumptionRecord));
+          setConsumptionRecords(records);
+          await hydrateLotDefinitions(records);
+          setIsDataLoading(false);
+          setHasFetchedData(true);
+
+          kullanimDogrulamaLogger.info('Kullanım doğrulama tüketim snapshot güncellendi', {
+            laboratoryId: selectedLaboratoryId,
+            count: records.length,
+            range: selectedRange,
+          });
+        },
+        (error) => {
+          kullanimDogrulamaLogger.error('Tüketim snapshot dinlenemedi', error);
+          setIsDataLoading(false);
+          toast({
+            title: 'Tüketim Hatası',
+            description: 'Seçilen aralıktaki tüketim verileri alınamadı.',
+            variant: 'destructive',
+          });
+        }
+      );
+
+      const disposalConstraints = [where('laboratoryId', '==', selectedLaboratoryId)];
+      if (sinceDate) {
+        disposalConstraints.push(where('verifiedAt', '>=', Timestamp.fromDate(sinceDate)));
+      }
+
+      const disposalQuery = query(collection(db, 'nfcDisposalEvents'), ...disposalConstraints);
+      const unsubscribeDisposals = onSnapshot(
+        disposalQuery,
+        (snapshot) => {
+          setDisposalEvents(
+            snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as NfcDisposalEvent))
+          );
+        },
+        (error) => {
+          kullanimDogrulamaLogger.error('İmha/NFC disposal snapshot dinlenemedi', error);
+        }
+      );
+
+      unsubscribeRefs.current = [unsubscribeConsumption, unsubscribeDisposals];
+      syncLabUrl(selectedLaboratoryId);
+      setNfcInput('');
+
+      toast({
+        title: 'Veriler Yükleniyor',
+        description:
+          selectedRange === 'all'
+            ? `${selectedLaboratory.name} için tüm geçmiş tüketim verileri yükleniyor.`
+            : `${selectedLaboratory.name} için son ${selectedRange} günün tüketimleri yükleniyor.`,
+      });
+    } catch (error) {
+      kullanimDogrulamaLogger.error('Kullanım doğrulama veri akışı başlatılamadı', error);
+      setIsDataLoading(false);
+      toast({
+        title: 'Akış Başlatılamadı',
+        description: 'Seçilen laboratuvar için doğrulama verileri başlatılamadı.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const processNfcScan = async (rawUid?: string) => {
+    const sourceUid = rawUid ?? nfcInput;
+    const parsedUid = parseNfcUid(sourceUid);
+
+    if (!selectedLaboratoryId) {
+      toast({ title: 'Uyarı', description: 'Önce laboratuvar seçin.' });
+      return;
+    }
+
+    if (!hasFetchedData) {
+      toast({
+        title: 'Önce Veri Alın',
+        description: 'Laboratuvar ve gün aralığını seçip "Veri Al" butonuna basın.',
+      });
+      return;
+    }
+
+    if (!parsedUid || !NFC_TAG_REGEX.test(parsedUid.normalized)) {
+      toast({
+        title: 'Geçersiz UID',
+        description: 'Beklenen format: xx:xx:xx:xx:xx:xx:xx:xx',
+        variant: 'destructive',
+      });
+      setNfcInput('');
+      return;
+    }
+
+    const uid = parsedUid.normalized;
+    const disposalDocId = buildDisposalEventId(uid);
+
+    try {
+      const existingDisposalSnap = await getDoc(doc(db, 'nfcDisposalEvents', disposalDocId));
+      if (existingDisposalSnap.exists()) {
+        toast({
+          title: 'UID Daha Önce İmha Edilmiş',
+          description: `${uid} daha önce disposed olarak işaretlenmiş.`,
+          variant: 'destructive',
+        });
+        setNfcInput('');
+        document.getElementById(NFC_INPUT_ID)?.focus();
+        return;
+      }
+
+      const familyGroup = verificationGroups.find((group) =>
+        !group.eksikAileTanimi &&
+        group.productIdentityKey === parsedUid.productIdentityKey
+      );
+
+      const exactGroup = verificationGroups.find((group) =>
+        !group.eksikAileTanimi &&
+        group.productIdentityKey === parsedUid.productIdentityKey &&
+        group.disposedUids.length < group.tuketilenAdet
+      );
+
+      if (!exactGroup) {
+        if (familyGroup) {
+          toast({
+            title: 'Bekleyen Kutu Kalmadı',
+            description: `${familyGroup.stokAdi} / ${familyGroup.lotNumarasi} için tanımlı aile örüntüsü eşleşti ancak bekleyen boş kutu kalmamış görünüyor.`,
+            variant: 'destructive',
+          });
+        } else {
+          const samePatternDifferentSuffix = verificationGroups.find((group) =>
+            !group.eksikAileTanimi && group.productIdentityKey.startsWith(`${parsedUid.productIdentityKey.split(':')[0]}:`)
+          );
+
+          if (samePatternDifferentSuffix) {
+            toast({
+              title: 'Ürün Kimliği Yakın, Örüntü Uyuşmadı',
+              description: `${uid} için ürün byte alanı benzer görünüyor ancak beklenen ürün+lota ait kimlik ile tam eşleşme yok.`,
+              variant: 'destructive',
+            });
+          } else {
+            toast({
+              title: 'Aile Örüntüsü Tanımlı Değil',
+              description: `${uid} için ${parsedUid.productIdentityKey} ürün-lot kimliği seçili laboratuvarın bekleyen tüketimlerinde bulunamadı.`,
+              variant: 'destructive',
+            });
+          }
+        }
+        setNfcInput('');
+        document.getElementById(NFC_INPUT_ID)?.focus();
+        return;
+      }
+
+      await setDoc(doc(db, 'nfcDisposalEvents', disposalDocId), {
+        laboratoryId: selectedLaboratoryId,
+        laboratoryName: laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId)?.name || '',
+        stokKodu: exactGroup.stokKodu,
+        stokAdi: exactGroup.stokAdi,
+        lotNumarasi: exactGroup.lotNumarasi,
+        uid,
+        patternKey: parsedUid.productIdentityKey,
+        fixedSuffix: parsedUid.fixedSuffix,
+        serialField: parsedUid.serialField,
+        consumptionRecordIds: exactGroup.consumptionRecordIds,
+        source: 'kullanim-dogrulama-panel',
+        status: 'disposed',
+        verifiedAt: serverTimestamp(),
+        verifiedByUid: currentUserProfile?.uid || '',
+        verifiedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+      });
+
+      kullanimDogrulamaLogger.info('NFC disposal doğrulaması tamamlandı', {
+        uid,
+        stokKodu: exactGroup.stokKodu,
+        lotNumarasi: exactGroup.lotNumarasi,
+      });
+
+      toast({
+        title: 'Çöp Kutusu Kabul Etti',
+        description: `${exactGroup.stokAdi} için ${uid} aile örüntüsüne uygun olarak kabul edildi.`,
+      });
+      setNfcInput('');
+      document.getElementById(NFC_INPUT_ID)?.focus();
+    } catch (error) {
+      kullanimDogrulamaLogger.error('NFC disposal doğrulaması kaydedilemedi', error);
+      toast({
+        title: 'Kayıt Hatası',
+        description: 'NFC doğrulama sonucu kaydedilemedi.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  useEffect(() => {
+    processNfcScanRef.current = processNfcScan;
+  }, [processNfcScan]);
+
+  const startWebNfcScan = async () => {
+    if (typeof window === 'undefined' || !('NDEFReader' in window)) {
+      setIsWebNfcScanning(false);
+      return;
+    }
+
+    try {
+      // @ts-ignore Web NFC API
+      const ndef = new NDEFReader();
+      await ndef.scan();
+      setIsWebNfcScanning(true);
+      ndef.onreading = (event: { serialNumber?: string }) => {
+        if (!event.serialNumber) return;
+        const normalized = normalizeNfcUid(event.serialNumber);
+        if (!normalized) return;
+        setNfcInput(normalized);
+        void processNfcScanRef.current(normalized);
+      };
+    } catch (error) {
+      kullanimDogrulamaLogger.warn('Web NFC otomatik dinleme başlatılamadı', error);
+      setIsWebNfcScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!hasFetchedData || !selectedLaboratoryId) {
+      setIsWebNfcScanning(false);
+      return;
+    }
+
+    void startWebNfcScan();
+  }, [hasFetchedData, selectedLaboratoryId]);
+
+  useEffect(() => {
+    if (!hasFetchedData) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      const isOtherInputFocused = activeElement?.tagName === 'INPUT' && activeElement.id !== NFC_INPUT_ID;
+      if (isOtherInputFocused) return;
+
+      if (event.key === 'Enter') {
+        const raw = scanBufferRef.current;
+        scanBufferRef.current = '';
+        if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+        if (!raw.trim()) return;
+        void processNfcScanRef.current(raw);
+        return;
+      }
+
+      if (event.key.length !== 1) return;
+      scanBufferRef.current += event.key;
+      if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = setTimeout(() => {
+        scanBufferRef.current = '';
+      }, 250);
     };
-  }, [verificationGroups]);
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [hasFetchedData]);
 
   return (
     <div className="space-y-6">
@@ -323,198 +643,318 @@ export default function KullanimDogrulamaPanel() {
         <CardHeader>
           <CardTitle className="text-xl flex items-center">
             <ShieldCheck className="mr-2 h-6 w-6 text-green-600" />
-            Kullanım Doğrulama (NFC Seri No Doğrulama)
+            Kullanım Doğrulama (NFC UID Doğrulama)
           </CardTitle>
           <CardDescription>
-            Seri numarası takipli ürünlerin tüketim doğrulaması. Her tüketilen ürün için eşsiz NFC
-            seri etiketi okutun, ardından boş kutuyu okutarak çöpe atın.
+            Önce laboratuvarı ve aralığı seçin, sonra veriyi yükleyin. Sonrasında panel yalnızca seçili laboratuvarın yeni tüketimlerini canlı izler ve çöp kutusunda tam UID ile doğrulama yapar.
           </CardDescription>
         </CardHeader>
+
         <CardContent className="space-y-4">
-          {/* Laboratory selection */}
-          <div>
-            <label htmlFor="lab-select-nfc" className="block text-sm font-medium mb-1">
-              Laboratuvar Seçin
-            </label>
-            <Select
-              value={selectedLaboratoryId}
-              onValueChange={(value) => {
-                setSelectedLaboratoryId(value);
-                setSearchTerm('');
-              }}
-            >
-              <SelectTrigger id="lab-select-nfc" className="w-full md:w-1/2 lg:w-1/3 rounded-md" disabled={isLabsLoading}>
-                <SelectValue placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'} />
-              </SelectTrigger>
-              <SelectContent>
-                {laboratories.map((h) => (
-                  <SelectItem key={h.id} value={h.id}>
-                    {h.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertTitle>Doğrulama mantığı</AlertTitle>
+            <AlertDescription className="space-y-1">
+              <p>1) UID formatı doğrulanır.</p>
+              <p>2) Ürün-lot için tanımlı B4:B5:B6:B7:B8 ürün kimliği kontrol edilir.</p>
+              <p>3) B1:B2 seri alanı değişken kabul edilir; aynı tam UID ikinci kez kabul edilmez.</p>
+              <p>4) UID daha önce disposed olmuşsa tekrar kabul edilmez.</p>
+            </AlertDescription>
+          </Alert>
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_auto]">
+            <div>
+              <label htmlFor="lab-select-nfc" className="block text-sm font-medium mb-1">
+                Laboratuvar Seçin
+              </label>
+              <Select
+                value={selectedLaboratoryId}
+                onValueChange={(value) => {
+                  setSelectedLaboratoryId(value);
+                  setHasFetchedData(false);
+                  setConsumptionRecords([]);
+                  setDisposalEvents([]);
+                  setLotDefinitionsByKey({});
+                  setSearchTerm('');
+                  cleanupSubscriptions();
+                  syncLabUrl(value);
+                }}
+              >
+                <SelectTrigger id="lab-select-nfc" className="w-full rounded-md" disabled={isLabsLoading}>
+                  <SelectValue placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {laboratories.map((laboratory) => (
+                    <SelectItem key={laboratory.id} value={laboratory.id}>
+                      {laboratory.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label htmlFor="day-range-nfc" className="block text-sm font-medium mb-1">
+                Veri Aralığı
+              </label>
+              <Select value={selectedRange} onValueChange={(value: DayRangeOption) => setSelectedRange(value)}>
+                <SelectTrigger id="day-range-nfc" className="w-full rounded-md">
+                  <SelectValue placeholder="Gün aralığı seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DAY_RANGE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-end">
+              <Button onClick={handleFetchData} className="w-full lg:w-auto" disabled={!selectedLaboratoryId || isDataLoading}>
+                {isDataLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                Veri Al
+              </Button>
+            </div>
           </div>
+
+          {selectedLaboratoryId && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline" className="font-mono">
+                {`URL: /kullanim-dogrulama/${selectedLaboratoryId}`}
+              </Badge>
+              {hasFetchedData && (
+                <>
+                  <Badge variant="secondary">
+                    <CalendarClock className="mr-1 h-3 w-3" />
+                    {loadedRangeLabel}
+                  </Badge>
+                  {activeSinceDate && (
+                    <Badge variant="outline">
+                      Başlangıç: {activeSinceDate.toLocaleDateString('tr-TR')}
+                    </Badge>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {selectedLaboratoryId && (
             <Card className="border-border dark:border-input rounded-lg p-4 mt-4">
               <CardHeader className="px-0 pt-0 pb-3">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                  <CardTitle className="text-lg">Doğrulanacak Kullanımlar</CardTitle>
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
+                  <div>
+                    <CardTitle className="text-lg">Doğrulanacak Kullanımlar</CardTitle>
+                    <CardDescription>
+                      Veri yalnızca "Veri Al" sonrası yüklenir. Sonrasında NFC okuyucu ve harici tarayıcı sürekli dinlemede kalır.
+                    </CardDescription>
+                  </div>
                   <Input
                     type="search"
-                    placeholder="Ürün adı veya kodu ile ara..."
+                    placeholder="Ürün adı, kodu veya lot ile ara..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="max-w-xs rounded-md h-9"
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    className="max-w-sm rounded-md h-9"
+                    disabled={!hasFetchedData}
                   />
                 </div>
               </CardHeader>
-              <CardContent className="px-0 pb-0">
-                {/* Overall progress */}
-                {verificationGroups.length > 0 && (
-                  <div className="mb-4 p-3 bg-muted/50 rounded-lg space-y-2">
+
+              <CardContent className="px-0 pb-0 space-y-4">
+                {hasFetchedData && verificationGroups.length > 0 && (
+                  <div className="p-3 bg-muted/50 rounded-lg space-y-2">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">Genel İlerleme</span>
-                      <span className="font-mono">{overallProgress.total}%</span>
+                      <span className="font-medium">Genel Aile Doğrulama İlerlemesi</span>
+                      <span className="font-mono">
+                        {overallProgress.verified}/{overallProgress.expected} ({overallProgress.total}%)
+                      </span>
                     </div>
                     <Progress value={overallProgress.total} className="h-2" />
-                    <div className="flex gap-4 text-xs text-muted-foreground">
-                      <span>NFC Seri: {overallProgress.nfc}%</span>
-                      <span>Boş Kutu: {overallProgress.box}%</span>
-                    </div>
                   </div>
                 )}
 
-                {/* NFC input */}
-                <div className="flex items-center space-x-2 mb-4">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
                   <Input
                     id={NFC_INPUT_ID}
-                    placeholder="NFC Etiketi (xx:xx:xx:xx:xx:xx:xx:xx)"
+                    placeholder="NFC UID otomatik dinleniyor... manuel giriş için Enter"
                     value={nfcInput}
-                    onChange={(e) => setNfcInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    className="flex-grow rounded-md h-10 font-mono"
-                    disabled={!selectedLaboratoryId || isDataLoading || verificationGroups.length === 0}
+                    onChange={(event) => setNfcInput(event.target.value.toUpperCase())}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void processNfcScan();
+                      }
+                    }}
+                    className="font-mono"
+                    disabled={!hasFetchedData || isDataLoading || verificationGroups.length === 0}
                   />
+
                   <Button
-                    onClick={handleNfcScan}
-                    className="rounded-md h-10"
-                    disabled={!nfcInput.trim()}
+                    type="button"
+                    variant="outline"
+                    onClick={startWebNfcScan}
+                    disabled={!hasFetchedData || verificationGroups.length === 0 || isWebNfcScanning}
                   >
-                    <Nfc className="mr-2 h-5 w-5" />
-                    Okut
+                    {isWebNfcScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Smartphone className="mr-2 h-4 w-4" />}
+                    {isWebNfcScanning ? 'Mobil NFC Dinlemede' : 'Dinlemeyi Başlat'}
                   </Button>
                 </div>
 
-                {isDataLoading ? (
-                  <div className="flex justify-center items-center py-6">
+                {parseNfcUid(nfcInput) && (
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Badge variant="outline" className="font-mono">
+                      Seri: {parseNfcUid(nfcInput)?.serialField}
+                    </Badge>
+                    <Badge variant="secondary" className="font-mono">
+                      Ürün Kimliği: {parseNfcUid(nfcInput)?.productIdentityKey}
+                    </Badge>
+                    <Badge
+                      variant={parseNfcUid(nfcInput)?.fixedSuffix === NFC_SUFFIX ? 'secondary' : 'destructive'}
+                      className="font-mono"
+                    >
+                      Son 4 bayt: {parseNfcUid(nfcInput)?.fixedSuffix}
+                    </Badge>
+                  </div>
+                )}
+
+                {!hasFetchedData ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <ScanLine className="h-10 w-10 mb-2" />
+                    <p>Önce laboratuvar ve gün aralığını seçip veriyi yükleyin.</p>
+                  </div>
+                ) : isDataLoading ? (
+                  <div className="flex justify-center items-center py-8">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
-                ) : verificationGroups.length === 0 && !searchTerm ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                ) : verificationGroups.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                     <Info className="h-10 w-10 mb-2" />
-                    <p>
-                      Bu laboratuvarda seri numarası takipli tüketilmiş ürün bulunamadı.
-                    </p>
+                    <p>Seçilen aralıkta seri takipli tüketim kaydı bulunamadı.</p>
                   </div>
-                ) : filteredGroups.length === 0 && searchTerm ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                ) : filteredGroups.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                     <Search className="h-10 w-10 mb-2" />
-                    <p>Arama kriterlerine uyan ürün bulunamadı.</p>
+                    <p>Arama kriterlerine uyan kayıt bulunamadı.</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto max-h-[500px]">
+                  <div className="overflow-x-auto max-h-[560px]">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Ürün Adı (Kodu)</TableHead>
+                          <TableHead>Ürün / Lot</TableHead>
                           <TableHead className="text-center">Tüketilen</TableHead>
-                          <TableHead className="text-center">NFC Okutulan</TableHead>
-                          <TableHead className="w-[180px]">İlerleme</TableHead>
-                          <TableHead className="text-center">Boş Kutu</TableHead>
+                          <TableHead className="text-center">Beklenen Kimlik</TableHead>
+                          <TableHead className="text-center">Doğrulanan UID</TableHead>
+                          <TableHead className="w-[220px]">İlerleme</TableHead>
+                          <TableHead>Durum</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {filteredGroups.map((group) => {
-                          const nfcProgress =
-                            group.tuketilenAdet > 0
-                              ? (group.okutulanNfcler.length / group.tuketilenAdet) * 100
-                              : 0;
-                          const allNfcDone =
-                            group.okutulanNfcler.length === group.tuketilenAdet &&
-                            group.tuketilenAdet > 0;
-                          const fullyDone = allNfcDone && group.bosKutuOkutuldu;
+                          const progress = group.tuketilenAdet > 0
+                            ? (group.disposedUids.length / group.tuketilenAdet) * 100
+                            : 0;
+                          const pendingCount = Math.max(group.tuketilenAdet - group.disposedUids.length, 0);
+                          const fullyDone = group.tuketilenAdet > 0 && pendingCount === 0;
 
                           return (
                             <TableRow
-                              key={group.stokKodu}
-                              className={
-                                fullyDone
-                                  ? 'bg-green-500/10 dark:bg-green-500/20 opacity-70'
-                                  : ''
-                              }
+                              key={group.id}
+                              className={fullyDone ? 'bg-green-500/10 dark:bg-green-500/20' : ''}
                             >
                               <TableCell>
-                                {group.stokAdi}
-                                <span className="block text-xs text-muted-foreground font-mono">
-                                  ({group.stokKodu})
-                                </span>
-                                {/* Show scanned NFC tags */}
-                                {group.okutulanNfcler.length > 0 && (
-                                  <div className="mt-1 flex flex-wrap gap-1">
-                                    {group.okutulanNfcler.map((tag) => (
-                                      <Badge
-                                        key={tag}
-                                        variant="secondary"
-                                        className="font-mono text-[10px]"
-                                      >
-                                        {tag}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-center font-medium">
-                                {group.tuketilenAdet}
-                              </TableCell>
-                              <TableCell className="text-center font-semibold text-primary">
-                                {group.okutulanNfcler.length}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center space-x-2">
-                                  <Progress
-                                    value={nfcProgress}
-                                    className="h-3 flex-grow rounded-md"
-                                  />
-                                  <span className="text-xs font-mono w-10 text-right">
-                                    {Math.round(nfcProgress)}%
-                                  </span>
-                                  {allNfcDone && (
-                                    <CheckSquare className="h-4 w-4 text-green-600" />
+                                <div className="font-medium">{group.stokAdi}</div>
+                                <div className="text-xs text-muted-foreground font-mono">
+                                  {group.stokKodu} • Lot: {group.lotNumarasi || '-'}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {group.productIdentityKey && (
+                                    <Badge variant="outline" className="font-mono text-[10px]">
+                                      Kimlik {group.productIdentityKey.split(':')[0]}
+                                    </Badge>
+                                  )}
+                                  {group.tuketilenSeriNolar.slice(0, 3).map((serial) => (
+                                    <Badge key={serial} variant="secondary" className="font-mono text-[10px]">
+                                      Seri {serial}
+                                    </Badge>
+                                  ))}
+                                  {group.tuketilenSeriNolar.length > 3 && (
+                                    <Badge variant="secondary" className="text-[10px]">
+                                      +{group.tuketilenSeriNolar.length - 3} seri
+                                    </Badge>
                                   )}
                                 </div>
                               </TableCell>
+
+                              <TableCell className="text-center font-semibold">
+                                {group.tuketilenAdet}
+                              </TableCell>
+
                               <TableCell className="text-center">
-                                {group.bosKutuOkutuldu ? (
-                                  <Badge
-                                    variant="default"
-                                    className="bg-green-600 hover:bg-green-700"
-                                  >
+                                <span className="font-semibold">{group.tuketilenAdet}</span>
+                                <div className="mt-2 flex flex-wrap gap-1 justify-center">
+                                  {group.productIdentityKey ? (
+                                    <Badge variant="outline" className="font-mono text-[10px]">
+                                      {`??:??:??:${group.productIdentityKey}`}
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="destructive" className="text-[10px]">
+                                      Kimlik tanımı yok
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="text-center font-semibold text-primary">
+                                {group.disposedUids.length}
+                                {group.disposedUids.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1 justify-center">
+                                    {group.disposedUids.slice(0, 2).map((uid) => (
+                                      <Badge key={uid} className="font-mono text-[10px]">
+                                        {uid}
+                                      </Badge>
+                                    ))}
+                                    {group.disposedUids.length > 2 && (
+                                      <Badge className="text-[10px]">+{group.disposedUids.length - 2} UID</Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <Progress value={progress} className="h-3 flex-grow" />
+                                  <span className="text-xs font-mono w-10 text-right">
+                                    {Math.round(progress)}%
+                                  </span>
+                                  {fullyDone && <CheckSquare className="h-4 w-4 text-green-600" />}
+                                </div>
+                              </TableCell>
+
+                              <TableCell>
+                                {group.eksikAileTanimi ? (
+                                  <Alert variant="destructive" className="py-2">
+                                    <AlertTriangle className="h-4 w-4" />
+                                    <AlertTitle className="text-xs">Ürün kimliği tanımı eksik</AlertTitle>
+                                    <AlertDescription className="text-xs">
+                                      Bu lot için B4:B5:B6:B7:B8 ürün kimliği tanımlı değil. Kullanım doğrulamada bu örüntü beklenir.
+                                    </AlertDescription>
+                                  </Alert>
+                                ) : fullyDone ? (
+                                  <Badge className="bg-green-600 hover:bg-green-700">
                                     <Trash2 className="mr-1 h-3 w-3" />
-                                    Atıldı
+                                    Tamamlandı
                                   </Badge>
                                 ) : (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleEmptyBoxScan(group.stokKodu)}
-                                    disabled={!allNfcDone}
-                                    className="text-xs"
-                                  >
-                                    <Trash2 className="mr-1 h-3 w-3" />
-                                    Boş Kutu Okut
-                                  </Button>
+                                  <div className="space-y-1">
+                                    <Badge variant="secondary">
+                                      Bekleyen: {pendingCount}
+                                    </Badge>
+                                    <p className="text-xs text-muted-foreground">
+                                      Beklenen örüntü: {`??:??:??:${group.productIdentityKey}`}
+                                    </p>
+                                  </div>
                                 )}
                               </TableCell>
                             </TableRow>
