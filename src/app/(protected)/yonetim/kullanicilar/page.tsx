@@ -12,7 +12,7 @@ import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert } from 'lu
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import type { User as AppUser, Hospital, Depot, AppView, ProductCode } from '@/lib/types';
+import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -70,6 +70,7 @@ export default function KullaniciPanel() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }>>({});
@@ -78,15 +79,17 @@ export default function KullaniciPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [uSnap, hSnap, dSnap, pSnap] = await Promise.all([
+      const [uSnap, hSnap, dSnap, pSnap, cSnap] = await Promise.all([
         getDocs(collection(db, 'users')),
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes'))
+        getDocs(collection(db, 'productCodes')),
+        getDocs(collection(db, 'companies'))
       ]);
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
+      setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
       const productCodes = pSnap.docs.map(d => d.data() as ProductCode);
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
       setBrands(uniqueBrands);
@@ -137,6 +140,7 @@ export default function KullaniciPanel() {
     const userData: Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }> = {
       name: currentUser.name,
       role: currentUser.role || 'user',
+      companyId: currentUser.companyId || '',
       nfcId: (currentUser.nfcId || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase(),
       accessibleViews: currentUser.accessibleViews,
       assignedLaboratories: currentUser.assignedLaboratories,
@@ -268,13 +272,14 @@ export default function KullaniciPanel() {
             ) : (
               <ScrollArea className="h-[300px] border rounded-md">
                 <Table>
-                  <TableHeader><TableRow><TableHead>Adı</TableHead><TableHead>E-posta</TableHead><TableHead>Rolü</TableHead><TableHead>NFC ID</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Adı</TableHead><TableHead>E-posta</TableHead><TableHead>Rolü</TableHead><TableHead>Firma</TableHead><TableHead>NFC ID</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow></TableHeader>
                   <TableBody>
                     {users.map(u => (
                       <TableRow key={u.uid}>
                         <TableCell className="font-medium">{u.name}</TableCell>
                         <TableCell>{u.email}</TableCell>
                         <TableCell className="capitalize">{u.role?.replace('_', ' ')}</TableCell>
+                        <TableCell className="text-xs">{u.companyId ? companies.find(c => c.id === u.companyId)?.name || u.companyId : <span className="text-muted-foreground">Legacy</span>}</TableCell>
                         <TableCell className="font-mono text-xs">{u.nfcId || '-'}</TableCell>
                         <TableCell className="text-right space-x-1">
                           <Button variant="ghost" size="icon" onClick={() => openModal(u)}><Edit3 className="h-4 w-4" /></Button>
@@ -316,6 +321,15 @@ export default function KullaniciPanel() {
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
                       <SelectItem value="driver">Driver (Şoför)</SelectItem>
                       <SelectItem value="teknisyen">Teknisyen</SelectItem>
+                    </SelectContent>
+                </Select>
+                <Select value={currentUser.companyId || ''} onValueChange={(value) => setCurrentUser({ ...currentUser, companyId: value === '__none__' ? '' : value })}>
+                    <SelectTrigger><SelectValue placeholder="Firma Seçin (Legacy)" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Legacy (Tanımsız)</SelectItem>
+                      {companies.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
                     </SelectContent>
                 </Select>
                 <Input
