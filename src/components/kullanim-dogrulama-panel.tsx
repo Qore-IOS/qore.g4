@@ -446,6 +446,17 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         description: 'Seçilen laboratuvar için doğrulama verileri başlatılamadı.',
         variant: 'destructive',
       });
+      setNfcInput('');
+      document.getElementById(NFC_INPUT_ID)?.focus();
+    } catch (error) {
+      kullanimDogrulamaLogger.error('NFC disposal doğrulaması kaydedilemedi', error);
+      toast({
+        title: 'Kayıt Hatası',
+        description: 'NFC doğrulama sonucu kaydedilemedi.',
+        variant: 'destructive',
+      });
+      setNfcInput('');
+      return;
     }
   }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
 
