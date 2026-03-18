@@ -8,11 +8,11 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert } from 'lucide-react';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import type { User as AppUser, Hospital, Depot, AppView, ProductCode } from '@/lib/types';
+import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -65,11 +65,12 @@ function cleanFirestoreData<T extends Record<string, any>>(data: T): Partial<T> 
 
 export default function KullaniciPanel() {
   const { toast } = useToast();
-  const { signup } = useAuth();
+  const { signup, currentUserProfile, isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }>>({});
@@ -78,15 +79,17 @@ export default function KullaniciPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [uSnap, hSnap, dSnap, pSnap] = await Promise.all([
+      const [uSnap, hSnap, dSnap, pSnap, cSnap] = await Promise.all([
         getDocs(collection(db, 'users')),
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes'))
+        getDocs(collection(db, 'productCodes')),
+        getDocs(collection(db, 'companies'))
       ]);
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
+      setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
       const productCodes = pSnap.docs.map(d => d.data() as ProductCode);
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
       setBrands(uniqueBrands);
@@ -125,6 +128,10 @@ export default function KullaniciPanel() {
       toast({ title: 'Hata', description: 'Sistemde sadece 1 adet Admin-Geliştirici olabilir.', variant: 'destructive' });
       return;
     }
+    if (currentUser.role === 'super_admin' && users.some(u => u.role === 'super_admin' && u.uid !== currentUser.uid)) {
+      toast({ title: 'Hata', description: 'Sistemde sadece 1 adet Süper Admin olabilir.', variant: 'destructive' });
+      return;
+    }
     // Primary laboratories should be a subset of assigned laboratories
     const validPrimaryLabs = (currentUser.primaryLaboratories || []).filter(
       labId => currentUser.assignedLaboratories?.includes(labId)
@@ -133,6 +140,7 @@ export default function KullaniciPanel() {
     const userData: Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }> = {
       name: currentUser.name,
       role: currentUser.role || 'user',
+      companyId: currentUser.companyId || '',
       nfcId: (currentUser.nfcId || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase(),
       accessibleViews: currentUser.accessibleViews,
       assignedLaboratories: currentUser.assignedLaboratories,
@@ -230,7 +238,33 @@ export default function KullaniciPanel() {
               </CardTitle>
               <CardDescription>Kullanıcıları yönetin, rollerini ve erişim izinlerini ayarlayın.</CardDescription>
             </div>
-            <Button onClick={() => openModal()} size="sm" disabled={isLoading}><PlusCircle className="mr-2 h-4 w-4" />Yeni Kullanıcı</Button>
+            <div className="flex gap-2">
+              {currentUserProfile?.role === 'admin' && !users.some(u => u.role === 'super_admin') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoading}
+                  className="border-amber-500 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950"
+                  onClick={async () => {
+                    if (!currentUserProfile?.uid) return;
+                    if (!confirm('Kendinizi Süper Admin olarak atamak istediğinizden emin misiniz? Bu işlem geri alınamaz ve sistemde sadece 1 Süper Admin olabilir.')) return;
+                    setIsLoading(true);
+                    try {
+                      await setDoc(doc(db, 'users', currentUserProfile.uid), { role: 'super_admin' }, { merge: true });
+                      toast({ title: 'Başarılı', description: 'Süper Admin rolü atandı. Değişikliklerin uygulanması için sayfayı yenileyin.' });
+                      fetchData();
+                    } catch (error: any) {
+                      toast({ title: 'Hata', description: `Rol atanamadı: ${error.message}`, variant: 'destructive' });
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
+                >
+                  <ShieldAlert className="mr-2 h-4 w-4" />Süper Admin Ol
+                </Button>
+              )}
+              <Button onClick={() => openModal()} size="sm" disabled={isLoading}><PlusCircle className="mr-2 h-4 w-4" />Yeni Kullanıcı</Button>
+            </div>
           </CardHeader>
           <CardContent>
              {isLoading ? (
@@ -238,13 +272,14 @@ export default function KullaniciPanel() {
             ) : (
               <ScrollArea className="h-[300px] border rounded-md">
                 <Table>
-                  <TableHeader><TableRow><TableHead>Adı</TableHead><TableHead>E-posta</TableHead><TableHead>Rolü</TableHead><TableHead>NFC ID</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Adı</TableHead><TableHead>E-posta</TableHead><TableHead>Rolü</TableHead><TableHead>Firma</TableHead><TableHead>NFC ID</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow></TableHeader>
                   <TableBody>
                     {users.map(u => (
                       <TableRow key={u.uid}>
                         <TableCell className="font-medium">{u.name}</TableCell>
                         <TableCell>{u.email}</TableCell>
                         <TableCell className="capitalize">{u.role?.replace('_', ' ')}</TableCell>
+                        <TableCell className="text-xs">{u.companyId ? companies.find(c => c.id === u.companyId)?.name || u.companyId : <span className="text-muted-foreground">Legacy</span>}</TableCell>
                         <TableCell className="font-mono text-xs">{u.nfcId || '-'}</TableCell>
                         <TableCell className="text-right space-x-1">
                           <Button variant="ghost" size="icon" onClick={() => openModal(u)}><Edit3 className="h-4 w-4" /></Button>
@@ -271,6 +306,9 @@ export default function KullaniciPanel() {
                 <Select value={currentUser.role || 'user'} onValueChange={(value) => setCurrentUser({ ...currentUser, role: value as any })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="super_admin" disabled={!isSuperAdmin || users.some(u => u.role === 'super_admin' && u.uid !== currentUser.uid)}>
+                        Süper Admin {users.some(u => u.role === 'super_admin' && u.uid !== currentUser.uid) ? '(Mevcut)' : ''}
+                      </SelectItem>
                       <SelectItem value="admin_developer" disabled={users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid)}>
                         Admin-Geliştirici {users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid) ? '(Mevcut)' : ''}
                       </SelectItem>
@@ -283,6 +321,15 @@ export default function KullaniciPanel() {
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
                       <SelectItem value="driver">Driver (Şoför)</SelectItem>
                       <SelectItem value="teknisyen">Teknisyen</SelectItem>
+                    </SelectContent>
+                </Select>
+                <Select value={currentUser.companyId || ''} onValueChange={(value) => setCurrentUser({ ...currentUser, companyId: value === '__none__' ? '' : value })}>
+                    <SelectTrigger><SelectValue placeholder="Firma Seçin (Legacy)" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Legacy (Tanımsız)</SelectItem>
+                      {companies.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
                     </SelectContent>
                 </Select>
                 <Input

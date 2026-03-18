@@ -97,7 +97,7 @@ export default function AplikasyonPanel({
 
   // Filter hospitals based on user's assigned laboratories
   // Admin users see all labs
-  const isAdmin = userRole === 'admin';
+  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
   const filteredHospitals = useMemo(() => {
     if (isAdmin || userAssignedLabs.length === 0) {
       return hospitals;
