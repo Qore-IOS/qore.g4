@@ -11,6 +11,7 @@ import { doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query, where, g
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import type { User, AppView } from '@/lib/types';
+import { LEGACY_COMPANY_ID } from '@/lib/types';
 import { VIEWS } from '@/lib/constants';
 import { safeSignOut } from '@/lib/presence-client';
 
@@ -32,6 +33,7 @@ interface AuthContextType {
   isAdmin: boolean;
   isAdminDeveloper: boolean;
   isSuperAdmin: boolean;
+  currentCompanyId: string;
   permissions: AppView[];
   isOrbAnimationEnabled: boolean;
   toggleOrbAnimation: () => void;
@@ -62,6 +64,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAdminDeveloper, setIsAdminDeveloper] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [currentCompanyId, setCurrentCompanyId] = useState<string>(LEGACY_COMPANY_ID);
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
@@ -171,6 +174,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setIsSuperAdmin(userData.role === 'super_admin');
               setIsAdmin(userData.role === 'super_admin' || userData.role === 'admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
               setIsAdminDeveloper(userData.role === 'super_admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
+              setCurrentCompanyId(userData.companyId || LEGACY_COMPANY_ID);
               setPermissions(userPermissions);
 
               // Force dark mode for 'user' role, otherwise apply user's preference
@@ -404,6 +408,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     isAdmin,
     isAdminDeveloper,
     isSuperAdmin,
+    currentCompanyId,
     permissions,
     isOrbAnimationEnabled,
     toggleOrbAnimation,

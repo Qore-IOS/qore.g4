@@ -129,11 +129,24 @@ export interface MinMaxRule {
   tuketimSuresiBirimi?: 'gun' | 'saat';
 }
 
+// Şirket bazlı veri yönetimi
+export const LEGACY_COMPANY_ID = '__legacy__';
+
+export interface Company {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt?: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}
+
 export interface User {
   uid: string;
   email: string | null;
   role: 'super_admin' | 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
   name?: string;
+  companyId?: string; // Şirket ID - boş veya undefined ise legacy şirkete ait
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
   createdAt?: Date;
