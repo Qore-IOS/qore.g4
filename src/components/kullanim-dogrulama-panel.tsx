@@ -345,6 +345,24 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       });
       return;
     }
+  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
+
+  const handleNfcScan = useCallback(async (rawUid?: string) => {
+    const sourceUid = rawUid ?? nfcInput;
+    const parsedUid = parseNfcUid(sourceUid);
+
+    if (!selectedLaboratoryId) {
+      toast({ title: 'Uyarı', description: 'Önce laboratuvar seçin.' });
+      return;
+    }
+
+    if (!hasFetchedData) {
+      toast({
+        title: 'Önce Veri Alın',
+        description: 'Laboratuvar ve gün aralığını seçip "Veri Al" butonuna basın.',
+      });
+      return;
+    }
 
     const selectedLaboratory = laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId);
     if (!selectedLaboratory) {
