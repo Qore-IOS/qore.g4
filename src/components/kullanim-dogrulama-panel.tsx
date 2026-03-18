@@ -282,6 +282,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     if (verificationGroups.length === 0) {
       return { expected: 0, verified: 0, total: 0 };
     }
+  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
 
     const expected = verificationGroups.reduce((sum, group) => sum + group.tuketilenAdet, 0);
     const verified = verificationGroups.reduce((sum, group) => sum + group.disposedUids.length, 0);
