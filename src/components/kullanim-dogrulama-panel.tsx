@@ -268,9 +268,13 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     return Object.values(grouped).sort((left, right) => left.stokAdi.localeCompare(right.stokAdi, 'tr'));
   }, [consumptionRecords, disposalEvents, lotDefinitionsByKey, serialTrackedCodes]);
 
+  const pendingGroups = verificationGroups.filter(
+    (group) => group.tuketilenAdet === 0 || group.disposedUids.length < group.tuketilenAdet
+  );
+
   const filteredGroups = !searchTerm
-    ? verificationGroups
-    : verificationGroups.filter((group) =>
+    ? pendingGroups
+    : pendingGroups.filter((group) =>
         [group.stokAdi, group.stokKodu, group.lotNumarasi]
           .join(' ')
           .toLowerCase()
