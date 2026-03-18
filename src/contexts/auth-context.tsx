@@ -11,6 +11,7 @@ import { doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query, where, g
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import type { User, AppView } from '@/lib/types';
+import { LEGACY_COMPANY_ID } from '@/lib/types';
 import { VIEWS } from '@/lib/constants';
 import { safeSignOut } from '@/lib/presence-client';
 
@@ -31,6 +32,8 @@ interface AuthContextType {
   isLoadingAuth: boolean;
   isAdmin: boolean;
   isAdminDeveloper: boolean;
+  isSuperAdmin: boolean;
+  currentCompanyId: string;
   permissions: AppView[];
   isOrbAnimationEnabled: boolean;
   toggleOrbAnimation: () => void;
@@ -60,6 +63,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAdminDeveloper, setIsAdminDeveloper] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [currentCompanyId, setCurrentCompanyId] = useState<string>(LEGACY_COMPANY_ID);
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
@@ -150,6 +155,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setCurrentUserProfile(anonymousProfile);
           setIsAdmin(false);
           setIsAdminDeveloper(false);
+          setIsSuperAdmin(false);
           setPermissions([]);
         } else {
             const userDocRef = doc(db, "users", user.uid);
@@ -165,8 +171,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               }
 
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
-              setIsAdmin(userData.role === 'admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
-              setIsAdminDeveloper(userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
+              setIsSuperAdmin(userData.role === 'super_admin');
+              setIsAdmin(userData.role === 'super_admin' || userData.role === 'admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
+              setIsAdminDeveloper(userData.role === 'super_admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
+              setCurrentCompanyId(userData.companyId || LEGACY_COMPANY_ID);
               setPermissions(userPermissions);
 
               // Force dark mode for 'user' role, otherwise apply user's preference
@@ -179,7 +187,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               }
 
             } else {
-              const defaultRole = user.uid === ADMIN_USER_UID ? 'admin' : 'user';
+              const defaultRole: string = user.uid === ADMIN_USER_UID ? 'admin' : 'user';
               const defaultViews = VIEWS.map(v => v.key) as AppView[];
               const defaultProfile: User = {
                 uid: user.uid,
@@ -190,8 +198,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 createdAt: new Date(),
               };
               setCurrentUserProfile(defaultProfile);
-              setIsAdmin(defaultRole === 'admin' || defaultRole === 'admin_developer');
-              setIsAdminDeveloper(defaultRole === 'admin_developer');
+              setIsSuperAdmin(defaultRole === 'super_admin');
+              setIsAdmin(defaultRole === 'super_admin' || defaultRole === 'admin' || defaultRole === 'admin_developer');
+              setIsAdminDeveloper(defaultRole === 'super_admin' || defaultRole === 'admin_developer');
               setPermissions(defaultViews);
               // Force dark mode for 'user' role
               if (defaultRole === 'user') {
@@ -210,6 +219,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setCurrentUserProfile(null);
         setIsAdmin(false);
         setIsAdminDeveloper(false);
+        setIsSuperAdmin(false);
         setPermissions([]);
       }
       setIsLoadingAuth(false);
@@ -397,6 +407,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     isLoadingAuth,
     isAdmin,
     isAdminDeveloper,
+    isSuperAdmin,
+    currentCompanyId,
     permissions,
     isOrbAnimationEnabled,
     toggleOrbAnimation,

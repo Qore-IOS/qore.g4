@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import BackButton from '@/components/BackButton';
 import { Button } from '@/components/ui/button';
-import { Warehouse, Building, Pill, MapPin, Users, Barcode, Beaker, QrCode, BookText } from 'lucide-react';
+import { Warehouse, Building, Building2, Pill, MapPin, Users, Barcode, Beaker, QrCode, BookText } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
@@ -12,7 +12,7 @@ import { useAuth } from '@/contexts/auth-context';
 
 export default function TanimlarPage() {
     const router = useRouter();
-    const { isOrbAnimationEnabled, toggleOrbAnimation, navMode, toggleNavMode } = useAuth();
+    const { isOrbAnimationEnabled, toggleOrbAnimation, navMode, toggleNavMode, isSuperAdmin } = useAuth();
 
     const modules = [
         { name: 'Depo Yönetimi', icon: Warehouse, path: '/yonetim/depolar' },
@@ -23,6 +23,7 @@ export default function TanimlarPage() {
         { name: 'Kullanıcı Yönetimi', icon: Users, path: '/yonetim/kullanicilar' },
         { name: 'Test Yönetimi', icon: Beaker, path: '/yonetim/test-yonetimi' },
         { name: 'Barkod Formatları', icon: QrCode, path: '/yonetim/barkod-formatlari' },
+        ...(isSuperAdmin ? [{ name: 'Firma Yönetimi', icon: Building2, path: '/yonetim/firmalar' }] : []),
       ];
 
     return (
