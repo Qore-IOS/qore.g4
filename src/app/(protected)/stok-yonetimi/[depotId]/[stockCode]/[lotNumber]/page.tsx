@@ -39,6 +39,7 @@ interface LotNfcDefinition {
   lotNumarasi: string;
   sampleUid: string;
   patternKey: string;
+  productIdentityKey?: string;
   b3: string;
   b4: string;
   fixedSuffix: string;
@@ -89,6 +90,7 @@ const parseNfcUid = (raw: string) => {
     bytes,
     serialField: `${bytes[0]}:${bytes[1]}`,
     patternKey: `${bytes[2]}:${bytes[3]}`,
+    productIdentityKey: `${bytes[3]}:${bytes.slice(4).join(':')}`,
     b3: bytes[2],
     b4: bytes[3],
     fixedSuffix: bytes.slice(4).join(':'),
@@ -444,6 +446,7 @@ export default function StockDetailPage() {
         lotNumarasi: decodedLotNumber,
         sampleUid: parsedNfcUid.normalized,
         patternKey: parsedNfcUid.patternKey,
+        productIdentityKey: parsedNfcUid.productIdentityKey,
         b3: parsedNfcUid.b3,
         b4: parsedNfcUid.b4,
         fixedSuffix: parsedNfcUid.fixedSuffix,
@@ -466,6 +469,7 @@ export default function StockDetailPage() {
         lotNumarasi: decodedLotNumber,
         sampleUid: parsedNfcUid.normalized,
         patternKey: parsedNfcUid.patternKey,
+        productIdentityKey: parsedNfcUid.productIdentityKey,
         b3: parsedNfcUid.b3,
         b4: parsedNfcUid.b4,
         fixedSuffix: parsedNfcUid.fixedSuffix,
@@ -478,7 +482,7 @@ export default function StockDetailPage() {
       setIsScanningNfc(false);
       toast({
         title: 'Etiket örüntüsü kaydedildi',
-        description: `${decodedStockCode} / ${decodedLotNumber} için ${parsedNfcUid.patternKey} deseni kaydedildi.`,
+        description: `${decodedStockCode} / ${decodedLotNumber} için ${parsedNfcUid.productIdentityKey} ürün kimliği kaydedildi.`,
       });
     } catch (error) {
       console.error('Error saving NFC definition:', error);
@@ -517,7 +521,7 @@ export default function StockDetailPage() {
                 {lotNfcDefinition && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <Badge variant="secondary" className="font-mono">
-                      NFC Deseni: {lotNfcDefinition.patternKey}
+                      NFC Kimliği: {lotNfcDefinition.productIdentityKey || `${lotNfcDefinition.b4}:${lotNfcDefinition.fixedSuffix}`}
                     </Badge>
                     <Badge variant="outline" className="font-mono">
                       Örnek UID: {lotNfcDefinition.sampleUid}
@@ -666,7 +670,7 @@ export default function StockDetailPage() {
               Lot için NFC etiket örüntüsü tanımla
             </DialogTitle>
             <DialogDescription>
-              Bu ekranda ürün + lot eşleşmesi için B3:B4 aile desenini kaydediyoruz. Tüketim sırasında ise her kutu için tam UID doğrulanacak.
+              Bu ekranda ürün + lot eşleşmesi için B4:B5:B6:B7:B8 ürün kimliğini kaydediyoruz. B1:B2 seri alanı değişken kalır.
             </DialogDescription>
           </DialogHeader>
 
@@ -676,8 +680,8 @@ export default function StockDetailPage() {
               <AlertTitle>Kaydedilecek alanlar</AlertTitle>
               <AlertDescription className="space-y-1">
                 <p><span className="font-medium">B1:B2</span> seri alanı olarak değişken kabul edilir.</p>
-                <p><span className="font-medium">B3:B4</span> lot + ürün ailesi deseni olarak kaydedilir.</p>
-                <p><span className="font-medium">Son 4 bayt</span> örneklerinizde sabit olduğu için sadece bilgi amaçlı gösterilir.</p>
+                <p><span className="font-medium">B4:B5:B6:B7:B8</span> ürün + lot kimliği olarak kaydedilir.</p>
+                <p><span className="font-medium">B3</span> ayırt etmede kullanılmaz; <span className="font-medium">B5:B6:B7:B8</span> sabit örüntüdür.</p>
               </AlertDescription>
             </Alert>
 
@@ -711,8 +715,8 @@ export default function StockDetailPage() {
                       <Badge variant="outline" className="font-mono">{parsedNfcUid.serialField}</Badge>
                     </div>
                     <div className="flex items-center justify-between rounded-md border p-3">
-                      <span>Aile deseni (B3:B4)</span>
-                      <Badge className="font-mono">{parsedNfcUid.patternKey}</Badge>
+                      <span>Ürün kimliği (B4:B5:B6:B7:B8)</span>
+                      <Badge className="font-mono">{parsedNfcUid.productIdentityKey}</Badge>
                     </div>
                     <div className="flex items-center justify-between rounded-md border p-3">
                       <span>Sabit son 4 bayt</span>
@@ -733,7 +737,7 @@ export default function StockDetailPage() {
                   <CardContent className="space-y-3 text-sm">
                     <div className="rounded-md border p-3">
                       <p className="text-muted-foreground">Tanımlama kuralı</p>
-                      <p className="font-mono font-medium">??:??:{parsedNfcUid.patternKey}:{parsedNfcUid.fixedSuffix}</p>
+                      <p className="font-mono font-medium">??:??:??:{parsedNfcUid.productIdentityKey}</p>
                     </div>
                     <div className="rounded-md border p-3">
                       <p className="text-muted-foreground">Tüketimde beklenen davranış</p>

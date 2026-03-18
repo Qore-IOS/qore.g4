@@ -74,8 +74,7 @@ interface NfcVerificationGroup {
   consumptionRecordIds: string[];
   tuketilenSeriNolar: string[];
   disposedUids: string[];
-  patternKey: string;
-  fixedSuffix: string;
+  productIdentityKey: string;
   eksikAileTanimi: boolean;
 }
 
@@ -104,7 +103,8 @@ const parseNfcUid = (raw: string) => {
   return {
     normalized,
     serialField: `${bytes[0]}:${bytes[1]}`,
-    patternKey: `${bytes[2]}:${bytes[3]}`,
+    ignoredB3: bytes[2],
+    productIdentityKey: `${bytes[3]}:${bytes[4]}:${bytes[5]}:${bytes[6]}:${bytes[7]}`,
     fixedSuffix: bytes.slice(4).join(':'),
   };
 };
@@ -163,6 +163,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
   const [disposalEvents, setDisposalEvents] = useState<NfcDisposalEvent[]>([]);
 
   const unsubscribeRefs = useRef<Array<() => void>>([]);
+  const scanBufferRef = useRef('');
+  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const handleNfcScanRef = useRef<(rawUid?: string) => Promise<void>>(async () => {});
 
   const clearSubscriptions = useCallback(() => {
     unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
@@ -223,8 +226,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       .forEach((record) => {
         const key = `${record.stokKodu}__${record.lotNumarasi || ''}`;
         const definition = lotDefinitionsByKey[key];
-        const patternKey = definition?.patternKey || (definition?.b3 && definition?.b4 ? `${definition.b3}:${definition.b4}` : '');
-        const fixedSuffix = (definition?.fixedSuffix || NFC_SUFFIX).toUpperCase();
+        const productIdentityKey = definition?.b4
+          ? `${definition.b4}:${(definition?.fixedSuffix || NFC_SUFFIX).toUpperCase()}`
+          : '';
 
         if (!grouped[key]) {
           grouped[key] = {
@@ -237,9 +241,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
             consumptionRecordIds: [],
             tuketilenSeriNolar: [],
             disposedUids: [],
-            patternKey,
-            fixedSuffix,
-            eksikAileTanimi: !patternKey,
+            productIdentityKey,
+            eksikAileTanimi: !productIdentityKey,
           };
         }
 
@@ -443,61 +446,19 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         description: 'Seçilen laboratuvar için doğrulama verileri başlatılamadı.',
         variant: 'destructive',
       });
+      setNfcInput('');
+      document.getElementById(NFC_INPUT_ID)?.focus();
+    } catch (error) {
+      kullanimDogrulamaLogger.error('NFC disposal doğrulaması kaydedilemedi', error);
+      toast({
+        title: 'Kayıt Hatası',
+        description: 'NFC doğrulama sonucu kaydedilemedi.',
+        variant: 'destructive',
+      });
+      setNfcInput('');
+      return;
     }
   }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
-
-  const handleDetectedNfcUid = useCallback((rawUid: string) => {
-    const normalized = normalizeNfcUid(rawUid);
-    if (!normalized) {
-      toast({
-        title: 'Geçersiz NFC etiketi',
-        description: 'UID xx:xx:xx:xx:xx:xx:xx:xx biçiminde olmalıdır.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setNfcInput(normalized);
-    setIsWebNfcScanning(false);
-    setTimeout(() => {
-      document.getElementById(NFC_INPUT_ID)?.focus();
-    }, 0);
-  }, [toast]);
-
-  const startWebNfcScan = useCallback(async () => {
-    if (typeof window === 'undefined' || !('NDEFReader' in window)) {
-      toast({
-        title: 'Web NFC kullanılamıyor',
-        description: 'Bu özellik Android Chrome ve HTTPS ortamında çalışır. Harici okuyucu için UID alanını kullanabilirsiniz.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      // @ts-ignore Web NFC API
-      const ndef = new NDEFReader();
-      await ndef.scan();
-      setIsWebNfcScanning(true);
-      toast({
-        title: 'NFC okuyucu hazır',
-        description: 'Lütfen boş kutudaki etiketi telefonunuza yaklaştırın.',
-      });
-      ndef.onreading = (event: { serialNumber?: string }) => {
-        if (event.serialNumber) {
-          handleDetectedNfcUid(event.serialNumber);
-        }
-      };
-    } catch (error) {
-      kullanimDogrulamaLogger.error('Web NFC tarama başlatılamadı', error);
-      setIsWebNfcScanning(false);
-      toast({
-        title: 'NFC tarama başlatılamadı',
-        description: 'Tarama başlatılamadı. UID değerini manuel de girebilirsiniz.',
-        variant: 'destructive',
-      });
-    }
-  }, [handleDetectedNfcUid, toast]);
 
   const handleNfcScan = useCallback(async (rawUid?: string) => {
     const sourceUid = rawUid ?? nfcInput;
@@ -544,14 +505,12 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
 
       const familyGroup = verificationGroups.find((group) =>
         !group.eksikAileTanimi &&
-        group.patternKey === parsedUid.patternKey &&
-        group.fixedSuffix === parsedUid.fixedSuffix
+        group.productIdentityKey === parsedUid.productIdentityKey
       );
 
       const exactGroup = verificationGroups.find((group) =>
         !group.eksikAileTanimi &&
-        group.patternKey === parsedUid.patternKey &&
-        group.fixedSuffix === parsedUid.fixedSuffix &&
+        group.productIdentityKey === parsedUid.productIdentityKey &&
         group.disposedUids.length < group.tuketilenAdet
       );
 
@@ -564,19 +523,19 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
           });
         } else {
           const samePatternDifferentSuffix = verificationGroups.find((group) =>
-            !group.eksikAileTanimi && group.patternKey === parsedUid.patternKey
+            !group.eksikAileTanimi && group.productIdentityKey.startsWith(`${parsedUid.productIdentityKey.split(':')[0]}:`)
           );
 
           if (samePatternDifferentSuffix) {
             toast({
-              title: 'Aile Eşleşti, Suffix Uyuşmadı',
-              description: `${uid} için aile kodu (${parsedUid.patternKey}) eşleşti ancak sabit son 4 bayt beklenen ${samePatternDifferentSuffix.fixedSuffix} değeriyle uyuşmuyor.`,
+              title: 'Ürün Kimliği Yakın, Örüntü Uyuşmadı',
+              description: `${uid} için ürün byte alanı benzer görünüyor ancak beklenen ürün+lota ait kimlik ile tam eşleşme yok.`,
               variant: 'destructive',
             });
           } else {
             toast({
               title: 'Aile Örüntüsü Tanımlı Değil',
-              description: `${uid} için ${parsedUid.patternKey}:${parsedUid.fixedSuffix} aile örüntüsü seçili laboratuvarın bekleyen tüketimlerinde bulunamadı.`,
+              description: `${uid} için ${parsedUid.productIdentityKey} ürün-lot kimliği seçili laboratuvarın bekleyen tüketimlerinde bulunamadı.`,
               variant: 'destructive',
             });
           }
@@ -593,7 +552,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         stokAdi: exactGroup.stokAdi,
         lotNumarasi: exactGroup.lotNumarasi,
         uid,
-        patternKey: parsedUid.patternKey,
+        patternKey: parsedUid.productIdentityKey,
         fixedSuffix: parsedUid.fixedSuffix,
         serialField: parsedUid.serialField,
         consumptionRecordIds: exactGroup.consumptionRecordIds,
@@ -623,17 +582,74 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         description: 'NFC doğrulama sonucu kaydedilemedi.',
         variant: 'destructive',
       });
-      setNfcInput('');
-      return;
     }
   }, [currentUserProfile?.name, currentUserProfile?.uid, hasFetchedData, laboratories, nfcInput, selectedLaboratoryId, toast, verificationGroups]);
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      handleNfcScan();
+  useEffect(() => {
+    handleNfcScanRef.current = handleNfcScan;
+  }, [handleNfcScan]);
+
+  const startWebNfcScan = useCallback(async () => {
+    if (typeof window === 'undefined' || !('NDEFReader' in window)) {
+      setIsWebNfcScanning(false);
+      return;
     }
-  };
+
+    try {
+      // @ts-ignore Web NFC API
+      const ndef = new NDEFReader();
+      await ndef.scan();
+      setIsWebNfcScanning(true);
+      ndef.onreading = (event: { serialNumber?: string }) => {
+        if (!event.serialNumber) return;
+        const normalized = normalizeNfcUid(event.serialNumber);
+        if (!normalized) return;
+        setNfcInput(normalized);
+        void handleNfcScanRef.current(normalized);
+      };
+    } catch (error) {
+      kullanimDogrulamaLogger.warn('Web NFC otomatik dinleme başlatılamadı', error);
+      setIsWebNfcScanning(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasFetchedData || !selectedLaboratoryId) {
+      setIsWebNfcScanning(false);
+      return;
+    }
+
+    void startWebNfcScan();
+  }, [hasFetchedData, selectedLaboratoryId, startWebNfcScan]);
+
+  useEffect(() => {
+    if (!hasFetchedData) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      const isOtherInputFocused = activeElement?.tagName === 'INPUT' && activeElement.id !== NFC_INPUT_ID;
+      if (isOtherInputFocused) return;
+
+      if (event.key === 'Enter') {
+        const raw = scanBufferRef.current;
+        scanBufferRef.current = '';
+        if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+        if (!raw.trim()) return;
+        void handleNfcScanRef.current(raw);
+        return;
+      }
+
+      if (event.key.length !== 1) return;
+      scanBufferRef.current += event.key;
+      if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = setTimeout(() => {
+        scanBufferRef.current = '';
+      }, 250);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [hasFetchedData]);
 
   return (
     <div className="space-y-6">
@@ -654,7 +670,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
             <AlertTitle>Doğrulama mantığı</AlertTitle>
             <AlertDescription className="space-y-1">
               <p>1) UID formatı doğrulanır.</p>
-              <p>2) Ürün-lot için tanımlı B3:B4 aile kodu ve sabit son 4 bayt kontrol edilir.</p>
+              <p>2) Ürün-lot için tanımlı B4:B5:B6:B7:B8 ürün kimliği kontrol edilir.</p>
               <p>3) B1:B2 seri alanı değişken kabul edilir; aynı tam UID ikinci kez kabul edilmez.</p>
               <p>4) UID daha önce disposed olmuşsa tekrar kabul edilmez.</p>
             </AlertDescription>
@@ -745,7 +761,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                   <div>
                     <CardTitle className="text-lg">Doğrulanacak Kullanımlar</CardTitle>
                     <CardDescription>
-                      Veri yalnızca "Veri Al" sonrası yüklenir. Sonrasında yeni tüketimler ve imha kayıtları canlı akar.
+                      Veri yalnızca "Veri Al" sonrası yüklenir. Sonrasında NFC okuyucu ve harici tarayıcı sürekli dinlemede kalır.
                     </CardDescription>
                   </div>
                   <Input
@@ -763,22 +779,27 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                 {hasFetchedData && verificationGroups.length > 0 && (
                   <div className="p-3 bg-muted/50 rounded-lg space-y-2">
                     <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">Genel Aile Doğrulama İlerlemesi</span>
-                    <span className="font-mono">
-                      {overallProgress.verified}/{overallProgress.expected} ({overallProgress.total}%)
-                    </span>
+                      <span className="font-medium">Genel Aile Doğrulama İlerlemesi</span>
+                      <span className="font-mono">
+                        {overallProgress.verified}/{overallProgress.expected} ({overallProgress.total}%)
+                      </span>
                     </div>
                     <Progress value={overallProgress.total} className="h-2" />
                   </div>
                 )}
 
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
                   <Input
                     id={NFC_INPUT_ID}
-                    placeholder="NFC UID (xx:xx:xx:xx:xx:xx:xx:xx)"
+                    placeholder="NFC UID otomatik dinleniyor... manuel giriş için Enter"
                     value={nfcInput}
                     onChange={(event) => setNfcInput(event.target.value.toUpperCase())}
-                    onKeyDown={handleKeyDown}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void handleNfcScan();
+                      }
+                    }}
                     className="font-mono"
                     disabled={!hasFetchedData || isDataLoading || verificationGroups.length === 0}
                   />
@@ -789,20 +810,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                     onClick={startWebNfcScan}
                     disabled={!hasFetchedData || verificationGroups.length === 0 || isWebNfcScanning}
                   >
-                    {isWebNfcScanning ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Smartphone className="mr-2 h-4 w-4" />
-                    )}
-                    Telefonda NFC Tara
-                  </Button>
-
-                  <Button
-                    onClick={() => handleNfcScan()}
-                    disabled={!nfcInput.trim() || !hasFetchedData || verificationGroups.length === 0}
-                  >
-                    <Nfc className="mr-2 h-4 w-4" />
-                    UID Doğrula
+                    {isWebNfcScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Smartphone className="mr-2 h-4 w-4" />}
+                    {isWebNfcScanning ? 'Mobil NFC Dinlemede' : 'Dinlemeyi Başlat'}
                   </Button>
                 </div>
 
@@ -812,7 +821,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                       Seri: {parseNfcUid(nfcInput)?.serialField}
                     </Badge>
                     <Badge variant="secondary" className="font-mono">
-                      Aile: {parseNfcUid(nfcInput)?.patternKey}
+                      Ürün Kimliği: {parseNfcUid(nfcInput)?.productIdentityKey}
                     </Badge>
                     <Badge
                       variant={parseNfcUid(nfcInput)?.fixedSuffix === NFC_SUFFIX ? 'secondary' : 'destructive'}
@@ -849,7 +858,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                         <TableRow>
                           <TableHead>Ürün / Lot</TableHead>
                           <TableHead className="text-center">Tüketilen</TableHead>
-                          <TableHead className="text-center">Beklenen Aile</TableHead>
+                          <TableHead className="text-center">Beklenen Kimlik</TableHead>
                           <TableHead className="text-center">Doğrulanan UID</TableHead>
                           <TableHead className="w-[220px]">İlerleme</TableHead>
                           <TableHead>Durum</TableHead>
@@ -874,9 +883,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                                   {group.stokKodu} • Lot: {group.lotNumarasi || '-'}
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1">
-                                  {group.patternKey && (
+                                  {group.productIdentityKey && (
                                     <Badge variant="outline" className="font-mono text-[10px]">
-                                      Aile {group.patternKey}
+                                      Kimlik {group.productIdentityKey.split(':')[0]}
                                     </Badge>
                                   )}
                                   {group.tuketilenSeriNolar.slice(0, 3).map((serial) => (
@@ -899,13 +908,13 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                               <TableCell className="text-center">
                                 <span className="font-semibold">{group.tuketilenAdet}</span>
                                 <div className="mt-2 flex flex-wrap gap-1 justify-center">
-                                  {group.patternKey ? (
+                                  {group.productIdentityKey ? (
                                     <Badge variant="outline" className="font-mono text-[10px]">
-                                      {`??:??:${group.patternKey}:${group.fixedSuffix}`}
+                                      {`??:??:??:${group.productIdentityKey}`}
                                     </Badge>
                                   ) : (
                                     <Badge variant="destructive" className="text-[10px]">
-                                      Aile tanımı yok
+                                      Kimlik tanımı yok
                                     </Badge>
                                   )}
                                 </div>
@@ -941,9 +950,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                                 {group.eksikAileTanimi ? (
                                   <Alert variant="destructive" className="py-2">
                                     <AlertTriangle className="h-4 w-4" />
-                                    <AlertTitle className="text-xs">Aile tanımı eksik</AlertTitle>
+                                    <AlertTitle className="text-xs">Ürün kimliği tanımı eksik</AlertTitle>
                                     <AlertDescription className="text-xs">
-                                      Bu lot için B3:B4 aile kodu tanımlı değil. Kullanım doğrulamada aile örüntüsü beklenir.
+                                      Bu lot için B4:B5:B6:B7:B8 ürün kimliği tanımlı değil. Kullanım doğrulamada bu örüntü beklenir.
                                     </AlertDescription>
                                   </Alert>
                                 ) : fullyDone ? (
@@ -957,7 +966,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                                       Bekleyen: {pendingCount}
                                     </Badge>
                                     <p className="text-xs text-muted-foreground">
-                                      Beklenen örüntü: {`??:??:${group.patternKey}:${group.fixedSuffix}`}
+                                      Beklenen örüntü: {`??:??:??:${group.productIdentityKey}`}
                                     </p>
                                   </div>
                                 )}
