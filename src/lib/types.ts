@@ -132,7 +132,7 @@ export interface MinMaxRule {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
+  role: 'super_admin' | 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
   name?: string;
   nfcId?: string; // Optional field for NFC card ID
   phoneNumber?: string;
@@ -1398,7 +1398,7 @@ export interface UserRequestComment {
   text: string;
   authorUid: string;
   authorName: string;
-  authorRole: 'user' | 'admin' | 'admin_developer';
+  authorRole: 'user' | 'admin' | 'admin_developer' | 'super_admin';
   images?: string[];
   createdAt: TimestampLike;
 }

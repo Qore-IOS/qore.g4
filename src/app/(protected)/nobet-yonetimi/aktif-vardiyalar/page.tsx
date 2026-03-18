@@ -69,7 +69,7 @@ export default function AktifVardiyalarPage() {
     if (userRole === 'teknik_servis' && shift.role === 'teknik_servis') return true;
     if (userRole === 'aplikasyon' && shift.role === 'aplikasyon') return true;
     // Admin can swap any shift
-    if (userRole === 'admin') return true;
+    if (userRole === 'admin' || userRole === 'super_admin') return true;
     return false;
   };
 
