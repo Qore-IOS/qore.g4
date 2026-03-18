@@ -339,6 +339,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       });
       return;
     }
+  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
 
     const selectedLaboratory = laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId);
     if (!selectedLaboratory) {
