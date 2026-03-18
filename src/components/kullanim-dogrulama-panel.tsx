@@ -342,6 +342,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       });
       return;
     }
+  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
 
     const selectedLaboratory = laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId);
     if (!selectedLaboratory) {
@@ -597,7 +598,6 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       kullanimDogrulamaLogger.warn('Web NFC otomatik dinleme başlatılamadı', error);
       setIsWebNfcScanning(false);
     }
-  };
 
   useEffect(() => {
     if (!hasFetchedData || !selectedLaboratoryId) {
