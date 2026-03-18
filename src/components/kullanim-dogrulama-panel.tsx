@@ -1,42 +1,17 @@
-/**
- * @fileoverview Usage Verification Panel Component
- * @description Enterprise-grade panel for verifying product consumption through
- * disposal barcode scanning. Ensures proper kit disposal verification in laboratory environments.
- * @module components/kullanim-dogrulama-panel
- * @version 2.0.0
- */
-
 'use client';
-import React, { useState, useMemo, useEffect, ChangeEvent, KeyboardEvent, Suspense, useCallback } from 'react';
-import type { Laboratory, ProductCode, ConsumptionRecord, VerificationItemGroup, AppView } from '@/lib/types';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+
+import React, { useState, useMemo, useEffect, useCallback, KeyboardEvent } from 'react';
+import type { Laboratory, ProductCode, ConsumptionRecord, VerificationItemGroup } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Progress } from '@/components/ui/progress';
-import { CheckSquare, Recycle, Loader2, Info, Search, Barcode } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Recycle, Loader2, Search, Barcode, CheckCircle2, AlertCircle, ScanLine, ShieldCheck, Package } from 'lucide-react';
 import { DISPOSAL_BARCODE_LENGTH, DISPOSAL_LOT_LENGTH } from '@/lib/constants';
 import { collection, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from "@/hooks/use-toast";
 import { kullanimDogrulamaLogger } from '@/lib/logger';
+import { cn } from '@/lib/utils';
 
-
-/**
- * Usage Verification Panel Component
- *
- * Provides functionality for verifying that consumed products have been properly
- * disposed of by scanning disposal kit barcodes. The panel displays consumption
- * records grouped by product, lot, and expiry date, allowing verification of
- * each consumed item.
- *
- * @example
- * ```tsx
- * <KullanimDogrulamaPanel />
- * ```
- */
 export default function KullanimDogrulamaPanel() {
   const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>('');
   const [disposalBarcode, setDisposalBarcode] = useState<string>('');
@@ -49,13 +24,8 @@ export default function KullanimDogrulamaPanel() {
   const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
   const { toast } = useToast();
 
-  /** Input element ID for disposal barcode scanner field */
   const DISPOSAL_BARCODE_INPUT_ID = "disposal-barcode-input";
 
-  /**
-   * Fetches all required data for the verification panel
-   * Loads laboratories, product codes, and consumption records from Firestore
-   */
   const fetchPanelData = useCallback(async () => {
     setIsLoading(true);
     const startTime = performance.now();
@@ -71,13 +41,13 @@ export default function KullanimDogrulamaPanel() {
       setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
 
       const consumptionItems = consumptionSnap.docs.map(doc => {
-          const data = doc.data();
-           Object.keys(data).forEach(key => {
-              if (data[key] instanceof Timestamp) {
-                  data[key] = data[key].toDate();
-              }
-          });
-          return { id: doc.id, ...data } as ConsumptionRecord;
+        const data = doc.data();
+        Object.keys(data).forEach(key => {
+          if (data[key] instanceof Timestamp) {
+            data[key] = data[key].toDate();
+          }
+        });
+        return { id: doc.id, ...data } as ConsumptionRecord;
       });
       setTuketimKayitlari(consumptionItems);
 
@@ -87,7 +57,6 @@ export default function KullanimDogrulamaPanel() {
         productsCount: productsSnap.docs.length,
         consumptionCount: consumptionSnap.docs.length,
       });
-
     } catch (error) {
       kullanimDogrulamaLogger.error('Panel verileri yüklenemedi', error);
       toast({ title: "Veri Hatası", description: "Doğrulama paneli için veriler yüklenemedi.", variant: "destructive" });
@@ -121,51 +90,53 @@ export default function KullanimDogrulamaPanel() {
             lotNumarasi: record.lotNumarasi,
             miad: record.miad,
             tuketilenAdet: 0,
-            dogrulananAdet: 0, 
+            dogrulananAdet: 0,
             originalRecordIds: [],
           };
         }
         grouped[key].tuketilenAdet += 1;
         if (!grouped[key].originalRecordIds.includes(record.id)) {
-            grouped[key].originalRecordIds.push(record.id);
+          grouped[key].originalRecordIds.push(record.id);
         }
       });
-      
+
       const currentVerificationState = verificationItems.reduce((acc, item) => {
         const key = `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
         acc[key] = item.dogrulananAdet;
         return acc;
       }, {} as Record<string, number>);
 
-
       Object.keys(grouped).forEach(key => {
-        if(currentVerificationState[key] && currentVerificationState[key] <= grouped[key].tuketilenAdet) {
+        if (currentVerificationState[key] && currentVerificationState[key] <= grouped[key].tuketilenAdet) {
           grouped[key].dogrulananAdet = currentVerificationState[key];
         }
       });
-      
-      setVerificationItems(Object.values(grouped).sort((a,b) => a.stokAdi.localeCompare(b.stokAdi)));
+
+      setVerificationItems(Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi)));
     } else {
       setVerificationItems([]);
     }
-    setDisposalBarcode(''); 
-  }, [selectedLaboratoryId, tuketimKayitlari, laboratories]); 
-  
+    setDisposalBarcode('');
+  }, [selectedLaboratoryId, tuketimKayitlari, laboratories]);
+
   const filteredVerificationItems = useMemo(() => {
     if (!searchTerm) return verificationItems;
-    return verificationItems.filter(item => 
-        item.stokAdi.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.stokKodu.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.lotNumarasi.toLowerCase().includes(searchTerm.toLowerCase())
+    return verificationItems.filter(item =>
+      item.stokAdi.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.stokKodu.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.lotNumarasi.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [verificationItems, searchTerm]);
 
+  /* ─── Summary KPIs ─── */
+  const summary = useMemo(() => {
+    const total = verificationItems.reduce((sum, i) => sum + i.tuketilenAdet, 0);
+    const verified = verificationItems.reduce((sum, i) => sum + i.dogrulananAdet, 0);
+    const fullyVerified = verificationItems.filter(i => i.dogrulananAdet === i.tuketilenAdet && i.tuketilenAdet > 0).length;
+    const pending = verificationItems.filter(i => i.dogrulananAdet < i.tuketilenAdet).length;
+    return { total, verified, fullyVerified, pending, percentage: total > 0 ? Math.round((verified / total) * 100) : 0 };
+  }, [verificationItems]);
 
-  /**
-   * Handles disposal barcode scanning and verification
-   * Validates barcode format, finds matching consumption record, and updates verification count
-   * @param barcodeToProcess - Optional barcode to process, defaults to current input value
-   */
   const handleDisposalScan = (barcodeToProcess?: string) => {
     const currentBarcode = (barcodeToProcess || disposalBarcode).trim();
 
@@ -214,9 +185,9 @@ export default function KullanimDogrulamaPanel() {
       toast({ title: "Doğrulandı", description: `${updatedItemDetailsForToast.stokAdi} (Lot: ${updatedItemDetailsForToast.lotNumarasi}) için 1 adet imha doğrulandı.` });
     } else {
       const alreadyFullyVerifiedItem = verificationItems.find(item => item.lotNumarasi === kitLotNumber && item.dogrulananAdet === item.tuketilenAdet);
-      if(alreadyFullyVerifiedItem){
-          kullanimDogrulamaLogger.debug('Zaten tamamen doğrulanmış lot', { kitLotNumber });
-          toast({ title: "Zaten Doğrulanmış", description: `${alreadyFullyVerifiedItem.stokAdi} (Lot: ${kitLotNumber}) için tüm tüketimler zaten doğrulanmış.`, variant: "default", duration: 5000 });
+      if (alreadyFullyVerifiedItem) {
+        kullanimDogrulamaLogger.debug('Zaten tamamen doğrulanmış lot', { kitLotNumber });
+        toast({ title: "Zaten Doğrulanmış", description: `${alreadyFullyVerifiedItem.stokAdi} (Lot: ${kitLotNumber}) için tüm tüketimler zaten doğrulanmış.`, variant: "default", duration: 5000 });
       } else {
         kullanimDogrulamaLogger.warn('Eşleşen lot bulunamadı', { kitLotNumber });
         toast({ title: "Uyarı", description: `Okutulan kit lot numarası (${kitLotNumber}) ile eşleşen veya doğrulanmamış tüketim bulunamadı.`, variant: "default", duration: 5000 });
@@ -226,144 +197,282 @@ export default function KullanimDogrulamaPanel() {
     setDisposalBarcode('');
     document.getElementById(DISPOSAL_BARCODE_INPUT_ID)?.focus();
   };
-  
+
   const handleDisposalKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-        e.preventDefault();
-        handleDisposalScan();
+      e.preventDefault();
+      handleDisposalScan();
     }
-  }
+  };
 
   return (
-    <div className="space-y-6" role="main" aria-label="Kullanım doğrulama paneli">
-      <Card className="shadow-md rounded-lg" role="region" aria-labelledby="verification-title">
-        <CardHeader>
-          <CardTitle id="verification-title" className="text-xl flex items-center">
-            <Recycle className="mr-2 h-6 w-6 text-green-600" aria-hidden="true" />
-            Kullanım Sağlama (İmha Doğrulama)
-          </CardTitle>
-          <CardDescription>Kullanılan ürünlerin kitlerinin imha edildiğini doğrulayın. İmha kiti barkodunu okutun.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label htmlFor="laboratory-select-verification" className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
-            <Select value={selectedLaboratoryId} onValueChange={(value) => { setSelectedLaboratoryId(value); setSearchTerm(''); }}>
-              <SelectTrigger id="laboratory-select-verification" className="w-full md:w-1/2 lg:w-1/3 rounded-md" aria-label="Doğrulama yapılacak laboratuvarı seçin">
-                <SelectValue placeholder="Doğrulama yapılacak laboratuvarı seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {laboratories.map(h => (
-                  <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen" role="main" aria-label="Kullanım doğrulama paneli">
+
+      {/* ══════════════════════ HEADER ══════════════════════ */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+            <Recycle className="h-5 w-5 text-emerald-500" />
+            Kullanım Doğrulama
+          </h1>
+          <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+            Kullanılan ürünlerin kitlerinin imha edildiğini doğrulayın
+          </p>
+        </div>
+      </div>
+
+      {/* ══════════════════════ LABORATORY SELECT ══════════════════════ */}
+      <div className="cihaz-card p-4 sm:p-5 space-y-3">
+        <p className="cihaz-overline text-[10px] sm:text-xs">Laboratuvar</p>
+        <Select value={selectedLaboratoryId} onValueChange={(value) => { setSelectedLaboratoryId(value); setSearchTerm(''); }}>
+          <SelectTrigger className="cihaz-pressed border-none h-10 w-full sm:w-1/2 lg:w-1/3" aria-label="Doğrulama yapılacak laboratuvarı seçin">
+            <SelectValue placeholder="Laboratuvar seçin" />
+          </SelectTrigger>
+          <SelectContent>
+            {laboratories.map(h => (
+              <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* ══════════════════════ CONTENT ══════════════════════ */}
+      {selectedLaboratoryId && (
+        <>
+          {/* ── KPI Cards ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <Package className="h-4 w-4 text-[var(--dashboard-accent)] mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">{summary.total}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Toplam Tüketim</span>
+            </div>
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <ShieldCheck className="h-4 w-4 text-emerald-500 mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-emerald-600">{summary.verified}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Doğrulanan</span>
+            </div>
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500 mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-emerald-600">{summary.fullyVerified}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Tamamlanan</span>
+            </div>
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <AlertCircle className="h-4 w-4 text-amber-500 mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-amber-600">{summary.pending}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Bekleyen</span>
+            </div>
           </div>
 
-          {selectedLaboratoryId && (
-            <Card className="border-border dark:border-input rounded-lg p-4 mt-4">
-              <CardHeader className="px-0 pt-0 pb-3">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                    <CardTitle className="text-lg">Doğrulanacak Kullanımlar</CardTitle>
-                     <Input
-                        type="search"
-                        placeholder="Stok adı, kodu veya lot ile ara..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="max-w-xs rounded-md h-9"
-                    />
-                </div>
-              </CardHeader>
-              <CardContent className="px-0 pb-0">
-              <div className="flex items-center space-x-2 mb-4" role="search">
-                <Input
-                  id={DISPOSAL_BARCODE_INPUT_ID}
-                  placeholder={`İmha Kiti Barkodu (${DISPOSAL_BARCODE_LENGTH} hane)`}
-                  value={disposalBarcode}
-                  onChange={(e) => setDisposalBarcode(e.target.value)}
-                  onKeyPress={handleDisposalKeyPress}
-                  maxLength={DISPOSAL_BARCODE_LENGTH}
-                  className="flex-grow rounded-md h-10"
-                  disabled={!selectedLaboratoryId || verificationItems.length === 0}
-                  aria-label="İmha kiti barkodu girin"
-                  aria-describedby="barcode-hint"
-                />
-                <span id="barcode-hint" className="sr-only">
-                  Barkod {DISPOSAL_BARCODE_LENGTH} haneli olmalıdır
-                </span>
-                <Button
-                  onClick={() => handleDisposalScan()}
-                  className="rounded-md h-10"
-                  disabled={!disposalBarcode}
-                  aria-label="Barkodu doğrula"
-                >
-                  <Barcode className="mr-2 h-5 w-5" aria-hidden="true" />
-                  Doğrula
-                </Button>
-              </div>
+          {/* ── Global Progress Bar ── */}
+          <div className="cihaz-card p-4 sm:p-5 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-[var(--dashboard-text)]">Genel İlerleme</p>
+              <span className="text-xs font-bold text-[var(--dashboard-accent)]">{summary.percentage}%</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500 ease-out"
+                style={{ width: `${summary.percentage}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-[var(--dashboard-muted)]">
+              {summary.verified} / {summary.total} adet doğrulandı
+            </p>
+          </div>
 
-              {isLoading ? (
-                  <div className="flex justify-center items-center py-6" role="status" aria-label="Yükleniyor">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
-                    <span className="sr-only">Veriler yükleniyor...</span>
-                  </div>
-              ) : verificationItems.length === 0 && !searchTerm ? (
-                 <div className="flex flex-col items-center justify-center py-6 text-muted-foreground" role="status">
-                  <Info className="h-10 w-10 mb-2" aria-hidden="true" />
-                  <p>Bu laboratuvar için doğrulanacak kullanım kaydı bulunmuyor.</p>
+          {/* ── Barcode Scanner ── */}
+          <div className="cihaz-card p-4 sm:p-5 space-y-3">
+            <p className="cihaz-overline text-[10px] sm:text-xs flex items-center gap-1.5">
+              <ScanLine className="h-3.5 w-3.5" />
+              Barkod Tarayıcı
+            </p>
+            <div className="flex items-center gap-2" role="search">
+              <Input
+                id={DISPOSAL_BARCODE_INPUT_ID}
+                placeholder={`İmha kiti barkodu (${DISPOSAL_BARCODE_LENGTH} hane)`}
+                value={disposalBarcode}
+                onChange={(e) => setDisposalBarcode(e.target.value)}
+                onKeyPress={handleDisposalKeyPress}
+                maxLength={DISPOSAL_BARCODE_LENGTH}
+                className="cihaz-pressed border-none flex-grow h-10 text-sm font-mono"
+                disabled={!selectedLaboratoryId || verificationItems.length === 0}
+                aria-label="İmha kiti barkodu girin"
+              />
+              <button
+                onClick={() => handleDisposalScan()}
+                disabled={!disposalBarcode}
+                className="cihaz-tool-item flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium disabled:opacity-40 shrink-0"
+                aria-label="Barkodu doğrula"
+              >
+                <Barcode className="h-4 w-4" />
+                <span className="hidden sm:inline">Doğrula</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── Search + Verification Table ── */}
+          <div className="cihaz-card-strong flex-1 flex flex-col overflow-hidden">
+            {/* Search bar */}
+            <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-[var(--dashboard-stroke)]">
+              <p className="text-xs font-semibold text-[var(--dashboard-text)] shrink-0">Doğrulanacak Kullanımlar</p>
+              <div className="relative max-w-xs w-full">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
+                <Input
+                  type="search"
+                  placeholder="Stok adı, kodu veya lot ara..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="cihaz-pressed border-none h-8 text-xs pl-8"
+                />
+              </div>
+            </div>
+
+            {/* Table header */}
+            {filteredVerificationItems.length > 0 && (
+              <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_70px_70px_140px] gap-1 px-4 sm:px-5 py-2.5 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+                <span>Ürün</span>
+                <span>Lot / Miad</span>
+                <span className="text-center">Tüketilen</span>
+                <span className="text-center">Doğrulanan</span>
+                <span className="text-center">%</span>
+                <span>İlerleme</span>
+              </div>
+            )}
+
+            {/* Content */}
+            {isLoading ? (
+              <div className="flex items-center justify-center h-[40vh]">
+                <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+              </div>
+            ) : verificationItems.length === 0 && !searchTerm ? (
+              <div className="flex flex-col items-center justify-center h-[35vh] text-center px-4">
+                <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                  <Recycle className="h-6 w-6 text-[var(--dashboard-muted)]" />
                 </div>
-              ) : filteredVerificationItems.length === 0 && searchTerm ? (
-                <div className="flex flex-col items-center justify-center py-6 text-muted-foreground" role="status">
-                  <Search className="h-10 w-10 mb-2" aria-hidden="true" />
-                  <p>Arama kriterlerine uyan doğrulanacak kullanım yok.</p>
+                <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Kayıt bulunamadı</p>
+                <p className="text-xs text-[var(--dashboard-muted)]">Bu laboratuvar için doğrulanacak kullanım kaydı yok</p>
+              </div>
+            ) : filteredVerificationItems.length === 0 && searchTerm ? (
+              <div className="flex flex-col items-center justify-center h-[35vh] text-center px-4">
+                <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                  <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
                 </div>
-              ) : (
-                <div className="overflow-x-auto max-h-[500px]">
-                  <Table aria-label="Doğrulanacak kullanım kayıtları">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Stok Adı (Kodu)</TableHead>
-                        <TableHead>Lot Numarası</TableHead>
-                        <TableHead>Miad</TableHead>
-                        <TableHead className="text-center">Tüketilen</TableHead>
-                        <TableHead className="text-center">Doğrulanan</TableHead>
-                        <TableHead className="w-[150px]">İlerleme</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredVerificationItems.map(item => {
-                        const progressPercentage = item.tuketilenAdet > 0 ? (item.dogrulananAdet / item.tuketilenAdet) * 100 : 0;
-                        const isFullyVerified = item.dogrulananAdet === item.tuketilenAdet && item.tuketilenAdet > 0;
-                        return (
-                          <TableRow key={`${item.stokKodu}-${item.lotNumarasi}-${item.miad}`} className={isFullyVerified ? 'bg-green-500/10 dark:bg-green-500/20 opacity-70' : ''}>
-                            <TableCell>
+                <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Sonuç yok</p>
+                <p className="text-xs text-[var(--dashboard-muted)]">Arama kriterlerine uyan kayıt bulunamadı</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto" style={{ maxHeight: '55vh' }}>
+                {filteredVerificationItems.map((item, idx) => {
+                  const progressPercentage = item.tuketilenAdet > 0 ? (item.dogrulananAdet / item.tuketilenAdet) * 100 : 0;
+                  const isFullyVerified = item.dogrulananAdet === item.tuketilenAdet && item.tuketilenAdet > 0;
+
+                  return (
+                    <div
+                      key={`${item.stokKodu}-${item.lotNumarasi}-${item.miad}`}
+                      className={cn(
+                        "border-b border-[var(--dashboard-stroke)] last:border-0 hover:bg-[var(--dashboard-surface-2)] transition-colors",
+                        idx % 2 === 0 && "bg-[var(--dashboard-surface)]/50",
+                        isFullyVerified && "opacity-60"
+                      )}
+                    >
+                      {/* Desktop row */}
+                      <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_70px_70px_140px] gap-1 items-center px-4 sm:px-5 py-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[var(--dashboard-text)] truncate flex items-center gap-1.5">
+                            {isFullyVerified && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
+                            {item.stokAdi}
+                          </p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[11px] text-[var(--dashboard-text)] font-mono">{item.lotNumarasi}</p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">{item.miad}</p>
+                        </div>
+                        <span className="text-xs font-medium text-center text-[var(--dashboard-text)]">{item.tuketilenAdet}</span>
+                        <span className={cn(
+                          "text-xs font-bold text-center",
+                          isFullyVerified ? "text-emerald-600" : "text-[var(--dashboard-accent)]"
+                        )}>{item.dogrulananAdet}</span>
+                        <span className="text-[10px] font-mono text-center text-[var(--dashboard-muted)]">{Math.round(progressPercentage)}%</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-hidden">
+                            <div
+                              className={cn(
+                                "h-full rounded-full transition-all duration-300",
+                                isFullyVerified
+                                  ? "bg-gradient-to-r from-emerald-400 to-emerald-500"
+                                  : "bg-gradient-to-r from-[var(--dashboard-accent)] to-amber-400"
+                              )}
+                              style={{ width: `${progressPercentage}%` }}
+                            />
+                          </div>
+                          {isFullyVerified && <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
+                        </div>
+                      </div>
+
+                      {/* Mobile row */}
+                      <div className="sm:hidden px-4 py-3 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-[var(--dashboard-text)] truncate flex items-center gap-1.5">
+                              {isFullyVerified && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
                               {item.stokAdi}
-                              <span className="block text-xs text-muted-foreground font-mono">({item.stokKodu})</span>
-                            </TableCell>
-                            <TableCell className="font-mono">{item.lotNumarasi}</TableCell>
-                            <TableCell>{item.miad}</TableCell>
-                            <TableCell className="text-center font-medium">{item.tuketilenAdet}</TableCell>
-                            <TableCell className="text-center font-semibold text-primary">{item.dogrulananAdet}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center space-x-2">
-                                <Progress value={progressPercentage} className="h-3 flex-grow rounded-md" />
-                                <span className="text-xs font-mono w-10 text-right">
-                                  {Math.round(progressPercentage)}%
-                                </span>
-                                {isFullyVerified && <CheckSquare className="h-5 w-5 text-green-600" />}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-              </CardContent>
-            </Card>
-          )}
-        </CardContent>
-      </Card>
+                            </p>
+                            <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
+                          </div>
+                          <span className={cn(
+                            "text-lg font-bold ml-2",
+                            isFullyVerified ? "text-emerald-600" : "text-[var(--dashboard-accent)]"
+                          )}>
+                            {item.dogrulananAdet}/{item.tuketilenAdet}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]">
+                            Lot: {item.lotNumarasi}
+                          </span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]">
+                            Miad: {item.miad}
+                          </span>
+                          {isFullyVerified && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                              Tamamlandı
+                            </span>
+                          )}
+                        </div>
+                        <div className="h-1.5 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all duration-300",
+                              isFullyVerified
+                                ? "bg-gradient-to-r from-emerald-400 to-emerald-500"
+                                : "bg-gradient-to-r from-[var(--dashboard-accent)] to-amber-400"
+                            )}
+                            style={{ width: `${progressPercentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Empty state when no lab selected ── */}
+      {!selectedLaboratoryId && !isLoading && (
+        <div className="cihaz-card-strong flex flex-col items-center justify-center h-[50vh] text-center px-4">
+          <div className="w-20 h-20 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+            <ScanLine className="h-8 w-8 text-[var(--dashboard-muted)]" />
+          </div>
+          <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Laboratuvar Seçin</p>
+          <p className="text-xs text-[var(--dashboard-muted)] max-w-xs">
+            Doğrulama işlemine başlamak için yukarıdan bir laboratuvar seçin
+          </p>
+        </div>
+      )}
     </div>
   );
 }
