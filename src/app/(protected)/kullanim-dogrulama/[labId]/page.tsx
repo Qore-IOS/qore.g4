@@ -1,5 +1,3 @@
-'use client';
-
 import KullanimDogrulamaPanel from '@/components/kullanim-dogrulama-panel';
 
 interface KullanimDogrulamaLabPageProps {
