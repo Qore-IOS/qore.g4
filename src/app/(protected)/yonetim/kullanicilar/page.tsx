@@ -8,7 +8,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert } from 'lucide-react';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -65,7 +65,7 @@ function cleanFirestoreData<T extends Record<string, any>>(data: T): Partial<T> 
 
 export default function KullaniciPanel() {
   const { toast } = useToast();
-  const { signup } = useAuth();
+  const { signup, currentUserProfile, isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -123,6 +123,10 @@ export default function KullaniciPanel() {
     }
     if (currentUser.role === 'admin_developer' && users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid)) {
       toast({ title: 'Hata', description: 'Sistemde sadece 1 adet Admin-Geliştirici olabilir.', variant: 'destructive' });
+      return;
+    }
+    if (currentUser.role === 'super_admin' && users.some(u => u.role === 'super_admin' && u.uid !== currentUser.uid)) {
+      toast({ title: 'Hata', description: 'Sistemde sadece 1 adet Süper Admin olabilir.', variant: 'destructive' });
       return;
     }
     // Primary laboratories should be a subset of assigned laboratories
@@ -230,7 +234,33 @@ export default function KullaniciPanel() {
               </CardTitle>
               <CardDescription>Kullanıcıları yönetin, rollerini ve erişim izinlerini ayarlayın.</CardDescription>
             </div>
-            <Button onClick={() => openModal()} size="sm" disabled={isLoading}><PlusCircle className="mr-2 h-4 w-4" />Yeni Kullanıcı</Button>
+            <div className="flex gap-2">
+              {currentUserProfile?.role === 'admin' && !users.some(u => u.role === 'super_admin') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoading}
+                  className="border-amber-500 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950"
+                  onClick={async () => {
+                    if (!currentUserProfile?.uid) return;
+                    if (!confirm('Kendinizi Süper Admin olarak atamak istediğinizden emin misiniz? Bu işlem geri alınamaz ve sistemde sadece 1 Süper Admin olabilir.')) return;
+                    setIsLoading(true);
+                    try {
+                      await setDoc(doc(db, 'users', currentUserProfile.uid), { role: 'super_admin' }, { merge: true });
+                      toast({ title: 'Başarılı', description: 'Süper Admin rolü atandı. Değişikliklerin uygulanması için sayfayı yenileyin.' });
+                      fetchData();
+                    } catch (error: any) {
+                      toast({ title: 'Hata', description: `Rol atanamadı: ${error.message}`, variant: 'destructive' });
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
+                >
+                  <ShieldAlert className="mr-2 h-4 w-4" />Süper Admin Ol
+                </Button>
+              )}
+              <Button onClick={() => openModal()} size="sm" disabled={isLoading}><PlusCircle className="mr-2 h-4 w-4" />Yeni Kullanıcı</Button>
+            </div>
           </CardHeader>
           <CardContent>
              {isLoading ? (
@@ -271,6 +301,9 @@ export default function KullaniciPanel() {
                 <Select value={currentUser.role || 'user'} onValueChange={(value) => setCurrentUser({ ...currentUser, role: value as any })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="super_admin" disabled={!isSuperAdmin || users.some(u => u.role === 'super_admin' && u.uid !== currentUser.uid)}>
+                        Süper Admin {users.some(u => u.role === 'super_admin' && u.uid !== currentUser.uid) ? '(Mevcut)' : ''}
+                      </SelectItem>
                       <SelectItem value="admin_developer" disabled={users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid)}>
                         Admin-Geliştirici {users.some(u => u.role === 'admin_developer' && u.uid !== currentUser.uid) ? '(Mevcut)' : ''}
                       </SelectItem>
