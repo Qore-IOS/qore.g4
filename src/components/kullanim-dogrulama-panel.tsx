@@ -267,32 +267,25 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     return Object.values(grouped).sort((left, right) => left.stokAdi.localeCompare(right.stokAdi, 'tr'));
   }, [consumptionRecords, disposalEvents, lotDefinitionsByKey, serialTrackedCodes]);
 
-  const filteredGroups = useMemo(() => {
-    if (!searchTerm) return verificationGroups;
-    const term = searchTerm.toLowerCase();
-    return verificationGroups.filter((group) =>
-      [group.stokAdi, group.stokKodu, group.lotNumarasi]
-        .join(' ')
-        .toLowerCase()
-        .includes(term)
-    );
-  }, [searchTerm, verificationGroups]);
+  const filteredGroups = !searchTerm
+    ? verificationGroups
+    : verificationGroups.filter((group) =>
+        [group.stokAdi, group.stokKodu, group.lotNumarasi]
+          .join(' ')
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase())
+      );
 
-  const overallProgress = useMemo(() => {
-    if (verificationGroups.length === 0) {
-      return { expected: 0, verified: 0, total: 0 };
-    }
-  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
-
-    const expected = verificationGroups.reduce((sum, group) => sum + group.tuketilenAdet, 0);
-    const verified = verificationGroups.reduce((sum, group) => sum + group.disposedUids.length, 0);
-
-    return {
-      expected,
-      verified,
-      total: expected > 0 ? Math.round((verified / expected) * 100) : 0,
-    };
-  }, [verificationGroups]);
+  const expectedVerificationCount = verificationGroups.reduce((sum, group) => sum + group.tuketilenAdet, 0);
+  const verifiedVerificationCount = verificationGroups.reduce((sum, group) => sum + group.disposedUids.length, 0);
+  const overallProgress = {
+    expected: expectedVerificationCount,
+    verified: verifiedVerificationCount,
+    total:
+      expectedVerificationCount > 0
+        ? Math.round((verifiedVerificationCount / expectedVerificationCount) * 100)
+        : 0,
+  };
 
   const syncLabUrl = useCallback((labId: string) => {
     router.replace(labId ? `/kullanim-dogrulama/${labId}` : '/kullanim-dogrulama');
@@ -346,6 +339,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       });
       return;
     }
+  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
 
     const selectedLaboratory = laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId);
     if (!selectedLaboratory) {
