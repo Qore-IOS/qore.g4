@@ -405,12 +405,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         }
       );
 
-      const disposalConstraints = [where('laboratoryId', '==', selectedLaboratoryId)];
-      if (sinceDate) {
-        disposalConstraints.push(where('verifiedAt', '>=', Timestamp.fromDate(sinceDate)));
-      }
-
-      const disposalQuery = query(collection(db, 'nfcDisposalEvents'), ...disposalConstraints);
+      const disposalQuery = query(
+        collection(db, 'nfcDisposalEvents'),
+        where('laboratoryId', '==', selectedLaboratoryId)
+      );
       const unsubscribeDisposals = onSnapshot(
         disposalQuery,
         (snapshot) => {
