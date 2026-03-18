@@ -1,5 +1,6 @@
 'use client';
 
+// kullanim-dogrulama-panel
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
 import { Button } from '@/components/ui/button';
