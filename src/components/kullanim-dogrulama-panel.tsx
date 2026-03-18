@@ -165,7 +165,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
   const unsubscribeRefs = useRef<Array<() => void>>([]);
   const scanBufferRef = useRef('');
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const handleNfcScanRef = useRef<(rawUid?: string) => Promise<void>>(async () => {});
+  const processNfcScanRef = useRef<(rawUid?: string) => Promise<void>>(async () => {});
 
   const clearSubscriptions = useCallback(() => {
     unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
@@ -282,6 +282,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     if (verificationGroups.length === 0) {
       return { expected: 0, verified: 0, total: 0 };
     }
+  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
 
     const expected = verificationGroups.reduce((sum, group) => sum + group.tuketilenAdet, 0);
     const verified = verificationGroups.reduce((sum, group) => sum + group.disposedUids.length, 0);
@@ -342,24 +343,6 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       toast({
         title: 'Laboratuvar Seçin',
         description: 'Önce doğrulama yapılacak laboratuvarı seçin.',
-      });
-      return;
-    }
-  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
-
-  const handleNfcScan = useCallback(async (rawUid?: string) => {
-    const sourceUid = rawUid ?? nfcInput;
-    const parsedUid = parseNfcUid(sourceUid);
-
-    if (!selectedLaboratoryId) {
-      toast({ title: 'Uyarı', description: 'Önce laboratuvar seçin.' });
-      return;
-    }
-
-    if (!hasFetchedData) {
-      toast({
-        title: 'Önce Veri Alın',
-        description: 'Laboratuvar ve gün aralığını seçip "Veri Al" butonuna basın.',
       });
       return;
     }
@@ -467,7 +450,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     }
   }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
 
-  const handleNfcScan = useCallback(async (rawUid?: string) => {
+  const processNfcScan = useCallback(async (rawUid?: string) => {
     const sourceUid = rawUid ?? nfcInput;
     const parsedUid = parseNfcUid(sourceUid);
 
@@ -593,8 +576,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
   }, [currentUserProfile?.name, currentUserProfile?.uid, hasFetchedData, laboratories, nfcInput, selectedLaboratoryId, toast, verificationGroups]);
 
   useEffect(() => {
-    handleNfcScanRef.current = handleNfcScan;
-  }, [handleNfcScan]);
+    processNfcScanRef.current = processNfcScan;
+  }, [processNfcScan]);
 
   const startWebNfcScan = useCallback(async () => {
     if (typeof window === 'undefined' || !('NDEFReader' in window)) {
@@ -612,7 +595,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         const normalized = normalizeNfcUid(event.serialNumber);
         if (!normalized) return;
         setNfcInput(normalized);
-        void handleNfcScanRef.current(normalized);
+        void processNfcScanRef.current(normalized);
       };
     } catch (error) {
       kullanimDogrulamaLogger.warn('Web NFC otomatik dinleme başlatılamadı', error);
@@ -642,7 +625,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         scanBufferRef.current = '';
         if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
         if (!raw.trim()) return;
-        void handleNfcScanRef.current(raw);
+        void processNfcScanRef.current(raw);
         return;
       }
 
@@ -804,7 +787,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault();
-                        void handleNfcScan();
+                        void processNfcScan();
                       }
                     }}
                     className="font-mono"
