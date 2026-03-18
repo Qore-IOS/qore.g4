@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -167,12 +167,15 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const processNfcScanRef = useRef<(rawUid?: string) => Promise<void>>(async () => {});
 
-  const clearSubscriptions = useCallback(() => {
+  const clearSubscriptions = () => {
+    unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
+    unsubscribeRefs.current = [];
+  };
+
+  useEffect(() => () => {
     unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
     unsubscribeRefs.current = [];
   }, []);
-
-  useEffect(() => () => clearSubscriptions(), [clearSubscriptions]);
 
   useEffect(() => {
     setSelectedLaboratoryId(initialLaboratoryId || '');
@@ -287,11 +290,11 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         : 0,
   };
 
-  const syncLabUrl = useCallback((labId: string) => {
+  const syncLabUrl = (labId: string) => {
     router.replace(labId ? `/kullanim-dogrulama/${labId}` : '/kullanim-dogrulama');
-  }, [router]);
+  };
 
-  const hydrateLotDefinitions = useCallback(async (records: ConsumptionRecord[]) => {
+  const hydrateLotDefinitions = async (records: ConsumptionRecord[]) => {
     const keys = Array.from(
       new Set(
         records
@@ -329,9 +332,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         variant: 'destructive',
       });
     }
-  }, [toast]);
+  };
 
-  const handleFetchData = useCallback(async () => {
+  const handleFetchData = async () => {
     if (!selectedLaboratoryId) {
       toast({
         title: 'Laboratuvar Seçin',
@@ -442,9 +445,9 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         variant: 'destructive',
       });
     }
-  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
+  };
 
-  const processNfcScan = useCallback(async (rawUid?: string) => {
+  const processNfcScan = async (rawUid?: string) => {
     const sourceUid = rawUid ?? nfcInput;
     const parsedUid = parseNfcUid(sourceUid);
 
@@ -567,13 +570,13 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         variant: 'destructive',
       });
     }
-  }, [currentUserProfile?.name, currentUserProfile?.uid, hasFetchedData, laboratories, nfcInput, selectedLaboratoryId, toast, verificationGroups]);
+  };
 
   useEffect(() => {
     processNfcScanRef.current = processNfcScan;
   }, [processNfcScan]);
 
-  const startWebNfcScan = useCallback(async () => {
+  const startWebNfcScan = async () => {
     if (typeof window === 'undefined' || !('NDEFReader' in window)) {
       setIsWebNfcScanning(false);
       return;
@@ -595,7 +598,6 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       kullanimDogrulamaLogger.warn('Web NFC otomatik dinleme başlatılamadı', error);
       setIsWebNfcScanning(false);
     }
-  }, []);
 
   useEffect(() => {
     if (!hasFetchedData || !selectedLaboratoryId) {
@@ -604,7 +606,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     }
 
     void startWebNfcScan();
-  }, [hasFetchedData, selectedLaboratoryId, startWebNfcScan]);
+  }, [hasFetchedData, selectedLaboratoryId]);
 
   useEffect(() => {
     if (!hasFetchedData) return;
