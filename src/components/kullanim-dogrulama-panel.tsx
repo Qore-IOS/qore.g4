@@ -218,7 +218,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     [productCodes]
   );
 
-  const verificationGroups = useMemo<NfcVerificationGroup[]>(() => {
+  const verificationGroups: NfcVerificationGroup[] = useMemo(() => {
     const grouped: Record<string, NfcVerificationGroup> = {};
 
     consumptionRecords
