@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -141,7 +140,6 @@ const uniqueStrings = (values: Array<string | undefined | null>) =>
   Array.from(new Set(values.map((value) => (value || '').trim().toUpperCase()).filter(Boolean)));
 
 export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: KullanimDogrulamaPanelProps) {
-  const router = useRouter();
   const { toast } = useToast();
   const { currentUserProfile } = useAuth();
 
@@ -291,7 +289,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
   };
 
   const syncLabUrl = (labId: string) => {
-    router.replace(labId ? `/kullanim-dogrulama/${labId}` : '/kullanim-dogrulama');
+    const targetPath = labId ? `/kullanim-dogrulama/${labId}` : '/kullanim-dogrulama';
+    window.history.replaceState(null, '', targetPath);
   };
 
   const hydrateLotDefinitions = async (records: ConsumptionRecord[]) => {
