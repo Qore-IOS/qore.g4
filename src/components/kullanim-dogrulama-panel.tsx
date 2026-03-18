@@ -623,6 +623,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         description: 'NFC doğrulama sonucu kaydedilemedi.',
         variant: 'destructive',
       });
+      setNfcInput('');
+      return;
     }
   }, [currentUserProfile?.name, currentUserProfile?.uid, hasFetchedData, laboratories, nfcInput, selectedLaboratoryId, toast, verificationGroups]);
 
