@@ -18,6 +18,7 @@ import {
   getDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import { companyQuery } from '@/lib/company-filter';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import fs from 'fs/promises';
@@ -41,10 +42,9 @@ function processDoc(doc: QueryDocumentSnapshot<DocumentData>): DepoStokItem {
  * We will filter for un-shipped items on the client-side to avoid needing a composite index.
  * This is intended for panels that need the full list, like DepoSayim.
  */
-export async function getFullDepotStock(depotId: string): Promise<{ items: DepoStokItem[] }> {
+export async function getFullDepotStock(depotId: string, companyId?: string): Promise<{ items: DepoStokItem[] }> {
   try {
-    const ref = collection(db, 'depoStok');
-    const q = query(ref, where('depotId', '==', depotId));
+    const q = companyQuery(db, 'depoStok', companyId || '', where('depotId', '==', depotId));
     const snap = await getDocs(q);
     const items = snap.docs.map(processDoc);
     return { items };
@@ -54,10 +54,9 @@ export async function getFullDepotStock(depotId: string): Promise<{ items: DepoS
   }
 }
 
-export async function getExpiringItems(depotId: string): Promise<DepoStokItem[]> {
-    const depoStokRef = collection(db, 'depoStok');
-    const q = query(
-        depoStokRef,
+export async function getExpiringItems(depotId: string, companyId?: string): Promise<DepoStokItem[]> {
+    const q = companyQuery(
+        db, 'depoStok', companyId || '',
         where('depotId', '==', depotId),
         where('isShipped', '==', false)
     );
