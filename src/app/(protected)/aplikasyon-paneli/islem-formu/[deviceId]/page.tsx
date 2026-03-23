@@ -184,6 +184,9 @@ export default function AplikasyonIslemFormuPage() {
   const [depotStockItems, setDepotStockItems] = useState<YedekParcaDepoStokItem[]>([]);
   const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
   const [selectedDepotStockItem, setSelectedDepotStockItem] = useState<DepotSelectableStockItem | null>(null);
+  const [pendingDepotStockItem, setPendingDepotStockItem] = useState<DepotSelectableStockItem | null>(null);
+  const [depotRequestedQuantity, setDepotRequestedQuantity] = useState(1);
+  const [isDepotQuantityDialogOpen, setIsDepotQuantityDialogOpen] = useState(false);
   const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool' | 'depot'>('personal');
   const [partSearchQuery, setPartSearchQuery] = useState('');
   const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
@@ -982,6 +985,9 @@ export default function AplikasyonIslemFormuPage() {
     setSelectedStockItem(null);
     setSelectedPoolStockItem(null);
     setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setDepotRequestedQuantity(1);
+    setIsDepotQuantityDialogOpen(false);
     setStockSourceTab('personal');
     setManualPartCode('');
     setManualPartName('');
@@ -997,16 +1003,27 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
-    let requestedQuantity = 1;
     if (item.isGrouped && item.totalQuantity > 1) {
-      const raw = window.prompt(`Depoda ${item.totalQuantity} adet mevcut. Kaç adet kullanılacak?`, '1');
-      if (raw === null) return;
-      requestedQuantity = Math.max(1, Math.min(item.totalQuantity, parseInt(raw, 10) || 1));
+      setPendingDepotStockItem(item);
+      setDepotRequestedQuantity(1);
+      setIsDepotQuantityDialogOpen(true);
+      return;
     }
-    setPartQuantity(requestedQuantity);
+    setPartQuantity(1);
     setSelectedDepotStockItem(item);
     setSelectedStockItem(null);
     setSelectedPoolStockItem(null);
+  };
+
+  const confirmDepotQuantitySelection = () => {
+    if (!pendingDepotStockItem) return;
+    const requestedQuantity = Math.max(1, Math.min(pendingDepotStockItem.totalQuantity, depotRequestedQuantity || 1));
+    setPartQuantity(requestedQuantity);
+    setSelectedDepotStockItem({ ...pendingDepotStockItem, totalQuantity: requestedQuantity });
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
   };
 
   const refreshDepotStock = async () => {
@@ -3392,6 +3409,33 @@ export default function AplikasyonIslemFormuPage() {
             >
               {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Yükleniyor...</> : 'Ekle'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDepotQuantityDialogOpen} onOpenChange={setIsDepotQuantityDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Depo Adet Seçimi</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              {pendingDepotStockItem?.stokAdi} için depoda toplam <strong>{pendingDepotStockItem?.totalQuantity || 0}</strong> adet mevcut.
+            </p>
+            <div className="space-y-1">
+              <Label>Kaç adet kullanılacak?</Label>
+              <Input
+                type="number"
+                min={1}
+                max={pendingDepotStockItem?.totalQuantity || 1}
+                value={depotRequestedQuantity}
+                onChange={(e) => setDepotRequestedQuantity(Math.max(1, Math.min(pendingDepotStockItem?.totalQuantity || 1, parseInt(e.target.value, 10) || 1)))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsDepotQuantityDialogOpen(false); setPendingDepotStockItem(null); }}>İptal</Button>
+            <Button onClick={confirmDepotQuantitySelection}>Seçimi Onayla</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
