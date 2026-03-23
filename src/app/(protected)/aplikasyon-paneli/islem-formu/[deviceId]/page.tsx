@@ -1015,6 +1015,31 @@ export default function AplikasyonIslemFormuPage() {
     setSelectedPoolStockItem(null);
   };
 
+  const selectPersonalStockItem = (item: PersonalStockItem) => {
+    setSelectedStockItem(item);
+    setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const selectPoolStockItem = (item: PoolWarehouseStockItem) => {
+    setSelectedPoolStockItem(item);
+    setSelectedStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const activateManualEntry = () => {
+    setShowManualEntry(true);
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
   const confirmDepotQuantitySelection = () => {
     if (!pendingDepotStockItem) return;
     const requestedQuantity = Math.max(1, Math.min(pendingDepotStockItem.totalQuantity, depotRequestedQuantity || 1));
@@ -2427,21 +2452,21 @@ export default function AplikasyonIslemFormuPage() {
               <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
                 <button
                   className={`wizard-sub-tab ${!showManualEntry && stockSourceTab === 'personal' ? 'active' : ''}`}
-                  onClick={() => { setStockSourceTab('personal'); setShowManualEntry(false); }}
+                  onClick={() => { setStockSourceTab('personal'); setShowManualEntry(false); setSelectedPoolStockItem(null); setSelectedDepotStockItem(null); }}
                 >
                   ŞAHSİ STOK
                 </button>
                 {poolStockItems.length > 0 && (
                   <button
                     className={`wizard-sub-tab ${!showManualEntry && stockSourceTab === 'pool' ? 'active' : ''}`}
-                    onClick={() => { setStockSourceTab('pool'); setShowManualEntry(false); }}
+                    onClick={() => { setStockSourceTab('pool'); setShowManualEntry(false); setSelectedStockItem(null); setSelectedDepotStockItem(null); }}
                   >
                     HAVUZ STOK
                   </button>
                 )}
                 <button
                   className={`wizard-sub-tab ${!showManualEntry && stockSourceTab === 'depot' ? 'active' : ''}`}
-                  onClick={() => { setStockSourceTab('depot'); setShowManualEntry(false); }}
+                  onClick={() => { setStockSourceTab('depot'); setShowManualEntry(false); setSelectedStockItem(null); setSelectedPoolStockItem(null); }}
                 >
                   DEPO STOK
                 </button>
@@ -2469,7 +2494,7 @@ export default function AplikasyonIslemFormuPage() {
                         <div
                           key={item.id}
                           onClick={() => {
-                            setSelectedStockItem(item); setSelectedPoolStockItem(null);
+                            selectPersonalStockItem(item);
                             setRemovedPartSerialNumber('');
                             setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
                             setUsedPartImageFile(null); setUsedPartImagePreview(null);
@@ -2502,7 +2527,7 @@ export default function AplikasyonIslemFormuPage() {
                         <div
                           key={item.id}
                           onClick={() => {
-                            setSelectedPoolStockItem(item); setSelectedStockItem(null);
+                            selectPoolStockItem(item);
                             setRemovedPartSerialNumber('');
                             setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
                             setUsedPartImageFile(null); setUsedPartImagePreview(null);
@@ -2567,7 +2592,7 @@ export default function AplikasyonIslemFormuPage() {
                     </div>
                   )}
                   <button
-                    onClick={() => { setShowManualEntry(true); setSelectedStockItem(null); setSelectedPoolStockItem(null); setSelectedDepotStockItem(null); }}
+                    onClick={activateManualEntry}
                     style={{ width: '100%', marginTop: '8px', padding: '10px', fontSize: '13px', fontWeight: 500, color: 'var(--wz-accent)', background: 'none', border: '1px dashed var(--wz-border)', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                   >
                     <Plus size={14} /> Stokta yok, manuel ekle
@@ -3068,21 +3093,30 @@ export default function AplikasyonIslemFormuPage() {
               <Label className="font-semibold text-sm">1. Parça Seçin</Label>
 
               {/* Stock source tabs */}
-              {poolStockItems.length > 0 && !showManualEntry && (
+              {!showManualEntry && (
                 <div className="flex gap-1 p-1 rounded-lg bg-muted/40 border border-border">
                   <button
-                    onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); }}
+                    onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); setSelectedDepotStockItem(null); }}
                     className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'personal' ? 'bg-background shadow-sm' : ''}`}
                   >
                     <Package className="h-3 w-3 inline mr-1" />
                     Şahsi Stok ({personalStock.filter(p => !usedPersonalStockIds.has(p.id)).length})
                   </button>
+                  {poolStockItems.length > 0 && (
+                    <button
+                      onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); setSelectedDepotStockItem(null); }}
+                      className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'pool' ? 'bg-background shadow-sm' : ''}`}
+                    >
+                      <Package className="h-3 w-3 inline mr-1" />
+                      Havuz Stok ({poolStockItems.filter(p => !usedPoolStockIds.has(p.id)).length})
+                    </button>
+                  )}
                   <button
-                    onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }}
-                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'pool' ? 'bg-background shadow-sm' : ''}`}
+                    onClick={() => { setStockSourceTab('depot'); setSelectedStockItem(null); setSelectedPoolStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${stockSourceTab === 'depot' ? 'bg-background shadow-sm' : ''}`}
                   >
                     <Package className="h-3 w-3 inline mr-1" />
-                    Havuz Stok ({poolStockItems.filter(p => !usedPoolStockIds.has(p.id)).length})
+                    Depo Stok ({selectableDepotStock.length})
                   </button>
                 </div>
               )}
@@ -3110,7 +3144,7 @@ export default function AplikasyonIslemFormuPage() {
                         {filteredStock.map(item => (
                           <button
                             key={item.id}
-                            onClick={() => { setSelectedStockItem(item); setSelectedPoolStockItem(null); }}
+                            onClick={() => selectPersonalStockItem(item)}
                             className={`w-full text-left p-3 rounded-lg transition-colors ${
                               selectedStockItem?.id === item.id
                                 ? 'bg-primary/10 border border-primary/40'
@@ -3137,7 +3171,7 @@ export default function AplikasyonIslemFormuPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setShowManualEntry(true)}
+                    onClick={activateManualEntry}
                     className="w-full text-xs"
                   >
                     <Plus className="h-4 w-4 mr-2" />
@@ -3167,7 +3201,7 @@ export default function AplikasyonIslemFormuPage() {
                         {filteredPoolStock.map(item => (
                           <button
                             key={item.id}
-                            onClick={() => { setSelectedPoolStockItem(item); setSelectedStockItem(null); }}
+                            onClick={() => selectPoolStockItem(item)}
                             className={`w-full text-left p-3 rounded-lg transition-colors ${
                               selectedPoolStockItem?.id === item.id
                                 ? 'bg-purple-500/10 border border-purple-500/40'
@@ -3192,7 +3226,67 @@ export default function AplikasyonIslemFormuPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setShowManualEntry(true)}
+                    onClick={activateManualEntry}
+                    className="w-full text-xs"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Stokta yok, manuel ekle
+                  </Button>
+                </>
+              ) : !showManualEntry && stockSourceTab === 'depot' ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Depo stokta ara..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-44 border border-border rounded-lg bg-background">
+                    {filteredDepotStock.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {selectableDepotStock.length === 0
+                          ? 'Depoda eklenebilir yedek parça bulunmuyor.'
+                          : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredDepotStock.map(item => (
+                          <button
+                            key={`${item.id || item.stokKodu}-${item.serialNumber || item.hucreNumarasi || 'qty'}`}
+                            onClick={() => handleDepotItemSelect(item)}
+                            className={`w-full text-left p-3 rounded-lg transition-colors ${
+                              selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu
+                                ? 'bg-orange-500/10 border border-orange-500/40'
+                                : 'hover:bg-muted/60 border border-transparent'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.stokAdi}</p>
+                                <p className="text-xs text-muted-foreground font-mono">
+                                  {item.stokKodu}
+                                  {item.serialNumber ? ` · SN:${item.serialNumber}` : ''}
+                                  {item.hucreNumarasi ? ` · H:${item.hucreNumarasi}` : ''}
+                                  {!item.serialNumber && !item.hucreNumarasi ? ` · ${item.totalQuantity} adet` : ''}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono">{item.serialNumber || item.hucreNumarasi || `${item.totalQuantity} adet`}</p>
+                                <p className="text-xs text-orange-600 font-medium">{item.address || 'Depo'}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={activateManualEntry}
                     className="w-full text-xs"
                   >
                     <Plus className="h-4 w-4 mr-2" />
