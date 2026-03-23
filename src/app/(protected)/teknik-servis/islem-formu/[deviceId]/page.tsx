@@ -3416,6 +3416,62 @@ export default function IslemFormuPage() {
                     Stokta yok, manuel ekle
                   </button>
                 </>
+              ) : !showManualEntry && stockSourceTab === 'depot' ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Depo stokta ara..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-44 rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+                    {filteredDepotStock.length === 0 ? (
+                      <div className="p-4 text-center text-[var(--dashboard-muted)]">
+                        {selectableDepotStock.length === 0 ? 'Depoda eklenebilir yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredDepotStock.map(item => (
+                          <button
+                            key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
+                            onClick={() => { handleDepotItemSelect(item); }}
+                            className={`w-full text-left p-3 rounded-xl transition-colors ${
+                              selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu
+                                ? 'bg-orange-500/10 border border-orange-500/40'
+                                : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p>
+                                <p className="text-xs text-[var(--dashboard-muted)] font-mono">
+                                  {item.stokKodu}
+                                  {item.serialNumber ? ` · SN:${item.serialNumber}` : ''}
+                                  {item.hucreNumarasi ? ` · H:${item.hucreNumarasi}` : ''}
+                                  {!item.serialNumber && !item.hucreNumarasi ? ` · ${item.totalQuantity} adet` : ''}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono text-[var(--dashboard-text)]">{item.serialNumber || item.hucreNumarasi || `${item.totalQuantity} adet`}</p>
+                                <p className="text-xs text-orange-600 font-medium">{item.address || 'Depo'}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <button
+                    onClick={() => setShowManualEntry(true)}
+                    className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Stokta yok, manuel ekle
+                  </button>
+                </>
               ) : showManualEntry ? (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
