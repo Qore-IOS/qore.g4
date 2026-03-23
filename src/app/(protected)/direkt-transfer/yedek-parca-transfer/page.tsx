@@ -258,6 +258,8 @@ export default function YedekParcaTransferPage() {
   const isAuthorized = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const isAdmin = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin';
   const isTeknikLojistik = currentUserProfile?.role === 'teknik_lojistik';
+  const isFieldPersonnel = currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
+  const canAccessTransferPanel = !isFieldPersonnel;
 
   const loadRecentTransferLogs = useCallback(async () => {
     const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
@@ -1771,6 +1773,11 @@ export default function YedekParcaTransferPage() {
 
   // Approve borrowed part
   const approveBorrowedPart = async (borrowed: any) => {
+    if (!isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç onayını yalnızca teknik lojistik kullanıcıları yapabilir.', variant: 'destructive' });
+      return;
+    }
+
     try {
       const now = new Date();
 
@@ -1781,20 +1788,44 @@ export default function YedekParcaTransferPage() {
         approvedByName: currentUserProfile?.name || '',
       });
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
-        action: 'borrowed_approved',
-        stokKodu: borrowed.stokKodu,
-        stokAdi: borrowed.stokAdi,
-        anaBirim: borrowed.anaBirim || 'Adet',
-        serialNumber: borrowed.serialNumber,
-        deviceId: borrowed.deviceId,
-        deviceName: borrowed.deviceName,
-        borrowedByUid: borrowed.borrowedByUid,
-        borrowedByName: borrowed.borrowedByName,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      });
+      if (borrowed.sourceType === 'depot') {
+        await addDoc(collection(db, 'sparePartTransferLogs'), {
+          action: 'use_on_device',
+          borrowedPartId: borrowed.id,
+          stokKodu: borrowed.stokKodu,
+          stokAdi: borrowed.stokAdi,
+          anaBirim: borrowed.anaBirim || 'Adet',
+          serialNumber: borrowed.serialNumber,
+          hucreNumarasi: borrowed.hucreNumarasi || '',
+          quantity: borrowed.quantity || 1,
+          deviceId: borrowed.deviceId,
+          deviceName: borrowed.deviceName,
+          labName: borrowed.labName,
+          formId: borrowed.formId,
+          formType: borrowed.formType,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+          approvedByUid: currentUserProfile?.uid || '',
+          approvedByName: currentUserProfile?.name || '',
+          usageImageUrl: borrowed.usedPartImageUrl || null,
+        });
+      } else {
+        await addDoc(collection(db, 'sparePartTransferLogs'), {
+          action: 'borrowed_approved',
+          stokKodu: borrowed.stokKodu,
+          stokAdi: borrowed.stokAdi,
+          anaBirim: borrowed.anaBirim || 'Adet',
+          serialNumber: borrowed.serialNumber,
+          deviceId: borrowed.deviceId,
+          deviceName: borrowed.deviceName,
+          borrowedByUid: borrowed.borrowedByUid,
+          borrowedByName: borrowed.borrowedByName,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+      }
 
       toast({
         title: 'Onaylandı',
@@ -1810,6 +1841,11 @@ export default function YedekParcaTransferPage() {
 
   // Reject borrowed part
   const rejectBorrowedPart = async (borrowed: any) => {
+    if (!isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç reddini yalnızca teknik lojistik kullanıcıları yapabilir.', variant: 'destructive' });
+      return;
+    }
+
     try {
       const now = new Date();
 
@@ -1819,6 +1855,22 @@ export default function YedekParcaTransferPage() {
         rejectedByUid: currentUserProfile?.uid || '',
         rejectedByName: currentUserProfile?.name || '',
       });
+
+      if (borrowed.sourceType === 'depot') {
+        await addDoc(collection(db, 'yedekParcaDepoStok'), {
+          productCodeId: borrowed.productCodeId || '',
+          stokKodu: borrowed.stokKodu,
+          stokAdi: borrowed.stokAdi,
+          anaBirim: borrowed.anaBirim || 'Adet',
+          serialNumber: borrowed.serialNumber || '',
+          hucreNumarasi: borrowed.hucreNumarasi || '',
+          address: borrowed.depotAddress || '',
+          quantity: borrowed.quantity || 1,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+      }
 
       await addDoc(collection(db, 'sparePartTransferLogs'), {
         action: 'borrowed_rejected',
@@ -2304,8 +2356,8 @@ export default function YedekParcaTransferPage() {
                 <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.borrowedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
-                <button onClick={() => approveBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Onayla</button>
-                <button onClick={() => rejectBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#B91C1C' }}><XCircle className="w-3 h-3" /> Reddet</button>
+                {isTeknikLojistik && <button onClick={() => approveBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Onayla</button>}
+                {isTeknikLojistik && <button onClick={() => rejectBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#B91C1C' }}><XCircle className="w-3 h-3" /> Reddet</button>}
               </div>
             </article>
           ))}
@@ -2379,11 +2431,14 @@ export default function YedekParcaTransferPage() {
                 <div className="divide-y" style={{ borderColor: 'var(--dashboard-stroke)' }}>
                   {filteredHistoryLogs.map(log => {
                     const isTransferAction = log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel';
+                    const resolvedActionLabel = log.action === 'borrowed_part' && log.approvalStatus === 'pending'
+                      ? 'Onay Bekleyen Borç'
+                      : getActionLabel(log.action);
                     return (
                       <div key={log.id} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 px-3 py-2.5 hover:bg-black/[.02] transition-colors">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: 'rgba(107,114,128,.10)', color: 'var(--dashboard-muted)' }}>{getActionLabel(log.action)}</span>
+                            <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: 'rgba(107,114,128,.10)', color: 'var(--dashboard-muted)' }}>{resolvedActionLabel}</span>
                             <span className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>{log.stokAdi}</span>
                           </div>
                           <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>
@@ -3276,6 +3331,11 @@ export default function YedekParcaTransferPage() {
   };
 
   const handleMenuSelect = useCallback((selection: MenuSelection, closeMenu?: () => void) => {
+    if (selection.section === 'transfer' && !canAccessTransferPanel) {
+      closeMenu?.();
+      return;
+    }
+
     setMenuSelection(selection);
 
     if (selection.section === 'personnel' && selection.personnelUid) {
@@ -3285,7 +3345,7 @@ export default function YedekParcaTransferPage() {
     }
 
     closeMenu?.();
-  }, [pathname, router]);
+  }, [canAccessTransferPanel, pathname, router]);
 
 
   useEffect(() => {
@@ -3306,6 +3366,28 @@ export default function YedekParcaTransferPage() {
       };
     });
   }, [pathname, users]);
+
+  useEffect(() => {
+    if (!isFieldPersonnel || !currentUserProfile?.uid) return;
+
+    const segments = pathname.split('/').filter(Boolean);
+    const routePersonnelUid = segments.length > 2 ? segments[2] : '';
+    const ownUid = currentUserProfile.uid;
+
+    if (routePersonnelUid) return;
+
+    setMenuSelection((prev) => {
+      if (prev.section === 'personnel' && prev.personnelUid === ownUid) return prev;
+      return {
+        section: 'personnel',
+        personnelUid: ownUid,
+        personnelName: currentUserProfile.name || currentUserProfile.email || '',
+        personnelRole: currentUserProfile.role || '',
+      };
+    });
+
+    router.replace(`/direkt-transfer/yedek-parca-transfer/${ownUid}`);
+  }, [currentUserProfile, isFieldPersonnel, pathname, router]);
 
   const renderManagementMenu = (closeMenu?: () => void) => {
     const menuItem = (section: MenuSection, icon: React.ReactNode, label: string, sub: string, extra?: React.ReactNode) => {
@@ -3356,7 +3438,7 @@ export default function YedekParcaTransferPage() {
         {/* Module nav */}
         {menuItem('depo-stok', <Warehouse className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Depo Stok', 'Yedek parça deposu')}
         {menuItem('toplam-stok', <PackageOpen className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Personel Toplam Stok', 'Kullanılmamış stok')}
-        {menuItem('transfer', <Send className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Transfer Paneli', 'Transfer, borç, iade, geçmiş',
+        {canAccessTransferPanel && menuItem('transfer', <Send className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Transfer Paneli', 'Transfer, borç, iade, geçmiş',
           (borrowedParts.length > 0 || pendingReturns.length > 0) ? (
             <div className="flex gap-1 flex-shrink-0">
               {borrowedParts.length > 0 && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white" style={{ background: '#B91C1C' }}>{borrowedParts.length}</span>}
@@ -3430,7 +3512,7 @@ export default function YedekParcaTransferPage() {
   const renderRightPanel = () => {
     switch (menuSelection.section) {
       case 'transfer':
-        return renderTransferPanel();
+        return canAccessTransferPanel ? renderTransferPanel() : renderPersonnelStock();
       case 'depo-stok':
         return renderDepoStok();
       case 'personnel':
@@ -3440,7 +3522,7 @@ export default function YedekParcaTransferPage() {
       case 'pool-stok':
         return renderPoolStock();
       default:
-        return renderTransferPanel();
+        return canAccessTransferPanel ? renderTransferPanel() : renderPersonnelStock();
     }
   };
 
