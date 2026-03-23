@@ -1030,6 +1030,19 @@ export default function IslemFormuPage() {
     setIsPartModalOpen(true);
   };
 
+  const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    let requestedQuantity = 1;
+    if (item.isGrouped && item.totalQuantity > 1) {
+      const raw = window.prompt(`Depoda ${item.totalQuantity} adet mevcut. Kaç adet kullanılacak?`, '1');
+      if (raw === null) return;
+      requestedQuantity = Math.max(1, Math.min(item.totalQuantity, parseInt(raw, 10) || 1));
+    }
+    setPartQuantity(requestedQuantity);
+    setSelectedDepotStockItem(item);
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+  };
+
   const refreshDepotStock = async () => {
     const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
     const items = snap.docs.map((d) => {
@@ -1258,7 +1271,7 @@ export default function IslemFormuPage() {
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
         depotStockId: selectedDepotStockItem.id,
         isDepotSelection: true,
-        quantity: 1,
+        quantity: selectedDepotStockItem.isGrouped ? partQuantity : 1,
         removedPartStokKodu: installedPartDefaults.stokKodu,
         removedPartStokAdi: installedPartDefaults.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
@@ -1621,15 +1634,16 @@ export default function IslemFormuPage() {
         }
 
         const consumeDepotSelection = (partChange: ActionItem) => {
+          const requestedQuantity = Math.max(1, partChange.quantity || 1);
           if (partChange.depotStockId) {
             const depotEntry = depotStockItems.find((item) => item.id === partChange.depotStockId);
             if (!depotEntry) throw new Error(`${partChange.stokAdi} için depo stok satırı bulunamadı.`);
 
-            if ((depotEntry.quantity || 1) <= 1) {
+            if ((depotEntry.quantity || 1) <= requestedQuantity) {
               batch.delete(doc(db, 'yedekParcaDepoStok', depotEntry.id));
             } else {
               batch.update(doc(db, 'yedekParcaDepoStok', depotEntry.id), {
-                quantity: (depotEntry.quantity || 1) - 1,
+                quantity: (depotEntry.quantity || 1) - requestedQuantity,
               });
             }
 
@@ -1644,11 +1658,11 @@ export default function IslemFormuPage() {
             throw new Error(`${partChange.stokAdi} için adetli depo stoğu bulunamadı.`);
           }
 
-          if (fallbackEntry.quantity <= 1) {
+          if (fallbackEntry.quantity <= requestedQuantity) {
             batch.delete(doc(db, 'yedekParcaDepoStok', fallbackEntry.id));
           } else {
             batch.update(doc(db, 'yedekParcaDepoStok', fallbackEntry.id), {
-              quantity: fallbackEntry.quantity - 1,
+              quantity: fallbackEntry.quantity - requestedQuantity,
             });
           }
 
@@ -1664,7 +1678,7 @@ export default function IslemFormuPage() {
             anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
             serialNumber: partChange.serialNumber || '',
             hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
-            quantity: 1,
+            quantity: Math.max(1, partChange.quantity || 1),
             sourceType: 'depot',
             sourceActionType: partChange.type,
             depotStockId: depotEntry.id,
@@ -1694,7 +1708,7 @@ export default function IslemFormuPage() {
             anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
             serialNumber: partChange.serialNumber || '',
             hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
-            quantity: 1,
+            quantity: Math.max(1, partChange.quantity || 1),
             approvalStatus: 'pending',
             sourceType: 'depot',
             deviceId,
@@ -1718,7 +1732,7 @@ export default function IslemFormuPage() {
             address: depotEntry.address || '',
             cihazGrubu: depotEntry.cihazGrubu || '',
             serialNumber: partChange.serialNumber || '',
-            quantity: 1,
+            quantity: Math.max(1, partChange.quantity || 1),
             relatedPersonnelUid: currentUserProfile?.uid || '',
             relatedPersonnelName: currentUserProfile?.name || '',
             notes: `${partChange.type === 'hucre_degisimi' ? 'Hücre değişimi' : 'İşlem formu parça değişimi'} için depodan borç kullanım`,
@@ -2532,7 +2546,7 @@ export default function IslemFormuPage() {
                         <div
                           key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
                           onClick={() => {
-                            setSelectedDepotStockItem(item); setSelectedStockItem(null); setSelectedPoolStockItem(null);
+                            handleDepotItemSelect(item);
                             setRemovedPartSerialNumber('');
                             setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
                             setUsedPartImageFile(null); setUsedPartImagePreview(null);
@@ -3325,7 +3339,7 @@ export default function IslemFormuPage() {
                         {filteredDepotStock.map(item => (
                           <button
                             key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
-                            onClick={() => { setSelectedDepotStockItem(item); setSelectedStockItem(null); setSelectedPoolStockItem(null); }}
+                            onClick={() => { handleDepotItemSelect(item); }}
                             className={`w-full text-left p-3 rounded-xl transition-colors ${
                               selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu
                                 ? 'bg-orange-500/10 border border-orange-500/40'
@@ -3539,7 +3553,7 @@ export default function IslemFormuPage() {
             {(selectedStockItem || selectedPoolStockItem || selectedDepotStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
               <div className={`p-3 border rounded-xl text-sm ${selectedPoolStockItem ? 'bg-purple-50/80 border-purple-200/60' : selectedDepotStockItem ? 'bg-orange-50/80 border-orange-200/60' : 'bg-emerald-50/80 border-emerald-200/60'}`}>
                 <p className={`font-medium ${selectedPoolStockItem ? 'text-purple-800' : selectedDepotStockItem ? 'text-orange-800' : 'text-emerald-800'}`}>
-                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || selectedDepotStockItem?.serialNumber || selectedDepotStockItem?.hucreNumarasi || manualSerialNumber || '1 adet'})
+                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || selectedDepotStockItem?.serialNumber || selectedDepotStockItem?.hucreNumarasi || manualSerialNumber || `${partQuantity} adet`})
                   {selectedPoolStockItem && <span className="ml-1 text-xs text-purple-600">(Havuz: {selectedPoolStockItem.poolWarehouseName})</span>}
                   {selectedDepotStockItem && <span className="ml-1 text-xs text-orange-600">(Depo)</span>}
                 </p>

@@ -996,6 +996,19 @@ export default function AplikasyonIslemFormuPage() {
     setIsPartModalOpen(true);
   };
 
+  const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    let requestedQuantity = 1;
+    if (item.isGrouped && item.totalQuantity > 1) {
+      const raw = window.prompt(`Depoda ${item.totalQuantity} adet mevcut. Kaç adet kullanılacak?`, '1');
+      if (raw === null) return;
+      requestedQuantity = Math.max(1, Math.min(item.totalQuantity, parseInt(raw, 10) || 1));
+    }
+    setPartQuantity(requestedQuantity);
+    setSelectedDepotStockItem(item);
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+  };
+
   const refreshDepotStock = async () => {
     const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
     const items = snap.docs.map((d) => {
@@ -1224,7 +1237,7 @@ export default function AplikasyonIslemFormuPage() {
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
         depotStockId: selectedDepotStockItem.id,
         isDepotSelection: true,
-        quantity: 1,
+        quantity: selectedDepotStockItem.isGrouped ? partQuantity : 1,
         removedPartStokKodu: installedPartDefaults.stokKodu,
         removedPartStokAdi: installedPartDefaults.stokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim(),
@@ -1613,15 +1626,16 @@ export default function AplikasyonIslemFormuPage() {
         }
 
         const consumeDepotSelection = (partChange: ActionItem) => {
+          const requestedQuantity = Math.max(1, partChange.quantity || 1);
           if (partChange.depotStockId) {
             const depotEntry = depotStockItems.find((item) => item.id === partChange.depotStockId);
             if (!depotEntry) throw new Error(`${partChange.stokAdi} için depo stok satırı bulunamadı.`);
 
-            if ((depotEntry.quantity || 1) <= 1) {
+            if ((depotEntry.quantity || 1) <= requestedQuantity) {
               batch.delete(doc(db, 'yedekParcaDepoStok', depotEntry.id));
             } else {
               batch.update(doc(db, 'yedekParcaDepoStok', depotEntry.id), {
-                quantity: (depotEntry.quantity || 1) - 1,
+                quantity: (depotEntry.quantity || 1) - requestedQuantity,
               });
             }
 
@@ -1636,11 +1650,11 @@ export default function AplikasyonIslemFormuPage() {
             throw new Error(`${partChange.stokAdi} için adetli depo stoğu bulunamadı.`);
           }
 
-          if (fallbackEntry.quantity <= 1) {
+          if (fallbackEntry.quantity <= requestedQuantity) {
             batch.delete(doc(db, 'yedekParcaDepoStok', fallbackEntry.id));
           } else {
             batch.update(doc(db, 'yedekParcaDepoStok', fallbackEntry.id), {
-              quantity: fallbackEntry.quantity - 1,
+              quantity: fallbackEntry.quantity - requestedQuantity,
             });
           }
 
@@ -1656,7 +1670,7 @@ export default function AplikasyonIslemFormuPage() {
             anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
             serialNumber: partChange.serialNumber || '',
             hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
-            quantity: 1,
+            quantity: Math.max(1, partChange.quantity || 1),
             sourceType: 'depot',
             sourceActionType: partChange.type,
             depotStockId: depotEntry.id,
@@ -1686,7 +1700,7 @@ export default function AplikasyonIslemFormuPage() {
             anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
             serialNumber: partChange.serialNumber || '',
             hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
-            quantity: 1,
+            quantity: Math.max(1, partChange.quantity || 1),
             approvalStatus: 'pending',
             sourceType: 'depot',
             deviceId,
@@ -1710,7 +1724,7 @@ export default function AplikasyonIslemFormuPage() {
             address: depotEntry.address || '',
             cihazGrubu: depotEntry.cihazGrubu || '',
             serialNumber: partChange.serialNumber || '',
-            quantity: 1,
+            quantity: Math.max(1, partChange.quantity || 1),
             relatedPersonnelUid: currentUserProfile?.uid || '',
             relatedPersonnelName: currentUserProfile?.name || '',
             notes: `${partChange.type === 'hucre_degisimi' ? 'Hücre değişimi' : 'İşlem formu parça değişimi'} için depodan borç kullanım`,
@@ -2504,7 +2518,7 @@ export default function AplikasyonIslemFormuPage() {
                         <div
                           key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
                           onClick={() => {
-                            setSelectedDepotStockItem(item); setSelectedStockItem(null); setSelectedPoolStockItem(null);
+                            handleDepotItemSelect(item);
                             setRemovedPartSerialNumber('');
                             setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
                             setUsedPartImageFile(null); setUsedPartImagePreview(null);
