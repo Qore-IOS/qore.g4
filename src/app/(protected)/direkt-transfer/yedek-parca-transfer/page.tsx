@@ -230,7 +230,7 @@ export default function YedekParcaTransferPage() {
   const [personnelStock, setPersonnelStock] = useState<PersonnelStockViewItem[]>([]);
   const [personnelStockLoading, setPersonnelStockLoading] = useState(false);
   const [personnelStockPage, setPersonnelStockPage] = useState(0);
-  const [personnelStockFilter, setPersonnelStockFilter] = useState<'all' | 'used' | 'unused'>('all');
+  const [personnelStockFilter, setPersonnelStockFilter] = useState<'all' | 'used' | 'unused' | 'pending_approval'>('all');
   const ITEMS_PER_PAGE = 20;
 
   // All personnel stock for toplam stok view
@@ -255,8 +255,8 @@ export default function YedekParcaTransferPage() {
   const [poolStockPage, setPoolStockPage] = useState(0);
 
   // Check authorization
-  const isAuthorized = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
-  const isAdmin = currentUserProfile?.role === 'admin';
+  const isAuthorized = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
+  const isAdmin = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin';
   const isTeknikLojistik = currentUserProfile?.role === 'teknik_lojistik';
 
   const loadRecentTransferLogs = useCallback(async () => {
@@ -759,7 +759,11 @@ export default function YedekParcaTransferPage() {
     if (personnelStockFilter === 'unused') {
       return personnelStock.filter(s => s.status === 'in_stock');
     }
-    return personnelStock;
+    if (personnelStockFilter === 'pending_approval') {
+      return personnelStock.filter(s => s.status === 'pending_approval');
+    }
+    // 'all' filter: exclude pending_approval items (shown in separate tab)
+    return personnelStock.filter(s => s.status !== 'pending_approval');
   }, [personnelStock, personnelStockFilter]);
 
   // Paginated personnel stock
@@ -1010,7 +1014,7 @@ export default function YedekParcaTransferPage() {
               createdByName: currentUserProfile?.name || '',
             });
           } else {
-            // Personel stokuna ekle
+            // Personel stokuna ekle (onay bekliyor olarak)
             const stockRef = doc(collection(db, 'personalStock'));
             batch.set(stockRef, {
               ownerUid: row.targetUid,
@@ -1022,7 +1026,7 @@ export default function YedekParcaTransferPage() {
               serialNumber: row.serialNumber,
               ...hucreData,
               source: 'depot',
-              status: 'in_stock',
+              status: 'pending_approval',
               createdAt: Timestamp.fromDate(now),
               transferredByUid: currentUserProfile?.uid || '',
               transferredByName: currentUserProfile?.name || '',
@@ -1129,7 +1133,7 @@ export default function YedekParcaTransferPage() {
               createdByName: currentUserProfile?.name || '',
             });
           } else {
-            // Personel stokuna ekle
+            // Personel stokuna ekle (onay bekliyor olarak)
             for (let i = 0; i < row.quantity; i++) {
               const stockRef = doc(collection(db, 'personalStock'));
               batch.set(stockRef, {
@@ -1141,7 +1145,7 @@ export default function YedekParcaTransferPage() {
               anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
                 source: 'depot',
-                status: 'in_stock',
+                status: 'pending_approval',
                 createdAt: Timestamp.fromDate(now),
                 transferredByUid: currentUserProfile?.uid || '',
                 transferredByName: currentUserProfile?.name || '',
@@ -1210,9 +1214,12 @@ export default function YedekParcaTransferPage() {
       }
 
       const totalItems = transferRows.reduce((s, r) => s + r.quantity, 0);
+      const hasPersonnelTargets = transferRows.some(r => !r.targetUid.startsWith('pool_'));
       toast({
         title: 'Transfer Tamamlandı',
-        description: `${totalItems} adet yedek parça başarıyla transfer edildi.`,
+        description: hasPersonnelTargets
+          ? `${totalItems} adet yedek parça transfer edildi. Personel onayı bekleniyor.`
+          : `${totalItems} adet yedek parça başarıyla transfer edildi.`,
       });
 
       setTransferRows([]);
@@ -1905,6 +1912,126 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  // Approve pending transfer
+  const approveTransfer = async (item: PersonnelStockViewItem) => {
+    try {
+      const now = new Date();
+      await updateDoc(doc(db, 'personalStock', item.id), {
+        status: 'in_stock',
+        approvedAt: Timestamp.fromDate(now),
+      });
+
+      await addDoc(collection(db, 'sparePartTransferLogs'), {
+        action: 'transfer_approved',
+        personalStockId: item.id,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
+        serialNumber: item.serialNumber || '',
+        toUid: item.ownerUid,
+        toName: item.ownerName,
+        quantity: 1,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      toast({
+        title: 'Onaylandı',
+        description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) stoğunuza eklendi.`,
+      });
+
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
+    } catch (err) {
+      console.error('Error approving transfer:', err);
+      toast({ title: 'Hata', description: 'Onaylama sırasında hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  // Reject pending transfer - return to depot
+  const rejectTransfer = async (item: PersonnelStockViewItem) => {
+    const shouldReject = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) transferini reddetmek istediğinize emin misiniz? Ürün depoya geri gönderilecektir.`);
+    if (!shouldReject) return;
+
+    try {
+      const now = new Date();
+      const batch = writeBatch(db);
+
+      // Delete from personalStock
+      batch.delete(doc(db, 'personalStock', item.id));
+
+      // Add back to depot stock
+      const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
+      batch.set(depoRef, {
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
+        serialNumber: item.serialNumber || '',
+        ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
+        quantity: 1,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      // Transfer log
+      const logRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(logRef, {
+        action: 'transfer_rejected',
+        personalStockId: item.id,
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
+        serialNumber: item.serialNumber || '',
+        fromUid: item.ownerUid,
+        fromName: item.ownerName,
+        quantity: 1,
+        notes: 'Transfer personel tarafından reddedildi, ürün depoya iade edildi.',
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      // Depo log
+      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+      batch.set(depoLogRef, {
+        action: 'iade_giris',
+        productCodeId: item.productCodeId,
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        anaBirim: item.anaBirim || 'Adet',
+        serialNumber: item.serialNumber || '',
+        quantity: 1,
+        relatedPersonnelUid: item.ownerUid,
+        relatedPersonnelName: item.ownerName,
+        notes: `Transfer reddedildi: ${item.ownerName} -> Depo`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      });
+
+      await batch.commit();
+
+      toast({
+        title: 'Reddedildi',
+        description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
+      });
+
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      await loadRecentTransferLogs();
+    } catch (err) {
+      console.error('Error rejecting transfer:', err);
+      toast({ title: 'Hata', description: 'Reddetme sırasında hata oluştu.', variant: 'destructive' });
+    }
+  };
+
   // Action labels for logs
   const getActionLabel = (action: string) => {
     const labels: Record<string, string> = {
@@ -1923,6 +2050,8 @@ export default function YedekParcaTransferPage() {
       depo_stock_deleted_admin: 'Admin Depo Stok Silme',
       personnel_stock_deleted_admin: 'Admin Personel Stok Silme',
       pool_stock_deleted_admin: 'Admin Havuz Stok Silme',
+      transfer_approved: 'Transfer Onaylandı',
+      transfer_rejected: 'Transfer Reddedildi',
     };
     return labels[action] || action;
   };
@@ -2235,6 +2364,8 @@ export default function YedekParcaTransferPage() {
                   <option value="borrowed_part">Borç Parça</option>
                   <option value="borrowed_approved">Borç Onaylandı</option>
                   <option value="borrowed_rejected">Borç Reddedildi</option>
+                  <option value="transfer_approved">Transfer Onaylandı</option>
+                  <option value="transfer_rejected">Transfer Reddedildi</option>
                   <option value="depo_stock_adjusted">Depo Stok Güncellendi</option>
                   <option value="depo_serial_deleted">Depo Seri No Silindi</option>
                   <option value="depo_stock_deleted_admin">Admin Depo Stok Silme</option>
@@ -2462,6 +2593,7 @@ export default function YedekParcaTransferPage() {
   const renderPersonnelStock = () => {
     const activeCount = personnelStock.filter(s => s.status === 'in_stock').length;
     const usedCount = personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return').length;
+    const pendingApprovalCount = personnelStock.filter(s => s.status === 'pending_approval').length;
 
     return (
       <div className="space-y-4">
@@ -2483,10 +2615,16 @@ export default function YedekParcaTransferPage() {
                 <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
                   {usedCount} Kullanıldı
                 </span>
+                {pendingApprovalCount > 0 && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                    {pendingApprovalCount} Onay Bekliyor
+                  </span>
+                )}
               </div>
               <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
                 {([
                   { key: 'all', label: 'Tamamını Göster' },
+                  { key: 'pending_approval', label: `Onayda Bekleyenler (${pendingApprovalCount})` },
                   { key: 'used', label: 'Kullanılanları Göster' },
                   { key: 'unused', label: 'Kullanılmayanları Göster' },
                 ] as const).map(option => {
@@ -2582,6 +2720,9 @@ export default function YedekParcaTransferPage() {
                           {item.status === 'pending_return' && (
                             <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">İade Bekliyor</span>
                           )}
+                          {item.status === 'pending_approval' && (
+                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">Onay Bekliyor</span>
+                          )}
                         </td>
                         <td className={cn('px-4 py-3 text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
                           {format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
@@ -2593,7 +2734,24 @@ export default function YedekParcaTransferPage() {
                           }
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {(isAdmin || isTeknikLojistik) ? (
+                          {item.status === 'pending_approval' ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => approveTransfer(item)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all active:scale-95"
+                                style={{ background: '#16A34A' }}
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" /> Onayla
+                              </button>
+                              <button
+                                onClick={() => rejectTransfer(item)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-red-50"
+                                style={{ color: '#B91C1C' }}
+                              >
+                                <XCircle className="w-3.5 h-3.5" /> Reddet
+                              </button>
+                            </div>
+                          ) : (isAdmin || isTeknikLojistik) ? (
                             <button
                               onClick={() => deletePersonnelStockItem(item)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
@@ -2663,13 +2821,33 @@ export default function YedekParcaTransferPage() {
                       {item.status === 'pending_return' && (
                         <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">İade Bekliyor</span>
                       )}
+                      {item.status === 'pending_approval' && (
+                        <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 shrink-0">Onay Bekliyor</span>
+                      )}
                     </div>
                     <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
                       <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
                         {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
                         {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
                       </span>
-                      {(isAdmin || isTeknikLojistik) ? (
+                      {item.status === 'pending_approval' ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => approveTransfer(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold text-white rounded-lg transition-all active:scale-95"
+                            style={{ background: '#16A34A' }}
+                          >
+                            <CheckCircle className="w-3 h-3" /> Onayla
+                          </button>
+                          <button
+                            onClick={() => rejectTransfer(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg transition-all active:scale-95 hover:bg-red-50"
+                            style={{ color: '#B91C1C' }}
+                          >
+                            <XCircle className="w-3 h-3" /> Reddet
+                          </button>
+                        </div>
+                      ) : (isAdmin || isTeknikLojistik) ? (
                         <button
                           onClick={() => deletePersonnelStockItem(item)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
