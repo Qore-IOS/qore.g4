@@ -297,6 +297,14 @@ const subItemMap: Record<string, DockSubItem[]> = {
       href: "/direkt-transfer",
     },
   ],
+  "direkt-transfer": [
+    {
+      key: "yedek-parca-transfer",
+      label: "Yedek Parça Transfer",
+      icon: Boxes,
+      href: "/direkt-transfer/yedek-parca-transfer",
+    },
+  ],
   "verimlilik-hesaplama": [
     {
       key: "verimlilik-hesaplama",
