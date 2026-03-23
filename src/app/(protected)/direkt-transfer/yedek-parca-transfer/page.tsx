@@ -258,6 +258,8 @@ export default function YedekParcaTransferPage() {
   const isAuthorized = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const isAdmin = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin';
   const isTeknikLojistik = currentUserProfile?.role === 'teknik_lojistik';
+  const isFieldPersonnel = currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
+  const canAccessTransferPanel = !isFieldPersonnel;
 
   const loadRecentTransferLogs = useCallback(async () => {
     const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
@@ -3276,6 +3278,11 @@ export default function YedekParcaTransferPage() {
   };
 
   const handleMenuSelect = useCallback((selection: MenuSelection, closeMenu?: () => void) => {
+    if (selection.section === 'transfer' && !canAccessTransferPanel) {
+      closeMenu?.();
+      return;
+    }
+
     setMenuSelection(selection);
 
     if (selection.section === 'personnel' && selection.personnelUid) {
@@ -3285,7 +3292,7 @@ export default function YedekParcaTransferPage() {
     }
 
     closeMenu?.();
-  }, [pathname, router]);
+  }, [canAccessTransferPanel, pathname, router]);
 
 
   useEffect(() => {
@@ -3306,6 +3313,28 @@ export default function YedekParcaTransferPage() {
       };
     });
   }, [pathname, users]);
+
+  useEffect(() => {
+    if (!isFieldPersonnel || !currentUserProfile?.uid) return;
+
+    const segments = pathname.split('/').filter(Boolean);
+    const routePersonnelUid = segments.length > 2 ? segments[2] : '';
+    const ownUid = currentUserProfile.uid;
+
+    if (routePersonnelUid) return;
+
+    setMenuSelection((prev) => {
+      if (prev.section === 'personnel' && prev.personnelUid === ownUid) return prev;
+      return {
+        section: 'personnel',
+        personnelUid: ownUid,
+        personnelName: currentUserProfile.name || currentUserProfile.email || '',
+        personnelRole: currentUserProfile.role || '',
+      };
+    });
+
+    router.replace(`/direkt-transfer/yedek-parca-transfer/${ownUid}`);
+  }, [currentUserProfile, isFieldPersonnel, pathname, router]);
 
   const renderManagementMenu = (closeMenu?: () => void) => {
     const menuItem = (section: MenuSection, icon: React.ReactNode, label: string, sub: string, extra?: React.ReactNode) => {
@@ -3356,7 +3385,7 @@ export default function YedekParcaTransferPage() {
         {/* Module nav */}
         {menuItem('depo-stok', <Warehouse className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Depo Stok', 'Yedek parça deposu')}
         {menuItem('toplam-stok', <PackageOpen className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Personel Toplam Stok', 'Kullanılmamış stok')}
-        {menuItem('transfer', <Send className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Transfer Paneli', 'Transfer, borç, iade, geçmiş',
+        {canAccessTransferPanel && menuItem('transfer', <Send className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-accent)' }} />, 'Transfer Paneli', 'Transfer, borç, iade, geçmiş',
           (borrowedParts.length > 0 || pendingReturns.length > 0) ? (
             <div className="flex gap-1 flex-shrink-0">
               {borrowedParts.length > 0 && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white" style={{ background: '#B91C1C' }}>{borrowedParts.length}</span>}
@@ -3430,7 +3459,7 @@ export default function YedekParcaTransferPage() {
   const renderRightPanel = () => {
     switch (menuSelection.section) {
       case 'transfer':
-        return renderTransferPanel();
+        return canAccessTransferPanel ? renderTransferPanel() : renderPersonnelStock();
       case 'depo-stok':
         return renderDepoStok();
       case 'personnel':
@@ -3440,7 +3469,7 @@ export default function YedekParcaTransferPage() {
       case 'pool-stok':
         return renderPoolStock();
       default:
-        return renderTransferPanel();
+        return canAccessTransferPanel ? renderTransferPanel() : renderPersonnelStock();
     }
   };
 
