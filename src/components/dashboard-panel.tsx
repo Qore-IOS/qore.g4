@@ -296,6 +296,7 @@ export default function DashboardPanel({
     if (!currentUserProfile?.uid) {
       return {
         timelineItems: [] as Array<{ id: string; label: string; type: 'past' | 'today' | 'future' }>,
+        todayTasks: [] as Array<{ id: string; label: string; type: 'today-task' }>,
       };
     }
 
