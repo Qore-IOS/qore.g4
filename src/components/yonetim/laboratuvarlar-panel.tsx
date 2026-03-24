@@ -20,8 +20,6 @@ import SharedLabPoolModal from '@/components/SharedLabPoolModal';
 import EfficiencyPoolModal from '@/components/EfficiencyPoolModal';
 import ProductOrderModal from '@/components/ProductOrderModal';
 import { exportDataToExcel } from '@/lib/utils';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
@@ -32,7 +30,6 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 
 export default function LaboratuvarPanel() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
@@ -70,11 +67,11 @@ export default function LaboratuvarPanel() {
     setIsLoading(true);
     try {
       const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'addressDefinitions')),
         getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
-        getDocs(companyQuery(db, 'depoStok', currentCompanyId)),
+        getDocs(collection(db, 'depoStok')),
         getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
       ]);
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
@@ -89,7 +86,7 @@ export default function LaboratuvarPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   useEffect(() => {
     fetchHospitalsAndProducts();

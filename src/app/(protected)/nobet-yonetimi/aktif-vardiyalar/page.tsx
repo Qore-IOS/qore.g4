@@ -14,7 +14,6 @@ import { useAuth } from '@/contexts/auth-context';
 import { useDutyShiftsByStatus, useHospitals } from '@/hooks/useFirebaseQueries';
 import { db } from '@/lib/firebase';
 import { doc, updateDoc, Timestamp, writeBatch, collection, addDoc } from 'firebase/firestore';
-import { companyStamp } from '@/lib/company-filter';
 import { format, differenceInDays, isWithinInterval, eachDayOfInterval, addDays, isSameDay, startOfDay } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { DutyShift } from '@/lib/types';
@@ -25,7 +24,7 @@ import { Label } from '@/components/ui/label';
 export default function AktifVardiyalarPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
   const queryClient = useQueryClient();
   const { data: shifts = [], isLoading } = useDutyShiftsByStatus('active');
   const { data: hospitals = [] } = useHospitals();
@@ -230,7 +229,7 @@ export default function AktifVardiyalarPage() {
           // Create new shifts for remaining days (original target owner)
           for (const range of remainingRanges) {
             const newShiftRef = doc(collection(db, 'dutyShifts'));
-            batch.set(newShiftRef, companyStamp({
+            batch.set(newShiftRef, {
               userId: swapTargetShift.userId,
               userName: swapTargetShift.userName,
               role: swapTargetShift.role,
@@ -246,13 +245,13 @@ export default function AktifVardiyalarPage() {
               createdByName: currentUserProfile?.name || '',
               notes: `Kısmi vardiya değişiminden oluşturuldu (Orijinal: ${swapTargetShift.id})`,
               originalShiftId: swapTargetShift.id,
-            }, currentCompanyId, 'dutyShifts'));
+            });
           }
 
           // Create new shifts for swapped days (own user takes target's days)
           for (const range of swappedRanges) {
             const newShiftRef = doc(collection(db, 'dutyShifts'));
-            batch.set(newShiftRef, companyStamp({
+            batch.set(newShiftRef, {
               userId: ownShift.userId,
               userName: ownShift.userName,
               role: swapTargetShift.role,
@@ -270,7 +269,7 @@ export default function AktifVardiyalarPage() {
               originalShiftId: swapTargetShift.id,
               swappedFromUserId: swapTargetShift.userId,
               swappedFromUserName: swapTargetShift.userName,
-            }, currentCompanyId, 'dutyShifts'));
+            });
           }
 
           // Similarly handle own shift: split selected days to target user
@@ -294,7 +293,7 @@ export default function AktifVardiyalarPage() {
             const ownRemainingRanges = groupContiguousDays(ownRemainingDays);
             for (const range of ownRemainingRanges) {
               const newShiftRef = doc(collection(db, 'dutyShifts'));
-              batch.set(newShiftRef, companyStamp({
+              batch.set(newShiftRef, {
                 userId: ownShift.userId,
                 userName: ownShift.userName,
                 role: ownShift.role,
@@ -310,14 +309,14 @@ export default function AktifVardiyalarPage() {
                 createdByName: currentUserProfile?.name || '',
                 notes: `Kısmi vardiya değişiminden oluşturuldu (Orijinal: ${ownShift.id})`,
                 originalShiftId: ownShift.id,
-              }, currentCompanyId, 'dutyShifts'));
+              });
             }
 
             // Create shifts for own swap days going to target user
             const ownSwappedRanges = groupContiguousDays(ownSwapDays);
             for (const range of ownSwappedRanges) {
               const newShiftRef = doc(collection(db, 'dutyShifts'));
-              batch.set(newShiftRef, companyStamp({
+              batch.set(newShiftRef, {
                 userId: swapTargetShift.userId,
                 userName: swapTargetShift.userName,
                 role: ownShift.role,
@@ -335,7 +334,7 @@ export default function AktifVardiyalarPage() {
                 originalShiftId: ownShift.id,
                 swappedFromUserId: ownShift.userId,
                 swappedFromUserName: ownShift.userName,
-              }, currentCompanyId, 'dutyShifts'));
+              });
             }
           } else {
             // Own shift doesn't have matching days, just update with target user info for the full shift

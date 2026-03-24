@@ -19,8 +19,6 @@ import { CalendarClock, Loader2, FileSpreadsheet, Trash2 } from 'lucide-react';
 import type { DepoStokItem, Shipment, ConsumptionRecord, ProductCode } from '@/lib/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 
 interface ReportRow {
   stokKodu: string;
@@ -31,7 +29,6 @@ interface ReportRow {
 
 export default function HareketsizStokRaporuPanel() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStockCodes, setSelectedStockCodes] = useState<Set<string>>(new Set());
@@ -41,7 +38,7 @@ export default function HareketsizStokRaporuPanel() {
     try {
       // 1) Fetch all transaction data and product master data
       const [depSnap, shipSnap, consSnap, prodSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'depoStok', currentCompanyId)),
+        getDocs(collection(db, 'depoStok')),
         getDocs(collection(db, 'shipments')),
         getDocs(collection(db, 'tuketimKayitlari')),
         getDocs(collection(db, 'productCodes')),
@@ -112,7 +109,7 @@ export default function HareketsizStokRaporuPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   useEffect(() => {
     fetchReport();

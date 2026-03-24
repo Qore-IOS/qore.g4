@@ -13,7 +13,6 @@ import {
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
 import type { DepoStokItem, ProductCode } from '@/lib/types';
 import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
@@ -38,7 +37,6 @@ export function useLabCountMissingStock(params: {
   toast?: (o: { title: string; description?: string; variant?: 'default' | 'destructive' }) => void;
   poolMemberIds?: string[];
   poolMemberNames?: string[];
-  companyId?: string;
 }) {
   const {
     labId,
@@ -100,22 +98,22 @@ export function useLabCountMissingStock(params: {
       const lot = parsed?.lotNumarasi || '';
       const serial = parsed?.seriNumarasi || '';
 
-      const cid = params.companyId || '';
+      const stokRef = collection(db, 'depoStok');
       const candidates: any[] = [];
 
       if (isSerial) {
         const snap = await getDocs(
-          companyQuery(db, 'depoStok', cid, where('seriNumarasi', '==', serial), limit(5))
+          query(stokRef, where('seriNumarasi', '==', serial), limit(5))
         );
         candidates.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
       } else if (stokKodu && lot) {
         const snap = await getDocs(
-          companyQuery(db, 'depoStok', cid, where('stokKodu', '==', stokKodu), where('lotNumarasi', '==', lot), limit(10))
+          query(stokRef, where('stokKodu', '==', stokKodu), where('lotNumarasi', '==', lot), limit(10))
         );
         candidates.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
       } else if (stokKodu) {
         const snap = await getDocs(
-          companyQuery(db, 'depoStok', cid, where('stokKodu', '==', stokKodu), limit(10))
+          query(stokRef, where('stokKodu', '==', stokKodu), limit(10))
         );
         candidates.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
@@ -140,7 +138,7 @@ export function useLabCountMissingStock(params: {
 
       // Create transfer record for traceability
       const transferRef = doc(collection(db, 'transfers'));
-      batch.set(transferRef, companyStamp({
+      batch.set(transferRef, {
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceDepotId: sourceDepotId,
@@ -151,7 +149,7 @@ export function useLabCountMissingStock(params: {
         itemCount: 1,
         createdByUid: 'system',
         createdByName: 'Sayım Otomatik Transfer',
-      }, params.companyId || '', 'transfers'));
+      });
 
       // Add item to transfer subcollection
       const transferItemRef = doc(collection(db, 'transfers', transferRef.id, 'items'), depotSource.id);
@@ -199,7 +197,7 @@ export function useLabCountMissingStock(params: {
         transferSource: 'depot' as const,
       };
     },
-    [labId, labName, params.companyId]
+    [labId, labName]
   );
 
   const transferFromPoolLabToLab = useCallback(
@@ -208,10 +206,12 @@ export function useLabCountMissingStock(params: {
       const serial = parsed?.seriNumarasi?.trim();
       if (!serial) return null;
 
+      const stokRef = collection(db, 'depoStok');
+
       // Search for the serial in pool member labs
       const snap = await getDocs(
-        companyQuery(
-          db, 'depoStok', params.companyId || '',
+        query(
+          stokRef,
           where('seriNumarasi', '==', serial),
           where('isShipped', '==', true),
           limit(5)
@@ -244,7 +244,7 @@ export function useLabCountMissingStock(params: {
 
       // Create inter-lab transfer record
       const transferRef = doc(collection(db, 'transfers'));
-      batch.set(transferRef, companyStamp({
+      batch.set(transferRef, {
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceLabId: sourceLabId,
@@ -255,7 +255,7 @@ export function useLabCountMissingStock(params: {
         itemCount: 1,
         createdByUid: 'system',
         createdByName: 'Sayım Otomatik Transfer',
-      }, params.companyId || '', 'transfers'));
+      });
 
       // Add item to transfer subcollection
       const transferItemRef = doc(collection(db, 'transfers', transferRef.id, 'items'), (poolSource as any).id);
@@ -300,7 +300,7 @@ export function useLabCountMissingStock(params: {
         sourceLabName,
       };
     },
-    [labId, labName, poolMemberIds, poolMemberNames, params.companyId]
+    [labId, labName, poolMemberIds, poolMemberNames]
   );
 
   const onScanAndStageIfMissing = useCallback(
@@ -401,13 +401,13 @@ export function useLabCountMissingStock(params: {
         hedefKurum: labName,
         eklenmeTarihi: new Date(),
       };
-      batch.set(ref, companyStamp(data as any, params.companyId || '', 'depoStok'));
+      batch.set(ref, data as any);
     });
     await batch.commit();
     const created = pending.length;
     setNewFromCount(prev => prev.filter(n => n.persisted));
     return created;
-  }, [labId, labName, newFromCount, params.companyId]);
+  }, [labId, labName, newFromCount]);
 
   return {
     newFromCount,

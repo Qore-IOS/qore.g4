@@ -4,8 +4,6 @@ import type { Depot, ProductCode, AddressDefinition, Hospital, DeviceLabPool } f
 import { db } from '@/lib/firebase';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -25,7 +23,6 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 
 export default function DepoYonetimPanel() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
   const [depots, setDepots] = useState<Depot[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -46,11 +43,11 @@ export default function DepoYonetimPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap, poolsSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'depots', currentCompanyId)),
+        getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'productCodes')),
-        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'addressDefinitions')),
-        getDocs(addCompanyFilter(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc')), currentCompanyId, 'deviceLabPools')),
+        getDocs(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc'))),
       ]);
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
       setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
@@ -62,7 +59,7 @@ export default function DepoYonetimPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   useEffect(() => {
     fetchData();
@@ -113,7 +110,7 @@ export default function DepoYonetimPanel() {
       if (currentDepot.id) {
         await setDoc(doc(db, 'depots', currentDepot.id), dataToSave, { merge: true });
       } else {
-        await addDoc(collection(db, 'depots'), companyStamp(dataToSave, currentCompanyId, 'depots'));
+        await addDoc(collection(db, 'depots'), dataToSave);
       }
       toast({ title: 'Başarılı', description: 'Depo kaydedildi.' });
       fetchData();

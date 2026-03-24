@@ -19,7 +19,6 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -48,7 +47,7 @@ export default function DashboardPanel({
     tuketimKayitlari,
 }: DashboardPanelProps) {
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const { theme } = useTheme();
   const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
   const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
@@ -92,9 +91,9 @@ export default function DashboardPanel({
   }, []);
 
   useEffect(() => {
-    const faultQuery = companyQuery(db, 'deviceFaultReports', currentCompanyId);
+    const faultQuery = query(collection(db, 'deviceFaultReports'));
     const unsubscribeFaults = onSnapshot(
-      faultQuery as any,
+      faultQuery,
       (snapshot) => {
         const reports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as DeviceFaultReport[];
         setFaultReports(reports);
@@ -102,9 +101,9 @@ export default function DashboardPanel({
       (error) => console.error('deviceFaultReports fetch error:', error)
     );
 
-    const taskQuery = companyQuery(db, 'purchasingTasks', currentCompanyId);
+    const taskQuery = query(collection(db, 'purchasingTasks'));
     const unsubscribeTasks = onSnapshot(
-      taskQuery as any,
+      taskQuery,
       (snapshot) => {
         const tasks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as PurchasingTask[];
         setPurchasingTasks(tasks);
@@ -116,7 +115,7 @@ export default function DashboardPanel({
       unsubscribeFaults();
       unsubscribeTasks();
     };
-  }, [currentCompanyId]);
+  }, []);
 
   // Total stock cost + risky cost – client-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
@@ -124,18 +123,13 @@ export default function DashboardPanel({
   useEffect(() => {
     (async () => {
       try {
-        const [productSnap, stockSnap, depotsSnap] = await Promise.allSettled([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', false))),
-        ]);
+        let productDocs: any[] = [];
+        let stockDocs: any[] = [];
+        let depotDocs: any[] = [];
 
-        const productDocs = productSnap.status === 'fulfilled' ? productSnap.value.docs : [];
-        const stockDocs = stockSnap.status === 'fulfilled' ? stockSnap.value.docs : [];
-        const depotDocs = depotsSnap.status === 'fulfilled' ? depotsSnap.value.docs : [];
-
-        if (productSnap.status === 'rejected') console.warn('[Dashboard] productCodes fetch failed:', productSnap.reason);
-        if (stockSnap.status === 'rejected') console.warn('[Dashboard] depoStok fetch failed:', stockSnap.reason);
-        if (depotsSnap.status === 'rejected') console.warn('[Dashboard] depots fetch failed:', depotsSnap.reason);
+        try { const s = await getDocs(collection(db, 'productCodes')); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+        try { const s = await getDocs(collection(db, 'depoStok')); stockDocs = s.docs; } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
+        try { const s = await getDocs(collection(db, 'depots')); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
         // Build cost map: stokKodu -> birim maliyet
         const costMap = new Map<string, number>();
@@ -237,7 +231,7 @@ export default function DashboardPanel({
         setRiskyCost(0);
       }
     })();
-  }, [currentCompanyId]);
+  }, []);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
   const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
@@ -249,17 +243,18 @@ export default function DashboardPanel({
         const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
         const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
 
-        const [productResult, consumptionResult] = await Promise.allSettled([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(companyQuery(
-            db, 'tuketimKayitlari', currentCompanyId,
+        let productDocs2: any[] = [];
+        let consumptionDocs: any[] = [];
+
+        try { const s = await getDocs(collection(db, 'productCodes')); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
+        try {
+          const s = await getDocs(query(
+            collection(db, 'tuketimKayitlari'),
             where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
             where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
-          )),
-        ]);
-
-        const productDocs2 = productResult.status === 'fulfilled' ? productResult.value.docs : [];
-        const consumptionDocs = consumptionResult.status === 'fulfilled' ? consumptionResult.value.docs : [];
+          ));
+          consumptionDocs = s.docs;
+        } catch (e) { console.warn('[Dashboard] yesterday consumption fetch failed:', e); }
 
         const priceMap = new Map<string, number>();
         productDocs2.forEach(d => {
@@ -278,7 +273,7 @@ export default function DashboardPanel({
         setYesterdayConsumptionCost(total);
       } catch (e) { console.error('Yesterday consumption cost error:', e); }
     })();
-  }, [currentCompanyId]);
+  }, []);
 
   // Average efficiency
   const [avgEfficiency, setAvgEfficiency] = useState<number | null>(null);
@@ -299,7 +294,7 @@ export default function DashboardPanel({
         setAvgEfficiency(efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length);
       } catch (e) { console.error('Avg efficiency error:', e); }
     })();
-  }, [currentCompanyId]);
+  }, []);
 
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
     const status = (report.status || '').toLowerCase().replace(/[\s-]/g, '_');
@@ -313,7 +308,6 @@ export default function DashboardPanel({
     if (!currentUserProfile?.uid) {
       return {
         timelineItems: [] as Array<{ id: string; label: string; type: 'past' | 'today' | 'future' }>,
-        todayTasks: [] as Array<{ id: string; label: string; type: 'today-task' }>,
       };
     }
 

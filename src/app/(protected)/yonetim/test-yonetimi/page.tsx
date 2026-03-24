@@ -12,8 +12,6 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode, Hospital } from '@/lib/types';
 import BackButton from '@/components/BackButton';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Check, ChevronsUpDown } from 'lucide-react';
@@ -31,7 +29,6 @@ interface HakEdisDefinition {
 
 export default function HakEdisPage() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
 
   // Laboratuvar seçimi
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -66,7 +63,7 @@ export default function HakEdisPage() {
       setLoading(prev => ({ ...prev, labs: true, products: true }));
       try {
         const [hospitalsSnap, productsSnap] = await Promise.all([
-          getDocs(companyQuery(db, 'hospitals', currentCompanyId, orderBy('name', 'asc'))),
+          getDocs(query(collection(db, 'hospitals'), orderBy('name', 'asc'))),
           getDocs(query(collection(db, 'productCodes'), orderBy('stokAdi', 'asc'))),
         ]);
         setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
@@ -79,7 +76,7 @@ export default function HakEdisPage() {
       }
     };
     fetchMasterData();
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   // Listen for hak ediş definitions when a lab is selected
   useEffect(() => {

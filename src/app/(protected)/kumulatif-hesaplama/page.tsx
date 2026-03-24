@@ -63,8 +63,6 @@ import type {
 } from '@/lib/types';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -113,7 +111,6 @@ function parseLocaleInt(val: any): number {
 export default function KumulatifHesaplamaPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -151,7 +148,7 @@ export default function KumulatifHesaplamaPage() {
       setIsLoading(true);
       try {
         const [hSnap, pSnap, poolSnap] = await Promise.all([
-          getDocs(companyQuery(db, 'hospitals', currentCompanyId, orderBy('name'))),
+          getDocs(query(collection(db, 'hospitals'), orderBy('name'))),
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'labPools')),
         ]);
@@ -197,7 +194,7 @@ export default function KumulatifHesaplamaPage() {
         setIsLoading(false);
       }
     })();
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   // ---- Product Listing Logic ----
 

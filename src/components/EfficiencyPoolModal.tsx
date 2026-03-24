@@ -13,7 +13,6 @@ import { collection, getDocs, addDoc, Timestamp, query, orderBy } from 'firebase
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
 import type { Hospital, LabPool, EfficiencyPool } from '@/lib/types';
 
 interface EfficiencyPoolModalProps {
@@ -24,7 +23,7 @@ interface EfficiencyPoolModalProps {
 
 export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated }: EfficiencyPoolModalProps) {
   const { toast } = useToast();
-  const { currentUser, currentCompanyId } = useAuth();
+  const { currentUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -44,7 +43,7 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
     setIsLoading(true);
     try {
       const [hospitalsSnap, poolsSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'hospitals', currentCompanyId, orderBy('name', 'asc'))),
+        getDocs(query(collection(db, 'hospitals'), orderBy('name', 'asc'))),
         getDocs(collection(db, 'labPools')),
       ]);
 
@@ -103,7 +102,7 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
         createdByName: currentUser?.name || currentUser?.email || 'Bilinmeyen',
       };
 
-      await addDoc(collection(db, 'efficiencyPools'), companyStamp(poolData, currentCompanyId, 'efficiencyPools'));
+      await addDoc(collection(db, 'efficiencyPools'), poolData);
 
       toast({ title: 'Başarılı', description: 'Verimlilik havuzu oluşturuldu.' });
       onOpenChange(false);

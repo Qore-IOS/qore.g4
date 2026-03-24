@@ -12,8 +12,6 @@ import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, setDoc, Timestamp, query, where, orderBy } from 'firebase/firestore';
 import type { Hospital, ProductCode, TestDefinition, MinMaxRule, LabPool } from '@/lib/types';
 import BackButton from './BackButton';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import {
@@ -49,7 +47,6 @@ const parseLocaleInt = (v: any) => {
 
 export default function CihazUstuEklePanel() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
@@ -69,7 +66,7 @@ export default function CihazUstuEklePanel() {
       setLoading(true);
       try {
         const [hSnap, pSnap, poolSnap] = await Promise.all([
-          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+          getDocs(collection(db, 'hospitals')),
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'labPools')),
         ]);
@@ -96,7 +93,7 @@ export default function CihazUstuEklePanel() {
       }
       setLoading(false);
     })();
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   useEffect(() => {
     if (!selectedHospitalId) {
@@ -120,7 +117,7 @@ export default function CihazUstuEklePanel() {
         // --- END NEW LOGIC ---
 
         const period = `${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear}`;
-        const dataSnap = await getDocs(companyQuery(db, 'cihazUstuGecmisi', currentCompanyId, where('hospitalId', '==', selectedHospitalId), where('period', '==', period)));
+        const dataSnap = await getDocs(query(collection(db, 'cihazUstuGecmisi'), where('hospitalId', '==', selectedHospitalId), where('period', '==', period)));
         
         const existingData: Record<string, number> = {};
         if (!dataSnap.empty) {

@@ -5,14 +5,13 @@ import { useToast } from "@/hooks/use-toast";
 import { collection, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, safeOnSnapshot } from '@/lib/company-filter';
 import AplikasyonPanel from '@/components/aplikasyon-panel';
 import { Loader2 } from 'lucide-react';
 
 export default function AplikasyonPaneliPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -22,8 +21,8 @@ export default function AplikasyonPaneliPage() {
   const fetchAllApplicationData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const unsubHospitals = safeOnSnapshot(
-        companyQuery(db, 'hospitals', currentCompanyId, orderBy('name', 'asc')),
+      const unsubHospitals = onSnapshot(
+        query(collection(db, 'hospitals'), orderBy('name', 'asc')),
         (snap) => setHospitals(snap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital))),
         (err) => {
           console.error("Hospitals listener error:", err);
@@ -31,8 +30,8 @@ export default function AplikasyonPaneliPage() {
         }
       );
 
-      const unsubDevices = safeOnSnapshot(
-        companyQuery(db, 'devices', currentCompanyId),
+      const unsubDevices = onSnapshot(
+        collection(db, 'devices'),
         (snap) => setDevices(snap.docs.map(d => ({ id: d.id, ...d.data() } as Device))),
         (err) => {
           console.error("Devices listener error:", err);
@@ -40,8 +39,8 @@ export default function AplikasyonPaneliPage() {
         }
       );
 
-      const unsubAssignments = safeOnSnapshot(
-        companyQuery(db, 'hospitalDeviceAssignments', currentCompanyId),
+      const unsubAssignments = onSnapshot(
+        collection(db, 'hospitalDeviceAssignments'),
         (snap) => {
           setHospitalDeviceAssignments(snap.docs.map(d => ({ id: d.id, ...d.data() } as AssignedDevice)));
         },
@@ -52,8 +51,8 @@ export default function AplikasyonPaneliPage() {
       );
 
       // Fetch active lab pools
-      const unsubLabPools = safeOnSnapshot(
-        companyQuery(db, 'deviceLabPools', currentCompanyId, where('active', '==', true)),
+      const unsubLabPools = onSnapshot(
+        query(collection(db, 'deviceLabPools'), where('active', '==', true)),
         (snap) => {
           setDeviceLabPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
           setIsLoading(false);
@@ -76,7 +75,7 @@ export default function AplikasyonPaneliPage() {
       setIsLoading(false);
       return () => {};
     }
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   useEffect(() => {
     const cleanupPromise = fetchAllApplicationData();

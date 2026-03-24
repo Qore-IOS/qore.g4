@@ -12,12 +12,9 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { Depot } from '@/lib/types';
 import BackButton from '@/components/BackButton';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
 
 export default function BorcDepoPanel() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
   const [borcDepots, setBorcDepots] = useState<Depot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -26,14 +23,14 @@ export default function BorcDepoPanel() {
   const fetchBorcDepots = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(companyQuery(db, 'borcDepots', currentCompanyId));
+      const snap = await getDocs(collection(db, 'borcDepots'));
       setBorcDepots(snap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
     } catch (e) {
       toast({ title: 'Hata', description: 'Borç depoları yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   useEffect(() => {
     fetchBorcDepots();
@@ -61,7 +58,7 @@ export default function BorcDepoPanel() {
       if (currentDepot.id) {
         await setDoc(doc(db, 'borcDepots', currentDepot.id), depotData);
       } else {
-        await addDoc(collection(db, 'borcDepots'), companyStamp(depotData, currentCompanyId, 'borcDepots'));
+        await addDoc(collection(db, 'borcDepots'), depotData);
       }
       toast({ title: 'Başarılı', description: 'Borç deposu kaydedildi.' });
       fetchBorcDepots();
