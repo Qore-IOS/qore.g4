@@ -123,15 +123,23 @@ export default function DashboardPanel({
   useEffect(() => {
     (async () => {
       try {
-        const [productSnap, stockSnap, depotsSnap] = await Promise.all([
+        const [productSnap, stockSnap, depotsSnap] = await Promise.allSettled([
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'depoStok')),
           getDocs(collection(db, 'depots')),
         ]);
 
+        const productDocs = productSnap.status === 'fulfilled' ? productSnap.value.docs : [];
+        const stockDocs = stockSnap.status === 'fulfilled' ? stockSnap.value.docs : [];
+        const depotDocs = depotsSnap.status === 'fulfilled' ? depotsSnap.value.docs : [];
+
+        if (productSnap.status === 'rejected') console.warn('[Dashboard] productCodes fetch failed:', productSnap.reason);
+        if (stockSnap.status === 'rejected') console.warn('[Dashboard] depoStok fetch failed:', stockSnap.reason);
+        if (depotsSnap.status === 'rejected') console.warn('[Dashboard] depots fetch failed:', depotsSnap.reason);
+
         // Build cost map: stokKodu -> birim maliyet
         const costMap = new Map<string, number>();
-        productSnap.docs.forEach((d) => {
+        productDocs.forEach((d) => {
           const data = d.data();
           const rawCost = data.cost ?? data.birimFiyat ?? data.unitPrice ?? data.price;
           const numCost = typeof rawCost === 'number' ? rawCost : parseFloat(rawCost);
@@ -143,7 +151,7 @@ export default function DashboardPanel({
         const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
         const groupedByDepotAndProduct = new Map<string, number>();
 
-        stockSnap.docs.forEach((d) => {
+        stockDocs.forEach((d) => {
           const data = d.data();
           if (data.isShipped === true) return;
           const cost = costMap.get(data.stokKodu);
@@ -164,7 +172,7 @@ export default function DashboardPanel({
         setTotalStockCost(total);
 
         // Riskli maliyet: tüm depolardan minMaxRules çek
-        const depotIds = depotsSnap.docs.map((d) => d.id);
+        const depotIds = depotDocs.map((d) => d.id);
         const allMinMaxRules = new Map<string, { max: number; maxGun: number }>();
 
         const rulePromises = depotIds.map(async (depotId) => {
@@ -241,7 +249,7 @@ export default function DashboardPanel({
         const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
         const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
 
-        const [productSnap, consumptionSnap] = await Promise.all([
+        const [productResult, consumptionResult] = await Promise.allSettled([
           getDocs(collection(db, 'productCodes')),
           getDocs(query(
             collection(db, 'tuketimKayitlari'),
@@ -250,8 +258,11 @@ export default function DashboardPanel({
           )),
         ]);
 
+        const productDocs2 = productResult.status === 'fulfilled' ? productResult.value.docs : [];
+        const consumptionDocs = consumptionResult.status === 'fulfilled' ? consumptionResult.value.docs : [];
+
         const priceMap = new Map<string, number>();
-        productSnap.docs.forEach(d => {
+        productDocs2.forEach(d => {
           const data = d.data();
           const rawCost = data.cost ?? data.birimFiyat ?? data.unitPrice ?? data.price;
           const numCost = typeof rawCost === 'number' ? rawCost : parseFloat(rawCost);
@@ -259,7 +270,7 @@ export default function DashboardPanel({
         });
 
         let total = 0;
-        consumptionSnap.docs.forEach(d => {
+        consumptionDocs.forEach(d => {
           const stokKodu = d.data().stokKodu;
           const cost = priceMap.get(stokKodu);
           if (cost) total += cost;
@@ -274,9 +285,10 @@ export default function DashboardPanel({
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        const effSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        if (!effSnap) return;
         const efficiencies: number[] = [];
-        snap.docs.forEach(d => {
+        effSnap.docs.forEach(d => {
           const data = d.data();
           const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
           if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
