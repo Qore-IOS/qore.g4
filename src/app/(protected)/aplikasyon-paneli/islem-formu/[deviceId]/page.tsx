@@ -1603,7 +1603,7 @@ export default function AplikasyonIslemFormuPage() {
           const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
 
           const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-          batch.set(faultReportRef, {
+          batch.set(faultReportRef, companyStamp({
             deviceId,
             hospitalId: device?.hospitalId,
             labName: hospital?.name,
@@ -1638,7 +1638,7 @@ export default function AplikasyonIslemFormuPage() {
             isCustomFault: isCustomFault || false,
             // Arıza kaydı işlem formundan açıldığı için bildirim gönderilmeyecek
             createdFromActionForm: true,
-          });
+          }, currentCompanyId, 'deviceFaultReports'));
 
           // Arıza geçmişine "opened" kaydı ekle
           const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
