@@ -1397,7 +1397,7 @@ export default function AplikasyonIslemFormuPage() {
 
         // Mirror form to deviceActionForms for device history page
         const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
-        batch.set(deviceFormRef, {
+        batch.set(deviceFormRef, companyStamp({
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
             seriNumarasi: device?.seriNumarasi,
@@ -1425,7 +1425,7 @@ export default function AplikasyonIslemFormuPage() {
             faultName: resolvedFaultName,
             isCustomFault: isCustomFault || false,
             selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
-        });
+        }, currentCompanyId, 'deviceActionForms'));
 
         // Create closed fault report when ariza is selected
         if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
