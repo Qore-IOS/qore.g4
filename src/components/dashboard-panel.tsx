@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -26,7 +26,7 @@ import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
-import { getExpiringProductsCount } from '@/actions/stokActions';
+import { getExpiringProductsCount, getTotalStockCost } from '@/actions/stokActions';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -90,31 +90,10 @@ export default function DashboardPanel({
     };
   }, []);
 
-  // Total stock cost – fetch all unshipped stock once, join with product prices client-side
-  const [totalStockCost, setTotalStockCost] = useState(0);
+  // Total stock cost – server-side calculation
+  const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
   useEffect(() => {
-    (async () => {
-      try {
-        const [productSnap, stockSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', false))),
-        ]);
-
-        const priceMap = new Map<string, number>();
-        productSnap.docs.forEach(d => {
-          const data = d.data();
-          if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
-        });
-
-        let total = 0;
-        stockSnap.docs.forEach(d => {
-          const stokKodu = d.data().stokKodu;
-          const cost = priceMap.get(stokKodu);
-          if (cost) total += cost;
-        });
-        setTotalStockCost(total);
-      } catch (e) { console.error('Total stock cost error:', e); }
-    })();
+    getTotalStockCost().then(setTotalStockCost).catch(() => setTotalStockCost(0));
   }, []);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
@@ -506,23 +485,21 @@ export default function DashboardPanel({
             </Card>
           </motion.div>
           
-          <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
+          <motion.div {...motionProps} className="xl:col-span-2 flex flex-col gap-3 sm:gap-4">
             {/* Cihaz Arızaları - Üst yarı */}
             <Card className="glass-card flex-1 flex flex-col">
-              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3">
+              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3 items-stretch">
                 {faultStatusCards.map((item) => {
                   const Icon = item.icon;
                   const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
                   const rate = total > 0 ? Math.round((item.value / total) * 100) : 0;
 
                   return (
-                    <Link key={item.key} href={item.href} className="dashboard-kpi-mini group rounded-2xl p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className={cn("text-xs font-semibold", item.tone)}>{item.label}</p>
-                        <Icon className={cn("h-4 w-4", item.tone)} />
-                      </div>
-                      <p className="mt-2 text-3xl font-bold text-slate-700">{item.value}</p>
-                      <div className="mt-3 h-1.5 rounded-full bg-white/60">
+                    <Link key={item.key} href={item.href} className="dashboard-kpi-mini group rounded-2xl p-3 flex flex-col items-center justify-center text-center">
+                      <Icon className={cn("h-5 w-5 mb-1", item.tone)} />
+                      <p className={cn("text-[11px] font-semibold", item.tone)}>{item.label}</p>
+                      <p className="mt-1 text-3xl font-bold text-slate-700">{item.value}</p>
+                      <div className="mt-2 h-1.5 w-full rounded-full bg-white/60">
                         <div className={cn("h-1.5 rounded-full transition-all duration-300", item.progressClass)} style={{ width: `${Math.max(rate, 10)}%` }} />
                       </div>
                     </Link>
@@ -530,23 +507,41 @@ export default function DashboardPanel({
                 })}
               </CardContent>
             </Card>
-            {/* Miad Yaklaşan Ürünler - Alt yarı */}
-            <Link href="/stok-yonetimi">
-              <Card className="glass-card cursor-pointer">
-                <CardContent className="pt-4 pb-4 flex items-center gap-3">
-                  <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-3 h-14 w-14 shrink-0">
-                    <AlertTriangle className="h-6 w-6 text-amber-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
+            {/* Alt satır: Miad + Anlık Maliyet yan yana, eşit boy */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              {/* Miad Yaklaşan Ürünler */}
+              <Link href="/stok-yonetimi" className="block h-full">
+                <Card className="glass-card cursor-pointer h-full flex flex-col">
+                  <CardContent className="pt-4 pb-4 flex-1 flex flex-col items-center justify-center text-center">
+                    <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-3 h-12 w-12 mb-2">
+                      <AlertTriangle className="h-5 w-5 text-amber-600" />
+                    </div>
                     <p className="text-[11px] font-semibold text-amber-600 uppercase tracking-wider">Miad ≤ 45 Gün</p>
-                    <p className="text-2xl font-bold text-slate-700 mt-0.5">
+                    <p className="text-2xl font-bold text-slate-700 mt-1">
                       {expiringProductsCount !== null ? expiringProductsCount : '…'}
                     </p>
-                    <p className="text-[10px] text-slate-500">Tüm depolarda yaklaşan ürün sayısı</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Tüm depolarda yaklaşan ürün sayısı</p>
+                  </CardContent>
+                </Card>
+              </Link>
+              {/* Anlık Maliyet */}
+              <Link href="/stok-yonetimi" className="block h-full">
+                <Card className="glass-card cursor-pointer h-full flex flex-col">
+                  <CardContent className="pt-4 pb-4 flex-1 flex flex-col items-center justify-center text-center">
+                    <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-3 h-12 w-12 mb-2">
+                      <Banknote className="h-5 w-5 text-emerald-600" />
+                    </div>
+                    <p className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">Anlık Maliyet</p>
+                    <p className="text-2xl font-bold text-slate-700 mt-1">
+                      {totalStockCost !== null
+                        ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(totalStockCost)
+                        : '…'}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Tüm depolardaki toplam stok maliyeti</p>
+                  </CardContent>
+                </Card>
+              </Link>
+            </div>
           </motion.div>
 
           <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
