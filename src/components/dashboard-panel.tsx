@@ -60,7 +60,13 @@ export default function DashboardPanel({
 
   // Fetch expiring products count (server-side)
   useEffect(() => {
-    getExpiringProductsCount(45).then(setExpiringProductsCount).catch(() => setExpiringProductsCount(0));
+    getExpiringProductsCount(45).then((count) => {
+      console.log('[Dashboard] Expiring products count:', count);
+      setExpiringProductsCount(count);
+    }).catch((err) => {
+      console.error('[Dashboard] getExpiringProductsCount error:', err);
+      setExpiringProductsCount(0);
+    });
   }, []);
 
   useEffect(() => {
@@ -93,7 +99,13 @@ export default function DashboardPanel({
   // Total stock cost – server-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
   useEffect(() => {
-    getTotalStockCost().then(setTotalStockCost).catch(() => setTotalStockCost(0));
+    getTotalStockCost().then((result) => {
+      console.log('[Dashboard] Stock cost result:', result);
+      setTotalStockCost(result.total);
+    }).catch((err) => {
+      console.error('[Dashboard] getTotalStockCost error:', err);
+      setTotalStockCost(0);
+    });
   }, []);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
