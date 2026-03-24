@@ -5,11 +5,12 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
-  startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, eachMonthOfInterval
+  startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, eachMonthOfInterval,
+  parse, isValid, differenceInDays
 } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
@@ -27,7 +28,6 @@ import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
-import { getExpiringProductsCount } from '@/actions/stokActions';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -59,9 +59,36 @@ export default function DashboardPanel({
 
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Fetch expiring products count (server-side)
+  // Fetch expiring products count (client-side)
   useEffect(() => {
-    getExpiringProductsCount(45).then(setExpiringProductsCount).catch(() => setExpiringProductsCount(0));
+    (async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'depoStok'));
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const seenKeys = new Set<string>();
+        let count = 0;
+
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+          if (data.isShipped === true) continue;
+          const miadStr = typeof data.miad === 'string' ? data.miad : '';
+          if (!miadStr) continue;
+          const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+          if (!isValid(miadDate)) continue;
+          const days = differenceInDays(miadDate, today);
+          if (days <= 45) {
+            const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
+            if (!seenKeys.has(key)) { seenKeys.add(key); count++; }
+          }
+        }
+        console.log('[Dashboard] depoStok docs:', snapshot.docs.length, 'expiring:', count);
+        setExpiringProductsCount(count);
+      } catch (err) {
+        console.error('[Dashboard] getExpiringProductsCount error:', err);
+        setExpiringProductsCount(0);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -91,30 +118,114 @@ export default function DashboardPanel({
     };
   }, [currentCompanyId]);
 
-  // Total stock cost – fetch all unshipped stock once, join with product prices client-side
-  const [totalStockCost, setTotalStockCost] = useState(0);
+  // Total stock cost + risky cost – client-side calculation
+  const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
+  const [riskyCost, setRiskyCost] = useState<number | null>(null);
   useEffect(() => {
     (async () => {
       try {
-        const [productSnap, stockSnap] = await Promise.all([
+        const [productSnap, stockSnap, depotsSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
           getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', false))),
         ]);
 
-        const priceMap = new Map<string, number>();
-        productSnap.docs.forEach(d => {
+        // Build cost map: stokKodu -> birim maliyet
+        const costMap = new Map<string, number>();
+        productSnap.docs.forEach((d) => {
           const data = d.data();
-          if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
+          if (data.cost && data.stokKodu) costMap.set(data.stokKodu, data.cost);
         });
 
+        // Toplam maliyet hesapla
         let total = 0;
-        stockSnap.docs.forEach(d => {
-          const stokKodu = d.data().stokKodu;
-          const cost = priceMap.get(stokKodu);
+        const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
+        const groupedByDepotAndProduct = new Map<string, number>();
+
+        stockSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.isShipped === true) return;
+          const cost = costMap.get(data.stokKodu);
           if (cost) total += cost;
+          // Riskli hesabı için stok bilgisi topla
+          activeStockItems.push({
+            stokKodu: data.stokKodu,
+            lotNumarasi: data.lotNumarasi || '',
+            miad: typeof data.miad === 'string' ? data.miad : '',
+            depotId: data.depotId || '',
+            quantity: 1,
+          });
+          // Depo+stokKodu bazında toplam adet
+          const gKey = `${data.depotId || ''}__${data.stokKodu}`;
+          groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + 1);
         });
+
         setTotalStockCost(total);
-      } catch (e) { console.error('Total stock cost error:', e); }
+
+        // Riskli maliyet: tüm depolardan minMaxRules çek
+        const depotIds = depotsSnap.docs.map((d) => d.id);
+        const allMinMaxRules = new Map<string, { max: number; maxGun: number }>();
+
+        const rulePromises = depotIds.map(async (depotId) => {
+          const rulesSnap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
+          rulesSnap.docs.forEach((d) => {
+            const rule = d.data();
+            if (rule.stokKodu && rule.max && rule.maxGun) {
+              // Depo bazlı key — aynı ürün farklı depolarda farklı rule'a sahip olabilir
+              allMinMaxRules.set(`${depotId}__${rule.stokKodu}`, { max: rule.max, maxGun: rule.maxGun });
+            }
+          });
+        });
+        await Promise.all(rulePromises);
+
+        // Stokları grupla: depotId + stokKodu + lotNumarasi + miad
+        const lotGroups = new Map<string, { stokKodu: string; depotId: string; lotNumarasi: string; miad: string; quantity: number }>();
+        activeStockItems.forEach((item) => {
+          const key = `${item.depotId}__${item.stokKodu}__${item.lotNumarasi}__${item.miad}`;
+          const existing = lotGroups.get(key);
+          if (existing) {
+            existing.quantity += 1;
+          } else {
+            lotGroups.set(key, { ...item, quantity: 1 });
+          }
+        });
+
+        // Her lot grubu için riskli kutu hesabı
+        let totalRiskyCost = 0;
+        lotGroups.forEach((group) => {
+          const ruleKey = `${group.depotId}__${group.stokKodu}`;
+          const rule = allMinMaxRules.get(ruleKey);
+          if (!rule) return;
+
+          // Miad info
+          if (!group.miad) return;
+          const miadDate = parse(group.miad, 'dd.MM.yyyy', new Date());
+          if (!isValid(miadDate)) return;
+          const miadDays = differenceInDays(miadDate, new Date());
+          if (miadDays <= 0 || miadDays === Infinity) return;
+
+          // Coverage info
+          const periodDays = Math.floor(rule.maxGun);
+          if (periodDays <= 0) return;
+          const dailyNeed = rule.max / periodDays;
+          if (dailyNeed <= 0) return;
+          // Depo+stokKodu bazında toplam stok (lot-agnostic coverage)
+          const totalStockForProduct = groupedByDepotAndProduct.get(ruleKey) || group.quantity;
+          const coverageDays = Math.floor(totalStockForProduct / dailyNeed);
+
+          if (coverageDays <= miadDays) return; // Riskli değil
+
+          const riskyDays = coverageDays - miadDays;
+          const riskyBoxes = Math.min(Math.max(0, Math.ceil(riskyDays * dailyNeed)), group.quantity);
+          const unitCost = costMap.get(group.stokKodu) || 0;
+          totalRiskyCost += riskyBoxes * unitCost;
+        });
+
+        setRiskyCost(totalRiskyCost);
+      } catch (err) {
+        console.error('[Dashboard] getTotalStockCost error:', err);
+        setTotalStockCost(0);
+        setRiskyCost(0);
+      }
     })();
   }, [currentCompanyId]);
 
@@ -507,23 +618,21 @@ export default function DashboardPanel({
             </Card>
           </motion.div>
           
-          <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">
+          <motion.div {...motionProps} className="xl:col-span-2 flex flex-col gap-3 sm:gap-4">
             {/* Cihaz Arızaları - Üst yarı */}
             <Card className="glass-card flex-1 flex flex-col">
-              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3">
+              <CardContent className="grid h-full grid-cols-1 gap-3 sm:grid-cols-3 items-stretch">
                 {faultStatusCards.map((item) => {
                   const Icon = item.icon;
                   const total = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
                   const rate = total > 0 ? Math.round((item.value / total) * 100) : 0;
 
                   return (
-                    <Link key={item.key} href={item.href} className="dashboard-kpi-mini group rounded-2xl p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className={cn("text-xs font-semibold", item.tone)}>{item.label}</p>
-                        <Icon className={cn("h-4 w-4", item.tone)} />
-                      </div>
-                      <p className="mt-2 text-3xl font-bold text-slate-700">{item.value}</p>
-                      <div className="mt-3 h-1.5 rounded-full bg-white/60">
+                    <Link key={item.key} href={item.href} className="dashboard-kpi-mini group rounded-2xl p-3 flex flex-col items-center justify-center text-center">
+                      <Icon className={cn("h-5 w-5 mb-1", item.tone)} />
+                      <p className={cn("text-[11px] font-semibold", item.tone)}>{item.label}</p>
+                      <p className="mt-1 text-3xl font-bold text-slate-700">{item.value}</p>
+                      <div className="mt-2 h-1.5 w-full rounded-full bg-white/60">
                         <div className={cn("h-1.5 rounded-full transition-all duration-300", item.progressClass)} style={{ width: `${Math.max(rate, 10)}%` }} />
                       </div>
                     </Link>
@@ -531,23 +640,55 @@ export default function DashboardPanel({
                 })}
               </CardContent>
             </Card>
-            {/* Miad Yaklaşan Ürünler - Alt yarı */}
-            <Link href="/stok-yonetimi">
-              <Card className="glass-card cursor-pointer">
-                <CardContent className="pt-4 pb-4 flex items-center gap-3">
-                  <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-3 h-14 w-14 shrink-0">
-                    <AlertTriangle className="h-6 w-6 text-amber-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
+            {/* Alt satır: Miad + Anlık Maliyet yan yana, eşit boy */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              {/* Miad Yaklaşan Ürünler */}
+              <Link href="/stok-yonetimi" className="block h-full">
+                <Card className="glass-card cursor-pointer h-full flex flex-col">
+                  <CardContent className="pt-4 pb-4 flex-1 flex flex-col items-center justify-center text-center">
+                    <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-3 h-12 w-12 mb-2">
+                      <AlertTriangle className="h-5 w-5 text-amber-600" />
+                    </div>
                     <p className="text-[11px] font-semibold text-amber-600 uppercase tracking-wider">Miad ≤ 45 Gün</p>
-                    <p className="text-2xl font-bold text-slate-700 mt-0.5">
+                    <p className="text-2xl font-bold text-slate-700 mt-1">
                       {expiringProductsCount !== null ? expiringProductsCount : '…'}
                     </p>
-                    <p className="text-[10px] text-slate-500">Tüm depolarda yaklaşan ürün sayısı</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Tüm depolarda yaklaşan ürün sayısı</p>
+                  </CardContent>
+                </Card>
+              </Link>
+              {/* Anlık Maliyet - %70 toplam, %30 riskli */}
+              <Link href="/stok-yonetimi" className="block h-full">
+                <Card className="glass-card cursor-pointer h-full flex flex-col overflow-hidden">
+                  <CardContent className="pt-0 pb-0 px-0 flex-1 flex flex-col">
+                    {/* %70 - Toplam Maliyet */}
+                    <div className="flex-[7] flex flex-col items-center justify-center text-center px-3 pt-3 pb-2">
+                      <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-2.5 h-10 w-10 mb-1.5">
+                        <Banknote className="h-4 w-4 text-emerald-600" />
+                      </div>
+                      <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">Anlık Maliyet</p>
+                      <p className="text-xl font-bold text-slate-700 mt-0.5">
+                        {totalStockCost !== null
+                          ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(totalStockCost)
+                          : '…'}
+                      </p>
+                    </div>
+                    {/* %30 - Riskli Maliyet */}
+                    <div className="flex-[3] flex items-center justify-center text-center px-3 pb-2 border-t border-dashed border-slate-200/80">
+                      <div className="flex items-center gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                        <p className="text-[10px] text-red-500 font-semibold">Riskli:</p>
+                        <p className="text-sm font-bold text-red-600">
+                          {riskyCost !== null
+                            ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(riskyCost)
+                            : '…'}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            </div>
           </motion.div>
 
           <motion.div {...motionProps} className="flex flex-col gap-3 sm:gap-4">

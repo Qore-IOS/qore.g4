@@ -36,6 +36,7 @@ import { useTheme } from 'next-themes';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 
 type FaultPartChange = {
   id: string;
@@ -43,6 +44,9 @@ type FaultPartChange = {
   stokAdi?: string;
   serialNumber?: string;
   personalStockId?: string;
+  depotStockId?: string;
+  isDepotSelection?: boolean;
+  quantity?: number;
   isManualEntry?: boolean;
   removedPartStokKodu?: string;
   removedPartStokAdi?: string;
@@ -59,6 +63,8 @@ type FaultHucreDegisimi = {
   stokKodu: string;
   stokAdi: string;
   personalStockId: string;
+  depotStockId?: string;
+  isDepotSelection?: boolean;
   hucreNumarasi: string;        // Takılan hücre
   removedHucreNumarasi?: string; // Çıkan hücre
   description?: string;
@@ -116,7 +122,7 @@ function normalizeStatus(status: string): DeviceFaultStatus {
 
 type FaultDoc = DeviceFaultReport;
 
-type StockSourceTab = 'personal' | 'pool';
+type StockSourceTab = 'personal' | 'pool' | 'depot';
 
 
 type AiSuggestion = {
@@ -205,10 +211,15 @@ export default function FaultDetailPage() {
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
   const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
+  const [depotStockItems, setDepotStockItems] = useState<YedekParcaDepoStokItem[]>([]);
   const [partSearchQuery, setPartSearchQuery] = useState('');
   const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
   const [stockSourceTab, setStockSourceTab] = useState<StockSourceTab>('personal');
   const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
+  const [selectedDepotStockItem, setSelectedDepotStockItem] = useState<DepotSelectableStockItem | null>(null);
+  const [pendingDepotStockItem, setPendingDepotStockItem] = useState<DepotSelectableStockItem | null>(null);
+  const [depotRequestedQuantity, setDepotRequestedQuantity] = useState(1);
+  const [isDepotQuantityDialogOpen, setIsDepotQuantityDialogOpen] = useState(false);
   const [manualPartCode, setManualPartCode] = useState('');
   const [manualPartName, setManualPartName] = useState('');
   const [manualSerialNumber, setManualSerialNumber] = useState('');
@@ -229,6 +240,8 @@ export default function FaultDetailPage() {
   const [faultHucreDegisimleri, setFaultHucreDegisimleri] = useState<FaultHucreDegisimi[]>([]);
   const [isHucreDegisimiModalOpen, setIsHucreDegisimiModalOpen] = useState(false);
   const [hucreDegisimiSelectedItem, setHucreDegisimiSelectedItem] = useState<PersonalStockItem | null>(null);
+  const [hucreDegisimiSelectedDepotItem, setHucreDegisimiSelectedDepotItem] = useState<DepotSelectableStockItem | null>(null);
+  const [hucreStockSourceTab, setHucreStockSourceTab] = useState<'personal' | 'depot'>('personal');
   const [hucreDegisimiRemovedHucre, setHucreDegisimiRemovedHucre] = useState('');
   const [hucreDegisimiDescription, setHucreDegisimiDescription] = useState('');
   const [hucreDegisimiSearchQuery, setHucreDegisimiSearchQuery] = useState('');
@@ -388,6 +401,25 @@ export default function FaultDetailPage() {
     };
     fetchPersonalStock();
   }, [currentUser]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const items = snap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+          } as YedekParcaDepoStokItem;
+        });
+        setDepotStockItems(items);
+      } catch (err) {
+        console.error('Depo stok alınamadı:', err);
+      }
+    })();
+  }, []);
 
   // Havuz stok verilerini çek
   useEffect(() => {
@@ -765,6 +797,27 @@ export default function FaultDetailPage() {
     );
   }, [poolStockItems, partSearchQuery]);
 
+  const selectableDepotStock = useMemo(
+    () => buildDepotSelectableItems(depotStockItems),
+    [depotStockItems]
+  );
+
+  const filteredDepotStock = useMemo(() => {
+    if (!partSearchQuery) return selectableDepotStock;
+    const q = partSearchQuery.toLowerCase();
+    return selectableDepotStock.filter((item) =>
+      item.stokKodu.toLowerCase().includes(q) ||
+      item.stokAdi.toLowerCase().includes(q) ||
+      (item.serialNumber || '').toLowerCase().includes(q) ||
+      (item.hucreNumarasi || '').toLowerCase().includes(q)
+    );
+  }, [partSearchQuery, selectableDepotStock]);
+
+  const selectableDepotHucreStock = useMemo(
+    () => buildDepotSelectableItems(depotStockItems, { cellsOnly: true }),
+    [depotStockItems]
+  );
+
   const handleRemovedPartImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -815,6 +868,10 @@ export default function FaultDetailPage() {
   const resetPartModalState = () => {
     setSelectedStockItem(null);
     setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setDepotRequestedQuantity(1);
+    setIsDepotQuantityDialogOpen(false);
     setStockSourceTab('personal');
     setPartSearchQuery('');
     setManualPartCode('');
@@ -835,9 +892,57 @@ export default function FaultDetailPage() {
     setIsPartModalOpen(true);
   };
 
+  const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    if (item.isGrouped && item.totalQuantity > 1) {
+      setPendingDepotStockItem(item);
+      setDepotRequestedQuantity(1);
+      setIsDepotQuantityDialogOpen(true);
+      return;
+    }
+    setSelectedDepotStockItem({ ...item, totalQuantity: 1 });
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+  };
+
+  const selectPersonalStockItem = (item: PersonalStockItem) => {
+    setSelectedStockItem(item);
+    setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const selectPoolStockItem = (item: PoolWarehouseStockItem) => {
+    setSelectedPoolStockItem(item);
+    setSelectedStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const activateManualEntry = () => {
+    setShowManualEntry(true);
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const confirmDepotQuantitySelection = () => {
+    if (!pendingDepotStockItem) return;
+    const requestedQuantity = Math.max(1, Math.min(pendingDepotStockItem.totalQuantity, depotRequestedQuantity || 1));
+    setSelectedDepotStockItem({ ...pendingDepotStockItem, totalQuantity: requestedQuantity });
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
   const addFaultHucreDegisimi = async () => {
-    if (!fault || !currentUser || !hucreDegisimiSelectedItem) return;
-    const hn = (hucreDegisimiSelectedItem as any).hucreNumarasi || '';
+    const selectedHucreItem = hucreStockSourceTab === 'depot' ? hucreDegisimiSelectedDepotItem : hucreDegisimiSelectedItem;
+    if (!fault || !currentUser || !selectedHucreItem) return;
+    const hn = selectedHucreItem.hucreNumarasi || '';
     const removedHn = hucreDegisimiRemovedHucre.trim().toUpperCase();
     if (removedHn && !/^[A-Za-z]\d{4}$/.test(removedHn)) {
       toast({ title: 'Geçersiz Format', description: 'Çıkan hücre numarası 1 harf + 4 rakamdan oluşmalıdır.', variant: 'destructive' });
@@ -845,29 +950,92 @@ export default function FaultDetailPage() {
     }
     setIsSavingHucre(true);
     try {
-      const item = hucreDegisimiSelectedItem;
-      await addDoc(collection(db, 'deviceFaultReports', fault.id, 'hucreDegisimleri'), {
+      const item = selectedHucreItem;
+      const batch = writeBatch(db);
+      const now = new Date();
+      let restoredDepotEntry: YedekParcaDepoStokItem | null = null;
+
+      if (hucreStockSourceTab === 'depot') {
+        const depotEntry = depotStockItems.find((stock) => stock.id === item.id);
+        if (!depotEntry) throw new Error('Seçilen depo hücre stoğu bulunamadı.');
+        restoredDepotEntry = depotEntry;
+        batch.delete(doc(db, 'yedekParcaDepoStok', depotEntry.id));
+
+        const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
+        batch.set(borrowedRef, {
+          productCodeId: depotEntry.productCodeId || '',
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          hucreNumarasi: hn,
+          quantity: 1,
+          sourceType: 'depot',
+          sourceActionType: 'hucre_degisimi',
+          depotStockId: depotEntry.id,
+          depotAddress: depotEntry.address || '',
+          deviceId: fault.deviceId,
+          deviceName: fault.model || '',
+          hospitalId: fault.hospitalId || '',
+          labName: fault.labName || '',
+          formId: fault.id,
+          formType: 'ariza_yonetimi',
+          borrowedByUid: currentUser.uid,
+          borrowedByName: currentUserProfile?.name || '',
+          borrowedAt: Timestamp.fromDate(now),
+          status: 'pending',
+        });
+
+        const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(transferLogRef, {
+          action: 'borrowed_part',
+          borrowedPartId: borrowedRef.id,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          hucreNumarasi: hn,
+          quantity: 1,
+          approvalStatus: 'pending',
+          sourceType: 'depot',
+          deviceId: fault.deviceId,
+          deviceName: fault.model || '',
+          labName: fault.labName || '',
+          formId: fault.id,
+          formType: 'ariza_yonetimi',
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUser.uid,
+          createdByName: currentUserProfile?.name || '',
+        });
+      }
+      const hucreRef = doc(collection(db, 'deviceFaultReports', fault.id, 'hucreDegisimleri'));
+      batch.set(hucreRef, {
         stokKodu: item.stokKodu,
         stokAdi: item.stokAdi,
-        personalStockId: item.id,
+        personalStockId: hucreStockSourceTab === 'personal' ? item.id : '',
+        depotStockId: hucreStockSourceTab === 'depot' ? item.id : '',
+        isDepotSelection: hucreStockSourceTab === 'depot',
         hucreNumarasi: hn,
         removedHucreNumarasi: removedHn || '',
         description: hucreDegisimiDescription.trim() || '',
-        addedAt: serverTimestamp(),
+        addedAt: Timestamp.fromDate(now),
         addedByUid: currentUser.uid,
         addedByName: currentUserProfile?.name || 'Bilinmeyen',
       });
       // Log to history
-      await addDoc(collection(db, 'deviceFaultReports', fault.id, 'history'), {
+      const historyRef = doc(collection(db, 'deviceFaultReports', fault.id, 'history'));
+      batch.set(historyRef, {
         type: 'note',
         actorUid: currentUser.uid,
         actorName: currentUserProfile?.name || 'Bilinmeyen',
-        description: `Hücre değişimi eklendi: ${item.stokAdi} (Takılan: H:${hn}${removedHn ? `, Çıkan: H:${removedHn}` : ''})${hucreDegisimiDescription.trim() ? ` - ${hucreDegisimiDescription.trim()}` : ''}`,
-        timestamp: serverTimestamp(),
+        description: `Hücre değişimi eklendi: ${item.stokAdi} (Takılan: H:${hn}${removedHn ? `, Çıkan: H:${removedHn}` : ''})${hucreDegisimiDescription.trim() ? ` - ${hucreDegisimiDescription.trim()}` : ''}${hucreStockSourceTab === 'depot' ? ' [Depo stoktan, borç onayı bekliyor]' : ''}`,
+        timestamp: Timestamp.fromDate(now),
       });
+      await batch.commit();
       toast({ title: 'Hücre Değişimi Eklendi' });
       setIsHucreDegisimiModalOpen(false);
       setHucreDegisimiSelectedItem(null);
+      setHucreDegisimiSelectedDepotItem(null);
       setHucreDegisimiRemovedHucre('');
       setHucreDegisimiDescription('');
       setHucreDegisimiSearchQuery('');
@@ -883,8 +1051,8 @@ export default function FaultDetailPage() {
     if (!fault || !currentUser) return;
 
     // Validate selection
-    if (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName)) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen stokunuzdan, havuz stoktan bir parça seçin veya manuel girin.', variant: 'destructive' });
+    if (!selectedStockItem && !selectedPoolStockItem && !selectedDepotStockItem && !(showManualEntry && manualPartCode && manualPartName)) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen stokunuzdan, havuz stoktan, depo stoktan bir parça seçin veya manuel girin.', variant: 'destructive' });
       return;
     }
 
@@ -909,19 +1077,23 @@ export default function FaultDetailPage() {
       const normalized = normalizeStatus(fault.status);
       const isPostClosure = normalized === 'cozuldu';
 
-      const resolvedStokKodu = selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || manualPartCode.trim();
-      const resolvedStokAdi = selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName.trim();
-      const resolvedSerialNumber = selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber.trim();
+      const resolvedStokKodu = selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || selectedDepotStockItem?.stokKodu || manualPartCode.trim();
+      const resolvedStokAdi = selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || manualPartName.trim();
+      const resolvedSerialNumber = selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || selectedDepotStockItem?.serialNumber || manualSerialNumber.trim();
+      const resolvedQuantity = selectedDepotStockItem?.isGrouped ? Math.max(1, selectedDepotStockItem.totalQuantity || 1) : 1;
 
       const partChangeData: any = {
         stokKodu: resolvedStokKodu,
         stokAdi: resolvedStokAdi,
         serialNumber: resolvedSerialNumber,
         personalStockId: selectedStockItem?.id || null,
+        depotStockId: selectedDepotStockItem?.id || null,
+        isDepotSelection: !!selectedDepotStockItem,
         poolStockId: selectedPoolStockItem?.id || null,
         poolWarehouseId: selectedPoolStockItem?.poolWarehouseId || null,
         poolWarehouseName: selectedPoolStockItem?.poolWarehouseName || null,
-        isManualEntry: !selectedStockItem && !selectedPoolStockItem,
+        isManualEntry: !selectedStockItem && !selectedPoolStockItem && !selectedDepotStockItem,
+        quantity: resolvedQuantity,
         removedPartStokKodu: removedPartStokKodu.trim() || resolvedStokKodu,
         removedPartStokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
         removedPartSerialNumber: removedPartSerialNumber.trim() || null,
@@ -967,6 +1139,74 @@ export default function FaultDetailPage() {
         });
       }
 
+      if (selectedDepotStockItem) {
+        const requestedQuantity = Math.max(1, selectedDepotStockItem.isGrouped ? selectedDepotStockItem.totalQuantity : 1);
+        const fallbackEntry = selectedDepotStockItem.id
+          ? depotStockItems.find((item) => item.id === selectedDepotStockItem.id)
+          : depotStockItems
+              .filter((item) => item.stokKodu === selectedDepotStockItem.stokKodu && !item.serialNumber && !item.hucreNumarasi)
+              .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+
+        if (!fallbackEntry) {
+          throw new Error('Seçilen depo stok kaydı bulunamadı.');
+        }
+
+        if ((fallbackEntry.quantity || 1) <= requestedQuantity) {
+          batch.delete(doc(db, 'yedekParcaDepoStok', fallbackEntry.id));
+        } else {
+          batch.update(doc(db, 'yedekParcaDepoStok', fallbackEntry.id), {
+            quantity: (fallbackEntry.quantity || 1) - requestedQuantity,
+          });
+        }
+
+        const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
+        batch.set(borrowedRef, {
+          productCodeId: fallbackEntry.productCodeId || '',
+          stokKodu: resolvedStokKodu,
+          stokAdi: resolvedStokAdi,
+          anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
+          serialNumber: resolvedSerialNumber || '',
+          quantity: requestedQuantity,
+          sourceType: 'depot',
+          sourceActionType: 'part_change',
+          depotStockId: fallbackEntry.id,
+          depotAddress: fallbackEntry.address || '',
+          deviceId: fault.deviceId,
+          deviceName: fault.model || '',
+          hospitalId: fault.hospitalId || '',
+          labName: fault.labName || '',
+          formId: fault.id,
+          formType: 'ariza_yonetimi',
+          borrowedByUid: currentUser.uid,
+          borrowedByName: currentUserProfile?.name || '',
+          borrowedAt: Timestamp.fromDate(now),
+          status: 'pending',
+          usedPartImageUrl: usedImgUrl || null,
+        });
+
+        const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(transferLogRef, {
+          action: 'borrowed_part',
+          borrowedPartId: borrowedRef.id,
+          stokKodu: resolvedStokKodu,
+          stokAdi: resolvedStokAdi,
+          anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
+          serialNumber: resolvedSerialNumber || '',
+          quantity: requestedQuantity,
+          approvalStatus: 'pending',
+          sourceType: 'depot',
+          deviceId: fault.deviceId,
+          deviceName: fault.model || '',
+          labName: fault.labName || '',
+          formId: fault.id,
+          formType: 'ariza_yonetimi',
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUser.uid,
+          createdByName: currentUserProfile?.name || '',
+          usageImageUrl: usedImgUrl || null,
+        });
+      }
+
       // If removed part has serial number, create personal stock entry for removed part
       if (removedPartSerialNumber.trim()) {
         const removedStockRef = doc(collection(db, 'personalStock'));
@@ -989,7 +1229,7 @@ export default function FaultDetailPage() {
 
       // Add history entry for part change (with post-closure flag)
       const historyRef = doc(collection(db, 'deviceFaultReports', fault.id, 'history'));
-      const historyDescription = `${isPostClosure ? '[Sonradan Eklendi] ' : ''}Parça değişimi: ${partChangeData.stokAdi} (${resolvedSerialNumber || 'Seri No Yok'})${removedPartSerialNumber.trim() ? ` → Çıkan: ${partChangeData.removedPartStokAdi} (${removedPartSerialNumber.trim()})` : ''}${selectedPoolStockItem ? ` [Havuz Stok: ${selectedPoolStockItem.poolWarehouseName}]` : ''}`;
+      const historyDescription = `${isPostClosure ? '[Sonradan Eklendi] ' : ''}Parça değişimi: ${partChangeData.stokAdi} (${resolvedSerialNumber || (resolvedQuantity > 1 ? `${resolvedQuantity} adet` : 'Seri No Yok')})${removedPartSerialNumber.trim() ? ` → Çıkan: ${partChangeData.removedPartStokAdi} (${removedPartSerialNumber.trim()})` : ''}${selectedPoolStockItem ? ` [Havuz Stok: ${selectedPoolStockItem.poolWarehouseName}]` : ''}${selectedDepotStockItem ? ` [Depo Stok · ${resolvedQuantity} adet · Borç onayı bekliyor]` : ''}`;
       batch.set(historyRef, {
         type: 'note',
         actorUid: currentUser.uid,
@@ -1016,10 +1256,11 @@ export default function FaultDetailPage() {
           removedPartStokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
           removedPartSerialNumber: removedPartSerialNumber.trim() || null,
           personalStockId: selectedStockItem?.id || null,
+          depotStockId: selectedDepotStockItem?.id || null,
           poolStockId: selectedPoolStockItem?.id || null,
           poolWarehouseId: selectedPoolStockItem?.poolWarehouseId || null,
           poolWarehouseName: selectedPoolStockItem?.poolWarehouseName || null,
-          isManualEntry: !selectedStockItem && !selectedPoolStockItem,
+          isManualEntry: !selectedStockItem && !selectedPoolStockItem && !selectedDepotStockItem,
           addedByUid: currentUser.uid,
           addedByName: currentUserProfile?.name || 'Bilinmeyen',
           addedAt: Timestamp.fromDate(now),
@@ -2379,10 +2620,10 @@ export default function FaultDetailPage() {
               <Label className="font-semibold">1. Parça Seçin</Label>
 
               {/* Stock source tabs */}
-              {poolStockItems.length > 0 && !showManualEntry && (
+              {!showManualEntry && (
                 <div className="flex gap-1 p-1 rounded-lg bg-muted border">
                   <button
-                    onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); }}
+                    onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); setSelectedDepotStockItem(null); }}
                     className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                       stockSourceTab === 'personal'
                         ? 'bg-background shadow-sm'
@@ -2393,7 +2634,7 @@ export default function FaultDetailPage() {
                     Şahsi Stok ({personalStock.length})
                   </button>
                   <button
-                    onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }}
+                    onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); setSelectedDepotStockItem(null); }}
                     className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                       stockSourceTab === 'pool'
                         ? 'bg-background shadow-sm'
@@ -2402,6 +2643,17 @@ export default function FaultDetailPage() {
                   >
                     <Package className="h-3 w-3 inline mr-1" />
                     Havuz Stok ({poolStockItems.length})
+                  </button>
+                  <button
+                    onClick={() => { setStockSourceTab('depot'); setSelectedStockItem(null); setSelectedPoolStockItem(null); }}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                      stockSourceTab === 'depot'
+                        ? 'bg-background shadow-sm'
+                        : 'text-muted-foreground'
+                    }`}
+                  >
+                    <Package className="h-3 w-3 inline mr-1" />
+                    Depo Stok ({selectableDepotStock.length})
                   </button>
                 </div>
               )}
@@ -2429,7 +2681,7 @@ export default function FaultDetailPage() {
                         {filteredStock.map(item => (
                           <button
                             key={item.id}
-                            onClick={() => { setSelectedStockItem(item); setSelectedPoolStockItem(null); }}
+                            onClick={() => selectPersonalStockItem(item)}
                             className={`w-full text-left p-2 rounded-md transition-colors ${
                               selectedStockItem?.id === item.id
                                 ? 'bg-primary/10 border-primary border'
@@ -2456,7 +2708,7 @@ export default function FaultDetailPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setShowManualEntry(true)}
+                    onClick={activateManualEntry}
                     className="w-full text-xs"
                   >
                     <Plus className="h-4 w-4 mr-2" />
@@ -2486,7 +2738,7 @@ export default function FaultDetailPage() {
                         {filteredPoolStock.map(item => (
                           <button
                             key={item.id}
-                            onClick={() => { setSelectedPoolStockItem(item); setSelectedStockItem(null); }}
+                            onClick={() => selectPoolStockItem(item)}
                             className={`w-full text-left p-2 rounded-md transition-colors ${
                               selectedPoolStockItem?.id === item.id
                                 ? 'bg-purple-500/10 border-purple-500 border'
@@ -2511,7 +2763,65 @@ export default function FaultDetailPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setShowManualEntry(true)}
+                    onClick={activateManualEntry}
+                    className="w-full text-xs"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Stokta yok, manuel ekle
+                  </Button>
+                </>
+              ) : !showManualEntry && stockSourceTab === 'depot' ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Depo stokta ara..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-40 border rounded-md bg-background">
+                    {filteredDepotStock.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {selectableDepotStock.length === 0 ? 'Depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {filteredDepotStock.map(item => (
+                          <button
+                            key={`${item.id || item.stokKodu}-${item.serialNumber || item.hucreNumarasi || 'qty'}`}
+                            onClick={() => handleDepotItemSelect(item)}
+                            className={`w-full text-left p-2 rounded-md transition-colors ${
+                              selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu
+                                ? 'bg-orange-500/10 border-orange-500 border'
+                                : 'hover:bg-muted'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.stokAdi}</p>
+                                <p className="text-xs text-muted-foreground font-mono">
+                                  {item.stokKodu}
+                                  {item.serialNumber ? ` · SN:${item.serialNumber}` : ''}
+                                  {item.hucreNumarasi ? ` · H:${item.hucreNumarasi}` : ''}
+                                  {!item.serialNumber && !item.hucreNumarasi ? ` · ${item.totalQuantity} adet` : ''}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-mono">{item.serialNumber || item.hucreNumarasi || `${item.totalQuantity} adet`}</p>
+                                <p className="text-xs text-orange-600 font-medium">{item.address || 'Depo'}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={activateManualEntry}
                     className="w-full text-xs"
                   >
                     <Plus className="h-4 w-4 mr-2" />
@@ -2697,19 +3007,24 @@ export default function FaultDetailPage() {
             </div>
 
             {/* Selected item summary */}
-            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualPartName)) && (
+            {(selectedStockItem || selectedPoolStockItem || selectedDepotStockItem || (showManualEntry && manualPartCode && manualPartName)) && (
               <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg text-sm">
                 <p className="font-medium text-green-800 dark:text-green-200">
-                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber || 'Seri No Yok'})
+                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || selectedDepotStockItem?.serialNumber || manualSerialNumber || (selectedDepotStockItem?.isGrouped ? `${selectedDepotStockItem.totalQuantity} adet` : 'Seri No Yok')})
                 </p>
                 {selectedPoolStockItem && (
                   <p className="text-purple-700 dark:text-purple-300 text-xs">
                     Kaynak: Havuz Stok - {selectedPoolStockItem.poolWarehouseName}
                   </p>
                 )}
+                {selectedDepotStockItem && (
+                  <p className="text-orange-700 dark:text-orange-300 text-xs">
+                    Kaynak: Depo Stok {selectedDepotStockItem.isGrouped ? `- ${selectedDepotStockItem.totalQuantity} adet` : ''}
+                  </p>
+                )}
                 {removedPartSerialNumber && (
                   <p className="text-green-700 dark:text-green-300">
-                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
+                    Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber})
                   </p>
                 )}
               </div>
@@ -2720,13 +3035,40 @@ export default function FaultDetailPage() {
             <Button
               onClick={addFaultPartChange}
               disabled={
-                (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName))
+                (!selectedStockItem && !selectedPoolStockItem && !selectedDepotStockItem && !(showManualEntry && manualPartCode && manualPartName))
                 || isSavingPart
                 || isUploadingImage
               }
             >
               {isSavingPart ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Kaydediliyor...</> : 'Ekle'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDepotQuantityDialogOpen} onOpenChange={setIsDepotQuantityDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Depo Adet Seçimi</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              {pendingDepotStockItem?.stokAdi} için depoda toplam <strong>{pendingDepotStockItem?.totalQuantity || 0}</strong> adet mevcut.
+            </p>
+            <div className="space-y-1">
+              <Label>Kaç adet kullanılacak?</Label>
+              <Input
+                type="number"
+                min={1}
+                max={pendingDepotStockItem?.totalQuantity || 1}
+                value={depotRequestedQuantity}
+                onChange={(e) => setDepotRequestedQuantity(Math.max(1, Math.min(pendingDepotStockItem?.totalQuantity || 1, parseInt(e.target.value, 10) || 1)))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsDepotQuantityDialogOpen(false); setPendingDepotStockItem(null); }}>İptal</Button>
+            <Button onClick={confirmDepotQuantitySelection}>Seçimi Onayla</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

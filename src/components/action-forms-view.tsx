@@ -17,13 +17,14 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { Depot, Device, DeviceLabPool, Hospital, PersonalStockItem, PoolWarehouseStockItem } from '@/lib/types';
+import type { Depot, Device, DeviceLabPool, Hospital, PersonalStockItem, PoolWarehouseStockItem, YedekParcaDepoStokItem } from '@/lib/types';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { useAuth } from '@/contexts/auth-context';
 import { companyQuery, companyStamp } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
+import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -62,6 +63,8 @@ type ActionRecord = {
     personalStockId?: string;
     poolStockId?: string;
     poolWarehouseId?: string;
+    depotStockId?: string;
+    isDepotSelection?: boolean;
     isManualEntry?: boolean;
     removedPartImageUrl?: string;
     usedPartImageUrl?: string;
@@ -285,10 +288,15 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
   const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
+  const [depotStockItems, setDepotStockItems] = useState<YedekParcaDepoStokItem[]>([]);
   const [partSearchQuery, setPartSearchQuery] = useState('');
   const [selectedStockItem, setSelectedStockItem] = useState<PersonalStockItem | null>(null);
   const [selectedPoolStockItem, setSelectedPoolStockItem] = useState<PoolWarehouseStockItem | null>(null);
-  const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool'>('personal');
+  const [selectedDepotStockItem, setSelectedDepotStockItem] = useState<DepotSelectableStockItem | null>(null);
+  const [pendingDepotStockItem, setPendingDepotStockItem] = useState<DepotSelectableStockItem | null>(null);
+  const [depotRequestedQuantity, setDepotRequestedQuantity] = useState(1);
+  const [isDepotQuantityDialogOpen, setIsDepotQuantityDialogOpen] = useState(false);
+  const [stockSourceTab, setStockSourceTab] = useState<'personal' | 'pool' | 'depot'>('personal');
   const [manualPartCode, setManualPartCode] = useState('');
   const [manualPartName, setManualPartName] = useState('');
   const [manualSerialNumber, setManualSerialNumber] = useState('');
@@ -414,6 +422,26 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     })();
   }, [form?.hospitalId, currentCompanyId]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        setDepotStockItems(
+          snap.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            } as YedekParcaDepoStokItem;
+          })
+        );
+      } catch (error) {
+        console.error('Error fetching depot stock:', error);
+      }
+    })();
+  }, []);
+
   const filteredStock = useMemo(() => {
     if (!partSearchQuery) return personalStock;
     const q = partSearchQuery.toLowerCase();
@@ -430,10 +458,23 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     );
   }, [partSearchQuery, poolStockItems]);
 
+  const selectableDepotStock = useMemo(() => buildDepotSelectableItems(depotStockItems), [depotStockItems]);
+
+  const filteredDepotStock = useMemo(() => {
+    if (!partSearchQuery) return selectableDepotStock;
+    const q = partSearchQuery.toLowerCase();
+    return selectableDepotStock.filter((p) =>
+      p.stokKodu.toLowerCase().includes(q)
+      || p.stokAdi.toLowerCase().includes(q)
+      || (p.serialNumber || '').toLowerCase().includes(q)
+      || (p.hucreNumarasi || '').toLowerCase().includes(q)
+    );
+  }, [partSearchQuery, selectableDepotStock]);
+
   const installedPartDefaults = useMemo(() => ({
-    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || ''),
-    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || ''),
-  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem, selectedPoolStockItem]);
+    stokKodu: showManualEntry ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || selectedDepotStockItem?.stokKodu || ''),
+    stokAdi: showManualEntry ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || ''),
+  }), [showManualEntry, manualPartCode, manualPartName, selectedStockItem, selectedPoolStockItem, selectedDepotStockItem]);
 
   useEffect(() => {
     if (!isAddPartModalOpen) return;
@@ -514,6 +555,10 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     setPartSearchQuery('');
     setSelectedStockItem(null);
     setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setDepotRequestedQuantity(1);
+    setIsDepotQuantityDialogOpen(false);
     setStockSourceTab('personal');
     setManualPartCode('');
     setManualPartName('');
@@ -527,6 +572,55 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     setRemovedPartImagePreview(null);
     setUsedPartImageFile(null);
     setUsedPartImagePreview(null);
+  };
+
+  const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    if (item.isGrouped && item.totalQuantity > 1) {
+      setPendingDepotStockItem(item);
+      setDepotRequestedQuantity(1);
+      setIsDepotQuantityDialogOpen(true);
+      return;
+    }
+    setPartQuantity(1);
+    setSelectedDepotStockItem({ ...item, totalQuantity: 1 });
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+  };
+
+  const confirmDepotQuantitySelection = () => {
+    if (!pendingDepotStockItem) return;
+    const requestedQuantity = Math.max(1, Math.min(pendingDepotStockItem.totalQuantity, depotRequestedQuantity || 1));
+    setPartQuantity(requestedQuantity);
+    setSelectedDepotStockItem({ ...pendingDepotStockItem, totalQuantity: requestedQuantity });
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const selectPersonalStockItem = (item: PersonalStockItem) => {
+    setSelectedStockItem(item);
+    setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const selectPoolStockItem = (item: PoolWarehouseStockItem) => {
+    setSelectedPoolStockItem(item);
+    setSelectedStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
+  };
+
+  const activateManualEntry = () => {
+    setShowManualEntry(true);
+    setSelectedStockItem(null);
+    setSelectedPoolStockItem(null);
+    setSelectedDepotStockItem(null);
+    setPendingDepotStockItem(null);
+    setIsDepotQuantityDialogOpen(false);
   };
 
   const openCancelPartModal = (actionIndex: number) => {
@@ -606,6 +700,22 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         notes: `Yedek parça kullanımı iptal edildi. Parça ${action.personalStockId ? 'şahsi stoğa' : action.poolStockId ? 'havuz deposuna' : 'kaynağına'} geri iade edildi.`,
       });
 
+      if (action.isDepotSelection) {
+        const restoredDepotRef = doc(collection(db, 'yedekParcaDepoStok'));
+        batch.set(restoredDepotRef, {
+          productCodeId: action.action || action.stokAdi || '',
+          stokKodu: action.stokKodu || '',
+          stokAdi: action.stokAdi || '',
+          anaBirim: 'Adet',
+          address: (action as any).depotAddress || '',
+          serialNumber: action.serialNumber || '',
+          quantity: action.serialNumber ? 1 : (action.quantity || 1),
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        });
+      }
+
       // Log in actionFormHistoryLogs for full audit trail
       const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
       batch.set(historyRef, {
@@ -658,6 +768,17 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         const poolSnap = await getDoc(doc(db, 'poolWarehouseStock', action.poolStockId));
         if (poolSnap.exists()) {
           setPoolStockItems((prev) => [...prev, { id: poolSnap.id, ...poolSnap.data() } as PoolWarehouseStockItem]);
+        }
+      }
+      if (action.isDepotSelection) {
+        const restoredDepotSnap = await getDocs(query(
+          collection(db, 'yedekParcaDepoStok'),
+          where('stokKodu', '==', action.stokKodu || ''),
+          where('stokAdi', '==', action.stokAdi || '')
+        ));
+        const restoredEntry = restoredDepotSnap.docs.at(-1);
+        if (restoredEntry) {
+          setDepotStockItems((prev) => [...prev, { id: restoredEntry.id, ...restoredEntry.data() } as YedekParcaDepoStokItem]);
         }
       }
 
@@ -720,7 +841,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   const saveAddedPart = async () => {
     if (!form) return;
 
-    if (!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName && manualSerialNumber)) {
+    if (!selectedStockItem && !selectedPoolStockItem && !selectedDepotStockItem && !(showManualEntry && manualPartCode && manualPartName && manualSerialNumber)) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen stoktan bir parça seçin veya manuel giriş yapın.', variant: 'destructive' });
       return;
     }
@@ -736,15 +857,15 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     }
 
     const isManual = showManualEntry;
-    const stokKodu = isManual ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || '');
-    const stokAdi = isManual ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || '');
-    const serialNumber = isManual ? manualSerialNumber.trim() : (selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || '');
-    const quantity = isManual ? partQuantity : 1;
+    const stokKodu = isManual ? manualPartCode.trim() : (selectedStockItem?.stokKodu || selectedPoolStockItem?.stokKodu || selectedDepotStockItem?.stokKodu || '');
+    const stokAdi = isManual ? manualPartName.trim() : (selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || '');
+    const serialNumber = isManual ? manualSerialNumber.trim() : (selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || selectedDepotStockItem?.serialNumber || '');
+    const quantity = isManual ? partQuantity : (selectedDepotStockItem?.totalQuantity || 1);
 
     const appendedAction = {
       id: crypto.randomUUID(),
       type: 'part_change',
-      action: isManual ? 'manual_part' : (selectedStockItem?.productCodeId || selectedPoolStockItem?.productCodeId || stokAdi),
+      action: isManual ? 'manual_part' : (selectedStockItem?.productCodeId || selectedPoolStockItem?.productCodeId || selectedDepotStockItem?.productCodeId || stokAdi),
       stokKodu,
       stokAdi,
       quantity,
@@ -753,6 +874,9 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       poolStockId: selectedPoolStockItem?.id,
       poolWarehouseId: selectedPoolStockItem?.poolWarehouseId,
       poolWarehouseName: selectedPoolStockItem?.poolWarehouseName,
+      depotStockId: selectedDepotStockItem?.id,
+      isDepotSelection: !!selectedDepotStockItem,
+      depotAddress: selectedDepotStockItem?.address || '',
       removedPartStokKodu: removedPartStokKodu.trim(),
       removedPartStokAdi: removedPartStokAdi.trim(),
       removedPartSerialNumber: removedPartSerialNumber.trim(),
@@ -861,6 +985,50 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         });
       }
 
+      if (appendedAction.isDepotSelection && selectedDepotStockItem) {
+        let remaining = appendedAction.quantity || 1;
+        const sourceIds = selectedDepotStockItem.sourceEntryIds.length > 0
+          ? selectedDepotStockItem.sourceEntryIds
+          : (selectedDepotStockItem.id ? [selectedDepotStockItem.id] : []);
+
+        for (const entryId of sourceIds) {
+          if (remaining <= 0) break;
+          const depotRef = doc(db, 'yedekParcaDepoStok', entryId);
+          const depotSnap = await getDoc(depotRef);
+          if (!depotSnap.exists()) continue;
+          const depotData = depotSnap.data() as YedekParcaDepoStokItem;
+          const availableQuantity = Math.max(1, depotData.quantity || 1);
+
+          if (depotData.serialNumber || depotData.hucreNumarasi || availableQuantity <= remaining) {
+            batch.delete(depotRef);
+            remaining -= availableQuantity;
+          } else {
+            batch.update(depotRef, {
+              quantity: availableQuantity - remaining,
+            });
+            remaining = 0;
+          }
+        }
+
+        const depotUseLogRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(depotUseLogRef, {
+          action: 'use_on_device',
+          depotStockId: appendedAction.depotStockId || null,
+          stokKodu: appendedAction.stokKodu,
+          stokAdi: appendedAction.stokAdi,
+          serialNumber: appendedAction.serialNumber,
+          quantity: appendedAction.quantity,
+          deviceId: form.deviceId,
+          deviceName: form.cihazAdi || '',
+          labName: form.labName || '',
+          formId: form.id,
+          formType,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        });
+      }
+
       await batch.commit();
 
       setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
@@ -869,6 +1037,34 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       }
       if (appendedAction.poolStockId) {
         setPoolStockItems((prev) => prev.filter((item) => item.id !== appendedAction.poolStockId));
+      }
+      if (appendedAction.isDepotSelection && selectedDepotStockItem) {
+        const selectedIds = new Set(selectedDepotStockItem.sourceEntryIds.length > 0
+          ? selectedDepotStockItem.sourceEntryIds
+          : (selectedDepotStockItem.id ? [selectedDepotStockItem.id] : []));
+        let remainingToConsume = appendedAction.quantity || 1;
+
+        setDepotStockItems((prev) => prev.flatMap((item) => {
+          if (!selectedIds.has(item.id)) return [item];
+          const availableQuantity = Math.max(1, item.quantity || 1);
+
+          if (item.serialNumber || item.hucreNumarasi) {
+            remainingToConsume = Math.max(0, remainingToConsume - availableQuantity);
+            return [];
+          }
+
+          if (availableQuantity <= remainingToConsume) {
+            remainingToConsume -= availableQuantity;
+            return [];
+          }
+
+          const updatedItem: YedekParcaDepoStokItem = {
+            ...item,
+            quantity: availableQuantity - remainingToConsume,
+          };
+          remainingToConsume = 0;
+          return [updatedItem];
+        }));
       }
       setIsAddPartModalOpen(false);
       resetPartModalState();
@@ -1062,13 +1258,18 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
             <div className="p-4 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] space-y-3">
               <Label className="font-semibold text-sm text-[var(--dashboard-text)]">1. Parça Seçin</Label>
 
-              {poolStockItems.length > 0 && !showManualEntry && (
+              {!showManualEntry && (
                 <div className="flex gap-1 p-1 rounded-xl bg-[var(--dashboard-surface)]" style={{ border: '1px solid var(--dashboard-stroke)' }}>
-                  <button onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); }} className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all" style={{ background: stockSourceTab === 'personal' ? 'var(--dashboard-surface-2)' : 'transparent', color: stockSourceTab === 'personal' ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', boxShadow: stockSourceTab === 'personal' ? 'var(--dashboard-raised-soft)' : 'none' }}>
+                  <button onClick={() => { setStockSourceTab('personal'); setSelectedPoolStockItem(null); setSelectedDepotStockItem(null); }} className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all" style={{ background: stockSourceTab === 'personal' ? 'var(--dashboard-surface-2)' : 'transparent', color: stockSourceTab === 'personal' ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', boxShadow: stockSourceTab === 'personal' ? 'var(--dashboard-raised-soft)' : 'none' }}>
                     <Package className="h-3 w-3 inline mr-1" />Şahsi Stok ({personalStock.length})
                   </button>
-                  <button onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); }} className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all" style={{ background: stockSourceTab === 'pool' ? 'var(--dashboard-surface-2)' : 'transparent', color: stockSourceTab === 'pool' ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', boxShadow: stockSourceTab === 'pool' ? 'var(--dashboard-raised-soft)' : 'none' }}>
-                    <Package className="h-3 w-3 inline mr-1" />Havuz Stok ({poolStockItems.length})
+                  {poolStockItems.length > 0 && (
+                    <button onClick={() => { setStockSourceTab('pool'); setSelectedStockItem(null); setSelectedDepotStockItem(null); }} className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all" style={{ background: stockSourceTab === 'pool' ? 'var(--dashboard-surface-2)' : 'transparent', color: stockSourceTab === 'pool' ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', boxShadow: stockSourceTab === 'pool' ? 'var(--dashboard-raised-soft)' : 'none' }}>
+                      <Package className="h-3 w-3 inline mr-1" />Havuz Stok ({poolStockItems.length})
+                    </button>
+                  )}
+                  <button onClick={() => { setStockSourceTab('depot'); setSelectedStockItem(null); setSelectedPoolStockItem(null); }} className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all" style={{ background: stockSourceTab === 'depot' ? 'var(--dashboard-surface-2)' : 'transparent', color: stockSourceTab === 'depot' ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', boxShadow: stockSourceTab === 'depot' ? 'var(--dashboard-raised-soft)' : 'none' }}>
+                    <Package className="h-3 w-3 inline mr-1" />Depo Stok ({selectableDepotStock.length})
                   </button>
                 </div>
               )}
@@ -1083,14 +1284,14 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
                     {filteredStock.length === 0 ? <div className="p-4 text-center text-[var(--dashboard-muted)]">{personalStock.length === 0 ? 'Şahsi stokunuzda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}</div> : (
                       <div className="p-2 space-y-1">
                         {filteredStock.map((item) => (
-                          <button key={item.id} onClick={() => { setSelectedStockItem(item); setSelectedPoolStockItem(null); }} className={`w-full text-left p-3 rounded-xl transition-colors ${selectedStockItem?.id === item.id ? 'bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/40' : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'}`}>
+                          <button key={item.id} onClick={() => selectPersonalStockItem(item)} className={`w-full text-left p-3 rounded-xl transition-colors ${selectedStockItem?.id === item.id ? 'bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/40' : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'}`}>
                             <div className="flex justify-between items-start"><div><p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p><p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p></div><div className="text-right"><p className="text-xs font-mono text-[var(--dashboard-text)]">{item.serialNumber}</p><p className="text-xs text-[var(--dashboard-muted)]">{item.source === 'depot' ? 'Depodan' : 'Cihazdan'}</p></div></div>
                           </button>
                         ))}
                       </div>
                     )}
                   </ScrollArea>
-                  <button onClick={() => setShowManualEntry(true)} className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"><Plus className="h-4 w-4" />Stokta yok, manuel ekle</button>
+                  <button onClick={activateManualEntry} className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"><Plus className="h-4 w-4" />Stokta yok, manuel ekle</button>
                 </>
               ) : !showManualEntry && stockSourceTab === 'pool' ? (
                 <>
@@ -1099,14 +1300,30 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
                     {filteredPoolStock.length === 0 ? <div className="p-4 text-center text-[var(--dashboard-muted)]">{poolStockItems.length === 0 ? 'Havuz depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}</div> : (
                       <div className="p-2 space-y-1">
                         {filteredPoolStock.map((item) => (
-                          <button key={item.id} onClick={() => { setSelectedPoolStockItem(item); setSelectedStockItem(null); }} className={`w-full text-left p-3 rounded-xl transition-colors ${selectedPoolStockItem?.id === item.id ? 'bg-purple-100/80 border border-purple-300/60' : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'}`}>
+                          <button key={item.id} onClick={() => selectPoolStockItem(item)} className={`w-full text-left p-3 rounded-xl transition-colors ${selectedPoolStockItem?.id === item.id ? 'bg-purple-100/80 border border-purple-300/60' : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'}`}>
                             <div className="flex justify-between items-start"><div><p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p><p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p></div><div className="text-right"><p className="text-xs font-mono text-[var(--dashboard-text)]">{item.serialNumber}</p><p className="text-xs text-purple-600">{item.poolWarehouseName}</p></div></div>
                           </button>
                         ))}
                       </div>
                     )}
                   </ScrollArea>
-                  <button onClick={() => setShowManualEntry(true)} className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"><Plus className="h-4 w-4" />Stokta yok, manuel ekle</button>
+                  <button onClick={activateManualEntry} className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"><Plus className="h-4 w-4" />Stokta yok, manuel ekle</button>
+                </>
+              ) : !showManualEntry && stockSourceTab === 'depot' ? (
+                <>
+                  <div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input placeholder="Depo stokta ara..." value={partSearchQuery} onChange={(e) => setPartSearchQuery(e.target.value)} className="pl-10" /></div>
+                  <ScrollArea className="h-44 rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+                    {filteredDepotStock.length === 0 ? <div className="p-4 text-center text-[var(--dashboard-muted)]">{selectableDepotStock.length === 0 ? 'Depoda yedek parça bulunmuyor.' : 'Sonuç bulunamadı.'}</div> : (
+                      <div className="p-2 space-y-1">
+                        {filteredDepotStock.map((item) => (
+                          <button key={`${item.id || item.stokKodu}-${item.serialNumber || item.hucreNumarasi || 'qty'}`} onClick={() => handleDepotItemSelect(item)} className={`w-full text-left p-3 rounded-xl transition-colors ${selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu ? 'bg-orange-100/80 border border-orange-300/60' : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'}`}>
+                            <div className="flex justify-between items-start"><div><p className="font-medium text-[var(--dashboard-text)]">{item.stokAdi}</p><p className="text-xs text-[var(--dashboard-muted)] font-mono">{item.stokKodu}{item.serialNumber ? ` · SN:${item.serialNumber}` : ''}{item.hucreNumarasi ? ` · H:${item.hucreNumarasi}` : ''}{!item.serialNumber && !item.hucreNumarasi ? ` · ${item.totalQuantity} adet` : ''}</p></div><div className="text-right"><p className="text-xs font-mono text-[var(--dashboard-text)]">{item.serialNumber || item.hucreNumarasi || `${item.totalQuantity} adet`}</p><p className="text-xs text-orange-600">{item.address || 'Depo'}</p></div></div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  <button onClick={activateManualEntry} className="w-full text-xs text-[var(--dashboard-accent)] hover:text-[var(--dashboard-accent)]/80 flex items-center justify-center gap-2 py-2 font-medium transition-colors"><Plus className="h-4 w-4" />Stokta yok, manuel ekle</button>
                 </>
               ) : (
                 <div className="space-y-2">
@@ -1128,23 +1345,51 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
               <div className="space-y-2"><Label className="text-xs flex items-center gap-1"><Camera className="h-3 w-3" />Takılan/Kullanılan Parça Fotoğrafı (Opsiyonel)</Label><input type="file" accept="image/*" ref={usedPartImageInputRef} onChange={handleUsedPartImageSelect} className="hidden" />{usedPartImagePreview ? <div className="relative"><img src={usedPartImagePreview} alt="Takılan parça" className="w-full h-32 object-cover rounded-md border" /><button type="button" className="absolute top-1 right-1 h-6 w-6 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600" onClick={() => { setUsedPartImageFile(null); setUsedPartImagePreview(null); if (usedPartImageInputRef.current) usedPartImageInputRef.current.value=''; }}><X className="h-3 w-3" /></button></div> : <button type="button" className="w-full h-16 border border-dashed border-[var(--dashboard-stroke)] rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-[var(--dashboard-surface-2)]" onClick={() => usedPartImageInputRef.current?.click()}><ImageIcon className="h-5 w-5 text-[var(--dashboard-muted)]" /><span className="text-xs text-[var(--dashboard-muted)]">Takılan parça fotoğrafı (Kamera/Galeri)</span></button>}</div>
             </div>
 
-            {(selectedStockItem || selectedPoolStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
-              <div className={`p-3 border rounded-xl text-sm ${selectedPoolStockItem ? 'bg-purple-50/80 border-purple-200/60' : 'bg-emerald-50/80 border-emerald-200/60'}`}>
-                <p className={`font-medium ${selectedPoolStockItem ? 'text-purple-800' : 'text-emerald-800'}`}>
-                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || manualSerialNumber})
+            {(selectedStockItem || selectedPoolStockItem || selectedDepotStockItem || (showManualEntry && manualPartCode && manualSerialNumber)) && (
+              <div className={`p-3 border rounded-xl text-sm ${selectedDepotStockItem ? 'bg-orange-50/80 border-orange-200/60' : selectedPoolStockItem ? 'bg-purple-50/80 border-purple-200/60' : 'bg-emerald-50/80 border-emerald-200/60'}`}>
+                <p className={`font-medium ${selectedDepotStockItem ? 'text-orange-800' : selectedPoolStockItem ? 'text-purple-800' : 'text-emerald-800'}`}>
+                  Takılacak: {selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || manualPartName} ({selectedStockItem?.serialNumber || selectedPoolStockItem?.serialNumber || selectedDepotStockItem?.serialNumber || selectedDepotStockItem?.hucreNumarasi || manualSerialNumber || `${partQuantity} adet`})
                   {selectedPoolStockItem && <span className="ml-1 text-xs text-purple-600">(Havuz: {selectedPoolStockItem.poolWarehouseName})</span>}
+                  {selectedDepotStockItem && <span className="ml-1 text-xs text-orange-600">(Depo: {selectedDepotStockItem.address || 'Merkez Depo'})</span>}
                 </p>
-                <p className={selectedPoolStockItem ? 'text-purple-700' : 'text-emerald-700'}>
-                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
+                <p className={selectedDepotStockItem ? 'text-orange-700' : selectedPoolStockItem ? 'text-purple-700' : 'text-emerald-700'}>
+                  Çıkacak: {removedPartStokAdi || selectedStockItem?.stokAdi || selectedPoolStockItem?.stokAdi || selectedDepotStockItem?.stokAdi || manualPartName} ({removedPartSerialNumber || 'Seri No Yok'})
                 </p>
               </div>
             )}
           </div>
           <DialogFooter className="px-4 sm:px-6 py-3 sm:py-4 border-t border-[var(--dashboard-stroke)] grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
             <button className="w-full sm:w-auto cihaz-tool-item px-4 py-2.5 text-sm font-medium" onClick={() => setIsAddPartModalOpen(false)}>İptal</button>
-            <button className="w-full sm:w-auto cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2" onClick={saveAddedPart} disabled={(!selectedStockItem && !selectedPoolStockItem && !(showManualEntry && manualPartCode && manualPartName && manualSerialNumber)) || isUploadingImage || isSavingAddedPart}>
+            <button className="w-full sm:w-auto cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-accent)] text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2" onClick={saveAddedPart} disabled={(!selectedStockItem && !selectedPoolStockItem && !selectedDepotStockItem && !(showManualEntry && manualPartCode && manualPartName && manualSerialNumber)) || isUploadingImage || isSavingAddedPart}>
               {(isUploadingImage || isSavingAddedPart) ? <><Loader2 className="h-4 w-4 animate-spin" />Yükleniyor...</> : 'Ekle'}
             </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDepotQuantityDialogOpen} onOpenChange={setIsDepotQuantityDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Depo Adet Seçimi</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-[var(--dashboard-muted)]">
+              {pendingDepotStockItem?.stokAdi} için depoda toplam <strong>{pendingDepotStockItem?.totalQuantity || 0}</strong> adet mevcut.
+            </p>
+            <div className="space-y-1">
+              <Label>Kaç adet kullanılacak?</Label>
+              <Input
+                type="number"
+                min={1}
+                max={pendingDepotStockItem?.totalQuantity || 1}
+                value={depotRequestedQuantity}
+                onChange={(e) => setDepotRequestedQuantity(Math.max(1, Math.min(pendingDepotStockItem?.totalQuantity || 1, parseInt(e.target.value, 10) || 1)))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsDepotQuantityDialogOpen(false); setPendingDepotStockItem(null); }}>İptal</Button>
+            <Button onClick={confirmDepotQuantitySelection}>Seçimi Onayla</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

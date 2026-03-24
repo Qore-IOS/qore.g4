@@ -357,13 +357,15 @@ export async function getExpiringProductsCount(thresholdDays: number = 45, compa
 
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
+      if (data.isShipped === true) continue;
+
       const miadStr = typeof data.miad === 'string' ? data.miad : '';
       if (!miadStr) continue;
       const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
       if (!isValid(miadDate)) continue;
 
       const days = differenceInDays(miadDate, today);
-      if (days <= thresholdDays && days >= 0) {
+      if (days <= thresholdDays) {
         const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
@@ -372,6 +374,7 @@ export async function getExpiringProductsCount(thresholdDays: number = 45, compa
       }
     }
 
+    console.log(`[getExpiringProductsCount] Total docs: ${snapshot.docs.length}, expiring: ${count}`);
     return count;
   } catch (error) {
     console.error('Error counting expiring products:', error);

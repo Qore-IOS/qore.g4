@@ -432,8 +432,8 @@ export async function emitSparePartTransfer(params: {
   await createNotification({
     type: 'spare_part_transfer',
     channel: 'push',
-    title: 'Yedek Parça Transfer Edildi',
-    message: `${params.actor.name} tarafından ${totalQty} adet yedek parça transfer edildi: ${itemSummary}`,
+    title: 'Yedek Parça Onay Bekliyor',
+    message: `${params.actor.name} tarafından ${totalQty} adet yedek parça transfer edildi, onayınız bekleniyor: ${itemSummary}`,
     href: '/direkt-transfer/yedek-parca-transfer',
     actor: params.actor,
     targets: [`user:${params.targetUid}`],

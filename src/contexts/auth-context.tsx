@@ -162,7 +162,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const userDocSnap = await getDoc(userDocRef);
             if (userDocSnap.exists()) {
               const userData = userDocSnap.data() as User;
-              const userPermissions = userData.accessibleViews || [];
+              const isSuperAdminRole = userData.role === 'super_admin';
+              const userPermissions = isSuperAdminRole
+                ? VIEWS.map(v => v.key) as AppView[]
+                : (userData.accessibleViews || []);
               if (!userPermissions.includes('arama')) {
                   userPermissions.push('arama');
               }

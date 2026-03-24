@@ -602,9 +602,9 @@ export async function calculateAllPerformances(filters?: PerformanceFilters, com
 
     // =========================================================================
     // 7. TEKRAR ARIZA CEZASI (-10 to 0 points)
-    //    -2 per recurrence within 7 days, max -10
+    //    -2 per recurrence within 3 hours, max -10
     // =========================================================================
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const recurrenceWindowMs = 3 * 60 * 60 * 1000;
     let recurrenceCount = 0;
 
     const userResolvedFaultsForRecurrence = (hasPrimaryLabs
@@ -619,7 +619,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters, com
         f.openedAt &&
         resolved.closedAt &&
         f.openedAt.getTime() > resolved.closedAt.getTime() &&
-        f.openedAt.getTime() - resolved.closedAt.getTime() <= sevenDaysMs
+        f.openedAt.getTime() - resolved.closedAt.getTime() <= recurrenceWindowMs
       );
       if (hasRecurrence) recurrenceCount++;
     }
