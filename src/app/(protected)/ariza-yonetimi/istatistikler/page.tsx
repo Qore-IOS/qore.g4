@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, orderBy, query, Timestamp, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { companyQuery, safeOnSnapshot, safeGetDocs } from '@/lib/company-filter';
 import type { Device, Hospital, ProductCode } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -80,7 +81,7 @@ export default function ArizaIstatistikleriPage() {
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, currentCompanyId } = useAuth();
 
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
@@ -100,11 +101,8 @@ export default function ArizaIstatistikleriPage() {
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
 
   useEffect(() => {
-    const reportsQuery = query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'));
-    const devicesQuery = query(collection(db, 'devices'));
-    const hospitalsQuery = query(collection(db, 'hospitals'), orderBy('name', 'asc'));
-
-    const unsubReports = onSnapshot(reportsQuery,
+    const unsubReports = safeOnSnapshot(
+        companyQuery(db, 'deviceFaultReports', currentCompanyId, orderBy('openedAt', 'desc')),
         (snapshot) => {
             const reportList: any[] = snapshot.docs.map(d => {
                 const data = d.data();
@@ -122,7 +120,8 @@ export default function ArizaIstatistikleriPage() {
         }
     );
 
-    const unsubDevices = onSnapshot(devicesQuery,
+    const unsubDevices = safeOnSnapshot(
+        companyQuery(db, 'devices', currentCompanyId),
         (snapshot) => {
             setDevices(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Device)));
         },
@@ -132,7 +131,8 @@ export default function ArizaIstatistikleriPage() {
         }
     );
 
-    const unsubHospitals = onSnapshot(hospitalsQuery,
+    const unsubHospitals = safeOnSnapshot(
+        companyQuery(db, 'hospitals', currentCompanyId, orderBy('name', 'asc')),
         (snapshot) => {
             setHospitals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
             setLoading(false);
@@ -151,8 +151,8 @@ export default function ArizaIstatistikleriPage() {
       console.error('Error fetching product codes:', err);
     });
 
-    // Fetch fault definitions
-    getDocs(collection(db, 'faultDefinitions')).then(snapshot => {
+    // Fetch fault definitions (company filtered)
+    safeGetDocs(companyQuery(db, 'faultDefinitions', currentCompanyId)).then(snapshot => {
       setFaultDefinitions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FaultDefinition)));
     }).catch(err => {
       console.error('Error fetching fault definitions:', err);
@@ -163,7 +163,7 @@ export default function ArizaIstatistikleriPage() {
         unsubDevices();
         unsubHospitals();
     };
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   // Fetch minMaxRules for all hospitals
   useEffect(() => {

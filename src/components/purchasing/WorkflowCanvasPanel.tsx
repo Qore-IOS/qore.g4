@@ -19,6 +19,8 @@ import type {
 import { cn } from '@/lib/utils';
 import { CheckCircle2, Circle, Link2, Maximize2, Minimize2, Palette, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 
 type Props = {
   tasks: PurchasingTask[];
@@ -47,6 +49,7 @@ export default function WorkflowCanvasPanel({
   onRequestCreateTask,
   onAttachFilesToTask,
 }: Props) {
+  const { currentCompanyId } = useAuth();
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(workflows[0]?.id || '');
   const [newName, setNewName] = useState('Yeni Workflow');
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
@@ -208,7 +211,7 @@ export default function WorkflowCanvasPanel({
     const name = newName.trim();
     if (!name) return;
     try {
-      const ref = await addDoc(collection(db, 'purchasingWorkflows'), {
+      const ref = await addDoc(collection(db, 'purchasingWorkflows'), companyStamp({
         name,
         color: newColor,
         taskIds: [],
@@ -218,7 +221,7 @@ export default function WorkflowCanvasPanel({
         updatedAt: Timestamp.now(),
         createdByUid: userUid || null,
         createdByName: userName || null,
-      });
+      }, currentCompanyId, 'purchasingWorkflows'));
       setSelectedWorkflowId(ref.id);
       toast.success('Workflow oluşturuldu');
     } catch (err) {

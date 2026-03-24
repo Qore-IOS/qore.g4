@@ -18,6 +18,8 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, ProductCode } from '@/lib/types';
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History } from 'lucide-react';
 import { formatMiad } from '@/lib/date';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 const SortableHeader: React.FC<{
   label: string;
@@ -50,6 +52,7 @@ type GroupedStockItem = {
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
+  const { currentCompanyId } = useAuth();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
@@ -65,8 +68,8 @@ export default function LaboratuvarYonetimiPanel() {
     async function fetchData() {
       setIsLoading(true);
       const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', true))),
         getDocs(collection(db, 'productCodes'))
       ]);
       setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
@@ -82,7 +85,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsLoading(false);
     }
     fetchData();
-  }, []);
+  }, [currentCompanyId]);
 
   const labStocks = useMemo(() => {
     if (!selectedLabId) return [];

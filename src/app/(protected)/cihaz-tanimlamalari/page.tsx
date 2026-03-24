@@ -7,8 +7,11 @@ import { Loader2 } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 export default function CihazTanimlamalariPage() {
+  const { currentCompanyId } = useAuth();
   const [imageFiles, setImageFiles] = useState<string[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,7 +22,7 @@ export default function CihazTanimlamalariPage() {
       try {
         const [images, hospitalsSnap] = await Promise.all([
           getDeviceImages(),
-          getDocs(collection(db, 'hospitals'))
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId))
         ]);
         setImageFiles(images);
         setHospitals(hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital)));
@@ -30,7 +33,7 @@ export default function CihazTanimlamalariPage() {
       }
     }
     loadData();
-  }, []);
+  }, [currentCompanyId]);
 
   if (loading) {
     return (

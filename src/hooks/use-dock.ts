@@ -26,6 +26,7 @@ import {
   doc,
   arrayUnion,
 } from "firebase/firestore";
+import { addCompanyFilter } from '@/lib/company-filter';
 import type { NotificationDoc } from "@/lib/notifications";
 import {
   Bell,
@@ -346,7 +347,7 @@ const subItemMap: Record<string, DockSubItem[]> = {
 };
 
 export function useDock() {
-  const { currentUser, currentUserProfile, logout } = useAuth();
+  const { currentUser, currentUserProfile, logout, currentCompanyId } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -442,12 +443,13 @@ export function useDock() {
 
     trackListener("useDock-notifications", "create");
 
-    const q = query(
+    const baseQ = query(
       collection(db, "notifications"),
       where("targets", "array-contains-any", keysArray),
       orderBy("createdAt", "desc"),
       fsLimit(40)
     );
+    const q = addCompanyFilter(baseQ, currentCompanyId, 'notifications');
 
     const unsub = onSnapshot(
       q,
@@ -498,7 +500,7 @@ export function useDock() {
       trackListener("useDock-notifications", "cleanup");
       unsub();
     };
-  }, [membershipKeysString, uid, notificationsAllowed, peekDockStable]);
+  }, [membershipKeysString, uid, notificationsAllowed, peekDockStable, currentCompanyId]);
 
   const unreadCount = useMemo(() => {
     if (!uid || !notificationsAllowed) return 0;

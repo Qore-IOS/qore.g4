@@ -24,7 +24,9 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useToast } from "@/hooks/use-toast";
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
+import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
 import { useAuth } from '@/contexts/auth-context';
 
@@ -66,24 +68,47 @@ type DayRangeOption = '1' | '2' | '5' | '7' | '30' | 'all';
     unsubscribeRefs.current = [];
   };
 
-  useEffect(() => () => {
-    unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
-    unsubscribeRefs.current = [];
-  }, []);
+  const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
 
   useEffect(() => {
     fetchPanelData();
   }, [fetchPanelData]);
 
   useEffect(() => {
-    if (selectedLaboratoryId) {
-      const laboratory = laboratories.find(h => h.id === selectedLaboratoryId);
-      if (!laboratory) return;
+    const fetchInitialData = async () => {
+      setIsLabsLoading(true);
+      try {
+        const [laboratoriesSnap, productsSnap] = await Promise.all([
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+          getDocs(collection(db, 'productCodes')),
+        ]);
 
-      const laboratoryName = laboratory.name;
-      const relevantConsumptions = tuketimKayitlari.filter(
-        record => record.laboratoryName === laboratoryName && record.consumptionType === 'normal_kullanim'
-      );
+        setLaboratories(
+          laboratoriesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Laboratory))
+        );
+
+        const products = productsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as ProductCode));
+        setProductCodes(products);
+
+        kullanimDogrulamaLogger.info('Laboratuvarlar ve ürün kodları yüklendi', {
+          laboratories: laboratoriesSnap.docs.length,
+          products: productsSnap.docs.length,
+        });
+      } catch (error) {
+        kullanimDogrulamaLogger.error('Temel veriler yüklenemedi', error);
+        toast({
+          title: 'Veri Hatası',
+          description: 'Laboratuvar listesi yüklenemedi.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsLabsLoading(false);
+      }
+    };
+
+    fetchInitialData();
+  }, [toast, currentCompanyId]);
 
       const grouped: Record<string, VerificationItemGroup> = {};
 

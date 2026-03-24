@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -542,7 +543,7 @@ function parseNaturalTaskInputForPlanning(
 // ==========================================
 
 export default function SatinAlmaPanel() {
-  const { currentUserProfile, isAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, currentCompanyId } = useAuth();
   const userName = currentUserProfile?.name || 'Kullanıcı';
 
   // State
@@ -608,18 +609,18 @@ export default function SatinAlmaPanel() {
 
   // Firestore listener
   useEffect(() => {
-    const q = query(collection(db, 'purchasingTasks'), orderBy('date', 'asc'));
+    const q = companyQuery(db, 'purchasingTasks', currentCompanyId, orderBy('date', 'asc'));
     const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingTask[];
+      q as any,
+      (snap: any) => {
+        const items = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as PurchasingTask[];
         setTasks(items);
         setTasksLoading(false);
         if (typeof window !== 'undefined') {
           localStorage.setItem(TASK_CACHE_KEY, JSON.stringify(serializeForCache(items)));
         }
       },
-      (err) => {
+      (err: any) => {
         console.error('PurchasingTasks listen error', err);
         if (typeof window !== 'undefined') {
           try {
@@ -635,21 +636,21 @@ export default function SatinAlmaPanel() {
       }
     );
     return () => unsub();
-  }, []);
+  }, [currentCompanyId]);
 
   useEffect(() => {
-    const q = query(collection(db, 'deviceFaultReports'));
+    const q = companyQuery(db, 'deviceFaultReports', currentCompanyId);
     const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as DeviceFaultReport[];
+      q as any,
+      (snap: any) => {
+        const items = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as DeviceFaultReport[];
         setFaultReports(items);
       },
-      (err) => console.error('DeviceFaultReports listen error', err)
+      (err: any) => console.error('DeviceFaultReports listen error', err)
     );
 
     return () => unsub();
-  }, []);
+  }, [currentCompanyId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -724,30 +725,30 @@ export default function SatinAlmaPanel() {
   }, [isOffline, syncOfflineMutations]);
 
   useEffect(() => {
-    const q = query(collection(db, 'purchasingTaskDefinitions'), orderBy('name', 'asc'));
+    const q = companyQuery(db, 'purchasingTaskDefinitions', currentCompanyId, orderBy('name', 'asc'));
     const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const defs = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingTaskDefinition[];
+      q as any,
+      (snap: any) => {
+        const defs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as PurchasingTaskDefinition[];
         setTaskDefinitions(defs.filter((d) => d.active !== false));
       },
-      (err) => console.error('TaskDefinitions listen error', err)
+      (err: any) => console.error('TaskDefinitions listen error', err)
     );
     return () => unsub();
-  }, []);
+  }, [currentCompanyId]);
 
   useEffect(() => {
-    const q = query(collection(db, 'purchasingWorkflows'), orderBy('updatedAt', 'desc'));
+    const q = companyQuery(db, 'purchasingWorkflows', currentCompanyId, orderBy('updatedAt', 'desc'));
     const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingWorkflowProject[];
+      q as any,
+      (snap: any) => {
+        const items = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as PurchasingWorkflowProject[];
         setWorkflows(items);
       },
-      (err) => console.error('Workflows listen error', err)
+      (err: any) => console.error('Workflows listen error', err)
     );
     return () => unsub();
-  }, []);
+  }, [currentCompanyId]);
 
   // Fetch reference data
   useEffect(() => {
@@ -755,9 +756,9 @@ export default function SatinAlmaPanel() {
     async function fetchReferenceData() {
       try {
         const [hospSnap, poolSnap, usersSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
           getDocs(collection(db, 'labPools')),
-          getDocs(query(collection(db, 'users'), where('role', 'in', ['admin', 'satin_alma']))),
+          getDocs(companyQuery(db, 'users', currentCompanyId, where('role', 'in', ['admin', 'satin_alma']))),
         ]);
         if (cancelled) return;
         setLaboratories(hospSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
@@ -769,7 +770,7 @@ export default function SatinAlmaPanel() {
     }
     fetchReferenceData();
     return () => { cancelled = true; };
-  }, []);
+  }, [currentCompanyId]);
 
   // Main laboratories
   const mainLaboratories = useMemo(() => {
@@ -1192,13 +1193,13 @@ export default function SatinAlmaPanel() {
           createdTaskId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const localTask = { ...taskDoc, id: createdTaskId } as PurchasingTask;
           setTasks((prev) => [...prev, localTask]);
-          enqueueMutation({ action: 'create', taskId: createdTaskId, payload: taskDoc });
+          enqueueMutation({ action: 'create', taskId: createdTaskId, payload: companyStamp(taskDoc, currentCompanyId, 'purchasingTasks') });
           if (data.files?.length) {
             toast.warning('Çevrimdışı modda dosya yükleme desteklenmiyor. İnternete bağlanınca düzenleyip ekleyebilirsiniz.');
           }
           toast.info('Çevrimdışı: görev yerel olarak kaydedildi ve senkron kuyruğuna alındı');
         } else {
-          const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
+          const docRef = await addDoc(collection(db, 'purchasingTasks'), companyStamp(taskDoc, currentCompanyId, 'purchasingTasks'));
           createdTaskId = docRef.id;
 
           if (data.workflowProjectId) {
@@ -1253,7 +1254,7 @@ export default function SatinAlmaPanel() {
                   ),
                 ],
               };
-              batch.set(doc(collection(db, 'purchasingTasks')), recurDoc);
+              batch.set(doc(collection(db, 'purchasingTasks')), companyStamp(recurDoc, currentCompanyId, 'purchasingTasks'));
             }
             await batch.commit();
             toast.success(`${filteredFutureDates.length} tekrarlayan görev oluşturuldu`);
@@ -2591,12 +2592,12 @@ export default function SatinAlmaPanel() {
               toast.error('Bu görev tanımı zaten mevcut');
               return;
             }
-            await addDoc(collection(db, 'purchasingTaskDefinitions'), {
+            await addDoc(collection(db, 'purchasingTaskDefinitions'), companyStamp({
               name: trimmed,
               requiresLaboratory,
               active: true,
               createdAt: Timestamp.now(),
-            });
+            }, currentCompanyId, 'purchasingTaskDefinitions'));
             toast.success('Görev tanımı eklendi');
           }}
           onDelete={async (id) => {

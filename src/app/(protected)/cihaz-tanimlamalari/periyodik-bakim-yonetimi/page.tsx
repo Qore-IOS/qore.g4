@@ -4,6 +4,8 @@ import { collection, getDocs, deleteDoc, doc, query, where, orderBy } from 'fire
 import { db } from '@/lib/firebase';
 import type { MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import BackButton from '@/components/BackButton';
 import { Loader2, Trash2, Search, Wrench, Package, Calendar, AlertTriangle, Building2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -51,6 +53,7 @@ const PERIOD_UNIT_LABELS: Record<string, string> = {
 
 export default function PeriyodikBakimYonetimiPage() {
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLabFilter, setSelectedLabFilter] = useState<string>('all');
@@ -70,12 +73,12 @@ export default function PeriyodikBakimYonetimiPage() {
     setLoading(true);
     try {
       const [plansSnap, logsSnap, partsSnap, partLogsSnap, devicesSnap, hospitalsSnap] = await Promise.all([
-        getDocs(collection(db, 'maintenancePlans')),
+        getDocs(companyQuery(db, 'maintenancePlans', currentCompanyId)),
         getDocs(query(collection(db, 'maintenanceLogs'), orderBy('completedAt', 'desc'))),
         getDocs(collection(db, 'periodicPartChanges')),
         getDocs(query(collection(db, 'periodicPartChangeLogs'), orderBy('completedAt', 'desc'))),
-        getDocs(collection(db, 'devices')),
-        getDocs(collection(db, 'hospitals')),
+        getDocs(companyQuery(db, 'devices', currentCompanyId)),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
       ]);
 
       setMaintenancePlans(plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan));
@@ -106,7 +109,7 @@ export default function PeriyodikBakimYonetimiPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [currentCompanyId]);
 
   const enrichedPlans = useMemo<EnrichedMaintenancePlan[]>(() => {
     const now = new Date();

@@ -27,6 +27,7 @@ import { addDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import QoreAIPanel from '@/components/QoreAIPanel';
 import { Button } from '@/components/ui/button';
 import {
@@ -157,7 +158,7 @@ export default function CihazYonetimiHost() {
 
   const { toast } = useToast();
   const router = useRouter();
-  const { isAdmin, currentUserProfile } = useAuth();
+  const { isAdmin, currentUserProfile, currentCompanyId } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -180,14 +181,14 @@ export default function CihazYonetimiHost() {
         teknikFormsSnap,
         aplikasyonFormsSnap,
       ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(companyQuery(db, 'devices', currentCompanyId)),
         getDocs(collection(db, 'hospitalDeviceAssignments')),
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'personnelAvailability')),
-        getDocs(collection(db, 'deviceFaultReports')),
-        getDocs(collection(db, 'deviceActionForms')),
-        getDocs(collection(db, 'aplikasyonActionForms')),
+        getDocs(companyQuery(db, 'users', currentCompanyId)),
+        getDocs(companyQuery(db, 'personnelAvailability', currentCompanyId)),
+        getDocs(companyQuery(db, 'deviceFaultReports', currentCompanyId)),
+        getDocs(companyQuery(db, 'deviceActionForms', currentCompanyId)),
+        getDocs(companyQuery(db, 'aplikasyonActionForms', currentCompanyId)),
       ]);
 
       setHospitals(hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Hospital));
@@ -265,7 +266,7 @@ export default function CihazYonetimiHost() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchAllApplicationData();
@@ -416,8 +417,8 @@ export default function CihazYonetimiHost() {
       };
 
       const [recordRef] = await Promise.all([
-        addDoc(collection(db, 'personnelAvailability'), payload),
-        addDoc(collection(db, 'personnelHistoryLogs'), {
+        addDoc(collection(db, 'personnelAvailability'), companyStamp(payload, currentCompanyId, 'personnelAvailability')),
+        addDoc(collection(db, 'personnelHistoryLogs'), companyStamp({
           uid: currentUserProfile.uid,
           action: 'availability_created',
           actionLabel: statusLabel,
@@ -429,7 +430,7 @@ export default function CihazYonetimiHost() {
           metadata: {
             type: availabilityType,
           },
-        }),
+        }, currentCompanyId, 'personnelHistoryLogs')),
       ]);
 
       setAvailabilityRecords((prev) => [

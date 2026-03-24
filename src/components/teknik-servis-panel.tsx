@@ -10,6 +10,8 @@ import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import { companyQuery } from '@/lib/company-filter';
+import { useAuth } from '@/contexts/auth-context';
 
 /* ─── Types ─── */
 
@@ -58,6 +60,7 @@ export default function TeknikServisPanel({
   hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = ''
 }: TeknikServisPanelProps) {
   const router = useRouter();
+  const { currentCompanyId } = useAuth();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
 
   /* ── Open fault reports ── */
@@ -66,8 +69,8 @@ export default function TeknikServisPanel({
   useEffect(() => {
     const fetchOpenFaults = async () => {
       try {
-        const q = query(
-          collection(db, 'deviceFaultReports'),
+        const q = companyQuery(
+          db, 'deviceFaultReports', currentCompanyId,
           where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
         );
         const snap = await getDocs(q);
@@ -82,7 +85,7 @@ export default function TeknikServisPanel({
       }
     };
     fetchOpenFaults();
-  }, []);
+  }, [currentCompanyId]);
 
   /* ── Device helpers ── */
 

@@ -46,6 +46,8 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useRowFocus } from '@/hooks/useRowFocus';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 export default function TransferGecmisPanel() {
   const searchParams = useSearchParams();
@@ -53,6 +55,7 @@ export default function TransferGecmisPanel() {
   const depotIdFromUrl = searchParams.get('depotId') || '';
   const labIdFromUrl = searchParams.get('labId') || 'all';
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
 
   const [depots, setDepots] = useState<Depot[]>([]);
   const [labs, setLabs] = useState<Hospital[]>([]);
@@ -73,7 +76,7 @@ export default function TransferGecmisPanel() {
 
   // Fetch depots once
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'depots'), snap => {
+    const unsub = onSnapshot(companyQuery(db, 'depots', currentCompanyId) as any, snap => {
       const depotList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       setDepots(depotList);
       if (!selectedDepotId && depotList.length > 0) {
@@ -81,16 +84,16 @@ export default function TransferGecmisPanel() {
       }
     });
     return () => unsub();
-  }, [selectedDepotId]);
+  }, [selectedDepotId, currentCompanyId]);
 
   // Fetch labs once for target laboratory filter
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'hospitals'), snap => {
+    const unsub = onSnapshot(companyQuery(db, 'hospitals', currentCompanyId) as any, snap => {
       const labList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       setLabs(labList);
     });
     return () => unsub();
-  }, []);
+  }, [currentCompanyId]);
 
   /**
    * Fetch total count for the selected depot (server-side)
@@ -105,7 +108,7 @@ export default function TransferGecmisPanel() {
       if (labId && labId !== 'all') {
         filters.push(where('targetHospitalId', '==', labId));
       }
-      const countQuery = query(collection(db, 'transfers'), ...filters);
+      const countQuery = companyQuery(db, 'transfers', currentCompanyId, ...filters);
       const snapshot = await getCountFromServer(countQuery);
       setTotalCount(snapshot.data().count);
     } catch (error) {
@@ -116,7 +119,7 @@ export default function TransferGecmisPanel() {
       });
       setTotalCount(0);
     }
-  }, []);
+  }, [currentCompanyId]);
 
   /**
    * Fetch transfers for the given page (server-side with cursor pagination)

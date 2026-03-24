@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, companyStamp, addCompanyFilter, safeGetDocs } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -138,7 +139,7 @@ export default function IslemFormuPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
 
   const [device, setDevice] = useState<Device | null>(null);
@@ -375,7 +376,7 @@ export default function IslemFormuPage() {
         if (!hospitalId) return;
 
         // 2. Get all device lab pools that include this hospital
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -386,7 +387,7 @@ export default function IslemFormuPage() {
         if (matchingPoolIds.length === 0) return;
 
         // 3. Get pool warehouses linked to these lab groups
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -425,10 +426,7 @@ export default function IslemFormuPage() {
   useEffect(() => {
     (async () => {
       try {
-        const q = query(
-          collection(db, 'faultDefinitions'),
-          where('type', '==', 'teknik_servis')
-        );
+        const q = companyQuery(db, 'faultDefinitions', currentCompanyId, where('type', '==', 'teknik_servis'));
         const snap = await getDocs(q);
         const faults = snap.docs.map(d => ({
           id: d.id,

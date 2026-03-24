@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { Check, X, Loader2, ListFilter } from 'lucide-react';
 import { cn, playFeedback } from '@/lib/utils';
@@ -39,7 +40,7 @@ export default function LaboratuvarSayimPage() {
   const params = useParams();
   const labId = Array.isArray(params?.labId) ? params.labId[0] : (params?.labId as string);
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
 
   const [labName, setLabName] = useState<string>('');
@@ -217,10 +218,10 @@ export default function LaboratuvarSayimPage() {
     getDocs(collection(db, 'labPools')).then(snap => {
       setLabPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
     });
-    getDocs(collection(db, 'hospitals')).then(snap => {
+    getDocs(companyQuery(db, 'hospitals', currentCompanyId)).then(snap => {
       setLaboratories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
     });
-  }, []);
+  }, [currentCompanyId]);
 
   useEffect(() => {
     if (!labId) return;

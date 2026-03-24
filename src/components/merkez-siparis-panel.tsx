@@ -26,6 +26,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 type LocationType = 'depot' | 'hospital';
 
@@ -121,7 +122,7 @@ const toDate = (value: unknown): Date | undefined => {
 export default function MerkezSiparisPanel() {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUserProfile, currentUser } = useAuth();
+  const { currentUserProfile, currentUser, currentCompanyId } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -159,13 +160,13 @@ export default function MerkezSiparisPanel() {
       setIsLoading(true);
       try {
         const [depotsSnap, hospitalsSnap, productsSnap, stokSnap, groupsSnap, centralOrdersSnap, cihazUstuSnap] = await Promise.all([
-          getDocs(collection(db, 'depots')),
-          getDocs(collection(db, 'hospitals')),
+          getDocs(companyQuery(db, 'depots', currentCompanyId)),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
           getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'depoStok')),
+          getDocs(companyQuery(db, 'depoStok', currentCompanyId)),
           getDocs(collection(db, 'deviceGroups')),
           getDocs(query(collection(db, 'centralOrders'), orderBy('createdAt', 'desc'))),
-          getDocs(collection(db, 'cihazUstuGecmisi')),
+          getDocs(companyQuery(db, 'cihazUstuGecmisi', currentCompanyId)),
         ]);
 
         const depotsData = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
@@ -248,7 +249,7 @@ export default function MerkezSiparisPanel() {
     };
 
     fetchData();
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   const productByStockCode = useMemo(() => {
     return productCodes.reduce<Record<string, ProductCode>>((acc, product) => {
