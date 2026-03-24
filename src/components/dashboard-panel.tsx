@@ -117,36 +117,114 @@ export default function DashboardPanel({
     };
   }, []);
 
-  // Total stock cost – client-side calculation
+  // Total stock cost + risky cost – client-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
+  const [riskyCost, setRiskyCost] = useState<number | null>(null);
   useEffect(() => {
     (async () => {
       try {
-        const [productSnap, stockSnap] = await Promise.all([
+        const [productSnap, stockSnap, depotsSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'depoStok')),
+          getDocs(collection(db, 'depots')),
         ]);
 
+        // Build cost map: stokKodu -> birim maliyet
         const costMap = new Map<string, number>();
         productSnap.docs.forEach((d) => {
           const data = d.data();
           if (data.cost && data.stokKodu) costMap.set(data.stokKodu, data.cost);
         });
 
+        // Toplam maliyet hesapla
         let total = 0;
-        let matchedCount = 0;
+        const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
+        const groupedByDepotAndProduct = new Map<string, number>();
+
         stockSnap.docs.forEach((d) => {
           const data = d.data();
           if (data.isShipped === true) return;
           const cost = costMap.get(data.stokKodu);
-          if (cost) { total += cost; matchedCount++; }
+          if (cost) total += cost;
+          // Riskli hesabı için stok bilgisi topla
+          activeStockItems.push({
+            stokKodu: data.stokKodu,
+            lotNumarasi: data.lotNumarasi || '',
+            miad: typeof data.miad === 'string' ? data.miad : '',
+            depotId: data.depotId || '',
+            quantity: 1,
+          });
+          // Depo+stokKodu bazında toplam adet
+          const gKey = `${data.depotId || ''}__${data.stokKodu}`;
+          groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + 1);
         });
 
-        console.log('[Dashboard] Stock cost:', { total, stockCount: stockSnap.docs.length, productCount: productSnap.docs.length, matchedCount, costMapSize: costMap.size });
         setTotalStockCost(total);
+
+        // Riskli maliyet: tüm depolardan minMaxRules çek
+        const depotIds = depotsSnap.docs.map((d) => d.id);
+        const allMinMaxRules = new Map<string, { max: number; maxGun: number }>();
+
+        const rulePromises = depotIds.map(async (depotId) => {
+          const rulesSnap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
+          rulesSnap.docs.forEach((d) => {
+            const rule = d.data();
+            if (rule.stokKodu && rule.max && rule.maxGun) {
+              // Depo bazlı key — aynı ürün farklı depolarda farklı rule'a sahip olabilir
+              allMinMaxRules.set(`${depotId}__${rule.stokKodu}`, { max: rule.max, maxGun: rule.maxGun });
+            }
+          });
+        });
+        await Promise.all(rulePromises);
+
+        // Stokları grupla: depotId + stokKodu + lotNumarasi + miad
+        const lotGroups = new Map<string, { stokKodu: string; depotId: string; lotNumarasi: string; miad: string; quantity: number }>();
+        activeStockItems.forEach((item) => {
+          const key = `${item.depotId}__${item.stokKodu}__${item.lotNumarasi}__${item.miad}`;
+          const existing = lotGroups.get(key);
+          if (existing) {
+            existing.quantity += 1;
+          } else {
+            lotGroups.set(key, { ...item, quantity: 1 });
+          }
+        });
+
+        // Her lot grubu için riskli kutu hesabı
+        let totalRiskyCost = 0;
+        lotGroups.forEach((group) => {
+          const ruleKey = `${group.depotId}__${group.stokKodu}`;
+          const rule = allMinMaxRules.get(ruleKey);
+          if (!rule) return;
+
+          // Miad info
+          if (!group.miad) return;
+          const miadDate = parse(group.miad, 'dd.MM.yyyy', new Date());
+          if (!isValid(miadDate)) return;
+          const miadDays = differenceInDays(miadDate, new Date());
+          if (miadDays <= 0 || miadDays === Infinity) return;
+
+          // Coverage info
+          const periodDays = Math.floor(rule.maxGun);
+          if (periodDays <= 0) return;
+          const dailyNeed = rule.max / periodDays;
+          if (dailyNeed <= 0) return;
+          // Depo+stokKodu bazında toplam stok (lot-agnostic coverage)
+          const totalStockForProduct = groupedByDepotAndProduct.get(ruleKey) || group.quantity;
+          const coverageDays = Math.floor(totalStockForProduct / dailyNeed);
+
+          if (coverageDays <= miadDays) return; // Riskli değil
+
+          const riskyDays = coverageDays - miadDays;
+          const riskyBoxes = Math.min(Math.max(0, Math.ceil(riskyDays * dailyNeed)), group.quantity);
+          const unitCost = costMap.get(group.stokKodu) || 0;
+          totalRiskyCost += riskyBoxes * unitCost;
+        });
+
+        setRiskyCost(totalRiskyCost);
       } catch (err) {
         console.error('[Dashboard] getTotalStockCost error:', err);
         setTotalStockCost(0);
+        setRiskyCost(0);
       }
     })();
   }, []);
@@ -579,20 +657,34 @@ export default function DashboardPanel({
                   </CardContent>
                 </Card>
               </Link>
-              {/* Anlık Maliyet */}
+              {/* Anlık Maliyet - %70 toplam, %30 riskli */}
               <Link href="/stok-yonetimi" className="block h-full">
-                <Card className="glass-card cursor-pointer h-full flex flex-col">
-                  <CardContent className="pt-4 pb-4 flex-1 flex flex-col items-center justify-center text-center">
-                    <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-3 h-12 w-12 mb-2">
-                      <Banknote className="h-5 w-5 text-emerald-600" />
+                <Card className="glass-card cursor-pointer h-full flex flex-col overflow-hidden">
+                  <CardContent className="pt-0 pb-0 px-0 flex-1 flex flex-col">
+                    {/* %70 - Toplam Maliyet */}
+                    <div className="flex-[7] flex flex-col items-center justify-center text-center px-3 pt-3 pb-2">
+                      <div className="dashboard-kpi-mini flex items-center justify-center rounded-2xl p-2.5 h-10 w-10 mb-1.5">
+                        <Banknote className="h-4 w-4 text-emerald-600" />
+                      </div>
+                      <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">Anlık Maliyet</p>
+                      <p className="text-xl font-bold text-slate-700 mt-0.5">
+                        {totalStockCost !== null
+                          ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(totalStockCost)
+                          : '…'}
+                      </p>
                     </div>
-                    <p className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">Anlık Maliyet</p>
-                    <p className="text-2xl font-bold text-slate-700 mt-1">
-                      {totalStockCost !== null
-                        ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(totalStockCost)
-                        : '…'}
-                    </p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Tüm depolardaki toplam stok maliyeti</p>
+                    {/* %30 - Riskli Maliyet */}
+                    <div className="flex-[3] flex items-center justify-center text-center px-3 pb-2 border-t border-dashed border-slate-200/80">
+                      <div className="flex items-center gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                        <p className="text-[10px] text-red-500 font-semibold">Riskli:</p>
+                        <p className="text-sm font-bold text-red-600">
+                          {riskyCost !== null
+                            ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(riskyCost)
+                            : '…'}
+                        </p>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </Link>
