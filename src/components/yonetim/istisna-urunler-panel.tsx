@@ -27,6 +27,8 @@ import useHidScanner from '@/hooks/useHidScanner';
 import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 type ScanRow = ScannedItem & {
   adet?: number;
@@ -35,7 +37,8 @@ type ScanRow = ScannedItem & {
 
 export default function IstisnaUrunlerPanel() {
   const { toast } = useToast();
-  
+  const { currentCompanyId } = useAuth();
+
   const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormat[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -54,7 +57,7 @@ export default function IstisnaUrunlerPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, formatsSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
+        getDocs(companyQuery(db, 'depots', currentCompanyId)),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'barcodeFormats')),
       ]);
@@ -73,7 +76,7 @@ export default function IstisnaUrunlerPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedDepotId, toast]);
+  }, [selectedDepotId, toast, currentCompanyId]);
 
   useEffect(() => {
     fetchPrerequisites();

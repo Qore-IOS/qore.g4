@@ -12,6 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { CheckSquare, Loader2, Info, Search, ShieldCheck, Trash2, Nfc } from 'lucide-react';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
 
@@ -46,6 +48,7 @@ export default function KullanimDogrulamaPanel() {
   const [verificationGroups, setVerificationGroups] = useState<NfcVerificationGroup[]>([]);
 
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
 
   const NFC_INPUT_ID = 'nfc-tag-input';
 
@@ -55,7 +58,7 @@ export default function KullanimDogrulamaPanel() {
       setIsLabsLoading(true);
       try {
         const [laboratoriesSnap, productsSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
           getDocs(collection(db, 'productCodes')),
         ]);
 
@@ -83,7 +86,7 @@ export default function KullanimDogrulamaPanel() {
     };
 
     fetchInitialData();
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   // Fetch consumption data when lab changes
   useEffect(() => {

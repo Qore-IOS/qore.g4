@@ -10,6 +10,8 @@ import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { companyQuery } from '@/lib/company-filter';
+import { useAuth } from '@/contexts/auth-context';
 
 
 
@@ -56,6 +58,7 @@ export default function AplikasyonPanel({
   hospitals, devices, hospitalDeviceAssignments, labPools = [], userAssignedLabs = [], userRole = '', toast
 }: AplikasyonPanelProps) {
   const router = useRouter();
+  const { currentCompanyId } = useAuth();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
 
   // Open fault reports - deviceIds with active faults
@@ -64,8 +67,8 @@ export default function AplikasyonPanel({
   useEffect(() => {
     const fetchOpenFaults = async () => {
       try {
-        const q = query(
-          collection(db, 'deviceFaultReports'),
+        const q = companyQuery(
+          db, 'deviceFaultReports', currentCompanyId,
           where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
         );
         const snap = await getDocs(q);
@@ -80,7 +83,7 @@ export default function AplikasyonPanel({
       }
     };
     fetchOpenFaults();
-  }, []);
+  }, [currentCompanyId]);
 
   const getDevicesForHospital = (hospitalId: string): Device[] => {
     return devices

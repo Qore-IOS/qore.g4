@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, companyStamp, addCompanyFilter, safeGetDocs } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -134,7 +135,7 @@ export default function AplikasyonIslemFormuPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
 
   const [device, setDevice] = useState<Device | null>(null);
@@ -337,7 +338,7 @@ export default function AplikasyonIslemFormuPage() {
         const hospitalId = deviceData.hospitalId;
         if (!hospitalId) return;
 
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -347,7 +348,7 @@ export default function AplikasyonIslemFormuPage() {
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -475,10 +476,7 @@ export default function AplikasyonIslemFormuPage() {
   useEffect(() => {
     (async () => {
       try {
-        const q = query(
-          collection(db, 'faultDefinitions'),
-          where('type', '==', 'aplikasyon')
-        );
+        const q = companyQuery(db, 'faultDefinitions', currentCompanyId, where('type', '==', 'aplikasyon'));
         const snap = await getDocs(q);
         const faults = snap.docs.map(d => ({
           id: d.id,
@@ -1360,7 +1358,7 @@ export default function AplikasyonIslemFormuPage() {
 
         // Create form document
         const formRef = doc(collection(db, 'aplikasyonActionForms'));
-        batch.set(formRef, {
+        batch.set(formRef, companyStamp({
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
             seriNumarasi: device?.seriNumarasi,
@@ -1395,7 +1393,7 @@ export default function AplikasyonIslemFormuPage() {
               timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
             })) : null,
             continuedFromDraft: !!currentDraftId,
-        });
+        }, currentCompanyId, 'aplikasyonActionForms'));
 
         // Mirror form to deviceActionForms for device history page
         const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);

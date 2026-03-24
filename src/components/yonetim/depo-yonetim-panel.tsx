@@ -47,9 +47,9 @@ export default function DepoYonetimPanel() {
     try {
       const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap, poolsSnap] = await Promise.all([
         getDocs(companyQuery(db, 'depots', currentCompanyId)),
-        getDocs(companyQuery(db, 'productCodes', currentCompanyId)),
+        getDocs(collection(db, 'productCodes')),
         getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
-        getDocs(companyQuery(db, 'addressDefinitions', currentCompanyId)),
+        getDocs(collection(db, 'addressDefinitions')),
         getDocs(addCompanyFilter(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc')), currentCompanyId, 'deviceLabPools')),
       ]);
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
@@ -62,7 +62,7 @@ export default function DepoYonetimPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();
@@ -113,7 +113,7 @@ export default function DepoYonetimPanel() {
       if (currentDepot.id) {
         await setDoc(doc(db, 'depots', currentDepot.id), dataToSave, { merge: true });
       } else {
-        await addDoc(collection(db, 'depots'), dataToSave);
+        await addDoc(collection(db, 'depots'), companyStamp(dataToSave, currentCompanyId, 'depots'));
       }
       toast({ title: 'Başarılı', description: 'Depo kaydedildi.' });
       fetchData();

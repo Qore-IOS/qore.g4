@@ -31,6 +31,7 @@ import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, get
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -118,7 +119,7 @@ export default function ToplamaPage() {
   const orderId = (params?.orderId as string) ?? '';
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode, formats: barcodeFormats } = useBarcodeParser();
   const { suppressGlobalLoading } = useLoading();
 
@@ -190,7 +191,7 @@ export default function ToplamaPage() {
         // 2. Fetch Dependent Data (Depot specific stock, etc.)
         const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
-          getDocs(query(collection(db, 'depoStok'), where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
+          getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
           getDocs(collection(db, 'def_deviceGroups')),
           getDocs(collection(db, 'hospitals')),
           getDoc(doc(db, 'depots', orderData.depotId)),

@@ -12,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 // Types from your app schema
 import type {
@@ -23,6 +25,7 @@ import type {
 
 export default function UrunKullanimIstatistikPage() {
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -42,7 +45,7 @@ export default function UrunKullanimIstatistikPage() {
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         // Hospitals' on-hand stock (items shipped to hospitals)
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
+        getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', true))),
         getDocs(collection(db, 'tuketimKayitlari'))
       ]);
 
@@ -72,7 +75,7 @@ export default function UrunKullanimIstatistikPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchAll();

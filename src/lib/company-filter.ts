@@ -16,12 +16,14 @@ import {
   query,
   where,
   getDocs as firestoreGetDocs,
+  onSnapshot as firestoreOnSnapshot,
   type CollectionReference,
   type Query,
   type QueryConstraint,
   type QuerySnapshot,
   type DocumentData,
   type Firestore,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { LEGACY_COMPANY_ID } from '@/lib/types';
 
@@ -119,6 +121,27 @@ export function companyStamp<T extends Record<string, any>>(
 }
 
 /**
+ * Firestore index hatasından URL çıkarır ve konsola loglar.
+ * Hem getDocs hem onSnapshot hataları için kullanılır.
+ */
+function logCompositeIndexUrl(error: any): void {
+  const msg = error?.message || error?.toString?.() || '';
+  const indexUrlMatch = msg.match(/(https:\/\/console\.firebase\.google\.com[^\s"']+)/);
+  if (indexUrlMatch) {
+    const url = indexUrlMatch[1];
+    console.error(
+      `%c🔥 COMPOSITE INDEX GEREKLİ%c\nAşağıdaki URL'ye tıklayarak index oluşturun:\n%c${url}`,
+      'color: #ff6b35; font-weight: bold; font-size: 14px;',
+      'color: #ff6b35;',
+      'color: #4CAF50; text-decoration: underline; font-size: 12px;'
+    );
+    console.error('Hata detayı:', msg);
+    // Ayrıca kolayca kopyalanabilir formatta logla
+    console.info(`📋 Index URL (kopyala): ${url}`);
+  }
+}
+
+/**
  * Firestore composite index hatalarını yakalayıp konsola index oluşturma URL'si loglayan getDocs wrapper'ı.
  * Firestore "requires an index" hatası verdiğinde, hata mesajındaki URL otomatik olarak loglanır.
  * Bu URL'ye tıklayarak Firebase konsolundan index'i tek tıkla oluşturabilirsiniz.
@@ -129,18 +152,35 @@ export async function safeGetDocs<T = DocumentData>(
   try {
     return await firestoreGetDocs(q) as QuerySnapshot<T>;
   } catch (error: any) {
-    const msg = error?.message || '';
-    // Firestore composite index hatası yakalandığında URL'yi logla
-    const indexUrlMatch = msg.match(/(https:\/\/console\.firebase\.google\.com[^\s"']+)/);
-    if (indexUrlMatch) {
-      console.error(
-        `%c🔥 COMPOSITE INDEX GEREKLİ%c\nAşağıdaki URL'ye tıklayarak index oluşturun:\n%c${indexUrlMatch[1]}`,
-        'color: #ff6b35; font-weight: bold; font-size: 14px;',
-        'color: #ff6b35;',
-        'color: #4CAF50; text-decoration: underline; font-size: 12px;'
-      );
-      console.error('Hata detayı:', msg);
-    }
+    logCompositeIndexUrl(error);
     throw error;
   }
+}
+
+/**
+ * Firestore composite index hatalarını yakalayıp konsola loglayan onSnapshot wrapper'ı.
+ * onSnapshot hata callback'inde index URL'sini otomatik loglar.
+ *
+ * Kullanım:
+ * ```
+ * const unsub = safeOnSnapshot(
+ *   companyQuery(db, 'deviceFaultReports', companyId),
+ *   (snapshot) => { ... },
+ *   (error) => console.error(error) // opsiyonel ek handler
+ * );
+ * ```
+ */
+export function safeOnSnapshot<T = DocumentData>(
+  q: Query | CollectionReference,
+  onNext: (snapshot: QuerySnapshot<T>) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  return firestoreOnSnapshot(
+    q as Query<T>,
+    onNext,
+    (error) => {
+      logCompositeIndexUrl(error);
+      onError?.(error);
+    }
+  );
 }

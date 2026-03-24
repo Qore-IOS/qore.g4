@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -47,7 +48,7 @@ export default function DashboardPanel({
     tuketimKayitlari,
 }: DashboardPanelProps) {
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { theme } = useTheme();
   const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
   const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
@@ -64,9 +65,9 @@ export default function DashboardPanel({
   }, []);
 
   useEffect(() => {
-    const faultQuery = query(collection(db, 'deviceFaultReports'));
+    const faultQuery = companyQuery(db, 'deviceFaultReports', currentCompanyId);
     const unsubscribeFaults = onSnapshot(
-      faultQuery,
+      faultQuery as any,
       (snapshot) => {
         const reports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as DeviceFaultReport[];
         setFaultReports(reports);
@@ -74,9 +75,9 @@ export default function DashboardPanel({
       (error) => console.error('deviceFaultReports fetch error:', error)
     );
 
-    const taskQuery = query(collection(db, 'purchasingTasks'));
+    const taskQuery = companyQuery(db, 'purchasingTasks', currentCompanyId);
     const unsubscribeTasks = onSnapshot(
-      taskQuery,
+      taskQuery as any,
       (snapshot) => {
         const tasks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as PurchasingTask[];
         setPurchasingTasks(tasks);
@@ -88,7 +89,7 @@ export default function DashboardPanel({
       unsubscribeFaults();
       unsubscribeTasks();
     };
-  }, []);
+  }, [currentCompanyId]);
 
   // Total stock cost – fetch all unshipped stock once, join with product prices client-side
   const [totalStockCost, setTotalStockCost] = useState(0);
@@ -97,7 +98,7 @@ export default function DashboardPanel({
       try {
         const [productSnap, stockSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
-          getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', false))),
+          getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', false))),
         ]);
 
         const priceMap = new Map<string, number>();
@@ -115,7 +116,7 @@ export default function DashboardPanel({
         setTotalStockCost(total);
       } catch (e) { console.error('Total stock cost error:', e); }
     })();
-  }, []);
+  }, [currentCompanyId]);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
   const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
@@ -129,8 +130,8 @@ export default function DashboardPanel({
 
         const [productSnap, consumptionSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
-          getDocs(query(
-            collection(db, 'tuketimKayitlari'),
+          getDocs(companyQuery(
+            db, 'tuketimKayitlari', currentCompanyId,
             where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
             where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
           )),
@@ -151,14 +152,14 @@ export default function DashboardPanel({
         setYesterdayConsumptionCost(total);
       } catch (e) { console.error('Yesterday consumption cost error:', e); }
     })();
-  }, []);
+  }, [currentCompanyId]);
 
   // Average efficiency
   const [avgEfficiency, setAvgEfficiency] = useState<number | null>(null);
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        const snap = await getDocs(companyQuery(db, 'totalEfficiencyRecords', currentCompanyId));
         const efficiencies: number[] = [];
         snap.docs.forEach(d => {
           const data = d.data();
@@ -171,7 +172,7 @@ export default function DashboardPanel({
         setAvgEfficiency(efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length);
       } catch (e) { console.error('Avg efficiency error:', e); }
     })();
-  }, []);
+  }, [currentCompanyId]);
 
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
     if (report.status === 'atama_bekliyor') acc.atamaBekleyen += 1;

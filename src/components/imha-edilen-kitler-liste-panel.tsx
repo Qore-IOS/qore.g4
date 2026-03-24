@@ -15,6 +15,8 @@ import { exportDataToExcel, cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 /* ─── Sorting types ─── */
 type SortKey = 'tarih' | 'kaynak' | 'urun' | 'lot' | 'giris' | 'adet' | 'kalan' | 'onaylayan';
@@ -26,6 +28,7 @@ type ColumnFiltersState = Record<ColumnFilterKey, Set<string>>;
 
 export default function ImhaEdilenKitlerListePanel() {
     const { toast } = useToast();
+    const { currentCompanyId } = useAuth();
     const [records, setRecords] = useState<DestroyedKitRecord[]>([]);
     const [hospitals, setHospitals] = useState<Hospital[]>([]);
     const [loading, setLoading] = useState(true);
@@ -50,8 +53,8 @@ export default function ImhaEdilenKitlerListePanel() {
             setLoading(true);
             try {
                 const [recordsSnap, labsSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'))),
-                    getDocs(collection(db, 'hospitals'))
+                    getDocs(companyQuery(db, 'destroyedKitsReports', currentCompanyId, orderBy('resolvedAt', 'desc'))),
+                    getDocs(companyQuery(db, 'hospitals', currentCompanyId))
                 ]);
 
                 setRecords(recordsSnap.docs.map(doc => {
@@ -70,7 +73,7 @@ export default function ImhaEdilenKitlerListePanel() {
             }
         };
         fetchData();
-    }, [toast]);
+    }, [toast, currentCompanyId]);
 
     /* ─── Helper: extract column value for a record ─── */
     const getColValue = useCallback((r: DestroyedKitRecord, key: ColumnFilterKey): string => {

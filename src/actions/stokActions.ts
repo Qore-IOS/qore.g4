@@ -238,16 +238,17 @@ export async function getPaginatedDepotStock(params: {
   sortField: string;
   sortDirection: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
+  companyId?: string;
 }): Promise<PaginatedStockResult> {
-  const { depotId, page, pageSize, sortField, sortDirection, columnFilters } = params;
+  const { depotId, page, pageSize, sortField, sortDirection, columnFilters, companyId } = params;
 
   if (!depotId) {
     return { rows: [], totalRows: 0, totalPages: 0, currentPage: 1, columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] } };
   }
 
-  // Composite query: depotId + isShipped (requires Firestore composite index)
-  const stockQuery = query(
-    collection(db, 'depoStok'),
+  // Composite query: companyId + depotId + isShipped (requires Firestore composite index)
+  const stockQuery = companyQuery(
+    db, 'depoStok', companyId || '',
     where('depotId', '==', depotId),
     where('isShipped', '==', false)
   );
@@ -340,11 +341,11 @@ export async function getPaginatedDepotStock(params: {
  * whose miad is within the next `thresholdDays` days,
  * across ALL depots. Server-side computation – only the count is returned.
  */
-export async function getExpiringProductsCount(thresholdDays: number = 45): Promise<number> {
+export async function getExpiringProductsCount(thresholdDays: number = 45, companyId?: string): Promise<number> {
   try {
-    // Composite query: isShipped (requires Firestore index)
-    const stockQuery = query(
-      collection(db, 'depoStok'),
+    // Composite query: companyId + isShipped (requires Firestore composite index)
+    const stockQuery = companyQuery(
+      db, 'depoStok', companyId || '',
       where('isShipped', '==', false)
     );
     const snapshot = await getDocs(stockQuery);

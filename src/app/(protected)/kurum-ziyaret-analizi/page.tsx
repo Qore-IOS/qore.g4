@@ -13,6 +13,8 @@ import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft, Settings2, CalendarDays } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -68,6 +70,7 @@ interface PersonnelVisitRecord {
 
 export default function KurumZiyaretAnaliziPage() {
   const router = useRouter();
+  const { currentCompanyId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [teknikForms, setTeknikForms] = useState<ActionForm[]>([]);
   const [aplikasyonForms, setAplikasyonForms] = useState<ActionForm[]>([]);
@@ -174,12 +177,12 @@ export default function KurumZiyaretAnaliziPage() {
       setLoading(true);
       try {
         const [teknikSnap, appSnap, faultSnap, usersSnap, hospitalsSnap, deviceLabPoolsSnap] = await Promise.all([
-          getDocs(query(collection(db, 'teknikServisActionForms'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db, 'aplikasyonActionForms'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))),
+          getDocs(companyQuery(db, 'teknikServisActionForms', currentCompanyId, orderBy('createdAt', 'desc'))),
+          getDocs(companyQuery(db, 'aplikasyonActionForms', currentCompanyId, orderBy('createdAt', 'desc'))),
+          getDocs(companyQuery(db, 'deviceFaultReports', currentCompanyId, orderBy('openedAt', 'desc'))),
           getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'deviceLabPools')),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+          getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId)),
         ]);
 
         const uMap = new Map<string, User>();
@@ -264,7 +267,7 @@ export default function KurumZiyaretAnaliziPage() {
     };
 
     fetchData();
-  }, []);
+  }, [currentCompanyId]);
 
   const selectedLabIdsFull = useMemo(() => {
     if (selectedLabIds.size === 0) return null;

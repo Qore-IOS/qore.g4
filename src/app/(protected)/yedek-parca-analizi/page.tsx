@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { Loader2, Package, Search, ArrowLeft, Monitor, Users, Warehouse, UserCheck, ChevronRight, Clock, CalendarClock, Building2, ChevronsUpDown, X } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -64,6 +66,7 @@ interface PartDetail {
 
 export default function YedekParcaAnaliziPage() {
   const router = useRouter();
+  const { currentCompanyId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [transferLogs, setTransferLogs] = useState<TransferLog[]>([]);
@@ -81,9 +84,9 @@ export default function YedekParcaAnaliziPage() {
       try {
         const [transferSnap, hospitalsSnap, assignmentsSnap, devicesSnap] = await Promise.all([
           getDocs(query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'use_on_device'))),
-          getDocs(collection(db, 'hospitals')),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
           getDocs(collection(db, 'hospitalDeviceAssignments')),
-          getDocs(collection(db, 'devices')),
+          getDocs(companyQuery(db, 'devices', currentCompanyId)),
         ]);
 
         const hMap = new Map<string, Hospital>();
@@ -129,7 +132,7 @@ export default function YedekParcaAnaliziPage() {
       }
     };
     fetchData();
-  }, []);
+  }, [currentCompanyId]);
 
   const partSummaries = useMemo(() => {
     const map = new Map<string, PartSummary>();

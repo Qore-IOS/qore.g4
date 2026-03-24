@@ -63,6 +63,7 @@ import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import * as XLSX from 'xlsx';
 import { useRowFocus } from '@/hooks/useRowFocus';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -83,7 +84,7 @@ import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 export default function SiparislerPanel(): JSX.Element {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   useRowFocus('focus');
 
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -173,8 +174,8 @@ export default function SiparislerPanel(): JSX.Element {
       setIsLoading(true);
       try {
         const [dSnap, hSnap, pSnap, sSnap] = await Promise.all([
-          getDocs(collection(db, 'depots')),
-          getDocs(collection(db, 'hospitals')),
+          getDocs(companyQuery(db, 'depots', currentCompanyId)),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'depoStok')),
         ]);
@@ -192,7 +193,7 @@ export default function SiparislerPanel(): JSX.Element {
         setIsLoading(false);
       }
     })();
-  }, [toast, currentUserProfile]);
+  }, [toast, currentUserProfile, currentCompanyId]);
 
 
   const addManualItem = () => {

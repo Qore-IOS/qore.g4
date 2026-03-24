@@ -46,6 +46,7 @@ import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
@@ -180,7 +181,7 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
 
 export default function DirektTransferPanel() {
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   const router = useRouter();
   const { invalidateDepoStok } = useInvalidateQueries();
 
@@ -302,10 +303,10 @@ export default function DirektTransferPanel() {
     setPrereqsLoading(true);
     try {
       const [depotSnap, productSnap, hospitalSnap, borcSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
+        getDocs(companyQuery(db, 'depots', currentCompanyId)),
         getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'borcDepots')),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(companyQuery(db, 'borcDepots', currentCompanyId)),
       ]);
 
       const depotList = depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
@@ -327,7 +328,7 @@ export default function DirektTransferPanel() {
     } finally {
       setPrereqsLoading(false);
     }
-  }, [selectedDepotId, toast, currentUserProfile]);
+  }, [selectedDepotId, toast, currentUserProfile, currentCompanyId]);
 
   useEffect(() => {
     fetchPrerequisites();

@@ -20,6 +20,7 @@ import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, transferFaultToOtherUnit, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem, PoolWarehouseStockItem, Depot, DeviceLabPool } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -154,7 +155,7 @@ export default function FaultDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, isAdmin } = useAuth();
+  const { currentUser, currentUserProfile, isAdmin, currentCompanyId } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const [fault, setFault] = useState<FaultDoc | null>(null);
@@ -399,7 +400,7 @@ export default function FaultDetailPage() {
         const hospitalId = deviceData.hospitalId;
         if (!hospitalId) return;
 
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -409,7 +410,7 @@ export default function FaultDetailPage() {
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;

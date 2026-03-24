@@ -69,6 +69,7 @@ import {
     serverTimestamp,
     Timestamp,
 } from 'firebase/firestore';
+import { companyQuery, companyStamp } from '@/lib/company-filter';
 import type {
     Hospital,
     Device,
@@ -87,7 +88,7 @@ export default function EjectedKitPanel() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { toast } = useToast();
-    const { currentUser, currentUserProfile } = useAuth();
+    const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
 
     const initialTab = searchParams.get('tab') || 'kayit';
     const [activeTab, setActiveTab] = useState(initialTab);
