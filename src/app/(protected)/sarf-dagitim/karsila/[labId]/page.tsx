@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -21,7 +22,7 @@ import { compareAsc, parse } from 'date-fns';
 export default function SarfDagilimPage() {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   const [consumableHospitals, setConsumableHospitals] = useState<Hospital[]>([]);
   const [pendingRequests, setPendingRequests] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,8 +41,8 @@ export default function SarfDagilimPage() {
       setLoading(true);
       try {
         const [hospitalsQuery, depotsQuery] = await Promise.all([
-            getDocs(query(collection(db, 'hospitals'), where('isConsumablesHospital', '==', true))),
-            getDocs(collection(db, 'depots'))
+            getDocs(companyQuery(db, 'hospitals', currentCompanyId, where('isConsumablesHospital', '==', true))),
+            getDocs(companyQuery(db, 'depots', currentCompanyId))
         ]);
         
         const labs = hospitalsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital));
@@ -71,7 +72,7 @@ export default function SarfDagilimPage() {
 
     fetchHospitalsAndDepots();
     return () => unsubRequests();
-  }, [toast]);
+  }, [toast, currentCompanyId]);
   
   useEffect(() => {
     if (!selectedDepotId) {

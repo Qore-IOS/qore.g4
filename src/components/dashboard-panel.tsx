@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -47,7 +48,7 @@ export default function DashboardPanel({
     tuketimKayitlari,
 }: DashboardPanelProps) {
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { theme } = useTheme();
   const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
   const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
@@ -91,9 +92,9 @@ export default function DashboardPanel({
   }, []);
 
   useEffect(() => {
-    const faultQuery = query(collection(db, 'deviceFaultReports'));
+    const faultQuery = companyQuery(db, 'deviceFaultReports', currentCompanyId);
     const unsubscribeFaults = onSnapshot(
-      faultQuery,
+      faultQuery as any,
       (snapshot) => {
         const reports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as DeviceFaultReport[];
         setFaultReports(reports);
@@ -101,9 +102,9 @@ export default function DashboardPanel({
       (error) => console.error('deviceFaultReports fetch error:', error)
     );
 
-    const taskQuery = query(collection(db, 'purchasingTasks'));
+    const taskQuery = companyQuery(db, 'purchasingTasks', currentCompanyId);
     const unsubscribeTasks = onSnapshot(
-      taskQuery,
+      taskQuery as any,
       (snapshot) => {
         const tasks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as PurchasingTask[];
         setPurchasingTasks(tasks);
@@ -115,7 +116,7 @@ export default function DashboardPanel({
       unsubscribeFaults();
       unsubscribeTasks();
     };
-  }, []);
+  }, [currentCompanyId]);
 
   // Total stock cost + risky cost – client-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
@@ -125,8 +126,7 @@ export default function DashboardPanel({
       try {
         const [productSnap, stockSnap, depotsSnap] = await Promise.allSettled([
           getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'depoStok')),
-          getDocs(collection(db, 'depots')),
+          getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', false))),
         ]);
 
         const productDocs = productSnap.status === 'fulfilled' ? productSnap.value.docs : [];
@@ -237,7 +237,7 @@ export default function DashboardPanel({
         setRiskyCost(0);
       }
     })();
-  }, []);
+  }, [currentCompanyId]);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
   const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
@@ -251,8 +251,8 @@ export default function DashboardPanel({
 
         const [productResult, consumptionResult] = await Promise.allSettled([
           getDocs(collection(db, 'productCodes')),
-          getDocs(query(
-            collection(db, 'tuketimKayitlari'),
+          getDocs(companyQuery(
+            db, 'tuketimKayitlari', currentCompanyId,
             where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
             where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
           )),
@@ -278,7 +278,7 @@ export default function DashboardPanel({
         setYesterdayConsumptionCost(total);
       } catch (e) { console.error('Yesterday consumption cost error:', e); }
     })();
-  }, []);
+  }, [currentCompanyId]);
 
   // Average efficiency
   const [avgEfficiency, setAvgEfficiency] = useState<number | null>(null);
@@ -299,7 +299,7 @@ export default function DashboardPanel({
         setAvgEfficiency(efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length);
       } catch (e) { console.error('Avg efficiency error:', e); }
     })();
-  }, []);
+  }, [currentCompanyId]);
 
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
     const status = (report.status || '').toLowerCase().replace(/[\s-]/g, '_');
@@ -313,6 +313,7 @@ export default function DashboardPanel({
     if (!currentUserProfile?.uid) {
       return {
         timelineItems: [] as Array<{ id: string; label: string; type: 'past' | 'today' | 'future' }>,
+        todayTasks: [] as Array<{ id: string; label: string; type: 'today-task' }>,
       };
     }
 

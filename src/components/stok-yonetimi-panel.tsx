@@ -37,6 +37,7 @@ import {
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import { Badge } from './ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -297,7 +298,7 @@ function ColumnFilterPopover({
 export default function StokYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
 
   // Master data
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -344,9 +345,9 @@ export default function StokYonetimiPanel() {
       setIsLoading(true);
       try {
         const [depotsSnap, productsSnap, hospitalsSnap] = await Promise.all([
-          getDocs(collection(db, 'depots')),
+          getDocs(companyQuery(db, 'depots', currentCompanyId)),
           getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'hospitals')),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
         ]);
         const allDepots = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
         setDepots(allDepots);
@@ -395,8 +396,7 @@ export default function StokYonetimiPanel() {
     (async () => {
       setIsStockLoading(true);
       try {
-        const stockQuery = query(
-          collection(db, 'depoStok'),
+        const stockQuery = companyQuery(db, 'depoStok', currentCompanyId,
           where('depotId', '==', selectedDepotId),
           where('isShipped', '==', false)
         );
@@ -598,8 +598,7 @@ export default function StokYonetimiPanel() {
   const handleExport = async (detailed: boolean) => {
     // Fetch all stock for export
     try {
-      const stockQuery = query(
-        collection(db, 'depoStok'),
+      const stockQuery = companyQuery(db, 'depoStok', currentCompanyId,
         where('depotId', '==', selectedDepotId),
         where('isShipped', '==', false)
       );
@@ -963,7 +962,7 @@ export default function StokYonetimiPanel() {
     }
     const labNames = hospitals.filter(h => h.id && selectedLabsForReport.includes(h.id)).map(h => h.name).filter((n): n is string => !!n);
     try {
-      const shippedQuery = query(collection(db, 'depoStok'), where('isShipped', '==', true));
+      const shippedQuery = companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', true));
       const shippedSnap = await getDocs(shippedQuery);
       const stockForSelectedLabs = shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)).filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
       const stockSummary: Record<string, { stokAdi: string; quantity: number }> = {};

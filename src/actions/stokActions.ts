@@ -18,6 +18,7 @@ import {
   getDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import { companyQuery } from '@/lib/company-filter';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import fs from 'fs/promises';
@@ -41,10 +42,9 @@ function processDoc(doc: QueryDocumentSnapshot<DocumentData>): DepoStokItem {
  * We will filter for un-shipped items on the client-side to avoid needing a composite index.
  * This is intended for panels that need the full list, like DepoSayim.
  */
-export async function getFullDepotStock(depotId: string): Promise<{ items: DepoStokItem[] }> {
+export async function getFullDepotStock(depotId: string, companyId?: string): Promise<{ items: DepoStokItem[] }> {
   try {
-    const ref = collection(db, 'depoStok');
-    const q = query(ref, where('depotId', '==', depotId));
+    const q = companyQuery(db, 'depoStok', companyId || '', where('depotId', '==', depotId));
     const snap = await getDocs(q);
     const items = snap.docs.map(processDoc);
     return { items };
@@ -54,10 +54,9 @@ export async function getFullDepotStock(depotId: string): Promise<{ items: DepoS
   }
 }
 
-export async function getExpiringItems(depotId: string): Promise<DepoStokItem[]> {
-    const depoStokRef = collection(db, 'depoStok');
-    const q = query(
-        depoStokRef,
+export async function getExpiringItems(depotId: string, companyId?: string): Promise<DepoStokItem[]> {
+    const q = companyQuery(
+        db, 'depoStok', companyId || '',
         where('depotId', '==', depotId),
         where('isShipped', '==', false)
     );
@@ -239,16 +238,17 @@ export async function getPaginatedDepotStock(params: {
   sortField: string;
   sortDirection: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
+  companyId?: string;
 }): Promise<PaginatedStockResult> {
-  const { depotId, page, pageSize, sortField, sortDirection, columnFilters } = params;
+  const { depotId, page, pageSize, sortField, sortDirection, columnFilters, companyId } = params;
 
   if (!depotId) {
     return { rows: [], totalRows: 0, totalPages: 0, currentPage: 1, columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] } };
   }
 
-  // Composite query: depotId + isShipped (requires Firestore composite index)
-  const stockQuery = query(
-    collection(db, 'depoStok'),
+  // Composite query: companyId + depotId + isShipped (requires Firestore composite index)
+  const stockQuery = companyQuery(
+    db, 'depoStok', companyId || '',
     where('depotId', '==', depotId),
     where('isShipped', '==', false)
   );
@@ -341,49 +341,14 @@ export async function getPaginatedDepotStock(params: {
  * whose miad is within the next `thresholdDays` days,
  * across ALL depots. Server-side computation – only the count is returned.
  */
-/**
- * Server-side: Toplam depo stok maliyetini hesaplar.
- * depoStok koleksiyonundaki her ürün için productCodes'taki cost ile çarpıp toplar.
- * Lot/miad ayrımı yapmaz — sadece stokKodu bazında adet * birim maliyet.
- */
-export async function getTotalStockCost(): Promise<{ total: number; stockCount: number; productCount: number; matchedCount: number }> {
+export async function getExpiringProductsCount(thresholdDays: number = 45, companyId?: string): Promise<number> {
   try {
-    // isShipped alanı olmayan dokümanları da kapsamak için tüm koleksiyonu çekip client-side filtrele
-    const [productSnap, stockSnap] = await Promise.all([
-      getDocs(collection(db, 'productCodes')),
-      getDocs(collection(db, 'depoStok')),
-    ]);
-
-    const costMap = new Map<string, number>();
-    productSnap.docs.forEach((d) => {
-      const data = d.data();
-      if (data.cost && data.stokKodu) costMap.set(data.stokKodu, data.cost);
-    });
-
-    let total = 0;
-    let matchedCount = 0;
-    stockSnap.docs.forEach((d) => {
-      const data = d.data();
-      // isShipped === true olanları atla
-      if (data.isShipped === true) return;
-      const cost = costMap.get(data.stokKodu);
-      if (cost) {
-        total += cost;
-        matchedCount++;
-      }
-    });
-
-    return { total, stockCount: stockSnap.docs.length, productCount: productSnap.docs.length, matchedCount };
-  } catch (error) {
-    console.error('Error calculating total stock cost:', error);
-    return { total: 0, stockCount: 0, productCount: 0, matchedCount: 0 };
-  }
-}
-
-export async function getExpiringProductsCount(thresholdDays: number = 45): Promise<number> {
-  try {
-    // Tüm depo stoklarını çek, isShipped === true olanları atla
-    const snapshot = await getDocs(collection(db, 'depoStok'));
+    // Composite query: companyId + isShipped (requires Firestore composite index)
+    const stockQuery = companyQuery(
+      db, 'depoStok', companyId || '',
+      where('isShipped', '==', false)
+    );
+    const snapshot = await getDocs(stockQuery);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 

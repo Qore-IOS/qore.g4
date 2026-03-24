@@ -18,6 +18,8 @@ import type {
   AssignedDevice, 
 } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 
 const processTimestamp = (docData: any) => {
   const data = { ...docData };
@@ -49,6 +51,7 @@ export function useDashboardData() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -68,18 +71,18 @@ export function useDashboardData() {
         labPoolsSnap,
         assignmentsSnap,
       ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(companyQuery(db, 'devices', currentCompanyId)),
         getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'depoStok')),
-        getDocs(collection(db, 'tuketimKayitlari')),
-        getDocs(collection(db, 'efficiencyHistory')),
-        getDocs(collection(db, 'cihazUstuGecmisi')),
-        getDocs(query(collection(db, 'kumulatifRaporlar'), orderBy('createdAt', 'desc'))),
-        getDocs(collection(db, 'shipments')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'labPools')),
-        getDocs(collection(db, 'hospitalDeviceAssignments')),
+        getDocs(companyQuery(db, 'depoStok', currentCompanyId)),
+        getDocs(companyQuery(db, 'tuketimKayitlari', currentCompanyId)),
+        getDocs(companyQuery(db, 'efficiencyHistory', currentCompanyId)),
+        getDocs(companyQuery(db, 'cihazUstuGecmisi', currentCompanyId)),
+        getDocs(companyQuery(db, 'kumulatifRaporlar', currentCompanyId, orderBy('createdAt', 'desc'))),
+        getDocs(companyQuery(db, 'shipments', currentCompanyId)),
+        getDocs(companyQuery(db, 'depots', currentCompanyId)),
+        getDocs(companyQuery(db, 'labPools', currentCompanyId)),
+        getDocs(companyQuery(db, 'hospitalDeviceAssignments', currentCompanyId)),
       ]);
 
       const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
@@ -129,7 +132,7 @@ export function useDashboardData() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();

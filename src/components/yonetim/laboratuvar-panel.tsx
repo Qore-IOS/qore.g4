@@ -18,6 +18,8 @@ import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import BackButton from '@/components/BackButton';
 import dynamic from 'next/dynamic';
 import SharedLabPoolModal from '@/components/SharedLabPoolModal';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
   ssr: false,
@@ -27,6 +29,7 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 
 export default function LaboratuvarPanel() {
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
@@ -53,7 +56,7 @@ export default function LaboratuvarPanel() {
     setIsLoading(true);
     try {
       const [hSnap, pSnap, addrSnap, poolsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'addressDefinitions')),
         getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
@@ -67,7 +70,7 @@ export default function LaboratuvarPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchHospitalsAndProducts();

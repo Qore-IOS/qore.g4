@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation, Eye, Warehouse, FlaskConical } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, increment
@@ -85,7 +86,7 @@ function autoOrder(stops: RouteStop[], startId: string): RouteStop[] {
 
 export default function RotaOlusturPage() {
   const { toast } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, currentCompanyId } = useAuth();
   const router = useRouter();
 
   const [myUid, setMyUid] = useState<string>('');
@@ -129,9 +130,9 @@ export default function RotaOlusturPage() {
     (async () => {
       try {
         const [hSnap, uSnap, dSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
           getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'depots')),
+          getDocs(companyQuery(db, 'depots', currentCompanyId)),
         ]);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Hospital[]);
         setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Depot[]);
@@ -144,7 +145,7 @@ export default function RotaOlusturPage() {
         toast({ title: 'Veri Hatası', description: 'Veriler alınamadı.', variant: 'destructive' });
       }
     })();
-  }, [toast, planDriverId]);
+  }, [toast, planDriverId, currentCompanyId]);
 
   // Tüm açık rotaları dinle
   useEffect(() => {

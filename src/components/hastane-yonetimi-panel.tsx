@@ -19,6 +19,8 @@ import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, FileSprea
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { formatMiad } from '@/lib/date';
 
 const SortableHeader: React.FC<{
@@ -53,6 +55,7 @@ type GroupedStockItem = {
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
@@ -69,13 +72,13 @@ export default function LaboratuvarYonetimiPanel() {
     async function fetchData() {
       setIsLoading(true);
       const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', true))),
         getDocs(collection(db, 'productCodes'))
       ]);
       setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
       setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
-      
+
       const names: Record<string, string> = {};
       productsSnap.docs.forEach(d => {
         const p = d.data();
@@ -86,7 +89,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsLoading(false);
     }
     fetchData();
-  }, []);
+  }, [currentCompanyId]);
 
   const selectedLabName = useMemo(() => {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';

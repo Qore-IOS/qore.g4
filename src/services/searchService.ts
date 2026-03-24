@@ -9,6 +9,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer } from '@/lib/types';
+import { companyQuery, addCompanyFilter } from '@/lib/company-filter';
 
 // İşlem tipi
 export type IslemTipi =
@@ -116,7 +117,8 @@ const formatMiad = (d: any): string => {
 export async function searchProductLedger(
   q: string,
   productCodes: ProductCode[],
-  depots: Depot[]
+  depots: Depot[],
+  companyId?: string
 ): Promise<SearchResult> {
   if (!q || q.trim().length < 2) {
     return { ledgerRows: [], stockSummary: [], searchType: 'product' };
@@ -133,8 +135,8 @@ export async function searchProductLedger(
 
   if (isPotentiallySerial) {
     const serialQueries = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal), limit(1))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal), limit(1))),
+      getDocs(query(companyQuery(db, 'depoStok', companyId || ''), where('seriNumarasi', '==', needleOriginal), limit(1))),
+      getDocs(query(companyQuery(db, 'tuketimKayitlari', companyId || ''), where('seriNumarasi', '==', needleOriginal), limit(1))),
     ]);
     if (serialQueries.some(snap => !snap.empty)) {
       searchType = 'serial';
@@ -143,7 +145,7 @@ export async function searchProductLedger(
 
   // Check for lot number if not serial
   if (searchType === 'product') {
-    const lotSnap = await getDocs(query(collection(db, 'depoStok'), where('lotNumarasi', '==', needleOriginal), limit(1)));
+    const lotSnap = await getDocs(query(companyQuery(db, 'depoStok', companyId || ''), where('lotNumarasi', '==', needleOriginal), limit(1)));
     if (!lotSnap.empty) searchType = 'lot';
   }
 
@@ -154,7 +156,7 @@ export async function searchProductLedger(
   if (searchType === 'serial') {
     // Try to find product info from depoStok first
     const productFromSerialSnap = await getDocs(
-      query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal), limit(1))
+      query(companyQuery(db, 'depoStok', companyId || ''), where('seriNumarasi', '==', needleOriginal), limit(1))
     );
     if (!productFromSerialSnap.empty) {
       const data = productFromSerialSnap.docs[0].data();
@@ -163,7 +165,7 @@ export async function searchProductLedger(
     } else {
       // If not found in depoStok, try tuketimKayitlari (for consumed items)
       const productFromConsumptionSnap = await getDocs(
-        query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal), limit(1))
+        query(companyQuery(db, 'tuketimKayitlari', companyId || ''), where('seriNumarasi', '==', needleOriginal), limit(1))
       );
       if (!productFromConsumptionSnap.empty) {
         const data = productFromConsumptionSnap.docs[0].data();
@@ -174,7 +176,7 @@ export async function searchProductLedger(
   } else if (searchType === 'lot') {
     targetLotNumarasi = needleOriginal;
     const productsFromLotSnap = await getDocs(
-      query(collection(db, 'depoStok'), where('lotNumarasi', '==', needleOriginal))
+      query(companyQuery(db, 'depoStok', companyId || ''), where('lotNumarasi', '==', needleOriginal))
     );
     productsFromLotSnap.forEach(doc => stockCodesToSearch.push(doc.data().stokKodu));
   } else {
@@ -199,8 +201,8 @@ export async function searchProductLedger(
   if (searchType === 'serial') {
     // First, get consumption records and depoStok by serial
     const [depoStokBySerial, consumptionBySerial] = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal))),
+      getDocs(query(companyQuery(db, 'depoStok', companyId || ''), where('seriNumarasi', '==', needleOriginal))),
+      getDocs(query(companyQuery(db, 'tuketimKayitlari', companyId || ''), where('seriNumarasi', '==', needleOriginal))),
     ]);
 
     consumptionSnap = consumptionBySerial;
@@ -213,7 +215,7 @@ export async function searchProductLedger(
       // fetch depoStok by stokKodu and lotNumarasi to show mal kabul records
       depoStokSnap = await getDocs(
         query(
-          collection(db, 'depoStok'),
+          companyQuery(db, 'depoStok', companyId || ''),
           where('stokKodu', '==', uniqueStockCodes[0]),
           where('lotNumarasi', '==', targetLotNumarasi)
         )
@@ -223,13 +225,13 @@ export async function searchProductLedger(
     }
   } else if (searchType === 'lot') {
     [depoStokSnap, consumptionSnap] = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('lotNumarasi', '==', needleOriginal))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('lotNumarasi', '==', needleOriginal))),
+      getDocs(query(companyQuery(db, 'depoStok', companyId || ''), where('lotNumarasi', '==', needleOriginal))),
+      getDocs(query(companyQuery(db, 'tuketimKayitlari', companyId || ''), where('lotNumarasi', '==', needleOriginal))),
     ]);
   } else if (uniqueStockCodes.length > 0 && uniqueStockCodes.length <= 30) {
     [depoStokSnap, consumptionSnap] = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('stokKodu', 'in', uniqueStockCodes))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('stokKodu', 'in', uniqueStockCodes))),
+      getDocs(query(companyQuery(db, 'depoStok', companyId || ''), where('stokKodu', 'in', uniqueStockCodes))),
+      getDocs(query(companyQuery(db, 'tuketimKayitlari', companyId || ''), where('stokKodu', 'in', uniqueStockCodes))),
     ]);
   } else {
     return { ledgerRows: [], stockSummary: [], searchType };
@@ -237,9 +239,9 @@ export async function searchProductLedger(
 
   // Fetch shipments, transfers, and destroyedKits
   const [shipmentsSnap, transfersSnap, destroyedKitsSnap] = await Promise.all([
-    getDocs(collection(db, 'shipments')),
-    getDocs(collection(db, 'transfers')),
-    getDocs(collection(db, 'destroyedKitsReports')),
+    getDocs(companyQuery(db, 'shipments', companyId || '')),
+    getDocs(companyQuery(db, 'transfers', companyId || '')),
+    getDocs(companyQuery(db, 'destroyedKitsReports', companyId || '')),
   ]);
 
   // Process fetched data

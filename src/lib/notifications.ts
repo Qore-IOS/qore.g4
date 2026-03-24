@@ -10,6 +10,7 @@ import {
   doc,
   arrayUnion,
 } from "firebase/firestore";
+import { companyStamp } from '@/lib/company-filter';
 
 export type NotificationType =
   | "order_created"
@@ -136,7 +137,7 @@ export function buildHrefForResource(
  * Creates the notification document in Firestore. The cloud function will handle the fan-out.
  */
 export async function createNotification(
-  payload: Omit<NotificationDoc, "createdAt" | "readBy">
+  payload: Omit<NotificationDoc, "createdAt" | "readBy"> & { companyId?: string }
 ) {
   const href =
     payload.href ||
@@ -155,7 +156,8 @@ export async function createNotification(
     createdAt: serverTimestamp(),
     readBy: [],
   };
-  await addDoc(collection(db, "notifications"), docData as any);
+  const { companyId: cid, ...restPayloadCheck } = payload; // extract companyId to avoid duplication
+  await addDoc(collection(db, "notifications"), companyStamp(docData as any, payload.companyId || '', 'notifications'));
 }
 
 export async function markAsRead(notificationId: string, uid: string) {
@@ -430,8 +432,8 @@ export async function emitSparePartTransfer(params: {
   await createNotification({
     type: 'spare_part_transfer',
     channel: 'push',
-    title: 'Yedek Parça Transfer Edildi',
-    message: `${params.actor.name} tarafından ${totalQty} adet yedek parça transfer edildi: ${itemSummary}`,
+    title: 'Yedek Parça Onay Bekliyor',
+    message: `${params.actor.name} tarafından ${totalQty} adet yedek parça transfer edildi, onayınız bekleniyor: ${itemSummary}`,
     href: '/direkt-transfer/yedek-parca-transfer',
     actor: params.actor,
     targets: [`user:${params.targetUid}`],

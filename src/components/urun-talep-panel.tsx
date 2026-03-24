@@ -43,6 +43,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, PlusCircle, Trash2, ClipboardPlus, Check, ChevronsUpDown, Unplug, CalendarDays, Wrench, FlaskConical, History } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -215,7 +216,7 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
 export default function UrunTalepPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   const [loading, setLoading] = useState(true);
 
   // Master Data
@@ -251,8 +252,8 @@ export default function UrunTalepPanel() {
     setLoading(true);
     try {
       const [depotSnap, hospitalSnap, productSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'hospitals')),
+        getDocs(companyQuery(db, 'depots', currentCompanyId)),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
         getDocs(collection(db, 'productCodes')),
       ]);
       setDepots(depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
@@ -264,7 +265,7 @@ export default function UrunTalepPanel() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();

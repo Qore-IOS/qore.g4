@@ -4,6 +4,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device } from '@/lib/types';
 import { isUnavailableAt, toDateValue, type PersonnelAvailabilityRecord } from '@/lib/personnel-availability';
+import { companyQuery } from '@/lib/company-filter';
 
 export interface PerformanceMetrics {
   // Raw metrics
@@ -70,11 +71,12 @@ export interface PerformanceFilters {
   selectedLaboratoryId?: string | null;
 }
 
-export async function calculateAllPerformances(filters?: PerformanceFilters): Promise<PersonnelPerformance[]> {
+export async function calculateAllPerformances(filters?: PerformanceFilters, companyId?: string): Promise<PersonnelPerformance[]> {
   const { dateRange, selectedLaboratoryId } = filters || {};
   const hasDateFilter = dateRange?.start || dateRange?.end;
   const hasLabFilter = !!selectedLaboratoryId;
   // Fetch all required data
+  const cid = companyId || '';
   const [
     usersSnap,
     faultsSnap,
@@ -87,16 +89,16 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     periodicPartChangeLogsSnap,
     availabilitySnap,
   ] = await Promise.all([
-    getDocs(collection(db, 'users')),
-    getDocs(collection(db, 'deviceFaultReports')),
-    getDocs(collection(db, 'deviceActionForms')),
-    getDocs(collection(db, 'aplikasyonActionForms')),
-    getDocs(collection(db, 'devices')),
-    getDocs(collection(db, 'maintenancePlans')),
-    getDocs(collection(db, 'maintenanceLogs')),
-    getDocs(collection(db, 'periodicPartChanges')),
-    getDocs(collection(db, 'periodicPartChangeLogs')),
-    getDocs(collection(db, 'personnelAvailability')),
+    getDocs(companyQuery(db, 'users', cid)),
+    getDocs(companyQuery(db, 'deviceFaultReports', cid)),
+    getDocs(companyQuery(db, 'deviceActionForms', cid)),
+    getDocs(companyQuery(db, 'aplikasyonActionForms', cid)),
+    getDocs(companyQuery(db, 'devices', cid)),
+    getDocs(companyQuery(db, 'maintenancePlans', cid)),
+    getDocs(companyQuery(db, 'maintenanceLogs', cid)),
+    getDocs(companyQuery(db, 'periodicPartChanges', cid)),
+    getDocs(companyQuery(db, 'periodicPartChangeLogs', cid)),
+    getDocs(companyQuery(db, 'personnelAvailability', cid)),
   ]);
 
   // Parse data
@@ -600,9 +602,9 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
     // =========================================================================
     // 7. TEKRAR ARIZA CEZASI (-10 to 0 points)
-    //    -2 per recurrence within 7 days, max -10
+    //    -2 per recurrence within 3 hours, max -10
     // =========================================================================
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const recurrenceWindowMs = 3 * 60 * 60 * 1000;
     let recurrenceCount = 0;
 
     const userResolvedFaultsForRecurrence = (hasPrimaryLabs
@@ -617,7 +619,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
         f.openedAt &&
         resolved.closedAt &&
         f.openedAt.getTime() > resolved.closedAt.getTime() &&
-        f.openedAt.getTime() - resolved.closedAt.getTime() <= sevenDaysMs
+        f.openedAt.getTime() - resolved.closedAt.getTime() <= recurrenceWindowMs
       );
       if (hasRecurrence) recurrenceCount++;
     }
