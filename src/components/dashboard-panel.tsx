@@ -9,7 +9,8 @@ import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivityS
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
-  startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, eachMonthOfInterval
+  startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, eachMonthOfInterval,
+  parse, isValid, differenceInDays
 } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
@@ -26,7 +27,6 @@ import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
-import { getExpiringProductsCount, getTotalStockCost } from '@/actions/stokActions';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -58,15 +58,36 @@ export default function DashboardPanel({
 
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Fetch expiring products count (server-side)
+  // Fetch expiring products count (client-side)
   useEffect(() => {
-    getExpiringProductsCount(45).then((count) => {
-      console.log('[Dashboard] Expiring products count:', count);
-      setExpiringProductsCount(count);
-    }).catch((err) => {
-      console.error('[Dashboard] getExpiringProductsCount error:', err);
-      setExpiringProductsCount(0);
-    });
+    (async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'depoStok'));
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const seenKeys = new Set<string>();
+        let count = 0;
+
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+          if (data.isShipped === true) continue;
+          const miadStr = typeof data.miad === 'string' ? data.miad : '';
+          if (!miadStr) continue;
+          const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+          if (!isValid(miadDate)) continue;
+          const days = differenceInDays(miadDate, today);
+          if (days <= 45) {
+            const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
+            if (!seenKeys.has(key)) { seenKeys.add(key); count++; }
+          }
+        }
+        console.log('[Dashboard] depoStok docs:', snapshot.docs.length, 'expiring:', count);
+        setExpiringProductsCount(count);
+      } catch (err) {
+        console.error('[Dashboard] getExpiringProductsCount error:', err);
+        setExpiringProductsCount(0);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -96,16 +117,38 @@ export default function DashboardPanel({
     };
   }, []);
 
-  // Total stock cost – server-side calculation
+  // Total stock cost – client-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
   useEffect(() => {
-    getTotalStockCost().then((result) => {
-      console.log('[Dashboard] Stock cost result:', result);
-      setTotalStockCost(result.total);
-    }).catch((err) => {
-      console.error('[Dashboard] getTotalStockCost error:', err);
-      setTotalStockCost(0);
-    });
+    (async () => {
+      try {
+        const [productSnap, stockSnap] = await Promise.all([
+          getDocs(collection(db, 'productCodes')),
+          getDocs(collection(db, 'depoStok')),
+        ]);
+
+        const costMap = new Map<string, number>();
+        productSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.cost && data.stokKodu) costMap.set(data.stokKodu, data.cost);
+        });
+
+        let total = 0;
+        let matchedCount = 0;
+        stockSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.isShipped === true) return;
+          const cost = costMap.get(data.stokKodu);
+          if (cost) { total += cost; matchedCount++; }
+        });
+
+        console.log('[Dashboard] Stock cost:', { total, stockCount: stockSnap.docs.length, productCount: productSnap.docs.length, matchedCount, costMapSize: costMap.size });
+        setTotalStockCost(total);
+      } catch (err) {
+        console.error('[Dashboard] getTotalStockCost error:', err);
+        setTotalStockCost(0);
+      }
+    })();
   }, []);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
