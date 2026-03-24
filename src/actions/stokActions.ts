@@ -341,6 +341,37 @@ export async function getPaginatedDepotStock(params: {
  * whose miad is within the next `thresholdDays` days,
  * across ALL depots. Server-side computation – only the count is returned.
  */
+/**
+ * Server-side: Toplam depo stok maliyetini hesaplar.
+ * depoStok koleksiyonundaki her ürün için productCodes'taki cost ile çarpıp toplar.
+ * Lot/miad ayrımı yapmaz — sadece stokKodu bazında adet * birim maliyet.
+ */
+export async function getTotalStockCost(): Promise<number> {
+  try {
+    const [productSnap, stockSnap] = await Promise.all([
+      getDocs(collection(db, 'productCodes')),
+      getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', false))),
+    ]);
+
+    const costMap = new Map<string, number>();
+    productSnap.docs.forEach((d) => {
+      const data = d.data();
+      if (data.cost && data.stokKodu) costMap.set(data.stokKodu, data.cost);
+    });
+
+    let total = 0;
+    stockSnap.docs.forEach((d) => {
+      const cost = costMap.get(d.data().stokKodu);
+      if (cost) total += cost;
+    });
+
+    return total;
+  } catch (error) {
+    console.error('Error calculating total stock cost:', error);
+    return 0;
+  }
+}
+
 export async function getExpiringProductsCount(thresholdDays: number = 45): Promise<number> {
   try {
     // Composite query: isShipped (requires Firestore index)

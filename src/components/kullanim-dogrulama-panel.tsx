@@ -8,7 +8,7 @@ import { Recycle, Loader2, Search, Barcode, CheckCircle2, AlertCircle, ScanLine,
 import { DISPOSAL_BARCODE_LENGTH, DISPOSAL_LOT_LENGTH } from '@/lib/constants';
 import { collection, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from "@/hooks/use-toast";
 import { kullanimDogrulamaLogger } from '@/lib/logger';
 import { cn } from '@/lib/utils';
 
@@ -19,114 +19,10 @@ export default function KullanimDogrulamaPanel() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
-interface KullanimDogrulamaPanelProps {
-  initialLaboratoryId?: string;
-}
-
-interface LotNfcDefinition {
-  stokKodu: string;
-  stokAdi?: string;
-  lotNumarasi: string;
-  sampleUid?: string;
-  patternKey?: string;
-  b3?: string;
-  b4?: string;
-  fixedSuffix?: string;
-  registeredTagUIDs?: string[];
-}
-
-interface NfcDisposalEvent {
-  id: string;
-  laboratoryId: string;
-  laboratoryName: string;
-  stokKodu: string;
-  stokAdi: string;
-  lotNumarasi: string;
-  uid: string;
-  patternKey?: string;
-  fixedSuffix?: string;
-  consumptionRecordIds: string[];
-}
-
-interface NfcVerificationGroup {
-  id: string;
-  stokKodu: string;
-  stokAdi: string;
-  lotNumarasi: string;
-  miad: string;
-  tuketilenAdet: number;
-  consumptionRecordIds: string[];
-  tuketilenSeriNolar: string[];
-  disposedUids: string[];
-  productIdentityKey: string;
-  eksikAileTanimi: boolean;
-}
-
-const DAY_RANGE_OPTIONS: Array<{ value: DayRangeOption; label: string }> = [
-  { value: '1', label: 'Son 1 gün' },
-  { value: '2', label: 'Son 2 gün' },
-  { value: '5', label: 'Son 5 gün' },
-  { value: '7', label: 'Son 7 gün' },
-  { value: '30', label: 'Son 30 gün' },
-  { value: 'all', label: 'Tüm geçmiş' },
-];
-
-const normalizeNfcUid = (raw: string): string | null => {
-  const hex = (raw || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
-  if (hex.length !== 16) return null;
-  return hex.match(/.{1,2}/g)?.join(':') ?? null;
-};
-
-const parseNfcUid = (raw: string) => {
-  const normalized = normalizeNfcUid(raw);
-  if (!normalized) return null;
-
-  const bytes = normalized.split(':');
-  if (bytes.length !== 8) return null;
-
-  return {
-    normalized,
-    serialField: `${bytes[0]}:${bytes[1]}`,
-    ignoredB3: bytes[2],
-    productIdentityKey: `${bytes[3]}:${bytes[4]}:${bytes[5]}:${bytes[6]}:${bytes[7]}`,
-    fixedSuffix: bytes.slice(4).join(':'),
-  };
-};
-
-const buildLotNfcDefinitionId = (stokKodu: string, lotNumarasi: string) =>
-  `${encodeURIComponent(stokKodu)}__${encodeURIComponent(lotNumarasi)}`;
-
-const buildDisposalEventId = (uid: string) => normalizeNfcUid(uid)?.replace(/:/g, '') ?? uid.replace(/[^0-9A-F]/gi, '').toUpperCase();
-
-const toDate = (value: unknown): Date | null => {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (value instanceof Timestamp) return value.toDate();
-  if (typeof value === 'object' && value && 'toDate' in value && typeof (value as { toDate?: () => Date }).toDate === 'function') {
-    return (value as { toDate: () => Date }).toDate();
-  }
-  if (typeof value === 'string' || typeof value === 'number') {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-  return null;
-};
-
-const getSinceDate = (range: DayRangeOption): Date | null => {
-  if (range === 'all') return null;
-  const days = Number(range);
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() - (days - 1));
-  return date;
-};
-
-const uniqueStrings = (values: Array<string | undefined | null>) =>
-  Array.from(new Set(values.map((value) => (value || '').trim().toUpperCase()).filter(Boolean)));
-
-export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: KullanimDogrulamaPanelProps) {
+  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
+  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
 
   const DISPOSAL_BARCODE_INPUT_ID = "disposal-barcode-input";
 
@@ -170,74 +66,34 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
   }, [toast]);
 
   useEffect(() => {
-    setSelectedLaboratoryId(initialLaboratoryId || '');
-  }, [initialLaboratoryId]);
+    fetchPanelData();
+  }, [fetchPanelData]);
 
   useEffect(() => {
-    const fetchInitialData = async () => {
-      setIsLabsLoading(true);
-      try {
-        const [laboratoriesSnap, productsSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'productCodes')),
-        ]);
+    if (selectedLaboratoryId) {
+      const laboratory = laboratories.find(h => h.id === selectedLaboratoryId);
+      if (!laboratory) return;
 
-        setLaboratories(
-          laboratoriesSnap.docs.map((item) => ({ id: item.id, ...item.data() } as Laboratory))
-        );
-        setProductCodes(
-          productsSnap.docs.map((item) => ({ id: item.id, ...item.data() } as ProductCode))
-        );
+      const laboratoryName = laboratory.name;
+      const relevantConsumptions = tuketimKayitlari.filter(
+        record => record.laboratoryName === laboratoryName && record.consumptionType === 'normal_kullanim'
+      );
 
-        kullanimDogrulamaLogger.info('Kullanım doğrulama temel verileri yüklendi', {
-          laboratoryCount: laboratoriesSnap.docs.length,
-          productCount: productsSnap.docs.length,
-        });
-      } catch (error) {
-        kullanimDogrulamaLogger.error('Kullanım doğrulama temel verileri yüklenemedi', error);
-        toast({
-          title: 'Veri Hatası',
-          description: 'Laboratuvar ve ürün listesi yüklenemedi.',
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLabsLoading(false);
-      }
-    };
+      const grouped: Record<string, VerificationItemGroup> = {};
 
-    fetchInitialData();
-  }, [toast]);
-
-  const serialTrackedCodes = useMemo(
-    () => new Set(productCodes.filter((product) => product.trackingMode === 'serial').map((product) => product.stokKodu)),
-    [productCodes]
-  );
-
-  const verificationGroups: NfcVerificationGroup[] = useMemo(() => {
-    const grouped: Record<string, NfcVerificationGroup> = {};
-
-    consumptionRecords
-      .filter((record) => serialTrackedCodes.has(record.stokKodu))
-      .forEach((record) => {
-        const key = `${record.stokKodu}__${record.lotNumarasi || ''}`;
-        const definition = lotDefinitionsByKey[key];
-        const productIdentityKey = definition?.b4
-          ? `${definition.b4}:${(definition?.fixedSuffix || NFC_SUFFIX).toUpperCase()}`
-          : '';
-
+      relevantConsumptions.forEach(record => {
+        const key = `${record.stokKodu}-${record.lotNumarasi}-${record.miad}`;
         if (!grouped[key]) {
           grouped[key] = {
-            id: key,
             stokKodu: record.stokKodu,
             stokAdi: record.stokAdi,
-            lotNumarasi: record.lotNumarasi || '',
+            lotNumarasi: record.lotNumarasi,
             miad: record.miad,
             tuketilenAdet: 0,
             dogrulananAdet: 0,
             originalRecordIds: [],
           };
         }
-
         grouped[key].tuketilenAdet += 1;
         if (!grouped[key].originalRecordIds.includes(record.id)) {
           grouped[key].originalRecordIds.push(record.id);
@@ -270,6 +126,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       item.stokKodu.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.lotNumarasi.toLowerCase().includes(searchTerm.toLowerCase())
     );
+  }, [verificationItems, searchTerm]);
 
   /* ─── Summary KPIs ─── */
   const summary = useMemo(() => {
@@ -284,102 +141,46 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     const currentBarcode = (barcodeToProcess || disposalBarcode).trim();
 
     if (!selectedLaboratoryId) {
-      toast({ title: 'Uyarı', description: 'Önce laboratuvar seçin.' });
+      kullanimDogrulamaLogger.warn('Laboratuvar seçilmeden barkod okutulmaya çalışıldı');
+      toast({ title: "Uyarı", description: "Lütfen önce bir laboratuvar seçin.", variant: "default" });
       return;
     }
-
-    if (!hasFetchedData) {
-      toast({
-        title: 'Önce Veri Alın',
-        description: 'Laboratuvar ve gün aralığını seçip "Veri Al" butonuna basın.',
+    if (!currentBarcode) {
+      toast({ title: "Uyarı", description: "Lütfen imha barkodunu okutun.", variant: "default" });
+      return;
+    }
+    if (currentBarcode.length !== DISPOSAL_BARCODE_LENGTH) {
+      kullanimDogrulamaLogger.warn('Geçersiz barkod uzunluğu', {
+        expected: DISPOSAL_BARCODE_LENGTH,
+        received: currentBarcode.length,
       });
+      toast({ title: "Hata", description: `İmha barkodu ${DISPOSAL_BARCODE_LENGTH} hane olmalıdır. Girilen: ${currentBarcode.length}`, variant: "destructive" });
+      setDisposalBarcode('');
       return;
     }
 
-    if (!parsedUid || !NFC_TAG_REGEX.test(parsedUid.normalized)) {
-      toast({
-        title: 'Geçersiz UID',
-        description: 'Beklenen format: xx:xx:xx:xx:xx:xx:xx:xx',
-        variant: 'destructive',
-      });
-      setNfcInput('');
-      return;
-    }
+    const kitLotNumber = currentBarcode.substring(0, DISPOSAL_LOT_LENGTH);
 
-    const uid = parsedUid.normalized;
-    const disposalDocId = buildDisposalEventId(uid);
+    let itemWasFoundAndUpdated = false;
+    let updatedItemDetailsForToast: VerificationItemGroup | null = null;
 
-    try {
-      const existingDisposalSnap = await getDoc(doc(db, 'nfcDisposalEvents', disposalDocId));
-      if (existingDisposalSnap.exists()) {
-        toast({
-          title: 'UID Daha Önce İmha Edilmiş',
-          description: `${uid} daha önce disposed olarak işaretlenmiş.`,
-          variant: 'destructive',
-        });
-        setNfcInput('');
-        document.getElementById(NFC_INPUT_ID)?.focus();
-        return;
-      }
-
-      const familyGroup = verificationGroups.find((group) =>
-        !group.eksikAileTanimi &&
-        group.productIdentityKey === parsedUid.productIdentityKey
-      );
-
-      const exactGroup = verificationGroups.find((group) =>
-        !group.eksikAileTanimi &&
-        group.productIdentityKey === parsedUid.productIdentityKey &&
-        group.disposedUids.length < group.tuketilenAdet
-      );
-
-      if (!exactGroup) {
-        if (familyGroup) {
-          toast({
-            title: 'Bekleyen Kutu Kalmadı',
-            description: `${familyGroup.stokAdi} / ${familyGroup.lotNumarasi} için tanımlı aile örüntüsü eşleşti ancak bekleyen boş kutu kalmamış görünüyor.`,
-            variant: 'destructive',
-          });
-        } else {
-          const samePatternDifferentSuffix = verificationGroups.find((group) =>
-            !group.eksikAileTanimi && group.productIdentityKey.startsWith(`${parsedUid.productIdentityKey.split(':')[0]}:`)
-          );
-
-          if (samePatternDifferentSuffix) {
-            toast({
-              title: 'Ürün Kimliği Yakın, Örüntü Uyuşmadı',
-              description: `${uid} için ürün byte alanı benzer görünüyor ancak beklenen ürün+lota ait kimlik ile tam eşleşme yok.`,
-              variant: 'destructive',
-            });
-          } else {
-            toast({
-              title: 'Aile Örüntüsü Tanımlı Değil',
-              description: `${uid} için ${parsedUid.productIdentityKey} ürün-lot kimliği seçili laboratuvarın bekleyen tüketimlerinde bulunamadı.`,
-              variant: 'destructive',
-            });
-          }
+    setVerificationItems(prevItems =>
+      prevItems.map(item => {
+        if (!itemWasFoundAndUpdated && item.lotNumarasi === kitLotNumber && item.dogrulananAdet < item.tuketilenAdet) {
+          itemWasFoundAndUpdated = true;
+          updatedItemDetailsForToast = { ...item, dogrulananAdet: item.dogrulananAdet + 1 };
+          return { ...item, dogrulananAdet: item.dogrulananAdet + 1 };
         }
-        setNfcInput('');
-        document.getElementById(NFC_INPUT_ID)?.focus();
-        return;
-      }
+        return item;
+      })
+    );
 
-      await setDoc(doc(db, 'nfcDisposalEvents', disposalDocId), {
-        laboratoryId: selectedLaboratoryId,
-        laboratoryName: laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId)?.name || '',
-        stokKodu: exactGroup.stokKodu,
-        stokAdi: exactGroup.stokAdi,
-        lotNumarasi: exactGroup.lotNumarasi,
-        uid,
-        patternKey: parsedUid.productIdentityKey,
-        fixedSuffix: parsedUid.fixedSuffix,
-        serialField: parsedUid.serialField,
-        consumptionRecordIds: exactGroup.consumptionRecordIds,
-        source: 'kullanim-dogrulama-panel',
-        status: 'disposed',
-        verifiedAt: serverTimestamp(),
-        verifiedByUid: currentUserProfile?.uid || '',
-        verifiedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+    if (itemWasFoundAndUpdated && updatedItemDetailsForToast) {
+      kullanimDogrulamaLogger.info('İmha doğrulandı', {
+        stokKodu: updatedItemDetailsForToast.stokKodu,
+        lotNumarasi: updatedItemDetailsForToast.lotNumarasi,
+        dogrulananAdet: updatedItemDetailsForToast.dogrulananAdet,
+        tuketilenAdet: updatedItemDetailsForToast.tuketilenAdet,
       });
       toast({ title: "Doğrulandı", description: `${updatedItemDetailsForToast.stokAdi} (Lot: ${updatedItemDetailsForToast.lotNumarasi}) için 1 adet imha doğrulandı.` });
     } else {
@@ -393,22 +194,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       }
     }
 
-    try {
-      // @ts-ignore Web NFC API
-      const ndef = new NDEFReader();
-      await ndef.scan();
-      setIsWebNfcScanning(true);
-      ndef.onreading = (event: { serialNumber?: string }) => {
-        if (!event.serialNumber) return;
-        const normalized = normalizeNfcUid(event.serialNumber);
-        if (!normalized) return;
-        setNfcInput(normalized);
-        void processNfcScanRef.current(normalized);
-      };
-    } catch (error) {
-      kullanimDogrulamaLogger.warn('Web NFC otomatik dinleme başlatılamadı', error);
-      setIsWebNfcScanning(false);
-    }
+    setDisposalBarcode('');
+    document.getElementById(DISPOSAL_BARCODE_INPUT_ID)?.focus();
   };
 
   const handleDisposalKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
