@@ -1,114 +1,83 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import React, { useState, useMemo, useEffect, useCallback, KeyboardEvent } from 'react';
+import type { Laboratory, ProductCode, ConsumptionRecord, VerificationItemGroup } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { CalendarClock, CheckSquare, Info, Loader2, Nfc, Search, ShieldCheck, Smartphone, Trash2, RefreshCcw, ScanLine, AlertTriangle } from 'lucide-react';
-import {
-  collection,
-  getDoc,
-  getDocs,
-  doc,
-  onSnapshot,
-  query,
-  setDoc,
-  Timestamp,
-  where,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { Input } from '@/components/ui/input';
+import { Recycle, Loader2, Search, Barcode, CheckCircle2, AlertCircle, ScanLine, ShieldCheck, Package } from 'lucide-react';
+import { DISPOSAL_BARCODE_LENGTH, DISPOSAL_LOT_LENGTH } from '@/lib/constants';
+import { collection, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from "@/hooks/use-toast";
 import { kullanimDogrulamaLogger } from '@/lib/logger';
-import { useAuth } from '@/contexts/auth-context';
+import { cn } from '@/lib/utils';
 
-const NFC_TAG_REGEX = /^[0-9A-F]{2}(:[0-9A-F]{2}){7}$/;
-const NFC_INPUT_ID = 'nfc-tag-input';
-const NFC_SUFFIX = '53:01:04:E0';
-
-type DayRangeOption = '1' | '2' | '5' | '7' | '30' | 'all';
+export default function KullanimDogrulamaPanel() {
+  const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>('');
+  const [disposalBarcode, setDisposalBarcode] = useState<string>('');
+  const [verificationItems, setVerificationItems] = useState<VerificationItemGroup[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
   const { toast } = useToast();
 
-  const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>(initialLaboratoryId);
-  const [selectedRange, setSelectedRange] = useState<DayRangeOption>('1');
-  const [nfcInput, setNfcInput] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isLabsLoading, setIsLabsLoading] = useState(true);
-  const [isDataLoading, setIsDataLoading] = useState(false);
-  const [isWebNfcScanning, setIsWebNfcScanning] = useState(false);
-  const [hasFetchedData, setHasFetchedData] = useState(false);
-  const [loadedRangeLabel, setLoadedRangeLabel] = useState<string>('');
-  const [activeSinceDate, setActiveSinceDate] = useState<Date | null>(null);
+  const DISPOSAL_BARCODE_INPUT_ID = "disposal-barcode-input";
 
-  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [consumptionRecords, setConsumptionRecords] = useState<ConsumptionRecord[]>([]);
-  const [lotDefinitionsByKey, setLotDefinitionsByKey] = useState<Record<string, LotNfcDefinition>>({});
-  const [disposalEvents, setDisposalEvents] = useState<NfcDisposalEvent[]>([]);
+  const fetchPanelData = useCallback(async () => {
+    setIsLoading(true);
+    const startTime = performance.now();
 
-  const unsubscribeRefs = useRef<Array<() => void>>([]);
-  const scanBufferRef = useRef('');
-  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const processNfcScanRef = useRef<(rawUid?: string) => Promise<void>>(async () => {});
+    try {
+      const [laboratoriesSnap, productsSnap, consumptionSnap] = await Promise.all([
+        getDocs(collection(db, 'hospitals')),
+        getDocs(collection(db, 'productCodes')),
+        getDocs(collection(db, 'tuketimKayitlari'))
+      ]);
 
-  const clearSubscriptions = () => {
-    unsubscribeRefs.current.forEach((unsubscribe) => unsubscribe());
-    unsubscribeRefs.current = [];
-  };
+      setLaboratories(laboratoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Laboratory)));
+      setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
 
-  const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+      const consumptionItems = consumptionSnap.docs.map(doc => {
+        const data = doc.data();
+        Object.keys(data).forEach(key => {
+          if (data[key] instanceof Timestamp) {
+            data[key] = data[key].toDate();
+          }
+        });
+        return { id: doc.id, ...data } as ConsumptionRecord;
+      });
+      setTuketimKayitlari(consumptionItems);
+
+      const duration = performance.now() - startTime;
+      kullanimDogrulamaLogger.performance('Panel verileri yüklendi', duration, {
+        laboratoriesCount: laboratoriesSnap.docs.length,
+        productsCount: productsSnap.docs.length,
+        consumptionCount: consumptionSnap.docs.length,
+      });
+    } catch (error) {
+      kullanimDogrulamaLogger.error('Panel verileri yüklenemedi', error);
+      toast({ title: "Veri Hatası", description: "Doğrulama paneli için veriler yüklenemedi.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
     fetchPanelData();
   }, [fetchPanelData]);
 
   useEffect(() => {
-    const fetchInitialData = async () => {
-      setIsLabsLoading(true);
-      try {
-        const [laboratoriesSnap, productsSnap] = await Promise.all([
-          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
-          getDocs(collection(db, 'productCodes')),
-        ]);
+    if (selectedLaboratoryId) {
+      const laboratory = laboratories.find(h => h.id === selectedLaboratoryId);
+      if (!laboratory) return;
 
-        setLaboratories(
-          laboratoriesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Laboratory))
-        );
-
-        const products = productsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as ProductCode));
-        setProductCodes(products);
-
-        kullanimDogrulamaLogger.info('Laboratuvarlar ve ürün kodları yüklendi', {
-          laboratories: laboratoriesSnap.docs.length,
-          products: productsSnap.docs.length,
-        });
-      } catch (error) {
-        kullanimDogrulamaLogger.error('Temel veriler yüklenemedi', error);
-        toast({
-          title: 'Veri Hatası',
-          description: 'Laboratuvar listesi yüklenemedi.',
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLabsLoading(false);
-      }
-    };
-
-    fetchInitialData();
-  }, [toast, currentCompanyId]);
+      const laboratoryName = laboratory.name;
+      const relevantConsumptions = tuketimKayitlari.filter(
+        record => record.laboratoryName === laboratoryName && record.consumptionType === 'normal_kullanim'
+      );
 
       const grouped: Record<string, VerificationItemGroup> = {};
 
@@ -121,217 +90,55 @@ type DayRangeOption = '1' | '2' | '5' | '7' | '30' | 'all';
             lotNumarasi: record.lotNumarasi,
             miad: record.miad,
             tuketilenAdet: 0,
-            consumptionRecordIds: [],
-            tuketilenSeriNolar: [],
-            disposedUids: [],
-            productIdentityKey,
-            eksikAileTanimi: !productIdentityKey,
+            dogrulananAdet: 0,
+            originalRecordIds: [],
           };
         }
         grouped[key].tuketilenAdet += 1;
-        grouped[key].consumptionRecordIds.push(record.id);
-        if (record.seriNumarasi) {
-          grouped[key].tuketilenSeriNolar.push(record.seriNumarasi);
+        if (!grouped[key].originalRecordIds.includes(record.id)) {
+          grouped[key].originalRecordIds.push(record.id);
         }
       });
 
-    Object.values(grouped).forEach((group) => {
-      const disposedUids = uniqueStrings(
-        disposalEvents
-          .filter((event) => event.stokKodu === group.stokKodu && event.lotNumarasi === group.lotNumarasi)
-          .map((event) => event.uid)
-      );
+      const currentVerificationState = verificationItems.reduce((acc, item) => {
+        const key = `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
+        acc[key] = item.dogrulananAdet;
+        return acc;
+      }, {} as Record<string, number>);
 
-      group.disposedUids = disposedUids;
-      group.tuketilenSeriNolar = uniqueStrings(group.tuketilenSeriNolar);
-    });
+      Object.keys(grouped).forEach(key => {
+        if (currentVerificationState[key] && currentVerificationState[key] <= grouped[key].tuketilenAdet) {
+          grouped[key].dogrulananAdet = currentVerificationState[key];
+        }
+      });
 
-    return Object.values(grouped).sort((left, right) => left.stokAdi.localeCompare(right.stokAdi, 'tr'));
-  }, [consumptionRecords, disposalEvents, lotDefinitionsByKey, serialTrackedCodes]);
+      setVerificationItems(Object.values(grouped).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi)));
+    } else {
+      setVerificationItems([]);
+    }
+    setDisposalBarcode('');
+  }, [selectedLaboratoryId, tuketimKayitlari, laboratories]);
 
-  const pendingGroups = verificationGroups.filter(
-    (group) => group.tuketilenAdet === 0 || group.disposedUids.length < group.tuketilenAdet
-  );
-
-  const filteredGroups = !searchTerm
-    ? pendingGroups
-    : pendingGroups.filter((group) =>
-        [group.stokAdi, group.stokKodu, group.lotNumarasi]
-          .join(' ')
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase())
-      );
-
-  const expectedVerificationCount = verificationGroups.reduce((sum, group) => sum + group.tuketilenAdet, 0);
-  const verifiedVerificationCount = verificationGroups.reduce((sum, group) => sum + group.disposedUids.length, 0);
-  const overallProgress = {
-    expected: expectedVerificationCount,
-    verified: verifiedVerificationCount,
-    total:
-      expectedVerificationCount > 0
-        ? Math.round((verifiedVerificationCount / expectedVerificationCount) * 100)
-        : 0,
-  };
-
-  const syncLabUrl = (labId: string) => {
-    const targetPath = labId ? `/kullanim-dogrulama/${labId}` : '/kullanim-dogrulama';
-    window.history.replaceState(null, '', targetPath);
-  };
-
-  const hydrateLotDefinitions = async (records: ConsumptionRecord[]) => {
-    const keys = Array.from(
-      new Set(
-        records
-          .filter((record) => record.stokKodu && record.lotNumarasi)
-          .map((record) => `${record.stokKodu}__${record.lotNumarasi || ''}`)
-      )
+  const filteredVerificationItems = useMemo(() => {
+    if (!searchTerm) return verificationItems;
+    return verificationItems.filter(item =>
+      item.stokAdi.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.stokKodu.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.lotNumarasi.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [verificationItems, searchTerm]);
 
-    if (keys.length === 0) {
-      setLotDefinitionsByKey({});
-      return;
-    }
+  /* ─── Summary KPIs ─── */
+  const summary = useMemo(() => {
+    const total = verificationItems.reduce((sum, i) => sum + i.tuketilenAdet, 0);
+    const verified = verificationItems.reduce((sum, i) => sum + i.dogrulananAdet, 0);
+    const fullyVerified = verificationItems.filter(i => i.dogrulananAdet === i.tuketilenAdet && i.tuketilenAdet > 0).length;
+    const pending = verificationItems.filter(i => i.dogrulananAdet < i.tuketilenAdet).length;
+    return { total, verified, fullyVerified, pending, percentage: total > 0 ? Math.round((verified / total) * 100) : 0 };
+  }, [verificationItems]);
 
-    try {
-      const entries = await Promise.all(
-        keys.map(async (key) => {
-          const [stokKodu, lotNumarasi] = key.split('__');
-          const definitionId = buildLotNfcDefinitionId(stokKodu, lotNumarasi);
-          const definitionSnap = await getDoc(doc(db, 'lotNfcDefinitions', definitionId));
-          return [key, definitionSnap.exists() ? (definitionSnap.data() as LotNfcDefinition) : null] as const;
-        })
-      );
-
-      setLotDefinitionsByKey(
-        entries.reduce<Record<string, LotNfcDefinition>>((accumulator, [key, value]) => {
-          if (value) accumulator[key] = value;
-          return accumulator;
-        }, {})
-      );
-    } catch (error) {
-      kullanimDogrulamaLogger.error('Lot NFC tanımları yüklenemedi', error);
-      toast({
-        title: 'NFC Tanım Hatası',
-        description: 'Tüketim kayıtlarına bağlı lot NFC tanımları yüklenemedi.',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleFetchData = useCallback(async () => {
-    if (!selectedLaboratoryId) {
-      toast({
-        title: 'Laboratuvar Seçin',
-        description: 'Önce doğrulama yapılacak laboratuvarı seçin.',
-      });
-      return;
-    }
-
-    const selectedLaboratory = laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId);
-    if (!selectedLaboratory) {
-      toast({
-        title: 'Laboratuvar Bulunamadı',
-        description: 'Seçilen laboratuvar bilgisi yüklenemedi.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    clearSubscriptions();
-    setIsDataLoading(true);
-    setConsumptionRecords([]);
-    setDisposalEvents([]);
-    setLotDefinitionsByKey({});
-    setHasFetchedData(false);
-    setSearchTerm('');
-
-    const sinceDate = getSinceDate(selectedRange);
-    setActiveSinceDate(sinceDate);
-    setLoadedRangeLabel(
-      selectedRange === 'all'
-        ? 'Tüm geçmiş'
-        : `Son ${selectedRange} gün`
-    );
-
-    try {
-      const consumptionConstraints = [
-        where('laboratoryId', '==', selectedLaboratoryId),
-        where('consumptionType', '==', 'normal_kullanim'),
-      ];
-
-      if (sinceDate) {
-        consumptionConstraints.push(where('consumptionTimestamp', '>=', Timestamp.fromDate(sinceDate)));
-      }
-
-      const consumptionQuery = query(collection(db, 'tuketimKayitlari'), ...consumptionConstraints);
-      const unsubscribeConsumption = onSnapshot(
-        consumptionQuery,
-        async (snapshot) => {
-          const records = snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as ConsumptionRecord));
-          setConsumptionRecords(records);
-          await hydrateLotDefinitions(records);
-          setIsDataLoading(false);
-          setHasFetchedData(true);
-
-          kullanimDogrulamaLogger.info('Kullanım doğrulama tüketim snapshot güncellendi', {
-            laboratoryId: selectedLaboratoryId,
-            count: records.length,
-            range: selectedRange,
-          });
-        },
-        (error) => {
-          kullanimDogrulamaLogger.error('Tüketim snapshot dinlenemedi', error);
-          setIsDataLoading(false);
-          toast({
-            title: 'Tüketim Hatası',
-            description: 'Seçilen aralıktaki tüketim verileri alınamadı.',
-            variant: 'destructive',
-          });
-        }
-      );
-
-      const disposalQuery = query(
-        collection(db, 'nfcDisposalEvents'),
-        where('laboratoryId', '==', selectedLaboratoryId)
-      );
-      const unsubscribeDisposals = onSnapshot(
-        disposalQuery,
-        (snapshot) => {
-          setDisposalEvents(
-            snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as NfcDisposalEvent))
-          );
-        },
-        (error) => {
-          kullanimDogrulamaLogger.error('İmha/NFC disposal snapshot dinlenemedi', error);
-        }
-      );
-
-      unsubscribeRefs.current = [unsubscribeConsumption, unsubscribeDisposals];
-      syncLabUrl(selectedLaboratoryId);
-      setNfcInput('');
-
-      toast({
-        title: 'Veriler Yükleniyor',
-        description:
-          selectedRange === 'all'
-            ? `${selectedLaboratory.name} için tüm geçmiş tüketim verileri yükleniyor.`
-            : `${selectedLaboratory.name} için son ${selectedRange} günün tüketimleri yükleniyor.`,
-      });
-    } catch (error) {
-      kullanimDogrulamaLogger.error('Kullanım doğrulama veri akışı başlatılamadı', error);
-      setIsDataLoading(false);
-      toast({
-        title: 'Akış Başlatılamadı',
-        description: 'Seçilen laboratuvar için doğrulama verileri başlatılamadı.',
-        variant: 'destructive',
-      });
-    }
-  }, [clearSubscriptions, hydrateLotDefinitions, laboratories, selectedLaboratoryId, selectedRange, syncLabUrl, toast]);
-
-  const processNfcScan = async (rawUid?: string) => {
-    const sourceUid = rawUid ?? nfcInput;
-    const parsedUid = parseNfcUid(sourceUid);
+  const handleDisposalScan = (barcodeToProcess?: string) => {
+    const currentBarcode = (barcodeToProcess || disposalBarcode).trim();
 
     if (!selectedLaboratoryId) {
       kullanimDogrulamaLogger.warn('Laboratuvar seçilmeden barkod okutulmaya çalışıldı');
@@ -375,413 +182,297 @@ type DayRangeOption = '1' | '2' | '5' | '7' | '30' | 'all';
         dogrulananAdet: updatedItemDetailsForToast.dogrulananAdet,
         tuketilenAdet: updatedItemDetailsForToast.tuketilenAdet,
       });
-
-      kullanimDogrulamaLogger.info('NFC disposal doğrulaması tamamlandı', {
-        uid,
-        stokKodu: exactGroup.stokKodu,
-        lotNumarasi: exactGroup.lotNumarasi,
-      });
-
-      toast({
-        title: 'Çöp Kutusu Kabul Etti',
-        description: `${exactGroup.stokAdi} için ${uid} aile örüntüsüne uygun olarak kabul edildi.`,
-      });
-      setNfcInput('');
-      document.getElementById(NFC_INPUT_ID)?.focus();
-    } catch (error) {
-      kullanimDogrulamaLogger.error('NFC disposal doğrulaması kaydedilemedi', error);
-      toast({
-        title: 'Kayıt Hatası',
-        description: 'NFC doğrulama sonucu kaydedilemedi.',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  useEffect(() => {
-    processNfcScanRef.current = processNfcScan;
-  }, [processNfcScan]);
-
-  const startWebNfcScan = async () => {
-    if (typeof window === 'undefined' || !('NDEFReader' in window)) {
-      setIsWebNfcScanning(false);
-      return;
+      toast({ title: "Doğrulandı", description: `${updatedItemDetailsForToast.stokAdi} (Lot: ${updatedItemDetailsForToast.lotNumarasi}) için 1 adet imha doğrulandı.` });
+    } else {
+      const alreadyFullyVerifiedItem = verificationItems.find(item => item.lotNumarasi === kitLotNumber && item.dogrulananAdet === item.tuketilenAdet);
+      if (alreadyFullyVerifiedItem) {
+        kullanimDogrulamaLogger.debug('Zaten tamamen doğrulanmış lot', { kitLotNumber });
+        toast({ title: "Zaten Doğrulanmış", description: `${alreadyFullyVerifiedItem.stokAdi} (Lot: ${kitLotNumber}) için tüm tüketimler zaten doğrulanmış.`, variant: "default", duration: 5000 });
+      } else {
+        kullanimDogrulamaLogger.warn('Eşleşen lot bulunamadı', { kitLotNumber });
+        toast({ title: "Uyarı", description: `Okutulan kit lot numarası (${kitLotNumber}) ile eşleşen veya doğrulanmamış tüketim bulunamadı.`, variant: "default", duration: 5000 });
+      }
     }
 
     setDisposalBarcode('');
     document.getElementById(DISPOSAL_BARCODE_INPUT_ID)?.focus();
   };
 
-  useEffect(() => {
-    if (!hasFetchedData || !selectedLaboratoryId) {
-      setIsWebNfcScanning(false);
-      return;
+  const handleDisposalKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleDisposalScan();
     }
-
-    void startWebNfcScan();
-  }, [hasFetchedData, selectedLaboratoryId]);
-
-  useEffect(() => {
-    if (!hasFetchedData) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const activeElement = document.activeElement as HTMLElement | null;
-      const isOtherInputFocused = activeElement?.tagName === 'INPUT' && activeElement.id !== NFC_INPUT_ID;
-      if (isOtherInputFocused) return;
-
-      if (event.key === 'Enter') {
-        const raw = scanBufferRef.current;
-        scanBufferRef.current = '';
-        if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
-        if (!raw.trim()) return;
-        void processNfcScanRef.current(raw);
-        return;
-      }
-
-      if (event.key.length !== 1) return;
-      scanBufferRef.current += event.key;
-      if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
-      scanTimeoutRef.current = setTimeout(() => {
-        scanBufferRef.current = '';
-      }, 250);
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [hasFetchedData]);
+  };
 
   return (
-    <div className="space-y-6">
-      <Card className="shadow-md rounded-lg">
-        <CardHeader>
-          <CardTitle className="text-xl flex items-center">
-            <ShieldCheck className="mr-2 h-6 w-6 text-green-600" />
-            Kullanım Doğrulama (NFC UID Doğrulama)
-          </CardTitle>
-          <CardDescription>
-            Önce laboratuvarı ve aralığı seçin, sonra veriyi yükleyin. Sonrasında panel yalnızca seçili laboratuvarın yeni tüketimlerini canlı izler ve çöp kutusunda tam UID ile doğrulama yapar.
-          </CardDescription>
-        </CardHeader>
+    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen" role="main" aria-label="Kullanım doğrulama paneli">
 
-        <CardContent className="space-y-4">
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertTitle>Doğrulama mantığı</AlertTitle>
-            <AlertDescription className="space-y-1">
-              <p>1) UID formatı doğrulanır.</p>
-              <p>2) Ürün-lot için tanımlı B4:B5:B6:B7:B8 ürün kimliği kontrol edilir.</p>
-              <p>3) B1:B2 seri alanı değişken kabul edilir; aynı tam UID ikinci kez kabul edilmez.</p>
-              <p>4) UID daha önce disposed olmuşsa tekrar kabul edilmez.</p>
-            </AlertDescription>
-          </Alert>
+      {/* ══════════════════════ HEADER ══════════════════════ */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+            <Recycle className="h-5 w-5 text-emerald-500" />
+            Kullanım Doğrulama
+          </h1>
+          <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+            Kullanılan ürünlerin kitlerinin imha edildiğini doğrulayın
+          </p>
+        </div>
+      </div>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_auto]">
-            <div>
-              <label htmlFor="lab-select-nfc" className="block text-sm font-medium mb-1">
-                Laboratuvar Seçin
-              </label>
-              <Select
-                value={selectedLaboratoryId}
-                onValueChange={(value) => {
-                  setSelectedLaboratoryId(value);
-                  setHasFetchedData(false);
-                  setConsumptionRecords([]);
-                  setDisposalEvents([]);
-                  setLotDefinitionsByKey({});
-                  setSearchTerm('');
-                  clearSubscriptions();
-                  syncLabUrl(value);
-                }}
-              >
-                <SelectTrigger id="lab-select-nfc" className="w-full rounded-md" disabled={isLabsLoading}>
-                  <SelectValue placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {laboratories.map((laboratory) => (
-                    <SelectItem key={laboratory.id} value={laboratory.id}>
-                      {laboratory.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* ══════════════════════ LABORATORY SELECT ══════════════════════ */}
+      <div className="cihaz-card p-4 sm:p-5 space-y-3">
+        <p className="cihaz-overline text-[10px] sm:text-xs">Laboratuvar</p>
+        <Select value={selectedLaboratoryId} onValueChange={(value) => { setSelectedLaboratoryId(value); setSearchTerm(''); }}>
+          <SelectTrigger className="cihaz-pressed border-none h-10 w-full sm:w-1/2 lg:w-1/3" aria-label="Doğrulama yapılacak laboratuvarı seçin">
+            <SelectValue placeholder="Laboratuvar seçin" />
+          </SelectTrigger>
+          <SelectContent>
+            {laboratories.map(h => (
+              <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* ══════════════════════ CONTENT ══════════════════════ */}
+      {selectedLaboratoryId && (
+        <>
+          {/* ── KPI Cards ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <Package className="h-4 w-4 text-[var(--dashboard-accent)] mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">{summary.total}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Toplam Tüketim</span>
             </div>
-
-            <div>
-              <label htmlFor="day-range-nfc" className="block text-sm font-medium mb-1">
-                Veri Aralığı
-              </label>
-              <Select value={selectedRange} onValueChange={(value: DayRangeOption) => setSelectedRange(value)}>
-                <SelectTrigger id="day-range-nfc" className="w-full rounded-md">
-                  <SelectValue placeholder="Gün aralığı seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DAY_RANGE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <ShieldCheck className="h-4 w-4 text-emerald-500 mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-emerald-600">{summary.verified}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Doğrulanan</span>
             </div>
-
-            <div className="flex items-end">
-              <Button onClick={handleFetchData} className="w-full lg:w-auto" disabled={!selectedLaboratoryId || isDataLoading}>
-                {isDataLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                Veri Al
-              </Button>
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500 mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-emerald-600">{summary.fullyVerified}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Tamamlanan</span>
+            </div>
+            <div className="cihaz-card p-3 sm:p-4 flex flex-col items-center text-center">
+              <AlertCircle className="h-4 w-4 text-amber-500 mb-1.5" />
+              <span className="text-xl sm:text-2xl font-bold text-amber-600">{summary.pending}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] font-medium uppercase tracking-wide">Bekleyen</span>
             </div>
           </div>
 
-          {selectedLaboratoryId && (
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline" className="font-mono">
-                {`URL: /kullanim-dogrulama/${selectedLaboratoryId}`}
-              </Badge>
-              {hasFetchedData && (
-                <>
-                  <Badge variant="secondary">
-                    <CalendarClock className="mr-1 h-3 w-3" />
-                    {loadedRangeLabel}
-                  </Badge>
-                  {activeSinceDate && (
-                    <Badge variant="outline">
-                      Başlangıç: {activeSinceDate.toLocaleDateString('tr-TR')}
-                    </Badge>
-                  )}
-                </>
-              )}
+          {/* ── Global Progress Bar ── */}
+          <div className="cihaz-card p-4 sm:p-5 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-[var(--dashboard-text)]">Genel İlerleme</p>
+              <span className="text-xs font-bold text-[var(--dashboard-accent)]">{summary.percentage}%</span>
             </div>
-          )}
+            <div className="h-2.5 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500 ease-out"
+                style={{ width: `${summary.percentage}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-[var(--dashboard-muted)]">
+              {summary.verified} / {summary.total} adet doğrulandı
+            </p>
+          </div>
 
-          {selectedLaboratoryId && (
-            <Card className="border-border dark:border-input rounded-lg p-4 mt-4">
-              <CardHeader className="px-0 pt-0 pb-3">
-                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
-                  <div>
-                    <CardTitle className="text-lg">Doğrulanacak Kullanımlar</CardTitle>
-                    <CardDescription>
-                      Veri yalnızca "Veri Al" sonrası yüklenir. Sonrasında NFC okuyucu ve harici tarayıcı sürekli dinlemede kalır.
-                    </CardDescription>
-                  </div>
-                  <Input
-                    type="search"
-                    placeholder="Ürün adı, kodu veya lot ile ara..."
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    className="max-w-sm rounded-md h-9"
-                    disabled={!hasFetchedData}
-                  />
+          {/* ── Barcode Scanner ── */}
+          <div className="cihaz-card p-4 sm:p-5 space-y-3">
+            <p className="cihaz-overline text-[10px] sm:text-xs flex items-center gap-1.5">
+              <ScanLine className="h-3.5 w-3.5" />
+              Barkod Tarayıcı
+            </p>
+            <div className="flex items-center gap-2" role="search">
+              <Input
+                id={DISPOSAL_BARCODE_INPUT_ID}
+                placeholder={`İmha kiti barkodu (${DISPOSAL_BARCODE_LENGTH} hane)`}
+                value={disposalBarcode}
+                onChange={(e) => setDisposalBarcode(e.target.value)}
+                onKeyPress={handleDisposalKeyPress}
+                maxLength={DISPOSAL_BARCODE_LENGTH}
+                className="cihaz-pressed border-none flex-grow h-10 text-sm font-mono"
+                disabled={!selectedLaboratoryId || verificationItems.length === 0}
+                aria-label="İmha kiti barkodu girin"
+              />
+              <button
+                onClick={() => handleDisposalScan()}
+                disabled={!disposalBarcode}
+                className="cihaz-tool-item flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium disabled:opacity-40 shrink-0"
+                aria-label="Barkodu doğrula"
+              >
+                <Barcode className="h-4 w-4" />
+                <span className="hidden sm:inline">Doğrula</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── Search + Verification Table ── */}
+          <div className="cihaz-card-strong flex-1 flex flex-col overflow-hidden">
+            {/* Search bar */}
+            <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-[var(--dashboard-stroke)]">
+              <p className="text-xs font-semibold text-[var(--dashboard-text)] shrink-0">Doğrulanacak Kullanımlar</p>
+              <div className="relative max-w-xs w-full">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
+                <Input
+                  type="search"
+                  placeholder="Stok adı, kodu veya lot ara..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="cihaz-pressed border-none h-8 text-xs pl-8"
+                />
+              </div>
+            </div>
+
+            {/* Table header */}
+            {filteredVerificationItems.length > 0 && (
+              <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_70px_70px_140px] gap-1 px-4 sm:px-5 py-2.5 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+                <span>Ürün</span>
+                <span>Lot / Miad</span>
+                <span className="text-center">Tüketilen</span>
+                <span className="text-center">Doğrulanan</span>
+                <span className="text-center">%</span>
+                <span>İlerleme</span>
+              </div>
+            )}
+
+            {/* Content */}
+            {isLoading ? (
+              <div className="flex items-center justify-center h-[40vh]">
+                <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+              </div>
+            ) : verificationItems.length === 0 && !searchTerm ? (
+              <div className="flex flex-col items-center justify-center h-[35vh] text-center px-4">
+                <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                  <Recycle className="h-6 w-6 text-[var(--dashboard-muted)]" />
                 </div>
-              </CardHeader>
-
-              <CardContent className="px-0 pb-0 space-y-4">
-                {hasFetchedData && verificationGroups.length > 0 && (
-                  <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">Genel Aile Doğrulama İlerlemesi</span>
-                      <span className="font-mono">
-                        {overallProgress.verified}/{overallProgress.expected} ({overallProgress.total}%)
-                      </span>
-                    </div>
-                    <Progress value={overallProgress.total} className="h-2" />
-                  </div>
-                )}
-
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-                  <Input
-                    id={NFC_INPUT_ID}
-                    placeholder="NFC UID otomatik dinleniyor... manuel giriş için Enter"
-                    value={nfcInput}
-                    onChange={(event) => setNfcInput(event.target.value.toUpperCase())}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        void processNfcScan();
-                      }
-                    }}
-                    className="font-mono"
-                    disabled={!hasFetchedData || isDataLoading || verificationGroups.length === 0}
-                  />
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={startWebNfcScan}
-                    disabled={!hasFetchedData || verificationGroups.length === 0 || isWebNfcScanning}
-                  >
-                    {isWebNfcScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Smartphone className="mr-2 h-4 w-4" />}
-                    {isWebNfcScanning ? 'Mobil NFC Dinlemede' : 'Dinlemeyi Başlat'}
-                  </Button>
+                <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Kayıt bulunamadı</p>
+                <p className="text-xs text-[var(--dashboard-muted)]">Bu laboratuvar için doğrulanacak kullanım kaydı yok</p>
+              </div>
+            ) : filteredVerificationItems.length === 0 && searchTerm ? (
+              <div className="flex flex-col items-center justify-center h-[35vh] text-center px-4">
+                <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                  <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
                 </div>
+                <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Sonuç yok</p>
+                <p className="text-xs text-[var(--dashboard-muted)]">Arama kriterlerine uyan kayıt bulunamadı</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto" style={{ maxHeight: '55vh' }}>
+                {filteredVerificationItems.map((item, idx) => {
+                  const progressPercentage = item.tuketilenAdet > 0 ? (item.dogrulananAdet / item.tuketilenAdet) * 100 : 0;
+                  const isFullyVerified = item.dogrulananAdet === item.tuketilenAdet && item.tuketilenAdet > 0;
 
-                {parseNfcUid(nfcInput) && (
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <Badge variant="outline" className="font-mono">
-                      Seri: {parseNfcUid(nfcInput)?.serialField}
-                    </Badge>
-                    <Badge variant="secondary" className="font-mono">
-                      Ürün Kimliği: {parseNfcUid(nfcInput)?.productIdentityKey}
-                    </Badge>
-                    <Badge
-                      variant={parseNfcUid(nfcInput)?.fixedSuffix === NFC_SUFFIX ? 'secondary' : 'destructive'}
-                      className="font-mono"
+                  return (
+                    <div
+                      key={`${item.stokKodu}-${item.lotNumarasi}-${item.miad}`}
+                      className={cn(
+                        "border-b border-[var(--dashboard-stroke)] last:border-0 hover:bg-[var(--dashboard-surface-2)] transition-colors",
+                        idx % 2 === 0 && "bg-[var(--dashboard-surface)]/50",
+                        isFullyVerified && "opacity-60"
+                      )}
                     >
-                      Son 4 bayt: {parseNfcUid(nfcInput)?.fixedSuffix}
-                    </Badge>
-                  </div>
-                )}
+                      {/* Desktop row */}
+                      <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_70px_70px_140px] gap-1 items-center px-4 sm:px-5 py-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[var(--dashboard-text)] truncate flex items-center gap-1.5">
+                            {isFullyVerified && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
+                            {item.stokAdi}
+                          </p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[11px] text-[var(--dashboard-text)] font-mono">{item.lotNumarasi}</p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">{item.miad}</p>
+                        </div>
+                        <span className="text-xs font-medium text-center text-[var(--dashboard-text)]">{item.tuketilenAdet}</span>
+                        <span className={cn(
+                          "text-xs font-bold text-center",
+                          isFullyVerified ? "text-emerald-600" : "text-[var(--dashboard-accent)]"
+                        )}>{item.dogrulananAdet}</span>
+                        <span className="text-[10px] font-mono text-center text-[var(--dashboard-muted)]">{Math.round(progressPercentage)}%</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-hidden">
+                            <div
+                              className={cn(
+                                "h-full rounded-full transition-all duration-300",
+                                isFullyVerified
+                                  ? "bg-gradient-to-r from-emerald-400 to-emerald-500"
+                                  : "bg-gradient-to-r from-[var(--dashboard-accent)] to-amber-400"
+                              )}
+                              style={{ width: `${progressPercentage}%` }}
+                            />
+                          </div>
+                          {isFullyVerified && <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
+                        </div>
+                      </div>
 
-                {!hasFetchedData ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                    <ScanLine className="h-10 w-10 mb-2" />
-                    <p>Önce laboratuvar ve gün aralığını seçip veriyi yükleyin.</p>
-                  </div>
-                ) : isDataLoading ? (
-                  <div className="flex justify-center items-center py-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  </div>
-                ) : verificationGroups.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                    <Info className="h-10 w-10 mb-2" />
-                    <p>Seçilen aralıkta seri takipli tüketim kaydı bulunamadı.</p>
-                  </div>
-                ) : filteredGroups.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                    <Search className="h-10 w-10 mb-2" />
-                    <p>Arama kriterlerine uyan kayıt bulunamadı.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto max-h-[560px]">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Ürün / Lot</TableHead>
-                          <TableHead className="text-center">Tüketilen</TableHead>
-                          <TableHead className="text-center">Beklenen Kimlik</TableHead>
-                          <TableHead className="text-center">Doğrulanan UID</TableHead>
-                          <TableHead className="w-[220px]">İlerleme</TableHead>
-                          <TableHead>Durum</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredGroups.map((group) => {
-                          const progress = group.tuketilenAdet > 0
-                            ? (group.disposedUids.length / group.tuketilenAdet) * 100
-                            : 0;
-                          const pendingCount = Math.max(group.tuketilenAdet - group.disposedUids.length, 0);
-                          const fullyDone = group.tuketilenAdet > 0 && pendingCount === 0;
+                      {/* Mobile row */}
+                      <div className="sm:hidden px-4 py-3 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-[var(--dashboard-text)] truncate flex items-center gap-1.5">
+                              {isFullyVerified && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
+                              {item.stokAdi}
+                            </p>
+                            <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{item.stokKodu}</p>
+                          </div>
+                          <span className={cn(
+                            "text-lg font-bold ml-2",
+                            isFullyVerified ? "text-emerald-600" : "text-[var(--dashboard-accent)]"
+                          )}>
+                            {item.dogrulananAdet}/{item.tuketilenAdet}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]">
+                            Lot: {item.lotNumarasi}
+                          </span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]">
+                            Miad: {item.miad}
+                          </span>
+                          {isFullyVerified && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                              Tamamlandı
+                            </span>
+                          )}
+                        </div>
+                        <div className="h-1.5 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all duration-300",
+                              isFullyVerified
+                                ? "bg-gradient-to-r from-emerald-400 to-emerald-500"
+                                : "bg-gradient-to-r from-[var(--dashboard-accent)] to-amber-400"
+                            )}
+                            style={{ width: `${progressPercentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
-                          return (
-                            <TableRow
-                              key={group.id}
-                              className={fullyDone ? 'bg-green-500/10 dark:bg-green-500/20' : ''}
-                            >
-                              <TableCell>
-                                <div className="font-medium">{group.stokAdi}</div>
-                                <div className="text-xs text-muted-foreground font-mono">
-                                  {group.stokKodu} • Lot: {group.lotNumarasi || '-'}
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-1">
-                                  {group.productIdentityKey && (
-                                    <Badge variant="outline" className="font-mono text-[10px]">
-                                      Kimlik {group.productIdentityKey.split(':')[0]}
-                                    </Badge>
-                                  )}
-                                  {group.tuketilenSeriNolar.slice(0, 3).map((serial) => (
-                                    <Badge key={serial} variant="secondary" className="font-mono text-[10px]">
-                                      Seri {serial}
-                                    </Badge>
-                                  ))}
-                                  {group.tuketilenSeriNolar.length > 3 && (
-                                    <Badge variant="secondary" className="text-[10px]">
-                                      +{group.tuketilenSeriNolar.length - 3} seri
-                                    </Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-
-                              <TableCell className="text-center font-semibold">
-                                {group.tuketilenAdet}
-                              </TableCell>
-
-                              <TableCell className="text-center">
-                                <span className="font-semibold">{group.tuketilenAdet}</span>
-                                <div className="mt-2 flex flex-wrap gap-1 justify-center">
-                                  {group.productIdentityKey ? (
-                                    <Badge variant="outline" className="font-mono text-[10px]">
-                                      {`??:??:??:${group.productIdentityKey}`}
-                                    </Badge>
-                                  ) : (
-                                    <Badge variant="destructive" className="text-[10px]">
-                                      Kimlik tanımı yok
-                                    </Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-
-                              <TableCell className="text-center font-semibold text-primary">
-                                {group.disposedUids.length}
-                                {group.disposedUids.length > 0 && (
-                                  <div className="mt-2 flex flex-wrap gap-1 justify-center">
-                                    {group.disposedUids.slice(0, 2).map((uid) => (
-                                      <Badge key={uid} className="font-mono text-[10px]">
-                                        {uid}
-                                      </Badge>
-                                    ))}
-                                    {group.disposedUids.length > 2 && (
-                                      <Badge className="text-[10px]">+{group.disposedUids.length - 2} UID</Badge>
-                                    )}
-                                  </div>
-                                )}
-                              </TableCell>
-
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Progress value={progress} className="h-3 flex-grow" />
-                                  <span className="text-xs font-mono w-10 text-right">
-                                    {Math.round(progress)}%
-                                  </span>
-                                  {fullyDone && <CheckSquare className="h-4 w-4 text-green-600" />}
-                                </div>
-                              </TableCell>
-
-                              <TableCell>
-                                {group.eksikAileTanimi ? (
-                                  <Alert variant="destructive" className="py-2">
-                                    <AlertTriangle className="h-4 w-4" />
-                                    <AlertTitle className="text-xs">Ürün kimliği tanımı eksik</AlertTitle>
-                                    <AlertDescription className="text-xs">
-                                      Bu lot için B4:B5:B6:B7:B8 ürün kimliği tanımlı değil. Kullanım doğrulamada bu örüntü beklenir.
-                                    </AlertDescription>
-                                  </Alert>
-                                ) : fullyDone ? (
-                                  <Badge className="bg-green-600 hover:bg-green-700">
-                                    <Trash2 className="mr-1 h-3 w-3" />
-                                    Tamamlandı
-                                  </Badge>
-                                ) : (
-                                  <div className="space-y-1">
-                                    <Badge variant="secondary">
-                                      Bekleyen: {pendingCount}
-                                    </Badge>
-                                    <p className="text-xs text-muted-foreground">
-                                      Beklenen örüntü: {`??:??:??:${group.productIdentityKey}`}
-                                    </p>
-                                  </div>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </CardContent>
-      </Card>
+      {/* ── Empty state when no lab selected ── */}
+      {!selectedLaboratoryId && !isLoading && (
+        <div className="cihaz-card-strong flex flex-col items-center justify-center h-[50vh] text-center px-4">
+          <div className="w-20 h-20 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+            <ScanLine className="h-8 w-8 text-[var(--dashboard-muted)]" />
+          </div>
+          <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Laboratuvar Seçin</p>
+          <p className="text-xs text-[var(--dashboard-muted)] max-w-xs">
+            Doğrulama işlemine başlamak için yukarıdan bir laboratuvar seçin
+          </p>
+        </div>
+      )}
     </div>
   );
 }

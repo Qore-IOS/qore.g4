@@ -20,7 +20,6 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 
 type Vehicle = {
@@ -96,7 +95,7 @@ type LabRouteStatus = {
 };
 
 export default function SoforIzlemPage() {
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
   const { toast } = useToast();
 
   const [driversWithRoutes, setDriversWithRoutes] = useState<DriverWithRoute[]>([]);
@@ -127,7 +126,7 @@ export default function SoforIzlemPage() {
   useEffect(() => {
     const fetchHospitals = async () => {
       try {
-        const hospitalsSnap = await getDocs(companyQuery(db, 'hospitals', currentCompanyId));
+        const hospitalsSnap = await getDocs(collection(db, 'hospitals'));
         const hospitalsList = hospitalsSnap.docs
           .map(d => ({ id: d.id, ...d.data() } as Hospital))
           .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
@@ -137,7 +136,7 @@ export default function SoforIzlemPage() {
       }
     };
     fetchHospitals();
-  }, [currentCompanyId]);
+  }, []);
 
   // Şoförleri ve aktif rotalarını getir
   useEffect(() => {

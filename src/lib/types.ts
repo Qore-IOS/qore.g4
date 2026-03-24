@@ -649,7 +649,7 @@ export interface PeriodicPartChangeStatus {
 export type PersonalStockSource = 'depot' | 'device';
 
 // Şahsi stoktaki yedek parça durumu
-export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return' | 'pending_approval';
+export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
 
 // Transfer log aksiyonları
 export type SparePartTransferAction =
@@ -661,9 +661,7 @@ export type SparePartTransferAction =
   | 'submit_to_depot'        // Depoya teslim edildi (cihazdan çıkan)
   | 'return_confirmed'       // Depo tarafından iade teslim alındı
   | 'submit_confirmed'       // Depo tarafından teslim alındı
-  | 'cancel_usage'           // Kullanım iptal edildi, parça şahsi stoğa geri döndü
-  | 'transfer_approved'      // Personel transfer onayı verdi
-  | 'transfer_rejected';     // Personel transfer onayını reddetti
+  | 'cancel_usage';          // Kullanım iptal edildi, parça şahsi stoğa geri döndü
 
 // Personel şahsi stok item
 export interface PersonalStockItem {

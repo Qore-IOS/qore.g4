@@ -80,7 +80,6 @@ import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, wh
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import BackButton from '@/components/BackButton';
 import { exportDataToExcel } from '@/lib/utils';
@@ -200,7 +199,7 @@ export default function TotalVerimlilikPanel({
   productCodes = [],
 }: TotalVerimlilikPanelProps) {
   const { toast } = useToast();
-  const { currentUser, currentCompanyId } = useAuth();
+  const { currentUser } = useAuth();
 
   const [selectedPoolId, setSelectedPoolId] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
@@ -312,9 +311,9 @@ export default function TotalVerimlilikPanel({
       setIsLoading(true);
       try {
         const [effPoolsSnap, labPoolsSnap, depotsSnap] = await Promise.all([
-          getDocs(companyQuery(db, 'efficiencyPools', currentCompanyId, orderBy('createdAt', 'desc'))),
+          getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
           getDocs(collection(db, 'labPools')),
-          getDocs(companyQuery(db, 'depots', currentCompanyId)),
+          getDocs(collection(db, 'depots')),
         ]);
         setEfficiencyPools(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)));
         setLabPools(labPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
@@ -327,7 +326,7 @@ export default function TotalVerimlilikPanel({
       }
     };
     fetchPools();
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   // Sütun 23 için döviz kurlarını çek
   useEffect(() => {

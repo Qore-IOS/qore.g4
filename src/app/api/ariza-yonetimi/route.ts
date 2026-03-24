@@ -47,23 +47,16 @@ export async function GET(request: NextRequest) {
     const lab = searchParams.get('lab') || 'all';
     const device = searchParams.get('device') || 'all';
     const opener = searchParams.get('opener') || 'all';
-    const companyId = searchParams.get('companyId') || '';
 
     // Pagination
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '20', 10);
 
-    // Fetch reports ordered by openedAt desc, with optional company filter
-    let dbQuery: FirebaseFirestore.Query = adminDb
+    // Fetch all reports ordered by openedAt desc
+    const snapshot = await adminDb
       .collection('deviceFaultReports')
-      .orderBy('openedAt', 'desc');
-
-    // Apply company filter if companyId is provided and not legacy
-    if (companyId && companyId !== '__legacy__') {
-      dbQuery = dbQuery.where('companyId', '==', companyId);
-    }
-
-    const snapshot = await dbQuery.get();
+      .orderBy('openedAt', 'desc')
+      .get();
 
     // Serialize all documents
     const allReports = snapshot.docs

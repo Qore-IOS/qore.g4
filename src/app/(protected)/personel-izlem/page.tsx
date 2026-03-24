@@ -35,7 +35,6 @@ import {
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
-import { companyQuery } from '@/lib/company-filter';
 
 // Neumorphic score circle component
 function ScoreCircle({ score }: { score: number }) {
@@ -253,9 +252,9 @@ function PersonnelCard({ performance }: { performance: PersonnelPerformance }) {
                   icon={AlertTriangle}
                   label="Tekrar Arıza"
                   value={`${metrics.recurrenceCount} adet`}
-                  subValue="3 saat içinde"
+                  subValue="7 gün içinde"
                   score={metrics.recurrencePenalty}
-                  tooltip="Çözümden sonra 3 saat içinde aynı cihazda tekrar arıza. Her tekrar -2 puan ceza."
+                  tooltip="Çözümden sonra 7 gün içinde aynı cihazda tekrar arıza. Her tekrar -2 puan ceza."
                   emphasize
                 />
               )}
@@ -555,10 +554,10 @@ function DetailedKPICard({
               icon={AlertTriangle}
               label="Tekrar Arıza Cezası"
               value={`${metrics.recurrenceCount} adet`}
-              subValue="3 saat içinde aynı cihazda tekrar arıza"
+              subValue="7 gün içinde aynı cihazda tekrar arıza"
               score={metrics.recurrencePenalty}
               maxScore={-10}
-              tooltip="Çözümden sonra 3 saat içinde aynı cihazda tekrar arıza. Her tekrar -2 puan ceza."
+              tooltip="Çözümden sonra 7 gün içinde aynı cihazda tekrar arıza. Her tekrar -2 puan ceza."
             />
           )}
           {(metrics.overdueMaintenanceTasks > 0 || metrics.overduePeriodicParts > 0) && (
@@ -864,7 +863,7 @@ function ComparisonView({
 
 export default function PersonelIzlemPage() {
   const router = useRouter();
-  const { currentUserProfile, isAdmin, currentCompanyId } = useAuth();
+  const { currentUserProfile, isAdmin } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [performances, setPerformances] = useState<PersonnelPerformance[]>([]);
@@ -903,7 +902,7 @@ export default function PersonelIzlemPage() {
   useEffect(() => {
     const loadHospitals = async () => {
       try {
-        const hospitalsSnap = await getDocs(companyQuery(db, 'hospitals', currentCompanyId));
+        const hospitalsSnap = await getDocs(collection(db, 'hospitals'));
         const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Hospital);
         setHospitals(hospitalsData.sort((a, b) => a.name.localeCompare(b.name, 'tr')));
       } catch (err) {
@@ -911,7 +910,7 @@ export default function PersonelIzlemPage() {
       }
     };
     loadHospitals();
-  }, [currentCompanyId]);
+  }, []);
 
   const loadPerformanceData = async (filters?: PerformanceFilters) => {
     setLoading(true);
@@ -1431,7 +1430,7 @@ export default function PersonelIzlemPage() {
             </div>
             <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/30">
               <p className="font-semibold text-red-600">Tekrar Arıza Cezası (-10 puan)</p>
-              <p className="text-muted-foreground">3 saat içinde aynı cihazda tekrar arıza: -2pt/adet</p>
+              <p className="text-muted-foreground">7 gün içinde aynı cihazda tekrar arıza: -2pt/adet</p>
             </div>
             <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/30">
               <p className="font-semibold text-red-600">Gecikmiş Bakım Cezası (-15 puan)</p>

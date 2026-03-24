@@ -4,7 +4,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, query, where, writeBatch, Timestamp, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -63,7 +62,7 @@ export default function PostClosurePartChangeButton({
   formCollection,
   createdByUid,
 }: PostClosurePartChangeButtonProps) {
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
   const { toast } = useToast();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -132,7 +131,7 @@ export default function PostClosurePartChangeButton({
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
+        const depotsSnap = await getDocs(collection(db, 'depots'));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;

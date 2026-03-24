@@ -18,8 +18,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { exportDataToExcel } from '@/lib/utils';
 import { tr } from 'date-fns/locale';
 import BackButton from './BackButton';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 
 // --- TYPE DEFINITIONS ---
 
@@ -46,7 +44,6 @@ interface DetailItem {
 
 export default function StokYonetimiGecmisPanel() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
   const [depots, setDepots] = useState<Depot[]>([]);
   const [allStock, setAllStock] = useState<DepoStokItem[]>([]);
   
@@ -70,8 +67,8 @@ export default function StokYonetimiGecmisPanel() {
     setLoading(true);
     try {
       const [depotsSnap, stockSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'depots', currentCompanyId)),
-        getDocs(companyQuery(db, 'depoStok', currentCompanyId)),
+        getDocs(collection(db, 'depots')),
+        getDocs(collection(db, 'depoStok')),
       ]);
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
       
@@ -89,7 +86,7 @@ export default function StokYonetimiGecmisPanel() {
     } finally {
       setLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   useEffect(() => {
     fetchData();

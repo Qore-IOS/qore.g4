@@ -25,7 +25,6 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
@@ -65,7 +64,7 @@ type PendingNewItem = {
 export default function DepoSayimPage() {
     const { toast } = useToast();
     const router = useRouter();
-    const { currentUserProfile, currentCompanyId } = useAuth();
+    const { currentUserProfile } = useAuth();
     const { parseAuto } = useBarcodeParser();
     
     const [isLoading, setIsLoading] = useState(true);
@@ -119,7 +118,7 @@ export default function DepoSayimPage() {
     const saveDraftSession = useCallback(async (groups: CountGroup[]) => {
         if (!draftSessionId || !selectedDepotId || !brandForCount || !currentUserProfile) return;
         try {
-            await setDoc(doc(db, 'depotBrandCountSessions', draftSessionId), companyStamp({
+            await setDoc(doc(db, 'depotBrandCountSessions', draftSessionId), {
                 depotId: selectedDepotId,
                 depotName: depots.find(d => d.id === selectedDepotId)?.name || '',
                 brand: brandForCount,
@@ -130,7 +129,7 @@ export default function DepoSayimPage() {
                 startedAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
                 draftItems: serializeCountGroups(groups),
-            }, currentCompanyId, 'depotBrandCountSessions'), { merge: true });
+            }, { merge: true });
         } catch (error) {
             console.error('saveDraftSession error:', error);
         }
@@ -150,9 +149,9 @@ export default function DepoSayimPage() {
         setIsLoading(true);
         try {
             const [depotsSnap, productsSnap, stockSnap] = await Promise.all([
-                getDocs(companyQuery(db, 'depots', currentCompanyId)),
+                getDocs(collection(db, 'depots')),
                 getDocs(collection(db, 'productCodes')),
-                getDocs(companyQuery(db, 'depoStok', currentCompanyId)),
+                getDocs(collection(db, 'depoStok')),
             ]);
             const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
             const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
@@ -168,7 +167,7 @@ export default function DepoSayimPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [toast, selectedDepotId, currentUserProfile, currentCompanyId]);
+    }, [toast, selectedDepotId, currentUserProfile]);
 
     useEffect(() => {
         fetchData();
@@ -584,7 +583,7 @@ Devam edilsin mi?`;
                         consumptionType: 'sayimdan_dusum', userId: currentUserProfile.uid, userName: currentUserProfile.name || '',
                         laboratoryName: depotName, laboratoryId: selectedDepotId,
                     };
-                    operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), companyStamp(consumptionRecord, currentCompanyId, 'tuketimKayitlari')));
+                    operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord));
                 });
             } else {
                 for (let i = 0; i < diff; i++) {
@@ -600,8 +599,8 @@ Devam edilsin mi?`;
                         consumptionType: 'sayimdan_fazla', userId: currentUserProfile.uid, userName: currentUserProfile.name || '',
                         laboratoryName: depotName, laboratoryId: selectedDepotId,
                     };
-                    operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), companyStamp(newEntry, currentCompanyId, 'depoStok')));
-                    operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), companyStamp(additionRecord, currentCompanyId, 'tuketimKayitlari')));
+                    operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), newEntry));
+                    operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), additionRecord));
                 }
             }
         }
@@ -620,7 +619,7 @@ Devam edilsin mi?`;
                 brands: [...new Set(newFoundItems.map(() => brandForCount))],
                 mode: 'unverified',
             };
-            operations.push((batch) => batch.set(malKabulRef, companyStamp(malKabulHeader, currentCompanyId, 'malKabulTransactions')));
+            operations.push((batch) => batch.set(malKabulRef, malKabulHeader));
 
             for (const group of newFoundItems) {
                 const adet = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
@@ -652,7 +651,7 @@ Devam edilsin mi?`;
                             irsaliyeNumarasi: malKabulTransactionId,
                             createdByName: currentUserProfile.name,
                         };
-                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), companyStamp(stockEntry, currentCompanyId, 'depoStok')));
+                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), stockEntry));
                     }
                 } else {
                     for (let i = 0; i < adet; i++) {
@@ -669,7 +668,7 @@ Devam edilsin mi?`;
                             irsaliyeNumarasi: malKabulTransactionId,
                             createdByName: currentUserProfile.name,
                         };
-                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), companyStamp(stockEntry, currentCompanyId, 'depoStok')));
+                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), stockEntry));
                     }
                 }
 
@@ -680,7 +679,7 @@ Devam edilsin mi?`;
                     laboratoryName: depotName, laboratoryId: selectedDepotId,
                     irsaliyeNumarasi: malKabulTransactionId || undefined,
                 };
-                operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), companyStamp(newFoundRecord, currentCompanyId, 'tuketimKayitlari')));
+                operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), newFoundRecord));
             }
         }
 
@@ -704,7 +703,7 @@ Devam edilsin mi?`;
             extraCount,
             newFoundCount,
         };
-        operations.push((batch) => batch.set(sessionRef, companyStamp(sessionData, currentCompanyId, 'depotBrandCountSessions')));
+        operations.push((batch) => batch.set(sessionRef, sessionData));
 
         try {
             const chunkSize = 450;
@@ -714,10 +713,11 @@ Devam edilsin mi?`;
                 await batch.commit();
             }
 
-            const scopedQuery = companyQuery(db, 'depoStok', currentCompanyId,
+            const scopedQuery = query(
+                collection(db, 'depoStok'),
                 where('depotId', '==', selectedDepotId)
             );
-            const scopedSnap = await getDocs(scopedQuery as any);
+            const scopedSnap = await getDocs(scopedQuery);
             const expectedByGroup = new Map<string, number>();
 
             brandCountItems.forEach(group => {

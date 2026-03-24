@@ -19,7 +19,6 @@ import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -63,7 +62,7 @@ interface GroupedDestroyedItem {
 
 export default function ImhaEdilenKitlerPanel() {
     const { toast } = useToast();
-    const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+    const { currentUser, currentUserProfile } = useAuth();
     const router = useRouter();
 
     // Master Data
@@ -120,10 +119,10 @@ export default function ImhaEdilenKitlerPanel() {
             setLoading(true);
             try {
                 const [hospitalsSnap, depotsSnap, productsSnap, recentSnap] = await Promise.all([
-                    getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
-                    getDocs(companyQuery(db, 'depots', currentCompanyId)),
+                    getDocs(collection(db, 'hospitals')),
+                    getDocs(collection(db, 'depots')),
                     getDocs(collection(db, 'productCodes')),
-                    getDocs(companyQuery(db, 'destroyedKitsReports', currentCompanyId, orderBy('resolvedAt', 'desc'), limit(5))),
+                    getDocs(query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'), limit(5))),
                 ]);
 
                 setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
@@ -141,7 +140,7 @@ export default function ImhaEdilenKitlerPanel() {
             }
         };
         fetchData();
-    }, [toast, currentCompanyId]);
+    }, [toast]);
 
     const selectedSourceName = useMemo(() => {
         if (selectedSourceType === 'depot') return depots.find(d => d.id === selectedDepotId)?.name || '';

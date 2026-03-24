@@ -5,11 +5,12 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Hospital, Device } from '@/lib/types';
 import {
+  collection,
+  onSnapshot,
+  query,
   where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { companyQuery, safeOnSnapshot } from '@/lib/company-filter';
-import { useAuth } from '@/contexts/auth-context';
 
 // Anatolian side of Istanbul bounds & center
 const ANATOLIA_BOUNDS = L.latLngBounds([40.85, 28.80], [41.25, 29.70]);
@@ -60,7 +61,6 @@ export default function DeviceMapPanel({
   hospitals,
   panelType,
 }: DeviceMapPanelProps) {
-  const { currentCompanyId } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
@@ -72,19 +72,20 @@ export default function DeviceMapPanel({
 
   // Listen to all devices in real-time
   useEffect(() => {
-    const unsub = safeOnSnapshot(
-      companyQuery(db, 'devices', currentCompanyId),
+    const unsub = onSnapshot(
+      collection(db, 'devices'),
       (snap) => {
         setAllDevices(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Device));
       }
     );
     return () => unsub();
-  }, [currentCompanyId]);
+  }, []);
 
   // Listen to open fault reports in real-time
   useEffect(() => {
-    const unsub = safeOnSnapshot(
-      companyQuery(db, 'deviceFaultReports', currentCompanyId,
+    const unsub = onSnapshot(
+      query(
+        collection(db, 'deviceFaultReports'),
         where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
       ),
       (snap) => {
@@ -105,7 +106,7 @@ export default function DeviceMapPanel({
       }
     );
     return () => unsub();
-  }, [panelType, currentCompanyId]);
+  }, [panelType]);
 
   // Build hospital location map (only hospitals with coordinates)
   const hospitalMap = useMemo(() => {

@@ -18,13 +18,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { compareAsc, parse } from 'date-fns';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 
 
 export default function SarfDagilimPage() {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
   const [consumableHospitals, setConsumableHospitals] = useState<Hospital[]>([]);
   const [pendingRequests, setPendingRequests] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,8 +42,8 @@ export default function SarfDagilimPage() {
       setLoading(true);
       try {
         const [hospitalsQuery, depotsQuery] = await Promise.all([
-            getDocs(companyQuery(db, 'hospitals', currentCompanyId, where('isConsumablesHospital', '==', true))),
-            getDocs(companyQuery(db, 'depots', currentCompanyId))
+            getDocs(query(collection(db, 'hospitals'), where('isConsumablesHospital', '==', true))),
+            getDocs(collection(db, 'depots'))
         ]);
         
         const labs = hospitalsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital));
@@ -81,7 +80,7 @@ export default function SarfDagilimPage() {
 
     fetchHospitalsAndDepots();
     return () => unsubRequests();
-  }, [toast, currentCompanyId]);
+  }, [toast]);
   
   useEffect(() => {
     if (!selectedDepotId) {

@@ -6,13 +6,8 @@
  * Bu hook'lar Firebase real-time listener'lar yerine polling + caching kullanarak
  * okuma sayısını dramatik olarak azaltır.
  *
- * Şirket Bazlı Filtreleme:
- * - Legacy kullanıcılar: Filtre yok, tüm veriler görünür (geçiş hissedilmez)
- * - Şirket kullanıcıları: where('companyId', '==', id) filtresi uygulanır
- * - Paylaşılan koleksiyonlar (productCodes, barcodeFormats): Filtre yok
- *
- * Composite Index: Firestore bazı sorgular için composite index gerektirebilir.
- * İndex URL'leri otomatik olarak tarayıcı konsoluna loglanır.
+ * Önceki yaklaşım: Her component mount'ta tam collection listener
+ * Yeni yaklaşım: Paylaşılan cache + configurable polling
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -46,8 +41,6 @@ import type {
   AddressDefinition,
   User as AppUser
 } from '@/lib/types';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, addCompanyFilter } from '@/lib/company-filter';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -66,7 +59,7 @@ const processTimestamp = (docData: any) => {
 
 /**
  * Product Codes - Used in 15+ places
- * SHARED: Tüm şirketler için ortak, filtre uygulanmaz
+ * Cache for 1 hour, refetch on window focus
  */
 export function useProductCodes() {
   return useQuery({
@@ -83,14 +76,12 @@ export function useProductCodes() {
 
 /**
  * Depots - Used in 12+ places
- * COMPANY FILTERED
  */
 export function useDepots() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['depots', currentCompanyId],
+    queryKey: ['depots'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
+      const snap = await getDocs(collection(db, 'depots'));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
     },
     staleTime: 60 * 60 * 1000,
@@ -101,14 +92,12 @@ export function useDepots() {
 
 /**
  * Hospitals/Laboratories - Used in 10+ places
- * COMPANY FILTERED
  */
 export function useHospitals() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['hospitals', currentCompanyId],
+    queryKey: ['hospitals'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'hospitals', currentCompanyId));
+      const snap = await getDocs(collection(db, 'hospitals'));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
     },
     staleTime: 60 * 60 * 1000,
@@ -119,14 +108,12 @@ export function useHospitals() {
 
 /**
  * Devices
- * COMPANY FILTERED
  */
 export function useDevices() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['devices', currentCompanyId],
+    queryKey: ['devices'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'devices', currentCompanyId));
+      const snap = await getDocs(collection(db, 'devices'));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
     },
     staleTime: 30 * 60 * 1000, // 30 minutes
@@ -137,14 +124,12 @@ export function useDevices() {
 
 /**
  * Lab Pools
- * COMPANY FILTERED
  */
 export function useLabPools() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['labPools', currentCompanyId],
+    queryKey: ['labPools'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'labPools', currentCompanyId));
+      const snap = await getDocs(collection(db, 'labPools'));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool));
     },
     staleTime: 60 * 60 * 1000,
@@ -154,7 +139,6 @@ export function useLabPools() {
 
 /**
  * Barcode Formats - Active only
- * SHARED: Tüm şirketler için ortak, filtre uygulanmaz
  */
 export function useBarcodeFormatsQuery() {
   return useQuery({
@@ -171,14 +155,12 @@ export function useBarcodeFormatsQuery() {
 
 /**
  * Address Definitions
- * COMPANY FILTERED
  */
 export function useAddressDefinitions() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['addressDefinitions', currentCompanyId],
+    queryKey: ['addressDefinitions'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'addressDefinitions', currentCompanyId));
+      const snap = await getDocs(collection(db, 'addressDefinitions'));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AddressDefinition));
     },
     staleTime: 60 * 60 * 1000,
@@ -188,14 +170,12 @@ export function useAddressDefinitions() {
 
 /**
  * Users
- * COMPANY FILTERED
  */
 export function useUsers() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['users', currentCompanyId],
+    queryKey: ['users'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'users', currentCompanyId));
+      const snap = await getDocs(collection(db, 'users'));
       return snap.docs.map(d => ({ uid: d.id, ...processTimestamp(d.data()) } as AppUser));
     },
     staleTime: 30 * 60 * 1000,
@@ -209,83 +189,81 @@ export function useUsers() {
 
 /**
  * Depot Stock - Filtered by depot
- * COMPANY FILTERED + DEPOT FILTERED
- * Composite Index gerekebilir: companyId + depotId
+ * No polling - invalidated via metadata listener when stock changes
  */
 export function useDepoStokByDepot(depotId: string | null) {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['depoStok', depotId, currentCompanyId],
+    queryKey: ['depoStok', depotId],
     queryFn: async () => {
       if (!depotId) return [];
-      const snap = await getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('depotId', '==', depotId)));
+      const q = query(collection(db, 'depoStok'), where('depotId', '==', depotId));
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
     enabled: !!depotId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes - no polling, relies on metadata listener
     gcTime: 30 * 60 * 1000,
+    // No refetchInterval - cache invalidated by useStockUpdateListener
   });
 }
 
 /**
  * All Depot Stock - For dashboard summaries
- * COMPANY FILTERED
+ * No polling - invalidated via metadata listener when stock changes
  */
 export function useAllDepoStok() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['depoStok', 'all', currentCompanyId],
+    queryKey: ['depoStok', 'all'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'depoStok', currentCompanyId));
+      const snap = await getDocs(collection(db, 'depoStok'));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 30 * 60 * 1000,
+    // No refetchInterval - cache invalidated by useStockUpdateListener
   });
 }
 
 /**
  * Shipped stock for a specific lab (or pool of labs)
- * COMPANY FILTERED
- * Composite Index gerekebilir: companyId + hedefKurumId + isShipped
+ * Now also queries by hedefKurum (name) for legacy records that may not have hedefKurumId
+ * @param labIds - Array of lab IDs to query
+ * @param labNames - Array of lab names for legacy record support
+ * @param options - Optional configuration: { enabled?: boolean }
  */
 export function useLabStock(
   labIds: string[],
   labNames: string[] = [],
   options: { enabled?: boolean } = {}
 ) {
-  const { currentCompanyId } = useAuth();
   const { enabled: externalEnabled = true } = options;
 
   return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(','), currentCompanyId],
+    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(',')],
     queryFn: async () => {
       if (labIds.length === 0) return [];
+      // We can only use 'in' with up to 30 values
       const ids = labIds.slice(0, 30);
       const names = labNames.slice(0, 30);
 
       // Query by hedefKurumId
-      const idQ = query(
+      const idQuery = query(
         collection(db, 'depoStok'),
-        ...([
-          where('hedefKurumId', 'in', ids),
-          where('isShipped', '==', true),
-        ])
+        where('hedefKurumId', 'in', ids),
+        where('isShipped', '==', true)
       );
-      const idSnap = await getDocs(addCompanyFilter(idQ, currentCompanyId, 'depoStok'));
+      const idSnap = await getDocs(idQuery);
       const idResults = idSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
 
-      // Also query by hedefKurum (name) for legacy records
+      // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
       let legacyResults: DepoStokItem[] = [];
       if (names.length > 0) {
-        const nameQ = query(
+        const nameQuery = query(
           collection(db, 'depoStok'),
-          ...([
-            where('hedefKurum', 'in', names),
-            where('isShipped', '==', true),
-          ])
+          where('hedefKurum', 'in', names),
+          where('isShipped', '==', true)
         );
-        const nameSnap = await getDocs(addCompanyFilter(nameQ, currentCompanyId, 'depoStok'));
+        const nameSnap = await getDocs(nameQuery);
         legacyResults = nameSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       }
 
@@ -301,29 +279,26 @@ export function useLabStock(
       return Array.from(resultMap.values());
     },
     enabled: externalEnabled && labIds.length > 0,
-    staleTime: 0,
+    staleTime: 0, // Always stale - allows metadata listener to trigger refetch immediately
     gcTime: 10 * 60 * 1000,
-    refetchInterval: 3 * 1000,
+    refetchInterval: 3 * 1000, // Poll every 3 seconds for real-time updates
     refetchOnWindowFocus: true,
   });
 }
 
 /**
  * Consumption Records - Recent only (last 500)
- * COMPANY FILTERED
- * Composite Index gerekebilir: companyId + consumptionTimestamp
  */
 export function useRecentConsumption(limitCount = 500) {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['tuketimKayitlari', 'recent', limitCount, currentCompanyId],
+    queryKey: ['tuketimKayitlari', 'recent', limitCount],
     queryFn: async () => {
-      const baseQ = query(
+      const q = query(
         collection(db, 'tuketimKayitlari'),
         orderBy('consumptionTimestamp', 'desc'),
         limit(limitCount)
       );
-      const snap = await getDocs(addCompanyFilter(baseQ, currentCompanyId, 'tuketimKayitlari'));
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
     },
     staleTime: 5 * 60 * 1000,
@@ -333,22 +308,20 @@ export function useRecentConsumption(limitCount = 500) {
 }
 
 /**
- * Daily Consumption Stats
- * COMPANY FILTERED
- * Composite Index gerekebilir: companyId + date
+ * Daily Consumption Stats - Aggregated daily totals for dashboard KPI
+ * Fetches pre-computed daily consumption counts instead of all consumption records
  */
 export function useDailyConsumptionStats(startDate: string, endDate: string) {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['dailyConsumptionStats', startDate, endDate, currentCompanyId],
+    queryKey: ['dailyConsumptionStats', startDate, endDate],
     queryFn: async () => {
-      const baseQ = query(
+      const q = query(
         collection(db, 'dailyConsumptionStats'),
         where('date', '>=', startDate),
         where('date', '<=', endDate),
         orderBy('date', 'asc')
       );
-      const snap = await getDocs(addCompanyFilter(baseQ, currentCompanyId, 'dailyConsumptionStats'));
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })) as Array<{
         id: string;
         date: string;
@@ -364,29 +337,29 @@ export function useDailyConsumptionStats(startDate: string, endDate: string) {
 
 /**
  * Consumption Records - By date range
- * COMPANY FILTERED
+ * Fetches all consumption records within a specified date range.
+ * This is used when user selects a specific date range or "Show All" in the statistics panel.
  */
 export function useConsumptionByDateRange(
   startDate: Date | null,
   endDate: Date | null,
   enabled = false
 ) {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['tuketimKayitlari', 'dateRange', startDate?.toISOString(), endDate?.toISOString(), currentCompanyId],
+    queryKey: ['tuketimKayitlari', 'dateRange', startDate?.toISOString(), endDate?.toISOString()],
     queryFn: async () => {
       if (!startDate || !endDate) return [];
 
       const startTimestamp = Timestamp.fromDate(startDate);
       const endTimestamp = Timestamp.fromDate(endDate);
 
-      const baseQ = query(
+      const q = query(
         collection(db, 'tuketimKayitlari'),
         where('consumptionTimestamp', '>=', startTimestamp),
         where('consumptionTimestamp', '<=', endTimestamp),
         orderBy('consumptionTimestamp', 'desc')
       );
-      const snap = await getDocs(addCompanyFilter(baseQ, currentCompanyId, 'tuketimKayitlari'));
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
     },
     enabled: enabled && !!startDate && !!endDate,
@@ -396,44 +369,38 @@ export function useConsumptionByDateRange(
 }
 
 /**
- * Fetch consumption records by date range - imperative function
- * companyId parametresi iletilmelidir (React hook dışı kullanım)
+ * Fetch consumption records by date range - imperative function for on-demand fetching
  */
 export async function fetchConsumptionByDateRange(
   startDate: Date,
-  endDate: Date,
-  companyId?: string
+  endDate: Date
 ): Promise<ConsumptionRecord[]> {
   const startTimestamp = Timestamp.fromDate(startDate);
   const endTimestamp = Timestamp.fromDate(endDate);
 
-  const baseQ = query(
+  const q = query(
     collection(db, 'tuketimKayitlari'),
     where('consumptionTimestamp', '>=', startTimestamp),
     where('consumptionTimestamp', '<=', endTimestamp),
     orderBy('consumptionTimestamp', 'desc')
   );
-  const finalQ = companyId ? addCompanyFilter(baseQ, companyId, 'tuketimKayitlari') : baseQ;
-  const snap = await getDocs(finalQ);
+  const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
 }
 
 /**
  * Shipments - Recent only
- * COMPANY FILTERED
- * Composite Index gerekebilir: companyId + createdAt
  */
 export function useRecentShipments(limitCount = 200) {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['shipments', 'recent', limitCount, currentCompanyId],
+    queryKey: ['shipments', 'recent', limitCount],
     queryFn: async () => {
-      const baseQ = query(
+      const q = query(
         collection(db, 'shipments'),
         orderBy('createdAt', 'desc'),
         limit(limitCount)
       );
-      const snap = await getDocs(addCompanyFilter(baseQ, currentCompanyId, 'shipments'));
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment));
     },
     staleTime: 5 * 60 * 1000,
@@ -444,19 +411,17 @@ export function useRecentShipments(limitCount = 200) {
 
 /**
  * Efficiency History - Recent only
- * COMPANY FILTERED
  */
 export function useEfficiencyHistory(limitCount = 100) {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['efficiencyHistory', 'recent', limitCount, currentCompanyId],
+    queryKey: ['efficiencyHistory', 'recent', limitCount],
     queryFn: async () => {
-      const baseQ = query(
+      const q = query(
         collection(db, 'efficiencyHistory'),
         orderBy('timestamp', 'desc'),
         limit(limitCount)
       );
-      const snap = await getDocs(addCompanyFilter(baseQ, currentCompanyId, 'efficiencyHistory'));
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
     },
     staleTime: 10 * 60 * 1000,
@@ -467,7 +432,6 @@ export function useEfficiencyHistory(limitCount = 100) {
 
 /**
  * Min/Max Rules for a specific hospital
- * Subcollection - parent zaten company-filtered
  */
 export function useMinMaxRules(hospitalId: string | null) {
   return useQuery({
@@ -485,7 +449,6 @@ export function useMinMaxRules(hospitalId: string | null) {
 
 /**
  * All Min/Max Rules for all hospitals
- * Subcollection - parent zaten company-filtered
  */
 export function useAllMinMaxRules(hospitalIds: string[]) {
   return useQuery({
@@ -508,7 +471,6 @@ export function useAllMinMaxRules(hospitalIds: string[]) {
 
 /**
  * SubPoints for a specific hospital
- * Subcollection - parent zaten company-filtered
  */
 export function useSubPoints(hospitalId: string | null) {
   return useQuery({
@@ -532,19 +494,33 @@ export function useSubPoints(hospitalId: string | null) {
 // STOCK UPDATE METADATA LISTENER - Event-based cache invalidation
 // ============================================================================
 
+/**
+ * Metadata document path for stock updates
+ * Single document that gets touched whenever stock changes (mal kabul, transfer)
+ */
 const STOCK_METADATA_DOC = 'metadata/stockLastUpdated';
 
+/**
+ * Touch the stock metadata document to signal a stock change
+ * Call this after mal kabul or transfer operations
+ */
 export async function touchStockMetadata() {
   try {
     await setDoc(doc(db, STOCK_METADATA_DOC), {
       lastUpdated: serverTimestamp(),
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(), // Fallback for offline
     });
   } catch (error) {
     console.error('Failed to touch stock metadata:', error);
   }
 }
 
+/**
+ * Hook that listens to stock metadata changes and invalidates cache
+ * Uses Firestore onSnapshot for real-time updates (single document = very cheap)
+ *
+ * Usage: Call this hook once in a high-level component (e.g., layout or provider)
+ */
 export function useStockUpdateListener() {
   const queryClient = useQueryClient();
   const isFirstLoad = useRef(true);
@@ -553,10 +529,13 @@ export function useStockUpdateListener() {
     const unsubscribe = onSnapshot(
       doc(db, STOCK_METADATA_DOC),
       (snapshot) => {
+        // Skip invalidation on first load (initial fetch)
         if (isFirstLoad.current) {
           isFirstLoad.current = false;
           return;
         }
+
+        // Invalidate all depoStok queries when metadata changes
         if (snapshot.exists()) {
           queryClient.invalidateQueries({ queryKey: ['depoStok'] });
         }
@@ -577,24 +556,29 @@ export function useStockUpdateListener() {
 import type { DutyShift } from '@/lib/types';
 
 /**
- * Get all active duty shifts
- * COMPANY FILTERED
+ * Get all active duty shifts (current date is within shift period)
+ * Used in DutyInfo component
+ * Considers startTime/endTime fields for accurate time-based filtering
  */
 export function useActiveDutyShifts() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', 'active', currentCompanyId],
+    queryKey: ['dutyShifts', 'active'],
     queryFn: async () => {
       const now = new Date();
       const snap = await getDocs(
-        companyQuery(db, 'dutyShifts', currentCompanyId, where('status', '==', 'active'))
+        query(
+          collection(db, 'dutyShifts'),
+          where('status', '==', 'active')
+        )
       );
+      // Filter to only include shifts where current datetime is within range (including startTime/endTime)
       return snap.docs
         .map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift))
         .filter(shift => {
           const startDate = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
           const endDate = shift.endDate instanceof Date ? shift.endDate : new Date(shift.endDate as any);
 
+          // Build effective start datetime using startTime field
           const effectiveStart = new Date(startDate);
           if (shift.startTime) {
             const [h, m] = shift.startTime.split(':').map(Number);
@@ -603,6 +587,7 @@ export function useActiveDutyShifts() {
             }
           }
 
+          // Build effective end datetime using endTime field
           const effectiveEnd = new Date(endDate);
           if (shift.endTime) {
             const [h, m] = shift.endTime.split(':').map(Number);
@@ -614,20 +599,19 @@ export function useActiveDutyShifts() {
           return now >= effectiveStart && now <= effectiveEnd;
         });
     },
-    staleTime: 5 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
     refetchOnWindowFocus: true,
   });
 }
 
 /**
  * Get upcoming duty shifts for the next 30 days for a specific lab
- * COMPANY FILTERED
+ * Used in DutyScheduleModal component
  */
 export function useUpcomingDutyShifts(labId: string | null) {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', 'upcoming30', labId, currentCompanyId],
+    queryKey: ['dutyShifts', 'upcoming30', labId],
     queryFn: async () => {
       if (!labId) return [];
       const now = new Date();
@@ -637,13 +621,17 @@ export function useUpcomingDutyShifts(labId: string | null) {
       thirtyDaysLater.setHours(23, 59, 59, 999);
 
       const snap = await getDocs(
-        companyQuery(db, 'dutyShifts', currentCompanyId, where('status', '==', 'active'))
+        query(
+          collection(db, 'dutyShifts'),
+          where('status', '==', 'active')
+        )
       );
       return snap.docs
         .map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift))
         .filter(shift => {
           const startDate = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
           const endDate = shift.endDate instanceof Date ? shift.endDate : new Date(shift.endDate as any);
+          // Shift overlaps with the next 30 days AND includes this lab
           return shift.laboratoryIds.includes(labId) &&
             startDate <= thirtyDaysLater && endDate >= now;
         })
@@ -662,15 +650,18 @@ export function useUpcomingDutyShifts(labId: string | null) {
 
 /**
  * Get all duty shifts (for admin view)
- * COMPANY FILTERED
  */
 export function useAllDutyShifts() {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', 'all', currentCompanyId],
+    queryKey: ['dutyShifts', 'all'],
     queryFn: async () => {
-      const snap = await getDocs(companyQuery(db, 'dutyShifts', currentCompanyId));
+      const snap = await getDocs(
+        query(
+          collection(db, 'dutyShifts')
+        )
+      );
       const shifts = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      // Sort client-side by startDate descending to avoid composite index requirement
       shifts.sort((a, b) => {
         const aTime = a.startDate instanceof Date ? a.startDate.getTime() : new Date(a.startDate as any).getTime();
         const bTime = b.startDate instanceof Date ? b.startDate.getTime() : new Date(b.startDate as any).getTime();
@@ -686,17 +677,19 @@ export function useAllDutyShifts() {
 
 /**
  * Get duty shifts by status
- * COMPANY FILTERED
  */
 export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelled') {
-  const { currentCompanyId } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', status, currentCompanyId],
+    queryKey: ['dutyShifts', status],
     queryFn: async () => {
       const snap = await getDocs(
-        companyQuery(db, 'dutyShifts', currentCompanyId, where('status', '==', status))
+        query(
+          collection(db, 'dutyShifts'),
+          where('status', '==', status)
+        )
       );
       const shifts = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      // Sort client-side by startDate descending to avoid composite index requirement
       shifts.sort((a, b) => {
         const aTime = a.startDate instanceof Date ? a.startDate.getTime() : new Date(a.startDate as any).getTime();
         const bTime = b.startDate instanceof Date ? b.startDate.getTime() : new Date(b.startDate as any).getTime();
@@ -714,6 +707,9 @@ export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelle
 // CACHE INVALIDATION HELPERS
 // ============================================================================
 
+/**
+ * Hook to get query client for cache invalidation
+ */
 export function useInvalidateQueries() {
   const queryClient = useQueryClient();
 
@@ -729,9 +725,13 @@ export function useInvalidateQueries() {
 }
 
 // ============================================================================
-// COMBINED DATA HOOK
+// COMBINED DATA HOOK - Replaces useDashboardData for most use cases
 // ============================================================================
 
+/**
+ * Lightweight dashboard data hook
+ * Only fetches what's needed, uses caching aggressively
+ */
 export function useLightweightDashboardData() {
   const hospitalsQuery = useHospitals();
   const depotsQuery = useDepots();

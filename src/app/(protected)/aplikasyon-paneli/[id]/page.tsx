@@ -23,7 +23,6 @@ import {
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
-import { companyQuery, companyStamp, addCompanyFilter, safeOnSnapshot } from '@/lib/company-filter';
 import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
@@ -49,7 +48,7 @@ export default function AplikasyonPaneliDetayPage() {
   const hospitalId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
@@ -141,11 +140,11 @@ export default function AplikasyonPaneliDetayPage() {
       return;
     }
     const deviceIds = new Set(devicesByHospital.map(d => d.id));
-    const qFaults = companyQuery(
-      db, 'deviceFaultReports', currentCompanyId,
+    const qFaults = query(
+      collection(db, 'deviceFaultReports'),
       where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
     );
-    const unsub = safeOnSnapshot(qFaults, (snap) => {
+    const unsub = onSnapshot(qFaults, (snap) => {
       const map: Record<string, 'teknik_servis' | 'aplikasyon'> = {};
       const idsMap: Record<string, string[]> = {};
       snap.docs.forEach((d) => {
@@ -583,7 +582,7 @@ export default function AplikasyonPaneliDetayPage() {
     setIsDigerFirmaSaving(true);
     try {
       // Create a record for the other company fault
-      await addDoc(collection(db, 'digerFirmaArizalar'), companyStamp({
+      await addDoc(collection(db, 'digerFirmaArizalar'), {
         hospitalId,
         hospitalName: hospital?.name || '',
         digerFirmaAdi: digerFirmaAdi.trim(),
@@ -593,7 +592,7 @@ export default function AplikasyonPaneliDetayPage() {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserProfile?.name || currentUserProfile?.displayName || '',
         formType: 'aplikasyon',
-      }, currentCompanyId, 'digerFirmaArizalar'));
+      });
 
       toast({ title: 'Başarılı', description: 'Diğer firma arıza kaydı oluşturuldu.' });
 
