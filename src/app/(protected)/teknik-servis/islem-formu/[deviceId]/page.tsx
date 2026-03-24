@@ -1521,7 +1521,7 @@ export default function IslemFormuPage() {
 
         // Create form document
         const formRef = doc(collection(db, 'teknikServisActionForms'));
-        batch.set(formRef, {
+        batch.set(formRef, companyStamp({
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
             seriNumarasi: device?.seriNumarasi,
@@ -1557,11 +1557,11 @@ export default function IslemFormuPage() {
               timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
             })) : null,
             continuedFromDraft: !!currentDraftId,
-        });
+        }, currentCompanyId, 'teknikServisActionForms'));
 
         // Mirror form to deviceActionForms for device history page
         const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
-        batch.set(deviceFormRef, {
+        batch.set(deviceFormRef, companyStamp({
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
             seriNumarasi: device?.seriNumarasi,
@@ -1590,7 +1590,7 @@ export default function IslemFormuPage() {
             selectedFaultName: resolvedFaultName,
             isCustomFault: isCustomFault || false,
             selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
-        });
+        }, currentCompanyId, 'deviceActionForms'));
 
         // Create closed fault report when ariza is selected
         if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
@@ -1611,7 +1611,7 @@ export default function IslemFormuPage() {
           const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
 
           const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-          batch.set(faultReportRef, {
+          batch.set(faultReportRef, companyStamp({
             deviceId,
             hospitalId: device?.hospitalId,
             labName: hospital?.name,
@@ -1646,7 +1646,7 @@ export default function IslemFormuPage() {
             isCustomFault: isCustomFault || false,
             // Arıza kaydı işlem formundan açıldığı için bildirim gönderilmeyecek
             createdFromActionForm: true,
-          });
+          }, currentCompanyId, 'deviceFaultReports'));
 
           // Arıza geçmişine "opened" kaydı ekle
           const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
