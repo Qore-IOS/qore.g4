@@ -341,49 +341,14 @@ export async function getPaginatedDepotStock(params: {
  * whose miad is within the next `thresholdDays` days,
  * across ALL depots. Server-side computation – only the count is returned.
  */
-/**
- * Server-side: Toplam depo stok maliyetini hesaplar.
- * depoStok koleksiyonundaki her ürün için productCodes'taki cost ile çarpıp toplar.
- * Lot/miad ayrımı yapmaz — sadece stokKodu bazında adet * birim maliyet.
- */
-export async function getTotalStockCost(): Promise<{ total: number; stockCount: number; productCount: number; matchedCount: number }> {
-  try {
-    // isShipped alanı olmayan dokümanları da kapsamak için tüm koleksiyonu çekip client-side filtrele
-    const [productSnap, stockSnap] = await Promise.all([
-      getDocs(collection(db, 'productCodes')),
-      getDocs(collection(db, 'depoStok')),
-    ]);
-
-    const costMap = new Map<string, number>();
-    productSnap.docs.forEach((d) => {
-      const data = d.data();
-      if (data.cost && data.stokKodu) costMap.set(data.stokKodu, data.cost);
-    });
-
-    let total = 0;
-    let matchedCount = 0;
-    stockSnap.docs.forEach((d) => {
-      const data = d.data();
-      // isShipped === true olanları atla
-      if (data.isShipped === true) return;
-      const cost = costMap.get(data.stokKodu);
-      if (cost) {
-        total += cost;
-        matchedCount++;
-      }
-    });
-
-    return { total, stockCount: stockSnap.docs.length, productCount: productSnap.docs.length, matchedCount };
-  } catch (error) {
-    console.error('Error calculating total stock cost:', error);
-    return { total: 0, stockCount: 0, productCount: 0, matchedCount: 0 };
-  }
-}
-
 export async function getExpiringProductsCount(thresholdDays: number = 45): Promise<number> {
   try {
-    // Tüm depo stoklarını çek, isShipped === true olanları atla
-    const snapshot = await getDocs(collection(db, 'depoStok'));
+    // Composite query: isShipped (requires Firestore index)
+    const stockQuery = query(
+      collection(db, 'depoStok'),
+      where('isShipped', '==', false)
+    );
+    const snapshot = await getDocs(stockQuery);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -392,15 +357,13 @@ export async function getExpiringProductsCount(thresholdDays: number = 45): Prom
 
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
-      if (data.isShipped === true) continue;
-
       const miadStr = typeof data.miad === 'string' ? data.miad : '';
       if (!miadStr) continue;
       const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
       if (!isValid(miadDate)) continue;
 
       const days = differenceInDays(miadDate, today);
-      if (days <= thresholdDays) {
+      if (days <= thresholdDays && days >= 0) {
         const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
@@ -409,7 +372,6 @@ export async function getExpiringProductsCount(thresholdDays: number = 45): Prom
       }
     }
 
-    console.log(`[getExpiringProductsCount] Total docs: ${snapshot.docs.length}, expiring: ${count}`);
     return count;
   } catch (error) {
     console.error('Error counting expiring products:', error);
