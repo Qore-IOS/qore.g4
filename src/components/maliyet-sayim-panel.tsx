@@ -28,6 +28,7 @@ import {
   X,
   ClipboardCheck,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
@@ -169,18 +170,26 @@ function ProductCountCard({
   onStokChange,
   onCihazChange,
   onMarkCounted,
+  showCost,
 }: {
   product: ProductCode;
   entry: ProductCountEntry;
   onStokChange: (val: string) => void;
   onCihazChange: (val: string) => void;
   onMarkCounted: () => void;
+  showCost: boolean;
 }) {
   const ambalajDegeri = product.ambalajDegeri || 0;
   const anaBirim = product.anaBirim || 'Adet';
   const stokNum = parseInt(entry.stokAdedi, 10) || 0;
   const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
   const toplamTest = ambalajDegeri > 0 ? (stokNum * ambalajDegeri) + cihazNum : 0;
+
+  const productCost = product.cost || 0;
+  const currency = product.currency || 'TRY';
+  const currencySymbol = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '₺';
+  const testBasinaMaliyet = ambalajDegeri > 0 && productCost > 0 ? productCost / ambalajDegeri : 0;
+  const toplamMaliyet = testBasinaMaliyet * toplamTest;
 
   return (
     <div
@@ -253,7 +262,7 @@ function ProductCountCard({
           </div>
         </div>
 
-        {/* Right 40%: Ambalaj info + total test */}
+        {/* Right 40%: Ambalaj info + total test + cost */}
         <div className="flex flex-col justify-end items-end gap-1" style={{ flex: '0 0 calc(40% - 0.75rem)' }}>
           {ambalajDegeri > 0 && (
             <span className="text-[11px] text-[var(--dashboard-muted)]">
@@ -262,8 +271,13 @@ function ProductCountCard({
           )}
           {ambalajDegeri > 0 && (stokNum > 0 || cihazNum > 0) ? (
             <div className="cihaz-pressed px-3 py-1.5 rounded-xl text-center w-full">
-              <span className="text-[10px] text-[var(--dashboard-muted)] block">Toplam Test</span>
-              <span className="text-base font-bold text-[var(--dashboard-accent)]">{toplamTest.toLocaleString('tr-TR')}</span>
+              <span className="text-[10px] text-[var(--dashboard-muted)] block">Toplam Test{showCost && toplamMaliyet > 0 ? ' / Maliyet' : ''}</span>
+              <span className="text-base font-bold text-[var(--dashboard-accent)]">
+                {toplamTest.toLocaleString('tr-TR')}
+                {showCost && toplamMaliyet > 0 && (
+                  <span className="text-emerald-600"> / {toplamMaliyet.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}{currencySymbol}</span>
+                )}
+              </span>
             </div>
           ) : !ambalajDegeri ? (
             <span className="text-[11px] text-[var(--dashboard-muted)] italic">{anaBirim}</span>
@@ -281,6 +295,8 @@ function ProductCountCard({
 export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: MaliyetSayimPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { currentUserProfile } = useAuth();
+  const canSeeCost = ['admin', 'admin_developer', 'super_admin', 'teknik_lojistik'].includes(currentUserProfile?.role ?? '');
 
   // Location selection - initialize from URL params
   const [locationType, setLocationType] = useState<LocationType | null>(() => {
@@ -804,6 +820,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                         onStokChange={(val) => handleStokChange(product.stokKodu, val)}
                         onCihazChange={(val) => handleCihazChange(product.stokKodu, val)}
                         onMarkCounted={() => handleMarkCounted(product.stokKodu)}
+                        showCost={canSeeCost}
                       />
                     ))
                   ) : (
