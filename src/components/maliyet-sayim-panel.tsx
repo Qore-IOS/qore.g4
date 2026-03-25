@@ -169,15 +169,19 @@ function ProductCountCard({
   onStokChange,
   onCihazChange,
   onMarkCounted,
-  barcodeInputRef,
 }: {
   product: ProductCode;
   entry: ProductCountEntry;
   onStokChange: (val: string) => void;
   onCihazChange: (val: string) => void;
   onMarkCounted: () => void;
-  barcodeInputRef?: React.RefObject<HTMLInputElement | null>;
 }) {
+  const ambalajDegeri = product.ambalajDegeri || 0;
+  const anaBirim = product.anaBirim || 'Adet';
+  const stokNum = parseInt(entry.stokAdedi, 10) || 0;
+  const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
+  const toplamTest = ambalajDegeri > 0 ? (stokNum * ambalajDegeri) + cihazNum : 0;
+
   return (
     <div
       className={cn(
@@ -217,33 +221,53 @@ function ProductCountCard({
         </button>
       </div>
 
-      {/* Count inputs */}
+      {/* Count inputs + summary row */}
       <div className="flex gap-3 mt-3">
-        <div className="flex-1">
-          <label className="text-[11px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">
-            Stok Adedi
-          </label>
-          <Input
-            type="number"
-            min="0"
-            placeholder=""
-            value={entry.stokAdedi}
-            onChange={(e) => onStokChange(e.target.value)}
-            className="h-9 text-sm"
-          />
+        {/* Left 60%: Inputs */}
+        <div className="flex gap-3" style={{ flex: '0 0 60%' }}>
+          <div className="flex-1">
+            <label className="text-[11px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">
+              Stok Adedi
+            </label>
+            <Input
+              type="number"
+              min="0"
+              placeholder=""
+              value={entry.stokAdedi}
+              onChange={(e) => onStokChange(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-[11px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">
+              Cihaz Üstü Test
+            </label>
+            <Input
+              type="number"
+              min="0"
+              placeholder=""
+              value={entry.cihazUstuAdedi}
+              onChange={(e) => onCihazChange(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
         </div>
-        <div className="flex-1">
-          <label className="text-[11px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">
-            Cihaz Üstü Test
-          </label>
-          <Input
-            type="number"
-            min="0"
-            placeholder=""
-            value={entry.cihazUstuAdedi}
-            onChange={(e) => onCihazChange(e.target.value)}
-            className="h-9 text-sm"
-          />
+
+        {/* Right 40%: Ambalaj info + total test */}
+        <div className="flex flex-col justify-end items-end gap-1" style={{ flex: '0 0 calc(40% - 0.75rem)' }}>
+          {ambalajDegeri > 0 && (
+            <span className="text-[11px] text-[var(--dashboard-muted)]">
+              {anaBirim} x{ambalajDegeri}
+            </span>
+          )}
+          {ambalajDegeri > 0 && (stokNum > 0 || cihazNum > 0) ? (
+            <div className="cihaz-pressed px-3 py-1.5 rounded-xl text-center w-full">
+              <span className="text-[10px] text-[var(--dashboard-muted)] block">Toplam Test</span>
+              <span className="text-base font-bold text-[var(--dashboard-accent)]">{toplamTest.toLocaleString('tr-TR')}</span>
+            </div>
+          ) : !ambalajDegeri ? (
+            <span className="text-[11px] text-[var(--dashboard-muted)] italic">{anaBirim}</span>
+          ) : null}
         </div>
       </div>
     </div>
