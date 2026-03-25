@@ -27,6 +27,10 @@ import {
   Save,
   X,
   ClipboardCheck,
+  CalendarDays,
+  ChevronDown,
+  AlertCircle,
+  Plus,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
@@ -38,6 +42,23 @@ import { cn } from '@/lib/utils';
 // TYPES
 // ============================================================================
 
+interface LotEntry {
+  lot: string;
+  miad?: string;        // dd.MM.yyyy format
+  count: number;
+}
+
+interface SerialEntry {
+  serial: string;
+  lot?: string;
+  miad?: string;        // dd.MM.yyyy format
+}
+
+interface ExpiryWarning {
+  id: string;
+  miad: string;         // yyyy-MM-dd (input date format)
+}
+
 interface ProductCountEntry {
   stokKodu: string;
   stokAdi: string;
@@ -45,6 +66,9 @@ interface ProductCountEntry {
   stokAdedi: string;   // string to allow empty
   cihazUstuAdedi: string; // string to allow empty
   counted: boolean;
+  lots: LotEntry[];
+  serials: SerialEntry[];
+  expiryWarnings: ExpiryWarning[];
 }
 
 interface BrandProgress {
@@ -65,6 +89,38 @@ interface MaliyetSayimPanelProps {
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+/** Parse dd.MM.yyyy to Date */
+function parseDdMmYyyy(s: string): Date | null {
+  const parts = s.split('.');
+  if (parts.length !== 3) return null;
+  const [d, m, y] = parts.map(Number);
+  if (!d || !m || !y) return null;
+  return new Date(y, m - 1, d);
+}
+
+/** Get remaining days from today to expiry date string (dd.MM.yyyy or yyyy-MM-dd) */
+function getRemainingDays(miad: string): number | null {
+  let date: Date | null = null;
+  if (miad.includes('.')) {
+    date = parseDdMmYyyy(miad);
+  } else if (miad.includes('-')) {
+    date = new Date(miad);
+  }
+  if (!date || isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  return Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/** Get expiry color class */
+function expiryColor(days: number | null): string {
+  if (days === null) return '';
+  if (days <= 30) return 'text-red-600 bg-red-50 border-red-200';
+  if (days <= 45) return 'text-amber-600 bg-amber-50 border-amber-200';
+  return '';
+}
 
 function getBrandsFromRules(
   minMaxRules: MinMaxRule[],
@@ -173,6 +229,8 @@ function ProductCountCard({
   onStokChange,
   onCihazChange,
   onMarkCounted,
+  onAddExpiryWarning,
+  onRemoveExpiryWarning,
   showCost,
 }: {
   product: ProductCode;
@@ -180,8 +238,14 @@ function ProductCountCard({
   onStokChange: (val: string) => void;
   onCihazChange: (val: string) => void;
   onMarkCounted: () => void;
+  onAddExpiryWarning: (miad: string) => void;
+  onRemoveExpiryWarning: (id: string) => void;
   showCost: boolean;
 }) {
+  const [accordionOpen, setAccordionOpen] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
   const ambalajDegeri = product.ambalajDegeri || 0;
   const anaBirim = product.anaBirim || 'Adet';
   const stokNum = parseInt(entry.stokAdedi, 10) || 0;
@@ -194,11 +258,24 @@ function ProductCountCard({
   const testBasinaMaliyet = ambalajDegeri > 0 && productCost > 0 ? productCost / ambalajDegeri : 0;
   const toplamMaliyet = testBasinaMaliyet * toplamTest;
 
+  const hasTrackingData = entry.lots.length > 0 || entry.serials.length > 0;
+  const hasExpiryWarnings = entry.expiryWarnings.length > 0;
+  const hasAccordionContent = hasTrackingData || hasExpiryWarnings;
+
+  // Find worst expiry across lots, serials, and manual warnings
+  const allExpiries: number[] = [];
+  entry.lots.forEach(l => { if (l.miad) { const d = getRemainingDays(l.miad); if (d !== null) allExpiries.push(d); } });
+  entry.serials.forEach(s => { if (s.miad) { const d = getRemainingDays(s.miad); if (d !== null) allExpiries.push(d); } });
+  entry.expiryWarnings.forEach(w => { const d = getRemainingDays(w.miad); if (d !== null) allExpiries.push(d); });
+  const worstExpiry = allExpiries.length > 0 ? Math.min(...allExpiries) : null;
+  const cardExpiryClass = expiryColor(worstExpiry);
+
   return (
     <div
       className={cn(
         'cihaz-card p-4 sm:p-5 transition-all duration-200',
-        entry.counted && 'ring-1 ring-emerald-500/30 bg-emerald-500/5'
+        entry.counted && 'ring-1 ring-emerald-500/30 bg-emerald-500/5',
+        cardExpiryClass && `ring-1 ${cardExpiryClass}`
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -216,21 +293,49 @@ function ProductCountCard({
                 </Badge>
               </span>
             )}
+            {worstExpiry !== null && worstExpiry <= 45 && (
+              <span className={cn('ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded', worstExpiry <= 30 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700')}>
+                {worstExpiry <= 0 ? 'Miadı geçmiş' : `${worstExpiry} gün`}
+              </span>
+            )}
           </p>
         </div>
 
-        {/* Counted status */}
-        <button
-          onClick={onMarkCounted}
-          className={cn(
-            'shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200',
-            entry.counted
-              ? 'bg-emerald-500 text-white shadow-md'
-              : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-accent)]'
-          )}
-        >
-          <Check className="w-4 h-4" />
-        </button>
+        {/* Manual expiry warning + counted */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="relative">
+            <button
+              onClick={() => { setShowDatePicker(true); setTimeout(() => dateInputRef.current?.showPicker(), 50); }}
+              className="w-8 h-8 rounded-xl flex items-center justify-center bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-amber-600 transition-colors"
+              title="Miad uyarısı ekle"
+            >
+              <CalendarDays className="w-4 h-4" />
+            </button>
+            {showDatePicker && (
+              <input
+                ref={dateInputRef}
+                type="date"
+                className="absolute top-0 left-0 w-8 h-8 opacity-0 cursor-pointer"
+                onChange={(e) => {
+                  if (e.target.value) onAddExpiryWarning(e.target.value);
+                  setShowDatePicker(false);
+                }}
+                onBlur={() => setShowDatePicker(false)}
+              />
+            )}
+          </div>
+          <button
+            onClick={onMarkCounted}
+            className={cn(
+              'w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200',
+              entry.counted
+                ? 'bg-emerald-500 text-white shadow-md'
+                : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-accent)]'
+            )}
+          >
+            <Check className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Count inputs + summary row */}
@@ -287,6 +392,77 @@ function ProductCountCard({
           ) : null}
         </div>
       </div>
+
+      {/* Accordion: Lot/Serial/Expiry details */}
+      {hasAccordionContent && (
+        <div className="mt-3 border-t border-[var(--dashboard-stroke)] pt-2">
+          <button
+            onClick={() => setAccordionOpen(prev => !prev)}
+            className="flex items-center gap-1.5 text-xs text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors w-full"
+          >
+            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', accordionOpen && 'rotate-180')} />
+            <span className="font-medium">
+              {entry.serials.length > 0 && `${entry.serials.length} seri no`}
+              {entry.serials.length > 0 && entry.lots.length > 0 && ' · '}
+              {entry.lots.length > 0 && `${entry.lots.length} lot`}
+              {(entry.serials.length > 0 || entry.lots.length > 0) && entry.expiryWarnings.length > 0 && ' · '}
+              {entry.expiryWarnings.length > 0 && `${entry.expiryWarnings.length} miad uyarısı`}
+            </span>
+          </button>
+
+          {accordionOpen && (
+            <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
+              {/* Serial entries */}
+              {entry.serials.map((s, i) => {
+                const days = s.miad ? getRemainingDays(s.miad) : null;
+                const colorClass = expiryColor(days);
+                return (
+                  <div key={`s-${i}`} className={cn('flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg border', colorClass || 'bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]')}>
+                    <span className="font-mono font-medium">SN: {s.serial}</span>
+                    <div className="flex items-center gap-2">
+                      {s.lot && <span className="text-[var(--dashboard-muted)]">Lot: {s.lot}</span>}
+                      {s.miad && <span>{s.miad}{days !== null && days <= 45 ? ` (${days}g)` : ''}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Lot entries */}
+              {entry.lots.map((l, i) => {
+                const days = l.miad ? getRemainingDays(l.miad) : null;
+                const colorClass = expiryColor(days);
+                return (
+                  <div key={`l-${i}`} className={cn('flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg border', colorClass || 'bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]')}>
+                    <span className="font-mono font-medium">Lot: {l.lot}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{l.count} adet</span>
+                      {l.miad && <span>{l.miad}{days !== null && days <= 45 ? ` (${days}g)` : ''}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Manual expiry warnings */}
+              {entry.expiryWarnings.map(w => {
+                const days = getRemainingDays(w.miad);
+                const colorClass = expiryColor(days);
+                const displayDate = w.miad.split('-').reverse().join('.');
+                return (
+                  <div key={w.id} className={cn('flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg border', colorClass || 'bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]')}>
+                    <div className="flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Miad: {displayDate}{days !== null ? ` (${days <= 0 ? 'geçmiş' : `${days} gün`})` : ''}</span>
+                    </div>
+                    <button onClick={() => onRemoveExpiryWarning(w.id)} className="text-[var(--dashboard-muted)] hover:text-red-500 transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -386,6 +562,9 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
             stokAdedi: '',
             cihazUstuAdedi: '',
             counted: false,
+            lots: [],
+            serials: [],
+            expiryWarnings: [],
           };
         }
       });
@@ -455,6 +634,34 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     }));
   }, []);
 
+  const handleAddExpiryWarning = useCallback((stokKodu: string, miad: string) => {
+    setCountData(prev => {
+      const entry = prev[stokKodu];
+      if (!entry) return prev;
+      return {
+        ...prev,
+        [stokKodu]: {
+          ...entry,
+          expiryWarnings: [...entry.expiryWarnings, { id: crypto.randomUUID(), miad }],
+        },
+      };
+    });
+  }, []);
+
+  const handleRemoveExpiryWarning = useCallback((stokKodu: string, warningId: string) => {
+    setCountData(prev => {
+      const entry = prev[stokKodu];
+      if (!entry) return prev;
+      return {
+        ...prev,
+        [stokKodu]: {
+          ...entry,
+          expiryWarnings: entry.expiryWarnings.filter(w => w.id !== warningId),
+        },
+      };
+    });
+  }, []);
+
   const handleCompleteBrand = useCallback(() => {
     // Mark all products of active brand as counted
     setCountData(prev => {
@@ -484,11 +691,12 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const handleScan = useCallback(({ raw }: { raw: string }) => {
     if (!raw.trim()) return;
 
-    // First try advanced parsing with all barcode formats
+    // Parse barcode with all formats
     const result = parseAndResolveBarcode(raw.trim(), barcodeFormats, productCodes);
     let found = result?.product;
+    const parsed = result?.parsed;
 
-    // Fallback: direct lookup by barcodeNumber or stokKodu
+    // Fallback: direct lookup
     if (!found) {
       found = productCodes.find(
         p => p.barcodeNumber === raw.trim() || p.stokKodu === raw.trim()
@@ -500,36 +708,68 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       return;
     }
 
-    // Check if product is in current location's minMaxRules
+    // Check if product is in current location
     const stokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
     if (stokKoduSet.size > 0 && !stokKoduSet.has(found.stokKodu)) {
       flashFeedback('error', `${found.stokAdi} bu lokasyonda tanımlı değil`);
       return;
     }
 
-    // Switch to product's brand if needed
+    // Switch brand if needed
     if (found.marka && found.marka !== activeBrand) {
       setActiveBrand(found.marka);
     }
 
-    // Increment stok adedi by 1
+    const trackingMode = found.trackingMode || 'qty_barcode';
+    const serial = parsed?.seriNumarasi;
+    const lot = parsed?.lotNumarasi;
+    const miad = parsed?.miadFormatted; // dd.MM.yyyy
+
     setCountData(prev => {
       const existing = prev[found!.stokKodu];
-      const currentStok = parseInt(existing?.stokAdedi || '0', 10) || 0;
-      return {
-        ...prev,
-        [found!.stokKodu]: {
-          stokKodu: found!.stokKodu,
-          stokAdi: found!.stokAdi,
-          marka: found!.marka ?? '',
-          stokAdedi: String(currentStok + 1),
-          cihazUstuAdedi: existing?.cihazUstuAdedi ?? '',
-          counted: existing?.counted ?? false,
-        },
+      const base: ProductCountEntry = {
+        stokKodu: found!.stokKodu,
+        stokAdi: found!.stokAdi,
+        marka: found!.marka ?? '',
+        stokAdedi: existing?.stokAdedi ?? '0',
+        cihazUstuAdedi: existing?.cihazUstuAdedi ?? '',
+        counted: existing?.counted ?? false,
+        lots: existing?.lots ?? [],
+        serials: existing?.serials ?? [],
+        expiryWarnings: existing?.expiryWarnings ?? [],
       };
+
+      const currentStok = parseInt(base.stokAdedi, 10) || 0;
+
+      if (trackingMode === 'serial' && serial) {
+        // Duplicate serial check
+        if (base.serials.some(s => s.serial === serial)) {
+          flashFeedback('error', `Mükerrer seri no: ${serial}`);
+          return prev;
+        }
+        base.serials = [...base.serials, { serial, lot, miad }];
+        base.stokAdedi = String(currentStok + 1);
+      } else if ((trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') && lot) {
+        // Add to existing lot or create new
+        const existingLot = base.lots.find(l => l.lot === lot);
+        if (existingLot) {
+          base.lots = base.lots.map(l => l.lot === lot ? { ...l, count: l.count + 1, miad: miad || l.miad } : l);
+        } else {
+          base.lots = [...base.lots, { lot, miad, count: 1 }];
+        }
+        base.stokAdedi = String(currentStok + 1);
+      } else {
+        // qty tracking - just increment
+        base.stokAdedi = String(currentStok + 1);
+      }
+
+      return { ...prev, [found!.stokKodu]: base };
     });
 
-    flashFeedback('success', `${found.stokAdi} +1`);
+    const feedbackParts = [found.stokAdi, '+1'];
+    if (serial) feedbackParts.push(`SN:${serial}`);
+    else if (lot) feedbackParts.push(`Lot:${lot}`);
+    flashFeedback('success', feedbackParts.join(' '));
   }, [barcodeFormats, productCodes, locationMinMaxRules, activeBrand, flashFeedback]);
 
   // HID barcode scanner listener
@@ -872,10 +1112,15 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                           stokAdedi: '',
                           cihazUstuAdedi: '',
                           counted: false,
+                          lots: [],
+                          serials: [],
+                          expiryWarnings: [],
                         }}
                         onStokChange={(val) => handleStokChange(product.stokKodu, val)}
                         onCihazChange={(val) => handleCihazChange(product.stokKodu, val)}
                         onMarkCounted={() => handleMarkCounted(product.stokKodu)}
+                        onAddExpiryWarning={(miad) => handleAddExpiryWarning(product.stokKodu, miad)}
+                        onRemoveExpiryWarning={(id) => handleRemoveExpiryWarning(product.stokKodu, id)}
                         showCost={canSeeCost}
                       />
                     ))
