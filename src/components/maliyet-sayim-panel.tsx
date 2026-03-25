@@ -1,6 +1,9 @@
 
 'use client';
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import type { Hospital, Depot, ProductCode, MinMaxRule } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -59,57 +62,31 @@ interface MaliyetSayimPanelProps {
 // HELPERS
 // ============================================================================
 
-function getBrandsForLocation(
-  locationId: string,
-  locationType: LocationType,
-  hospitals: Hospital[],
-  depots: Depot[],
+function getBrandsFromRules(
+  minMaxRules: MinMaxRule[],
   productCodes: ProductCode[]
 ): string[] {
-  if (locationType === 'lab') {
-    const lab = hospitals.find(h => h.id === locationId);
-    if (!lab?.minMaxRules) return [];
-    const stokKoduSet = new Set(
-      Object.values(lab.minMaxRules as Record<string, MinMaxRule>).map(r => r.stokKodu)
-    );
-    const brands = new Set<string>();
-    productCodes.forEach(p => {
-      if (stokKoduSet.has(p.stokKodu) && p.marka) {
-        brands.add(p.marka);
-      }
-    });
-    return Array.from(brands).sort((a, b) => a.localeCompare(b, 'tr'));
-  } else {
-    // For depot: get brands of all productCodes (since depot has all products)
-    const brands = new Set<string>();
-    productCodes.forEach(p => {
-      if (p.marka) brands.add(p.marka);
-    });
-    return Array.from(brands).sort((a, b) => a.localeCompare(b, 'tr'));
-  }
+  if (minMaxRules.length === 0) return [];
+  const stokKoduSet = new Set(minMaxRules.map(r => r.stokKodu));
+  const brands = new Set<string>();
+  productCodes.forEach(p => {
+    if (stokKoduSet.has(p.stokKodu) && p.marka) {
+      brands.add(p.marka);
+    }
+  });
+  return Array.from(brands).sort((a, b) => a.localeCompare(b, 'tr'));
 }
 
-function getProductsForBrand(
+function getProductsForBrandFromRules(
   brand: string,
-  locationId: string,
-  locationType: LocationType,
-  hospitals: Hospital[],
+  minMaxRules: MinMaxRule[],
   productCodes: ProductCode[]
 ): ProductCode[] {
-  if (locationType === 'lab') {
-    const lab = hospitals.find(h => h.id === locationId);
-    if (!lab?.minMaxRules) return [];
-    const stokKoduSet = new Set(
-      Object.values(lab.minMaxRules as Record<string, MinMaxRule>).map(r => r.stokKodu)
-    );
-    return productCodes
-      .filter(p => p.marka === brand && stokKoduSet.has(p.stokKodu))
-      .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
-  } else {
-    return productCodes
-      .filter(p => p.marka === brand)
-      .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
-  }
+  if (minMaxRules.length === 0) return [];
+  const stokKoduSet = new Set(minMaxRules.map(r => r.stokKodu));
+  return productCodes
+    .filter(p => p.marka === brand && stokKoduSet.has(p.stokKodu))
+    .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
 }
 
 // ============================================================================
@@ -278,9 +255,19 @@ function ProductCountCard({
 // ============================================================================
 
 export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: MaliyetSayimPanelProps) {
-  // Location selection
-  const [locationType, setLocationType] = useState<LocationType | null>(null);
-  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Location selection - initialize from URL params
+  const [locationType, setLocationType] = useState<LocationType | null>(() => {
+    const t = searchParams.get('type');
+    return t === 'lab' || t === 'depot' ? t : null;
+  });
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(() => searchParams.get('id'));
+
+  // MinMaxRules fetched from Firestore sub-collection
+  const [locationMinMaxRules, setLocationMinMaxRules] = useState<MinMaxRule[]>([]);
+  const [isLoadingRules, setIsLoadingRules] = useState(false);
 
   // Brand & product state
   const [activeBrand, setActiveBrand] = useState<string | null>(null);
@@ -295,6 +282,29 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
 
   const barcodeRef = useRef<HTMLInputElement>(null);
 
+  // Fetch minMaxRules from Firestore when location changes
+  useEffect(() => {
+    if (!selectedLocationId || !locationType) {
+      setLocationMinMaxRules([]);
+      return;
+    }
+
+    const collectionPath = locationType === 'lab'
+      ? `hospitals/${selectedLocationId}/minMaxRules`
+      : `depots/${selectedLocationId}/minMaxRules`;
+
+    setIsLoadingRules(true);
+    getDocs(collection(db, collectionPath))
+      .then(snap => {
+        setLocationMinMaxRules(snap.docs.map(d => d.data() as MinMaxRule));
+      })
+      .catch(err => {
+        console.error('Error fetching minMaxRules:', err);
+        setLocationMinMaxRules([]);
+      })
+      .finally(() => setIsLoadingRules(false));
+  }, [selectedLocationId, locationType]);
+
   // ---- Derived data ----
 
   const locationName = useMemo(() => {
@@ -307,13 +317,13 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
 
   const brands = useMemo(() => {
     if (!selectedLocationId || !locationType) return [];
-    return getBrandsForLocation(selectedLocationId, locationType, hospitals, depots, productCodes);
-  }, [selectedLocationId, locationType, hospitals, depots, productCodes]);
+    return getBrandsFromRules(locationMinMaxRules, productCodes);
+  }, [selectedLocationId, locationType, locationMinMaxRules, productCodes]);
 
   const brandProducts = useMemo(() => {
     if (!activeBrand || !selectedLocationId || !locationType) return [];
-    return getProductsForBrand(activeBrand, selectedLocationId, locationType, hospitals, productCodes);
-  }, [activeBrand, selectedLocationId, locationType, hospitals, productCodes]);
+    return getProductsForBrandFromRules(activeBrand, locationMinMaxRules, productCodes);
+  }, [activeBrand, selectedLocationId, locationType, locationMinMaxRules, productCodes]);
 
   // Initialize count data when brand products change
   useEffect(() => {
@@ -339,14 +349,14 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   // Brand progress
   const brandProgressList = useMemo((): BrandProgress[] => {
     return brands.map(brand => {
-      const products = getProductsForBrand(brand, selectedLocationId!, locationType!, hospitals, productCodes);
+      const products = getProductsForBrandFromRules(brand, locationMinMaxRules, productCodes);
       const completed = products.filter(p => countData[p.stokKodu]?.counted).length;
       let status: BrandProgress['status'] = 'idle';
       if (completed > 0 && completed < products.length) status = 'in_progress';
       if (completed === products.length && products.length > 0) status = 'completed';
       return { brand, total: products.length, completed, status };
     });
-  }, [brands, countData, selectedLocationId, locationType, hospitals, productCodes]);
+  }, [brands, countData, locationMinMaxRules, productCodes]);
 
   const totalBrands = brandProgressList.length;
   const completedBrands = brandProgressList.filter(b => b.status === 'completed').length;
@@ -446,7 +456,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     setActiveBrand(null);
     setCountData({});
     setSearchQuery('');
-  }, []);
+    router.replace(`/maliyet-sayim?type=${type}&id=${id}`, { scroll: false });
+  }, [router]);
 
   // Auto-select first incomplete brand when brands load
   useEffect(() => {
@@ -532,6 +543,15 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     );
   }
 
+  // ---- RENDER: Loading minMaxRules ----
+  if (isLoadingRules) {
+    return (
+      <div className="flex h-full w-full items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+      </div>
+    );
+  }
+
   // ---- RENDER: Main Counting Interface ----
 
   const activeBrandProgress = brandProgressList.find(b => b.brand === activeBrand);
@@ -546,7 +566,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
         <div className="px-4 sm:px-6 py-3 flex items-center gap-4 flex-wrap">
           {/* Back button + Location */}
           <button
-            onClick={() => { setSelectedLocationId(null); setLocationType(null); }}
+            onClick={() => { setSelectedLocationId(null); setLocationType(null); router.replace('/maliyet-sayim', { scroll: false }); }}
             className="shrink-0 flex items-center gap-2 text-sm text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
           >
             <ChevronLeft className="w-4 h-4" />
