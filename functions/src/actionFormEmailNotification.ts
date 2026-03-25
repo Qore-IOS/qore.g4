@@ -269,66 +269,132 @@ async function handleActionFormCreated(
 
   logger.info(`[actionFormEmail] Processing ${formType} form: ${formId}`);
 
-  // 1. Get hospital's sorumluEmail
-  const hospitalId = data.hospitalId;
-  if (!hospitalId) {
-    logger.info(`[actionFormEmail] No hospitalId on form ${formId}, skipping email.`);
-    return;
-  }
-
-  const hospitalDoc = await db.collection('hospitals').doc(hospitalId).get();
-  if (!hospitalDoc.exists) {
-    logger.info(`[actionFormEmail] Hospital ${hospitalId} not found, skipping email.`);
-    return;
-  }
-
-  const hospitalData = hospitalDoc.data()!;
-  const sorumluEmail = hospitalData.sorumluEmail;
-  if (!sorumluEmail || !sorumluEmail.trim()) {
-    logger.info(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId}, skipping email.`);
-    return;
-  }
-
-  // 2. Get transporter
-  const transporter = getTransporter();
-  if (!transporter) {
-    logger.error(`[actionFormEmail] SMTP not configured, cannot send email for form ${formId}.`);
-    return;
-  }
-
-  // 3. Generate PDF
-  const pdfBuffer = generateActionFormPDF(data, formType);
-
-  // 4. Compose email
-  const labName = hospitalData.name || data.labName || 'Bilinmeyen Laboratuvar';
-  const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
-  const personnelName = data.createdByName || 'Bilinmeyen Kullanici';
-  const formTypeLabel = formType === 'teknik_servis' ? 'teknik servis' : 'aplikasyon';
-
-  const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
-  const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
-
-  const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-  const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
+  // Prepare log entry for Firestore
+  const logEntry: Record<string, any> = {
+    formId,
+    formType,
+    deviceId: data.deviceId || null,
+    cihazAdi: data.cihazAdi || null,
+    labName: data.labName || null,
+    hospitalId: data.hospitalId || null,
+    createdByName: data.createdByName || null,
+    createdByUid: data.createdByUid || null,
+    status: 'processing',
+    steps: [] as string[],
+    error: null as string | null,
+    emailSentTo: null as string | null,
+    smtpConfigured: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
 
   try {
-    await transporter.sendMail({
-      from: senderEmail,
-      to: sorumluEmail.trim(),
-      subject,
-      text: body,
-      attachments: [
-        {
-          filename: pdfFileName,
-          content: pdfBuffer,
-          contentType: 'application/pdf',
-        },
-      ],
-    });
+    // 1. Get hospital's sorumluEmail
+    const hospitalId = data.hospitalId;
+    if (!hospitalId) {
+      logEntry.status = 'skipped';
+      logEntry.error = 'Form üzerinde hospitalId bulunamadı';
+      logEntry.steps.push('hospitalId kontrolü: BAŞARISIZ - hospitalId yok');
+      logger.info(`[actionFormEmail] No hospitalId on form ${formId}, skipping email.`);
+      await db.collection('emailNotificationLogs').add(logEntry);
+      return;
+    }
+    logEntry.steps.push(`hospitalId kontrolü: OK (${hospitalId})`);
 
-    logger.info(`[actionFormEmail] Email sent to ${sorumluEmail} for form ${formId}`);
-  } catch (error: any) {
-    logger.error(`[actionFormEmail] Failed to send email for form ${formId}:`, error?.message || error);
+    const hospitalDoc = await db.collection('hospitals').doc(hospitalId).get();
+    if (!hospitalDoc.exists) {
+      logEntry.status = 'skipped';
+      logEntry.error = `Hospital dokümanı bulunamadı: ${hospitalId}`;
+      logEntry.steps.push(`Hospital dokümanı sorgusu: BAŞARISIZ - ${hospitalId} bulunamadı`);
+      logger.info(`[actionFormEmail] Hospital ${hospitalId} not found, skipping email.`);
+      await db.collection('emailNotificationLogs').add(logEntry);
+      return;
+    }
+    logEntry.steps.push('Hospital dokümanı sorgusu: OK');
+
+    const hospitalData = hospitalDoc.data()!;
+    const sorumluEmail = hospitalData.sorumluEmail;
+    logEntry.labName = hospitalData.name || data.labName || null;
+
+    if (!sorumluEmail || !sorumluEmail.trim()) {
+      logEntry.status = 'skipped';
+      logEntry.error = `Hospital ${hospitalId} için sorumluEmail tanımlı değil`;
+      logEntry.steps.push('sorumluEmail kontrolü: BAŞARISIZ - email tanımlı değil');
+      logger.info(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId}, skipping email.`);
+      await db.collection('emailNotificationLogs').add(logEntry);
+      return;
+    }
+    logEntry.steps.push(`sorumluEmail kontrolü: OK (${sorumluEmail.trim()})`);
+    logEntry.emailSentTo = sorumluEmail.trim();
+
+    // 2. Get transporter
+    const transporter = getTransporter();
+    if (!transporter) {
+      logEntry.status = 'failed';
+      logEntry.smtpConfigured = false;
+      logEntry.error = 'SMTP yapılandırması eksik. SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS ortam değişkenlerini kontrol edin.';
+      logEntry.steps.push('SMTP yapılandırma kontrolü: BAŞARISIZ - ortam değişkenleri eksik');
+      logger.error(`[actionFormEmail] SMTP not configured, cannot send email for form ${formId}.`);
+      await db.collection('emailNotificationLogs').add(logEntry);
+      return;
+    }
+    logEntry.smtpConfigured = true;
+    logEntry.steps.push('SMTP yapılandırma kontrolü: OK');
+
+    // 3. Generate PDF
+    logEntry.steps.push('PDF oluşturma: başladı');
+    const pdfBuffer = generateActionFormPDF(data, formType);
+    logEntry.steps.push(`PDF oluşturma: OK (${pdfBuffer.length} byte)`);
+
+    // 4. Compose email
+    const labName = hospitalData.name || data.labName || 'Bilinmeyen Laboratuvar';
+    const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
+    const personnelName = data.createdByName || 'Bilinmeyen Kullanici';
+    const formTypeLabel = formType === 'teknik_servis' ? 'teknik servis' : 'aplikasyon';
+
+    const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
+    const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
+
+    const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
+
+    logEntry.steps.push(`Email hazırlandı: from=${senderEmail}, to=${sorumluEmail.trim()}, subject=${subject}`);
+
+    try {
+      await transporter.sendMail({
+        from: senderEmail,
+        to: sorumluEmail.trim(),
+        subject,
+        text: body,
+        attachments: [
+          {
+            filename: pdfFileName,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+
+      logEntry.status = 'sent';
+      logEntry.steps.push('Email gönderimi: BAŞARILI');
+      logger.info(`[actionFormEmail] Email sent to ${sorumluEmail} for form ${formId}`);
+    } catch (error: any) {
+      logEntry.status = 'failed';
+      logEntry.error = error?.message || String(error);
+      logEntry.steps.push(`Email gönderimi: BAŞARISIZ - ${error?.message || error}`);
+      logger.error(`[actionFormEmail] Failed to send email for form ${formId}:`, error?.message || error);
+    }
+  } catch (outerError: any) {
+    logEntry.status = 'error';
+    logEntry.error = outerError?.message || String(outerError);
+    logEntry.steps.push(`Beklenmeyen hata: ${outerError?.message || outerError}`);
+    logger.error(`[actionFormEmail] Unexpected error for form ${formId}:`, outerError?.message || outerError);
+  }
+
+  // Always write log entry
+  try {
+    await db.collection('emailNotificationLogs').add(logEntry);
+  } catch (logError) {
+    logger.error(`[actionFormEmail] Failed to write log for form ${formId}:`, logError);
   }
 }
 
