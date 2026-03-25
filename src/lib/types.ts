@@ -535,6 +535,7 @@ export type AppView =
   | 'nobet-yonetimi'
   | 'satin-alma'
   | 'kullanici-talepleri'
+  | 'maliyet-sayim'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
