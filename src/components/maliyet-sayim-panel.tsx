@@ -243,7 +243,6 @@ function ProductCountCard({
   showCost: boolean;
 }) {
   const [accordionOpen, setAccordionOpen] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const ambalajDegeri = product.ambalajDegeri || 0;
@@ -305,24 +304,21 @@ function ProductCountCard({
         <div className="flex items-center gap-1.5 shrink-0">
           <div className="relative">
             <button
-              onClick={() => { setShowDatePicker(true); setTimeout(() => dateInputRef.current?.showPicker(), 50); }}
+              onClick={() => dateInputRef.current?.click()}
               className="w-8 h-8 rounded-xl flex items-center justify-center bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-amber-600 transition-colors"
               title="Miad uyarısı ekle"
             >
               <CalendarDays className="w-4 h-4" />
             </button>
-            {showDatePicker && (
-              <input
-                ref={dateInputRef}
-                type="date"
-                className="absolute top-0 left-0 w-8 h-8 opacity-0 cursor-pointer"
-                onChange={(e) => {
-                  if (e.target.value) onAddExpiryWarning(e.target.value);
-                  setShowDatePicker(false);
-                }}
-                onBlur={() => setShowDatePicker(false)}
-              />
-            )}
+            <input
+              ref={dateInputRef}
+              type="date"
+              className="absolute top-0 left-0 w-8 h-8 opacity-0 cursor-pointer pointer-events-none"
+              onChange={(e) => {
+                if (e.target.value) onAddExpiryWarning(e.target.value);
+                e.target.value = '';
+              }}
+            />
           </div>
           <button
             onClick={onMarkCounted}
