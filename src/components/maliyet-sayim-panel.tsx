@@ -29,6 +29,9 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
+import useHidScanner from '@/hooks/useHidScanner';
+import { parseAndResolveBarcode } from '@/lib/barcode';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
@@ -313,14 +316,18 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const [activeBrand, setActiveBrand] = useState<string | null>(null);
   const [countData, setCountData] = useState<Record<string, ProductCountEntry>>({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [barcodeInput, setBarcodeInput] = useState('');
   const [showOnlyUncounted, setShowOnlyUncounted] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Barcode scanner
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const { formats: barcodeFormats } = useSafeBarcodeFormats();
 
   // Completion modal
   const [showFinishModal, setShowFinishModal] = useState(false);
 
-  const barcodeRef = useRef<HTMLInputElement>(null);
+  const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch minMaxRules from Firestore when location changes
   useEffect(() => {
@@ -468,27 +475,69 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     }
   }, [brandProgressList, activeBrand]);
 
-  const handleBarcodeSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (!barcodeInput.trim()) return;
+  const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
+    if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+    setScanFeedback({ type, message });
+    scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 2500);
+  }, []);
 
-    // Find product by barcode number or stok kodu
-    const found = productCodes.find(
-      p => p.barcodeNumber === barcodeInput.trim() || p.stokKodu === barcodeInput.trim()
-    );
+  const handleScan = useCallback(({ raw }: { raw: string }) => {
+    if (!raw.trim()) return;
 
-    if (found) {
-      // If the product belongs to a different brand, switch brand
-      if (found.marka && found.marka !== activeBrand) {
-        setActiveBrand(found.marka);
-      }
-      // Scroll to / highlight the product (via search)
-      setSearchQuery(found.stokKodu);
-      setTimeout(() => setSearchQuery(''), 3000);
+    // First try advanced parsing with all barcode formats
+    const result = parseAndResolveBarcode(raw.trim(), barcodeFormats, productCodes);
+    let found = result?.product;
+
+    // Fallback: direct lookup by barcodeNumber or stokKodu
+    if (!found) {
+      found = productCodes.find(
+        p => p.barcodeNumber === raw.trim() || p.stokKodu === raw.trim()
+      );
     }
 
-    setBarcodeInput('');
-  }, [barcodeInput, productCodes, activeBrand]);
+    if (!found) {
+      flashFeedback('error', 'Ürün bulunamadı');
+      return;
+    }
+
+    // Check if product is in current location's minMaxRules
+    const stokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+    if (stokKoduSet.size > 0 && !stokKoduSet.has(found.stokKodu)) {
+      flashFeedback('error', `${found.stokAdi} bu lokasyonda tanımlı değil`);
+      return;
+    }
+
+    // Switch to product's brand if needed
+    if (found.marka && found.marka !== activeBrand) {
+      setActiveBrand(found.marka);
+    }
+
+    // Increment stok adedi by 1
+    setCountData(prev => {
+      const existing = prev[found!.stokKodu];
+      const currentStok = parseInt(existing?.stokAdedi || '0', 10) || 0;
+      return {
+        ...prev,
+        [found!.stokKodu]: {
+          stokKodu: found!.stokKodu,
+          stokAdi: found!.stokAdi,
+          marka: found!.marka ?? '',
+          stokAdedi: String(currentStok + 1),
+          cihazUstuAdedi: existing?.cihazUstuAdedi ?? '',
+          counted: existing?.counted ?? false,
+        },
+      };
+    });
+
+    flashFeedback('success', `${found.stokAdi} +1`);
+  }, [barcodeFormats, productCodes, locationMinMaxRules, activeBrand, flashFeedback]);
+
+  // HID barcode scanner listener
+  useHidScanner({
+    enabled: scannerActive && !!selectedLocationId,
+    allowDuringInputs: false,
+    onScan: handleScan,
+  });
 
   const handleSelectLocation = useCallback((type: LocationType, id: string) => {
     setLocationType(type);
@@ -620,6 +669,28 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
               <Building2 className="w-4 h-4 text-[var(--dashboard-accent)]" />
             )}
             <span className="text-sm font-semibold text-[var(--dashboard-text)]">{locationName}</span>
+
+            <button
+              onClick={() => setScannerActive(prev => !prev)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200',
+                scannerActive
+                  ? 'bg-emerald-500 text-white shadow-md animate-pulse'
+                  : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+              )}
+            >
+              <ScanBarcode className="w-4 h-4" />
+              {scannerActive ? 'Okuyucu Aktif' : 'Barkod'}
+            </button>
+
+            {scanFeedback && (
+              <span className={cn(
+                'text-xs font-medium px-2 py-1 rounded-lg animate-in fade-in slide-in-from-left-2',
+                scanFeedback.type === 'success' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600'
+              )}>
+                {scanFeedback.message}
+              </span>
+            )}
           </div>
 
           {/* Progress summary */}
@@ -747,23 +818,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                   </div>
                 </div>
 
-                {/* Action row: search, barcode, filters */}
+                {/* Action row: search, filters */}
                 <div className="flex items-center gap-2 mt-3 flex-wrap">
-                  {/* Barcode input */}
-                  <form onSubmit={handleBarcodeSubmit} className="flex items-center gap-1.5">
-                    <div className="relative">
-                      <ScanBarcode className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--dashboard-muted)]" />
-                      <Input
-                        ref={barcodeRef}
-                        type="text"
-                        placeholder="Barkod okut / ara"
-                        value={barcodeInput}
-                        onChange={(e) => setBarcodeInput(e.target.value)}
-                        className="pl-9 h-9 w-40 sm:w-56 text-sm"
-                      />
-                    </div>
-                  </form>
-
                   {/* Search */}
                   <div className="relative flex-1 min-w-[120px] max-w-[240px]">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--dashboard-muted)]" />
