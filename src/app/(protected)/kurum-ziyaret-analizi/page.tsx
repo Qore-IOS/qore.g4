@@ -69,15 +69,27 @@ interface PersonnelVisitRecord {
 }
 
 function logFirestoreIndexHint(error: unknown, context: string) {
-  const message = (error as { message?: string } | null)?.message || '';
+  const err = (error as { message?: string; code?: string; name?: string } | null) || {};
+  const message = err.message || '';
+  const code = err.code || 'unknown';
+  const name = err.name || 'UnknownError';
   const indexUrlMatch = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
+
+  console.error(`[${context}] Firestore sorgu hatası`, { code, name, message });
+
   if (indexUrlMatch) {
     console.error(`[${context}] Firestore index gerekli. Oluşturma linki: ${indexUrlMatch[0]}`);
     return;
   }
 
-  if ((error as { code?: string } | null)?.code === 'failed-precondition') {
+  if (code === 'failed-precondition') {
     console.error(`[${context}] Firestore sorgusu index bekliyor. Hata:`, error);
+    console.error(`[${context}] Hata mesajında otomatik index linki bulunamadı. Firebase Console > Firestore > Indexes bölümünden kontrol edin.`);
+    return;
+  }
+
+  if (code.includes('cors') || message.toLowerCase().includes('cors') || message.includes('ERR_FAILED') || message.includes('302')) {
+    console.error(`[${context}] Bu hata index değil, ağ/CORS/proxy kaynaklı görünüyor. Index linki bu yüzden üretilemiyor.`);
   }
 }
 
