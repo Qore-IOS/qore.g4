@@ -21,6 +21,8 @@ import { readExcelDataSmart, exportDataToExcel } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import type { Asset, Depot, Hospital } from '@/lib/types';
 import LabelPrinter from '@/components/yonetim/LabelPrinter';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 
 const iconMap: Record<string, React.ElementType> = {
@@ -65,6 +67,7 @@ interface Location {
 
 export default function EnvanterYonetimiPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -88,12 +91,33 @@ export default function EnvanterYonetimiPage() {
             getDocs(collection(db, 'depots')),
             getDocs(collection(db, 'vehicles')),
         ]);
-        setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)));
-        setAssets(assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-        setVehicleCount(vehiclesSnap.size);
+        setCategories(filterByCompanyScope(
+          categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)),
+          currentCompanyId,
+          isSuperAdmin
+        ));
+        setAssets(filterByCompanyScope(
+          assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)),
+          currentCompanyId,
+          isSuperAdmin
+        ));
+        const scopedVehicles = filterByCompanyScope(
+          vehiclesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        setVehicleCount(scopedVehicles.length);
 
-        const hospitalLocations = hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string }));
-        const depotLocations = depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string }));
+        const hospitalLocations = filterByCompanyScope(
+          hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string })),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        const depotLocations = filterByCompanyScope(
+          depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string })),
+          currentCompanyId,
+          isSuperAdmin
+        );
         setLocations([...hospitalLocations, ...depotLocations].sort((a, b) => a.name.localeCompare(b.name)));
 
     } catch (e) {
@@ -101,7 +125,7 @@ export default function EnvanterYonetimiPage() {
     } finally {
         setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -140,7 +164,7 @@ export default function EnvanterYonetimiPage() {
       if (editingCategory.id) {
         await setDoc(doc(db, 'assetCategories', editingCategory.id), data, { merge: true });
       } else {
-        await addDoc(collection(db, 'assetCategories'), data);
+        await addDoc(collection(db, 'assetCategories'), withCompanyScope(data, currentUserProfile?.companyId));
       }
       toast({ title: 'Başarılı', description: 'Kategori kaydedildi.' });
       setIsModalOpen(false);
@@ -232,7 +256,7 @@ export default function EnvanterYonetimiPage() {
           batch.set(doc(db, 'assets', existingAsset.id), assetData, { merge: true });
           updatedCount++;
         } else {
-          batch.set(doc(collection(db, 'assets')), assetData);
+          batch.set(doc(collection(db, 'assets')), withCompanyScope(assetData, currentUserProfile?.companyId));
           newCount++;
         }
       }
@@ -264,7 +288,7 @@ export default function EnvanterYonetimiPage() {
             const categoryName = String(row['Kategori Adı'] || Object.values(row)[0] || '').trim();
             if (categoryName && !existingCategoryNames.has(categoryName.toLowerCase())) {
                 const newDocRef = doc(collection(db, 'assetCategories'));
-                batch.set(newDocRef, { name: categoryName });
+                batch.set(newDocRef, withCompanyScope({ name: categoryName }, currentUserProfile?.companyId));
                 existingCategoryNames.add(categoryName.toLowerCase());
                 newCount++;
             }

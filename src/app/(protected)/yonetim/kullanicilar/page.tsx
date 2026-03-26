@@ -19,6 +19,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 type NotificationTypeUI =
   | 'order_created'
@@ -65,7 +66,7 @@ function cleanFirestoreData<T extends Record<string, any>>(data: T): Partial<T> 
 
 export default function KullaniciPanel() {
   const { toast } = useToast();
-  const { signup, currentUserProfile, isSuperAdmin } = useAuth();
+  const { signup, currentUserProfile, isSuperAdmin, currentCompanyId } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -86,9 +87,21 @@ export default function KullaniciPanel() {
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'companies'))
       ]);
-      setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
-      setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
+      setUsers(filterByCompanyScope(
+        uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
+      setHospitals(filterByCompanyScope(
+        hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
+      setDepots(filterByCompanyScope(
+        dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
       setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
       const productCodes = pSnap.docs.map(d => d.data() as ProductCode);
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
@@ -99,7 +112,7 @@ export default function KullaniciPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -165,7 +178,7 @@ export default function KullaniciPanel() {
           setIsLoading(false);
           return;
         }
-        await signup(currentUser.email, password, payload);
+        await signup(currentUser.email, password, withCompanyScope(payload, currentUser.companyId || currentUserProfile?.companyId));
         toast({ title: 'Başarılı', description: 'Yeni kullanıcı oluşturuldu.' });
       }
       fetchData();

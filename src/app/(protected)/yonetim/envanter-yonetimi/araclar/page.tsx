@@ -17,6 +17,8 @@ import BackButton from '@/components/BackButton';
 import type { User as AppUser } from '@/lib/types';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Kullanılabilir araç ikonları - /public/vehicles/ klasöründen
 const VEHICLE_ICONS = [
@@ -39,6 +41,7 @@ interface Vehicle {
 
 export default function AraclarPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,13 +57,19 @@ export default function AraclarPage() {
       ]);
 
       setVehicles(
-        vehiclesSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Vehicle))
+        filterByCompanyScope(
+          vehiclesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Vehicle)),
+          currentCompanyId,
+          isSuperAdmin
+        )
           .sort((a, b) => a.plaka.localeCompare(b.plaka))
       );
 
-      const driverUsers = usersSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as AppUser))
+      const driverUsers = filterByCompanyScope(
+        usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),
+        currentCompanyId,
+        isSuperAdmin
+      )
         .filter(u => (u as any).role === 'driver');
       setDrivers(driverUsers);
     } catch (e) {
@@ -68,7 +77,7 @@ export default function AraclarPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -112,6 +121,7 @@ export default function AraclarPage() {
         await addDoc(collection(db, 'vehicles'), {
           ...dataToSave,
           createdAt: new Date(),
+          companyId: currentUserProfile?.companyId || currentCompanyId,
         });
       }
       toast({ title: 'Başarılı', description: 'Araç kaydedildi.' });

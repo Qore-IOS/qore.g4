@@ -18,6 +18,8 @@ import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 interface HakEdisDefinition {
   id: string;
@@ -29,6 +31,7 @@ interface HakEdisDefinition {
 
 export default function HakEdisPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
 
   // Laboratuvar seçimi
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -66,7 +69,11 @@ export default function HakEdisPage() {
           getDocs(query(collection(db, 'hospitals'), orderBy('name', 'asc'))),
           getDocs(query(collection(db, 'productCodes'), orderBy('stokAdi', 'asc'))),
         ]);
-        setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
+        setHospitals(filterByCompanyScope(
+          hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)),
+          currentCompanyId,
+          isSuperAdmin
+        ));
         setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       } catch (error) {
         console.error("Error fetching master data:", error);
@@ -76,7 +83,7 @@ export default function HakEdisPage() {
       }
     };
     fetchMasterData();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   // Listen for hak ediş definitions when a lab is selected
   useEffect(() => {
@@ -92,7 +99,11 @@ export default function HakEdisPage() {
     );
 
     const unsubscribe = onSnapshot(hakEdisQuery, (snapshot) => {
-      setHakEdisDefinitions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HakEdisDefinition)));
+      setHakEdisDefinitions(filterByCompanyScope(
+        snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HakEdisDefinition)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
       setLoading(prev => ({ ...prev, definitions: false }));
     }, (error) => {
       console.error("Error fetching hak ediş definitions:", error);
@@ -101,7 +112,7 @@ export default function HakEdisPage() {
     });
 
     return () => unsubscribe();
-  }, [selectedLabId, toast]);
+  }, [selectedLabId, toast, currentCompanyId, isSuperAdmin]);
 
   // Fetch exchange rates
   useEffect(() => {
@@ -159,6 +170,7 @@ export default function HakEdisPage() {
         sutTestAdi: newSutTestAdi.trim(),
         linkedStokKodu: newLinkedStokKodu.trim(),
         hakEdisMiktari: hakEdis,
+        companyId: currentUserProfile?.companyId || currentCompanyId,
       });
 
       toast({ title: 'Başarılı', description: 'Hak ediş tanımı eklendi.' });

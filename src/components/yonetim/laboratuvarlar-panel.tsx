@@ -20,6 +20,8 @@ import SharedLabPoolModal from '@/components/SharedLabPoolModal';
 import EfficiencyPoolModal from '@/components/EfficiencyPoolModal';
 import ProductOrderModal from '@/components/ProductOrderModal';
 import { exportDataToExcel } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
@@ -30,6 +32,7 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 
 export default function LaboratuvarPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
@@ -74,19 +77,19 @@ export default function LaboratuvarPanel() {
         getDocs(collection(db, 'depoStok')),
         getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
       ]);
-      setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
+      setHospitals(filterByCompanyScope(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setAddressDefinitions(addrSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
-      setLabPools(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
+      setAddressDefinitions(filterByCompanyScope(addrSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
+      setLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)), currentCompanyId, isSuperAdmin));
       setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
-      setEfficiencyPools(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)));
+      setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchHospitalsAndProducts();
@@ -160,18 +163,18 @@ export default function LaboratuvarPanel() {
         toast({ title: 'Başarılı', description: 'Laboratuvar güncellendi.' });
       } else {
         const newRef = doc(collection(db, 'hospitals'));
-        await setDoc(newRef, { ...dataToSave, createdAt: new Date() });
+        await setDoc(newRef, withCompanyScope({ ...dataToSave, createdAt: new Date() }, currentUserProfile?.companyId));
         
         if (hospitalSubPoints.length > 0) {
             const batch = writeBatch(db);
             hospitalSubPoints.forEach(sp => {
                 const spRef = doc(collection(db, 'hospitals', newRef.id, 'subPoints'));
-                batch.set(spRef, {
+                batch.set(spRef, withCompanyScope({
                     name: sp.name,
                     isActive: true,
                     createdAt: Timestamp.now(),
                     updatedAt: Timestamp.now(),
-                });
+                }, currentUserProfile?.companyId));
             });
             await batch.commit();
         }
@@ -210,12 +213,12 @@ export default function LaboratuvarPanel() {
     if (isEditingHospital && currentHospital?.id) {
         setIsSavingSubPoint(true);
         try {
-            const newDocRef = await addDoc(collection(db, 'hospitals', currentHospital.id, 'subPoints'), {
+            const newDocRef = await addDoc(collection(db, 'hospitals', currentHospital.id, 'subPoints'), withCompanyScope({
                 name,
                 isActive: true,
                 createdAt: Timestamp.now(),
                 updatedAt: Timestamp.now(),
-            });
+            }, currentUserProfile?.companyId));
             setHospitalSubPoints(prev => [...prev, { id: newDocRef.id, name, isActive: true }].sort((a,b)=>a.name.localeCompare(b.name)));
             setNewSubPointName('');
             toast({ title: 'Alt Nokta', description: 'Alt tüketim noktası eklendi.' });

@@ -15,6 +15,8 @@ import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp
 import BackButton from '@/components/BackButton';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 type ExpenseCategory =
   | 'Ulaşım'
@@ -49,6 +51,7 @@ type ExpenseRequest = {
 
 export default function MasrafYonetimiOnayPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [requests, setRequests] = useState<ExpenseRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
@@ -59,7 +62,11 @@ export default function MasrafYonetimiOnayPage() {
     const q = query(collection(db, 'expensePeriods'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExpenseRequest));
+        const data = filterByCompanyScope(
+          snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExpenseRequest)),
+          currentCompanyId,
+          isSuperAdmin
+        );
         setRequests(data);
         setLoading(false);
       }, 
@@ -70,7 +77,7 @@ export default function MasrafYonetimiOnayPage() {
       }
     );
     return () => unsubscribe();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   const filteredRequests = useMemo(() => {
     return requests.filter(req => req.status === activeTab);

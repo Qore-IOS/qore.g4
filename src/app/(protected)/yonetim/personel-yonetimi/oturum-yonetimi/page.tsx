@@ -23,6 +23,7 @@ import {
 } from 'firebase/firestore';
 import BackButton from '@/components/BackButton';
 import Link from 'next/link';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 type AppUser = {
   id: string;
@@ -41,7 +42,7 @@ type PersonnelGroup = {
 };
 
 export default function OturumYonetimiPage() {
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [groups, setGroups] = useState<PersonnelGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,8 +52,11 @@ export default function OturumYonetimiPage() {
   useEffect(() => {
     const q = query(collection(db, 'users'), orderBy('name'));
     const unsub = onSnapshot(q, (snap) => {
-      const list: AppUser[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) }));
+      const list = filterByCompanyScope(
+        snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as AppUser)),
+        currentCompanyId,
+        isSuperAdmin
+      );
       setUsers(list);
       setLoading(false);
     }, (err) => {
@@ -60,18 +64,21 @@ export default function OturumYonetimiPage() {
         setLoading(false);
     });
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Fetch existing groups
   useEffect(() => {
     const q = query(collection(db, 'personelGruplari'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, (snap) => {
-      const list: PersonnelGroup[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) }));
+      const list = filterByCompanyScope(
+        snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as PersonnelGroup)),
+        currentCompanyId,
+        isSuperAdmin
+      );
       setGroups(list);
     });
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   return (
     <div className="p-6 space-y-6">
@@ -191,13 +198,13 @@ function GroupDialog({ users, currentUserId }: { users: AppUser[]; currentUserId
     }
     try {
       setSaving(true);
-      await addDoc(collection(db, 'personelGruplari'), {
+      await addDoc(collection(db, 'personelGruplari'), withCompanyScope({
         name: groupName.trim(),
         memberIds: Array.from(selected),
         autoLogoutTime: autoLogoutTime || null,
         createdAt: serverTimestamp(),
         createdBy: currentUserId || null,
-      });
+      }, currentCompanyId));
       setSaving(false);
       setOpen(false);
       setGroupName('');
