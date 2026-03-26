@@ -9,7 +9,7 @@ import { Loader2, QrCode, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { doc, getDoc, collection, getDocs, updateDoc, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { companyQuery } from '@/lib/company-filter';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import BackButton from '@/components/BackButton';
 import QRCode from 'qrcode';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -76,8 +76,8 @@ export default function AssetDetailPage() {
       try {
         const [assetDocSnap, labsSnap, depotsSnap] = await Promise.all([
           getDoc(doc(db, 'assets', assetId)),
-          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
-          getDocs(companyQuery(db, 'depots', currentCompanyId)),
+          getDocs(collection(db, 'hospitals')),
+          getDocs(collection(db, 'depots')),
         ]);
 
         if (assetDocSnap.exists()) {

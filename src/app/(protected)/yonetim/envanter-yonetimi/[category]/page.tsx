@@ -15,11 +15,9 @@ import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import BackButton from '@/components/BackButton';
 import type { Hospital, Depot, Asset } from '@/lib/types';
-import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -95,7 +93,7 @@ export default function AssetCategoryPage() {
   const router = useRouter();
   const categoryName = decodeURIComponent(Array.isArray(params.category) ? params.category[0] : params.category || '');
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<{ value: string; label: string }[]>([]);
@@ -123,8 +121,8 @@ export default function AssetCategoryPage() {
     try {
       // Fetch locations (labs and depots)
       const [labsSnap, depotsSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
-        getDocs(companyQuery(db, 'depots', currentCompanyId)),
+        getDocs(collection(db, 'hospitals')),
+        getDocs(collection(db, 'depots')),
       ]);
       const labLocations = filterByCompanyScope(
         labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}`, companyId: (doc.data() as any).companyId })),
@@ -139,7 +137,7 @@ export default function AssetCategoryPage() {
       setLocations([...labLocations, ...depotLocations, { value: 'Diğer', label: 'Diğer (Manuel Giriş)' }].sort((a,b) => a.label.localeCompare(b.label)));
 
       // Fetch assets for the current category
-      const assetsSnap = await getDocs(companyQuery(db, 'assets', currentCompanyId, where('category', '==', categoryName)));
+      const assetsSnap = await getDocs(query(collection(db, 'assets'), where('category', '==', categoryName)));
       setAssets(assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)));
 
     } catch (e) {
@@ -175,9 +173,9 @@ export default function AssetCategoryPage() {
     
     try {
       if (editingAsset.id) {
-        await setDoc(doc(db, 'assets', editingAsset.id), companyStamp(dataToSave as Record<string, any>, currentCompanyId, 'assets'), { merge: true });
+        await setDoc(doc(db, 'assets', editingAsset.id), withCompanyScope(dataToSave as Record<string, any>, currentCompanyId), { merge: true });
       } else {
-        await addDoc(collection(db, 'assets'), companyStamp(dataToSave as Record<string, any>, currentCompanyId, 'assets'));
+        await addDoc(collection(db, 'assets'), withCompanyScope(dataToSave as Record<string, any>, currentCompanyId));
       }
       toast({ title: 'Başarılı', description: 'Envanter kalemi kaydedildi.' });
       setIsModalOpen(false);
