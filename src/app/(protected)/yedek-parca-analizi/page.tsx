@@ -64,6 +64,19 @@ interface PartDetail {
   changeHistory: ChangeHistoryEntry[];
 }
 
+function logFirestoreIndexHint(error: unknown, context: string) {
+  const message = (error as { message?: string } | null)?.message || '';
+  const indexUrlMatch = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
+  if (indexUrlMatch) {
+    console.error(`[${context}] Firestore index gerekli. Oluşturma linki: ${indexUrlMatch[0]}`);
+    return;
+  }
+
+  if ((error as { code?: string } | null)?.code === 'failed-precondition') {
+    console.error(`[${context}] Firestore sorgusu index bekliyor. Hata:`, error);
+  }
+}
+
 export default function YedekParcaAnaliziPage() {
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth();
@@ -137,6 +150,7 @@ export default function YedekParcaAnaliziPage() {
           }), currentCompanyId, isSuperAdmin)
         );
       } catch (error) {
+        logFirestoreIndexHint(error, 'yedek-parca-analizi/fetchData');
         console.error('Yedek parça analizi veri hatası:', error);
       } finally {
         setLoading(false);
@@ -240,6 +254,7 @@ export default function YedekParcaAnaliziPage() {
         changeHistory,
       });
     } catch (error) {
+      logFirestoreIndexHint(error, 'yedek-parca-analizi/selectPart');
       console.error('Parça detay hatası:', error);
     } finally {
       setDetailLoading(false);

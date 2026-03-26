@@ -68,6 +68,19 @@ interface PersonnelVisitRecord {
   source: 'form' | 'fault';
 }
 
+function logFirestoreIndexHint(error: unknown, context: string) {
+  const message = (error as { message?: string } | null)?.message || '';
+  const indexUrlMatch = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
+  if (indexUrlMatch) {
+    console.error(`[${context}] Firestore index gerekli. Oluşturma linki: ${indexUrlMatch[0]}`);
+    return;
+  }
+
+  if ((error as { code?: string } | null)?.code === 'failed-precondition') {
+    console.error(`[${context}] Firestore sorgusu index bekliyor. Hata:`, error);
+  }
+}
+
 export default function KurumZiyaretAnaliziPage() {
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth();
@@ -269,6 +282,7 @@ export default function KurumZiyaretAnaliziPage() {
           }), currentCompanyId, isSuperAdmin)
         );
       } catch (error) {
+        logFirestoreIndexHint(error, 'kurum-ziyaret-analizi/fetchData');
         console.error('Kurum ziyaret analizi veri hatası:', error);
       } finally {
         setLoading(false);
