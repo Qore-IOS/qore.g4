@@ -12,10 +12,8 @@ import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
-import BackButton from '@/components/BackButton';
-import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import BackButton from '@/components/BackButton';
 
 interface Asset {
   id: string;
@@ -37,7 +35,7 @@ export default function AssetLocationPage() {
   const router = useRouter();
   const locationName = decodeURIComponent(Array.isArray(params.locationName) ? params.locationName[0] : params.locationName || '');
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,8 +45,12 @@ export default function AssetLocationPage() {
     if (!locationName) return;
     setLoading(true);
     try {
-      const assetsSnap = await getDocs(companyQuery(db, 'assets', currentCompanyId, where('konum', '==', locationName)));
-      setAssets(assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)));
+      const assetsSnap = await getDocs(query(collection(db, 'assets'), where('konum', '==', locationName)));
+      setAssets(filterByCompanyScope(
+        assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
     } catch (e) {
       toast({ title: 'Hata', description: 'Bu konuma ait veriler yüklenemedi.', variant: 'destructive' });
     } finally {

@@ -14,13 +14,11 @@ import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import BackButton from '@/components/BackButton';
 import type { User as AppUser } from '@/lib/types';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Kullanılabilir araç ikonları - /public/vehicles/ klasöründen
 const VEHICLE_ICONS = [
@@ -54,8 +52,8 @@ export default function AraclarPage() {
     setLoading(true);
     try {
       const [vehiclesSnap, usersSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'vehicles', currentCompanyId)),
-        getDocs(companyQuery(db, 'users', currentCompanyId)),
+        getDocs(collection(db, 'vehicles')),
+        getDocs(collection(db, 'users')),
       ]);
 
       setVehicles(
@@ -118,12 +116,12 @@ export default function AraclarPage() {
 
     try {
       if (editingVehicle.id) {
-        await setDoc(doc(db, 'vehicles', editingVehicle.id), companyStamp(dataToSave as Record<string, any>, currentCompanyId, 'vehicles'), { merge: true });
+        await setDoc(doc(db, 'vehicles', editingVehicle.id), withCompanyScope(dataToSave as Record<string, any>, currentCompanyId), { merge: true });
       } else {
-        await addDoc(collection(db, 'vehicles'), companyStamp({
+        await addDoc(collection(db, 'vehicles'), withCompanyScope({
           ...dataToSave,
           createdAt: new Date(),
-        } as Record<string, any>, currentCompanyId, 'vehicles'));
+        } as Record<string, any>, currentCompanyId));
       }
       toast({ title: 'Başarılı', description: 'Araç kaydedildi.' });
       setIsModalOpen(false);
