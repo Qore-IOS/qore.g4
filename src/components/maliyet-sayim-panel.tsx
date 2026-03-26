@@ -76,6 +76,8 @@ interface BrandProgress {
   total: number;
   completed: number;
   status: 'idle' | 'in_progress' | 'completed';
+  cost: number;           // total cost for this brand based on count data
+  costCurrency: string;   // dominant currency symbol
 }
 
 type LocationType = 'lab' | 'depot';
@@ -122,6 +124,16 @@ function expiryColor(days: number | null): string {
   return '';
 }
 
+/** Calculate total cost for a single product based on count data */
+function calcProductCost(product: ProductCode, entry?: ProductCountEntry): number {
+  if (!entry || !product.cost || !product.ambalajDegeri) return 0;
+  const stokNum = parseInt(entry.stokAdedi, 10) || 0;
+  const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
+  const toplamTest = (stokNum * product.ambalajDegeri) + cihazNum;
+  if (toplamTest <= 0) return 0;
+  return (product.cost / product.ambalajDegeri) * toplamTest;
+}
+
 function getBrandsFromRules(
   minMaxRules: MinMaxRule[],
   productCodes: ProductCode[]
@@ -158,10 +170,12 @@ function BrandChecklistItem({
   brand,
   isActive,
   onClick,
+  showCost,
 }: {
   brand: BrandProgress;
   isActive: boolean;
   onClick: () => void;
+  showCost: boolean;
 }) {
   const pct = brand.total > 0 ? Math.round((brand.completed / brand.total) * 100) : 0;
 
@@ -199,6 +213,11 @@ function BrandChecklistItem({
         <span className="text-xs text-[var(--dashboard-muted)]">
           {brand.completed} / {brand.total} ürün
         </span>
+        {showCost && brand.cost > 0 && (
+          <span className="text-[10px] font-semibold text-emerald-600">
+            {brand.cost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}{brand.costCurrency}
+          </span>
+        )}
       </div>
 
       {/* Mini progress */}
@@ -570,7 +589,10 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       let status: BrandProgress['status'] = 'idle';
       if (completed > 0 && completed < products.length) status = 'in_progress';
       if (completed === products.length && products.length > 0) status = 'completed';
-      return { brand, total: products.length, completed, status };
+      const cost = products.reduce((sum, p) => sum + calcProductCost(p, countData[p.stokKodu]), 0);
+      const currencies = products.map(p => p.currency || 'TRY');
+      const costCurrency = currencies.includes('TRY') ? '₺' : currencies.includes('EUR') ? '€' : '₺';
+      return { brand, total: products.length, completed, status, cost, costCurrency };
     });
   }, [brands, countData, locationMinMaxRules, productCodes]);
 
@@ -579,6 +601,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const totalProducts = brandProgressList.reduce((s, b) => s + b.total, 0);
   const totalCounted = brandProgressList.reduce((s, b) => s + b.completed, 0);
   const overallPct = totalProducts > 0 ? Math.round((totalCounted / totalProducts) * 100) : 0;
+  const totalCost = brandProgressList.reduce((s, b) => s + b.cost, 0);
 
   // Filtered products for display
   const filteredProducts = useMemo(() => {
@@ -927,6 +950,9 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           <div className="flex items-center gap-4 ml-auto text-xs text-[var(--dashboard-muted)]">
             <span>{completedBrands} / {totalBrands} marka</span>
             <span>{totalCounted} / {totalProducts} ürün</span>
+            {canSeeCost && totalCost > 0 && (
+              <span className="font-semibold text-emerald-600">{totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}₺</span>
+            )}
             <div className="hidden sm:flex items-center gap-2">
               <div className="w-24 h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
                 <div
@@ -1001,6 +1027,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                   brand={bp}
                   isActive={bp.brand === activeBrand}
                   onClick={() => setActiveBrand(bp.brand)}
+                  showCost={canSeeCost}
                 />
               ))}
             </div>
