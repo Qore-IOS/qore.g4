@@ -21,6 +21,8 @@ import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import type { Hospital, LabPool, User } from '@/lib/types';
 import type { DateRange } from 'react-day-picker';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 interface ActionForm {
   id: string;
@@ -66,8 +68,22 @@ interface PersonnelVisitRecord {
   source: 'form' | 'fault';
 }
 
+function logFirestoreIndexHint(error: unknown, context: string) {
+  const message = (error as { message?: string } | null)?.message || '';
+  const indexUrlMatch = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
+  if (indexUrlMatch) {
+    console.error(`[${context}] Firestore index gerekli. Oluşturma linki: ${indexUrlMatch[0]}`);
+    return;
+  }
+
+  if ((error as { code?: string } | null)?.code === 'failed-precondition') {
+    console.error(`[${context}] Firestore sorgusu index bekliyor. Hata:`, error);
+  }
+}
+
 export default function KurumZiyaretAnaliziPage() {
   const router = useRouter();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [teknikForms, setTeknikForms] = useState<ActionForm[]>([]);
   const [aplikasyonForms, setAplikasyonForms] = useState<ActionForm[]>([]);
@@ -183,24 +199,33 @@ export default function KurumZiyaretAnaliziPage() {
         ]);
 
         const uMap = new Map<string, User>();
-        usersSnap.docs.forEach((d) => {
-          const data = d.data();
-          uMap.set(d.id, { uid: d.id, ...data } as User);
+        filterByCompanyScope(
+          usersSnap.docs.map((d) => ({ uid: d.id, ...d.data() } as User)),
+          currentCompanyId,
+          isSuperAdmin
+        ).forEach((user) => {
+          uMap.set(user.uid, user);
         });
         setUsersMap(uMap);
 
+        const scopedHospitals = filterByCompanyScope(
+          hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
+          currentCompanyId,
+          isSuperAdmin
+        );
         const hospitalsMap = new Map<string, Hospital>();
         const hospitalsNameMap = new Map<string, string>();
-        hospitalsSnap.docs.forEach((d) => {
-          const hospital = { id: d.id, ...d.data() } as Hospital;
-          hospitalsMap.set(d.id, hospital);
-          hospitalsNameMap.set(d.id, hospital.name || 'Bilinmiyor');
+        scopedHospitals.forEach((hospital) => {
+          hospitalsMap.set(hospital.id, hospital);
+          hospitalsNameMap.set(hospital.id, hospital.name || 'Bilinmiyor');
         });
         setHospitalNamesMap(hospitalsNameMap);
 
-        const pools: LabPool[] = deviceLabPoolsSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as LabPool))
-          .filter((p) => p.active !== false);
+        const pools: LabPool[] = filterByCompanyScope(
+          deviceLabPoolsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LabPool)),
+          currentCompanyId,
+          isSuperAdmin
+        ).filter((p) => p.active !== false);
 
         const options: LabOption[] = [];
 
@@ -224,29 +249,29 @@ export default function KurumZiyaretAnaliziPage() {
         setLabOptions(options);
 
         setTeknikForms(
-          teknikSnap.docs.map((d) => {
+          filterByCompanyScope(teknikSnap.docs.map((d) => {
             const data = d.data();
             return {
               id: d.id, createdByUid: data.createdByUid, createdByName: data.createdByName || 'Bilinmiyor',
               hospitalId: data.hospitalId, labName: data.labName, formType: 'teknik_servis' as const,
               createdAt: toDateValue(data.createdAt) || new Date(0),
             };
-          })
+          }), currentCompanyId, isSuperAdmin)
         );
 
         setAplikasyonForms(
-          appSnap.docs.map((d) => {
+          filterByCompanyScope(appSnap.docs.map((d) => {
             const data = d.data();
             return {
               id: d.id, createdByUid: data.createdByUid, createdByName: data.createdByName || 'Bilinmiyor',
               hospitalId: data.hospitalId, labName: data.labName, formType: 'aplikasyon' as const,
               createdAt: toDateValue(data.createdAt) || new Date(0),
             };
-          })
+          }), currentCompanyId, isSuperAdmin)
         );
 
         setFaultReports(
-          faultSnap.docs.map((d) => {
+          filterByCompanyScope(faultSnap.docs.map((d) => {
             const data = d.data();
             return {
               id: d.id, interventionType: data.interventionType, faultType: data.faultType,
@@ -254,9 +279,10 @@ export default function KurumZiyaretAnaliziPage() {
               labId: data.labId, labName: data.labName, status: data.status,
               closedAt: toDateValue(data.closedAt),
             };
-          })
+          }), currentCompanyId, isSuperAdmin)
         );
       } catch (error) {
+        logFirestoreIndexHint(error, 'kurum-ziyaret-analizi/fetchData');
         console.error('Kurum ziyaret analizi veri hatası:', error);
       } finally {
         setLoading(false);
@@ -264,7 +290,7 @@ export default function KurumZiyaretAnaliziPage() {
     };
 
     fetchData();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const selectedLabIdsFull = useMemo(() => {
     if (selectedLabIds.size === 0) return null;
