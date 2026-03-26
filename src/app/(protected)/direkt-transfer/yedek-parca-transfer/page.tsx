@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore';
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -178,7 +179,7 @@ interface PersonnelStockViewItem extends PersonalStockItem {
 export default function YedekParcaTransferPage() {
   const router = useRouter();
   const pathname = usePathname();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
   const depotExcelInputRef = useRef<HTMLInputElement>(null);
 
@@ -521,7 +522,7 @@ export default function YedekParcaTransferPage() {
         });
 
         const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(transferLogRef, {
+        batch.set(transferLogRef, withCompanyScope({
           action: 'depo_stock_adjusted',
           productCodeId: existing.productCodeId,
           stokKodu: existing.stokKodu,
@@ -533,7 +534,7 @@ export default function YedekParcaTransferPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
 
         updatedCount += 1;
       }
@@ -998,7 +999,7 @@ export default function YedekParcaTransferPage() {
 
             // Transfer log
             const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, {
+            batch.set(logRef, withCompanyScope({
               action: 'transfer_to_pool',
               poolStockId: poolStockRef.id,
               poolWarehouseId,
@@ -1014,7 +1015,7 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            });
+            }, currentCompanyId));
           } else {
             // Personel stokuna ekle (onay bekliyor olarak)
             const stockRef = doc(collection(db, 'personalStock'));
@@ -1036,7 +1037,7 @@ export default function YedekParcaTransferPage() {
 
             // Transfer log
             const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, {
+            batch.set(logRef, withCompanyScope({
               action: 'transfer_to_personnel',
               personalStockId: stockRef.id,
               productCodeId: row.productCodeId,
@@ -1051,7 +1052,7 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            });
+            }, currentCompanyId));
           }
 
           // Depo log
@@ -1119,7 +1120,7 @@ export default function YedekParcaTransferPage() {
 
             // Transfer log
             const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, {
+            batch.set(logRef, withCompanyScope({
               action: 'transfer_to_pool',
               poolWarehouseId,
               poolWarehouseName: row.targetName,
@@ -1133,7 +1134,7 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            });
+            }, currentCompanyId));
           } else {
             // Personel stokuna ekle (onay bekliyor olarak)
             for (let i = 0; i < row.quantity; i++) {
@@ -1156,7 +1157,7 @@ export default function YedekParcaTransferPage() {
 
             // Transfer log
             const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, {
+            batch.set(logRef, withCompanyScope({
               action: 'transfer_to_personnel',
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
@@ -1169,7 +1170,7 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            });
+            }, currentCompanyId));
           }
 
           // Depo log
@@ -1337,7 +1338,7 @@ export default function YedekParcaTransferPage() {
         }
 
         const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(logRef, {
+        batch.set(logRef, withCompanyScope({
           action: 'transfer_to_personnel',
           productCodeId: '',
           stokKodu: row.stokKodu,
@@ -1352,7 +1353,7 @@ export default function YedekParcaTransferPage() {
           createdByName: currentUserProfile?.name || '',
           notes: 'Manuel stok girişi',
           manualEntry: true,
-        });
+        }, currentCompanyId));
       });
 
       await batch.commit();
@@ -1450,7 +1451,7 @@ export default function YedekParcaTransferPage() {
       });
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(transferLogRef, {
+      batch.set(transferLogRef, withCompanyScope({
         action: 'depo_stock_adjusted',
         productCodeId: editingDepoGroup.productCodeId,
         stokKodu: editingDepoGroup.stokKodu,
@@ -1463,7 +1464,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       await batch.commit();
       setEditingDepoGroup(null);
@@ -1511,7 +1512,7 @@ export default function YedekParcaTransferPage() {
       });
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(transferLogRef, {
+      batch.set(transferLogRef, withCompanyScope({
         action: 'depo_serial_deleted',
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
@@ -1522,7 +1523,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       await batch.commit();
       await fetchDepoStok();
@@ -1573,7 +1574,7 @@ export default function YedekParcaTransferPage() {
       });
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(transferLogRef, {
+      batch.set(transferLogRef, withCompanyScope({
         action: 'depo_stock_deleted_admin',
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
@@ -1585,7 +1586,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       await batch.commit();
       await fetchDepoStok();
@@ -1614,7 +1615,7 @@ export default function YedekParcaTransferPage() {
       const now = new Date();
       await deleteDoc(doc(db, 'personalStock', item.id));
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'personnel_stock_deleted_admin',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -1629,7 +1630,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       if (menuSelection.personnelUid) {
         await fetchPersonnelStock(menuSelection.personnelUid);
@@ -1657,7 +1658,7 @@ export default function YedekParcaTransferPage() {
       const now = new Date();
       await deleteDoc(doc(db, 'poolWarehouseStock', item.id));
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'pool_stock_deleted_admin',
         poolStockId: item.id,
         poolWarehouseId: item.poolWarehouseId,
@@ -1672,7 +1673,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       if (menuSelection.poolWarehouseId) {
         await fetchPoolStock(menuSelection.poolWarehouseId);
@@ -1742,7 +1743,7 @@ export default function YedekParcaTransferPage() {
       }
 
       // Create log entry
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: pendingReturn.returnType === 'return_to_depot' ? 'return_confirmed' : 'submit_confirmed',
         personalStockId: pendingReturn.personalStockId,
         stokKodu: pendingReturn.stokKodu,
@@ -1754,7 +1755,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       toast({
         title: 'Teslim Alındı',
@@ -1789,7 +1790,7 @@ export default function YedekParcaTransferPage() {
       });
 
       if (borrowed.sourceType === 'depot') {
-        await addDoc(collection(db, 'sparePartTransferLogs'), {
+        await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
           action: 'use_on_device',
           borrowedPartId: borrowed.id,
           stokKodu: borrowed.stokKodu,
@@ -1809,9 +1810,9 @@ export default function YedekParcaTransferPage() {
           approvedByUid: currentUserProfile?.uid || '',
           approvedByName: currentUserProfile?.name || '',
           usageImageUrl: borrowed.usedPartImageUrl || null,
-        });
+        }, currentCompanyId));
       } else {
-        await addDoc(collection(db, 'sparePartTransferLogs'), {
+        await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
           action: 'borrowed_approved',
           stokKodu: borrowed.stokKodu,
           stokAdi: borrowed.stokAdi,
@@ -1824,7 +1825,7 @@ export default function YedekParcaTransferPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       toast({
@@ -1872,7 +1873,7 @@ export default function YedekParcaTransferPage() {
         });
       }
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'borrowed_rejected',
         stokKodu: borrowed.stokKodu,
         stokAdi: borrowed.stokAdi,
@@ -1885,7 +1886,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       toast({
         title: 'Reddedildi',
@@ -1928,7 +1929,7 @@ export default function YedekParcaTransferPage() {
         previousOwnerName: item.ownerName,
       });
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'transfer_between_personnel',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -1944,7 +1945,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile.uid,
         createdByName: currentUserProfile.name,
-      });
+      }, currentCompanyId));
 
       toast({
         title: 'Üzerinize Alındı',
@@ -1973,7 +1974,7 @@ export default function YedekParcaTransferPage() {
         approvedAt: Timestamp.fromDate(now),
       });
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'transfer_approved',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -1987,7 +1988,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       toast({
         title: 'Onaylandı',
@@ -2032,7 +2033,7 @@ export default function YedekParcaTransferPage() {
 
       // Transfer log
       const logRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(logRef, {
+      batch.set(logRef, withCompanyScope({
         action: 'transfer_rejected',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -2047,7 +2048,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       // Depo log
       const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
