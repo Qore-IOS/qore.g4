@@ -915,8 +915,10 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   // ---- Voice counting: SpeechRecognition lifecycle ----
   const toggleVoice = useCallback(() => {
     if (voiceActive) {
-      // Stop
-      recognitionRef.current?.stop();
+      // Stop - clear ref BEFORE stop() so onend doesn't auto-restart
+      const ref = recognitionRef.current;
+      recognitionRef.current = null;
+      ref?.stop();
       setVoiceActive(false);
       setVoiceTranscript('');
       return;
