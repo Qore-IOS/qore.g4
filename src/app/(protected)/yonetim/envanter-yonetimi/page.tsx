@@ -92,7 +92,7 @@ export default function EnvanterYonetimiPage() {
             getDocs(collection(db, 'vehicles')),
         ]);
         setCategories(filterByCompanyScope(
-          categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)),
+          categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), name: doc.data().name } as AssetCategory)),
           currentCompanyId,
           isSuperAdmin
         ));
@@ -109,12 +109,12 @@ export default function EnvanterYonetimiPage() {
         setVehicleCount(scopedVehicles.length);
 
         const hospitalLocations = filterByCompanyScope(
-          hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string })),
+          hospitalsSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), name: (doc.data() as Hospital).name as string })),
           currentCompanyId,
           isSuperAdmin
         );
         const depotLocations = filterByCompanyScope(
-          depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string })),
+          depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), name: (doc.data() as Depot).name as string })),
           currentCompanyId,
           isSuperAdmin
         );

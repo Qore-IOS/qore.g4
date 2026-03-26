@@ -267,6 +267,7 @@ export default function KurumZiyaretAnaliziPage() {
               id: d.id, createdByUid: data.createdByUid, createdByName: data.createdByName || 'Bilinmiyor',
               hospitalId: data.hospitalId, labName: data.labName, formType: 'teknik_servis' as const,
               createdAt: toDateValue(data.createdAt) || new Date(0),
+              companyId: data.companyId,
             };
           }), currentCompanyId, isSuperAdmin)
         );
@@ -278,6 +279,7 @@ export default function KurumZiyaretAnaliziPage() {
               id: d.id, createdByUid: data.createdByUid, createdByName: data.createdByName || 'Bilinmiyor',
               hospitalId: data.hospitalId, labName: data.labName, formType: 'aplikasyon' as const,
               createdAt: toDateValue(data.createdAt) || new Date(0),
+              companyId: data.companyId,
             };
           }), currentCompanyId, isSuperAdmin)
         );
@@ -290,6 +292,7 @@ export default function KurumZiyaretAnaliziPage() {
               assignedToUid: data.assignedToUid, assignedToName: data.assignedToName,
               labId: data.labId, labName: data.labName, status: data.status,
               closedAt: toDateValue(data.closedAt),
+              companyId: data.companyId,
             };
           }), currentCompanyId, isSuperAdmin)
         );

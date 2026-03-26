@@ -158,6 +158,7 @@ export default function YedekParcaAnaliziPage() {
               createdByUid: data.createdByUid || '', createdByName: data.createdByName || 'Bilinmiyor',
               createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
               formType: data.formType,
+              companyId: data.companyId,
             };
           }), currentCompanyId, isSuperAdmin)
         );
