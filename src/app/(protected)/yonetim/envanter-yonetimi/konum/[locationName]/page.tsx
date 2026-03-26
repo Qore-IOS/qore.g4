@@ -11,6 +11,8 @@ import { Loader2, Search, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery } from '@/lib/company-filter';
 import BackButton from '@/components/BackButton';
 
 interface Asset {
@@ -33,6 +35,7 @@ export default function AssetLocationPage() {
   const router = useRouter();
   const locationName = decodeURIComponent(Array.isArray(params.locationName) ? params.locationName[0] : params.locationName || '');
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,15 +45,14 @@ export default function AssetLocationPage() {
     if (!locationName) return;
     setLoading(true);
     try {
-      const assetsQuery = query(collection(db, 'assets'), where('konum', '==', locationName));
-      const assetsSnap = await getDocs(assetsQuery);
+      const assetsSnap = await getDocs(companyQuery(db, 'assets', currentCompanyId, where('konum', '==', locationName)));
       setAssets(assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)));
     } catch (e) {
       toast({ title: 'Hata', description: 'Bu konuma ait veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [locationName, toast]);
+  }, [locationName, toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();

@@ -183,7 +183,7 @@ export default function CihazYonetimiHost() {
       ] = await Promise.all([
         getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
         getDocs(companyQuery(db, 'devices', currentCompanyId)),
-        getDocs(collection(db, 'hospitalDeviceAssignments')),
+        getDocs(companyQuery(db, 'hospitalDeviceAssignments', currentCompanyId)),
         getDocs(companyQuery(db, 'users', currentCompanyId)),
         getDocs(companyQuery(db, 'personnelAvailability', currentCompanyId)),
         getDocs(companyQuery(db, 'deviceFaultReports', currentCompanyId)),

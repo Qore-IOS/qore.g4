@@ -180,7 +180,7 @@ export default function KurumZiyaretAnaliziPage() {
           getDocs(companyQuery(db, 'teknikServisActionForms', currentCompanyId, orderBy('createdAt', 'desc'))),
           getDocs(companyQuery(db, 'aplikasyonActionForms', currentCompanyId, orderBy('createdAt', 'desc'))),
           getDocs(companyQuery(db, 'deviceFaultReports', currentCompanyId, orderBy('openedAt', 'desc'))),
-          getDocs(collection(db, 'users')),
+          getDocs(companyQuery(db, 'users', currentCompanyId)),
           getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
           getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId)),
         ]);
