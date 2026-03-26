@@ -26,6 +26,7 @@ import { db } from '@/lib/firebase';
 import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
 import {
   Dialog,
@@ -48,7 +49,7 @@ export default function AplikasyonPaneliDetayPage() {
   const hospitalId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
@@ -489,7 +490,7 @@ export default function AplikasyonPaneliDetayPage() {
         requestedByName: currentUserProfile.displayName || currentUser.email || '',
       });
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'return_to_depot',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -500,7 +501,7 @@ export default function AplikasyonPaneliDetayPage() {
         performedByName: currentUserProfile.displayName || currentUser.email || '',
         timestamp: serverTimestamp(),
         details: `${item.stokAdi} (${item.serialNumber}) depoya iade talebi oluşturuldu.`,
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Başarılı', description: 'Depoya iade talebi oluşturuldu.' });
       loadPersonalStock();
@@ -540,7 +541,7 @@ export default function AplikasyonPaneliDetayPage() {
         requestedByName: currentUserProfile.displayName || currentUser.email || '',
       });
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'submit_to_depot',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -551,7 +552,7 @@ export default function AplikasyonPaneliDetayPage() {
         performedByName: currentUserProfile.displayName || currentUser.email || '',
         timestamp: serverTimestamp(),
         details: `${item.stokAdi} (${item.serialNumber}) depoya teslim talebi oluşturuldu. Kaynak cihaz: ${item.sourceDeviceName || 'Bilinmiyor'}`,
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Başarılı', description: 'Depoya teslim talebi oluşturuldu.' });
       loadPersonalStock();

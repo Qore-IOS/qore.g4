@@ -16,6 +16,7 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import type { ProductCode, Depot } from '@/lib/types';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -59,7 +60,7 @@ export default function HavuzStokGirisPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const poolWarehouseId = searchParams.get('poolWarehouseId') || '';
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -490,7 +491,7 @@ export default function HavuzStokGirisPage() {
 
       // Log entries
       for (const row of rows) {
-        await addDoc(collection(db, 'sparePartTransferLogs'), {
+        await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
           action: 'pool_stock_entry',
           poolWarehouseId,
           poolWarehouseName: poolWarehouse.name,
@@ -507,7 +508,7 @@ export default function HavuzStokGirisPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       toast({
