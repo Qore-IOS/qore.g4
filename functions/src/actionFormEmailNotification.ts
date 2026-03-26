@@ -87,62 +87,76 @@ function getTransporter() {
   });
 }
 
-// --- PDF Generation ---
-function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyon'): Buffer {
+// --- PDF Generation (matching client-side template) ---
+function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyon', formId: string): Buffer {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const padX = 40;
+  const FONT = 'helvetica';
 
-  doc.setFont('helvetica');
+  const ORANGE = { r: 199, g: 137, b: 65 };
 
-  // --- Header ---
+  doc.setFont(FONT);
+
+  // --- Orange page border ---
+  doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+  doc.setLineWidth(2);
+  doc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
+
+  // --- HEADER ---
+  const headerY = 30;
+  doc.setTextColor(0, 0, 0);
   doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(FONT, 'bold');
   const title = formType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu';
-  doc.text(title, padX, 40);
+  doc.text(title, padX, headerY + 20);
 
-  // --- Form Info ---
+  // --- FORM INFO SECTION ---
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  let currentY = 60;
+  doc.setFont(FONT, 'normal');
+  let currentY = 100;
 
-  // Build personnel string
+  // Build personnel string with accompanying personnel
   let personnelStr = data.createdByName || '-';
   if (data.eslikEdenPersonel && data.eslikEdenPersonel.length > 0) {
     const eslikNames = data.eslikEdenPersonel.map((p: any) => p.name).join(', ');
     personnelStr += ` (Eslik Eden: ${eslikNames})`;
   }
 
-  const createdAtStr = data.createdAt?.toDate
-    ? formatDate(data.createdAt.toDate())
-    : (data.createdAt?._seconds ? formatDate(new Date(data.createdAt._seconds * 1000)) : '-');
+  // Use baslangicTarihi if available, otherwise createdAt
+  let dateStr: string;
+  if (data.baslangicTarihi && data.baslangicSaati) {
+    const parts = data.baslangicTarihi.split('-');
+    dateStr = `${parts[2]}.${parts[1]}.${parts[0]} ${data.baslangicSaati}`;
+  } else {
+    dateStr = data.createdAt?.toDate
+      ? formatDate(data.createdAt.toDate())
+      : (data.createdAt?._seconds ? formatDate(new Date(data.createdAt._seconds * 1000)) : '-');
+  }
 
-  const info = [
+  const info: string[][] = [
+    ['Form No:', formId],
     ['Laboratuvar:', data.labName || '-'],
     ['Cihaz:', `${data.cihazAdi || '-'} (SN: ${data.seriNumarasi || '-'})`],
     ['Islemi Yapan:', personnelStr],
-    ['Tarih / Saat:', createdAtStr],
+    ['Tarih / Saat:', dateStr],
   ];
-
-  if (data.baslangicTarihi && data.baslangicSaati) {
-    info.push(['Baslangic:', `${data.baslangicTarihi} ${data.baslangicSaati}`]);
-  }
-  if (data.bitisTarihi && data.bitisSaati) {
-    info.push(['Bitis:', `${data.bitisTarihi} ${data.bitisSaati}`]);
-  }
 
   autoTable(doc, {
     body: info,
     startY: currentY,
     theme: 'plain',
-    styles: { font: 'helvetica', fontSize: 10, cellPadding: { top: 4, bottom: 4 } },
+    styles: { font: FONT, fontSize: 10, cellPadding: { top: 4, bottom: 4 } },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
   });
   currentY = (doc as any).lastAutoTable.finalY + 15;
 
-  // --- Aciklama ---
+  // --- ACIKLAMA SECTION ---
   if (data.aciklama?.trim()) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
+    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    doc.line(padX, currentY, pageW - padX, currentY);
     doc.text('Aciklama', padX, currentY + 12);
     currentY += 18;
 
@@ -150,17 +164,65 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
       body: [[data.aciklama]],
       startY: currentY,
       theme: 'grid',
-      styles: { font: 'helvetica', fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
+      styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
       margin: { left: padX, right: padX },
     });
     currentY = (doc as any).lastAutoTable.finalY + 15;
   }
 
-  // --- Islem Tipi ve Turu ---
-  doc.setFont('helvetica', 'bold');
+  // --- ISLEM TURUNE OZEL DETAYLAR ---
+  const hasPeriyodikDetay = data.islemTuru === 'periyodik_bakim' && (data.selectedMaintenanceTasks?.length ?? 0) > 0;
+  const hasArizaDetay = data.islemTuru === 'ariza' && (Boolean(data.selectedFaultName) || (data.selectedTests?.length ?? 0) > 0);
+
+  if (hasPeriyodikDetay || hasArizaDetay) {
+    doc.setFont(FONT, 'bold');
+    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    doc.line(padX, currentY, pageW - padX, currentY);
+    doc.text('Islem Turune Ozel Detaylar', padX, currentY + 12);
+    currentY += 18;
+
+    const detailRows: string[][] = [];
+
+    if (hasPeriyodikDetay) {
+      detailRows.push([
+        'Periyodik Bakim Isleri',
+        data.selectedMaintenanceTasks.map((task: any) => task.taskName).join(', '),
+      ]);
+    }
+
+    if (hasArizaDetay) {
+      detailRows.push([
+        'Tespit Edilen Ariza',
+        data.selectedFaultName || '-',
+      ]);
+
+      if ((data.selectedTests?.length ?? 0) > 0) {
+        detailRows.push([
+          'Ariza ile Iliskili Testler',
+          data.selectedTests.join(', '),
+        ]);
+      }
+    }
+
+    autoTable(doc, {
+      body: detailRows,
+      startY: currentY,
+      theme: 'grid',
+      styles: { font: FONT, fontSize: 10, cellPadding: { top: 5, bottom: 5 } },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
+      margin: { left: padX, right: padX },
+    });
+    currentY = (doc as any).lastAutoTable.finalY + 15;
+  }
+
+  // --- ISLEM TIPI & TURU SECTION ---
+  doc.setFont(FONT, 'bold');
+  doc.setFontSize(10);
+  doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+  doc.line(padX, currentY, pageW - padX, currentY);
   doc.text('Islem Tipi ve Turu', padX, currentY + 12);
   currentY += 18;
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(FONT, 'normal');
 
   const islemRows: string[][] = [];
   if (formType === 'teknik_servis' && data.islemTipi) {
@@ -173,17 +235,19 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     body: islemRows,
     startY: currentY,
     theme: 'plain',
-    styles: { font: 'helvetica', fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
+    styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
     margin: { left: padX, right: padX },
   });
   currentY = (doc as any).lastAutoTable.finalY + 15;
 
-  // --- Yapilan Islemler ---
+  // --- YAPILAN ISLEMLER SECTION ---
   const operationLabels = formType === 'teknik_servis' ? TEKNIK_OPERATION_LABELS : APLIKASYON_OPERATION_LABELS;
   const operations = (data.actions || []).filter((a: any) => a.type === 'operation');
   if (operations.length > 0) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
+    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    doc.line(padX, currentY, pageW - padX, currentY);
     doc.text('Yapilan Islemler', padX, currentY + 12);
     currentY += 18;
 
@@ -195,38 +259,49 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
       ]),
       startY: currentY,
       theme: 'grid',
-      styles: { font: 'helvetica', fontSize: 10 },
+      styles: { font: FONT, fontSize: 10 },
       headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
       margin: { left: padX, right: padX },
     });
     currentY = (doc as any).lastAutoTable.finalY + 15;
   }
 
-  // --- Degisen Parcalar ---
+  // --- DEGISEN PARCALAR SECTION ---
   const parts = (data.actions || []).filter((a: any) => a.type === 'part_change');
   if (parts.length > 0) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
+    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    doc.line(padX, currentY, pageW - padX, currentY);
     doc.text('Degisen Parcalar', padX, currentY + 12);
     currentY += 18;
 
     autoTable(doc, {
-      head: [['Parca', 'Kod', 'Adet']],
-      body: parts.map((act: any) => [
-        act.stokAdi || act.action,
-        act.stokKodu || '-',
-        String(act.quantity),
-      ]),
+      head: [['Parca', 'Kod', 'Adet', 'Birim']],
+      body: parts.map((act: any) => {
+        let partName = act.stokAdi || act.action;
+        if (act.isManualEntry && act.stokKodu && act.stokAdi) {
+          partName = `${act.stokKodu} - ${act.stokAdi}`;
+        }
+        return [
+          partName,
+          act.stokKodu || '-',
+          String(act.quantity),
+          act.anaBirim ? act.anaBirim.toLowerCase() : 'adet',
+        ];
+      }),
       startY: currentY,
       theme: 'grid',
-      styles: { font: 'helvetica', fontSize: 10 },
+      styles: { font: FONT, fontSize: 10 },
       headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
       margin: { left: padX, right: padX },
     });
     currentY = (doc as any).lastAutoTable.finalY + 15;
   }
 
-  // --- Cihaz Durumu ---
-  doc.setFont('helvetica', 'bold');
+  // --- CIHAZ DURUMU SECTION ---
+  doc.setFont(FONT, 'bold');
+  doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+  doc.line(padX, currentY, pageW - padX, currentY);
   doc.text('Cihaz Durumu', padX, currentY + 12);
   currentY += 18;
 
@@ -239,10 +314,48 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     body: [['Durum:', cihazDurumuStr]],
     startY: currentY,
     theme: 'plain',
-    styles: { font: 'helvetica', fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
+    styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
     margin: { left: padX, right: padX },
   });
+
+  const finalY = (doc as any).lastAutoTable.finalY;
+
+  // --- IMZALAR (SIGNATURES) SECTION ---
+  const signatureY = finalY + 40;
+  if (signatureY < pageH - 140) {
+    doc.setFont(FONT, 'bold');
+    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
+    doc.text('Imzalar', padX, signatureY - 3);
+
+    doc.setFont(FONT, 'normal');
+    doc.setFontSize(10);
+
+    // Personnel signature with name
+    doc.text('Islemi Yapan Personel', padX, signatureY + 15);
+    doc.setFont(FONT, 'bold');
+    doc.text(data.createdByName || '-', padX, signatureY + 28);
+    doc.setFont(FONT, 'normal');
+    doc.line(padX, signatureY + 32, padX + 150, signatureY + 32);
+    if (data.personnelSignature) {
+      try {
+        doc.addImage(data.personnelSignature, 'PNG', padX, signatureY + 37, 150, 40, undefined, 'FAST');
+      } catch (e) { /* signature image may fail in server context */ }
+    }
+
+    // Technician signature with name
+    doc.text('Teknisyen', pageW / 2 + 20, signatureY + 15);
+    doc.setFont(FONT, 'bold');
+    doc.text(data.technicianName || '-', pageW / 2 + 20, signatureY + 28);
+    doc.setFont(FONT, 'normal');
+    doc.line(pageW / 2 + 20, signatureY + 32, pageW / 2 + 170, signatureY + 32);
+    if (data.technicianSignature) {
+      try {
+        doc.addImage(data.technicianSignature, 'PNG', pageW / 2 + 20, signatureY + 37, 150, 40, undefined, 'FAST');
+      } catch (e) { /* signature image may fail in server context */ }
+    }
+  }
 
   // Return as Buffer
   const arrayBuffer = doc.output('arraybuffer');
@@ -342,7 +455,7 @@ async function handleActionFormCreated(
 
     // 3. Generate PDF
     logEntry.steps.push('PDF oluşturma: başladı');
-    const pdfBuffer = generateActionFormPDF(data, formType);
+    const pdfBuffer = generateActionFormPDF(data, formType, formId);
     logEntry.steps.push(`PDF oluşturma: OK (${pdfBuffer.length} byte)`);
 
     // 4. Compose email
