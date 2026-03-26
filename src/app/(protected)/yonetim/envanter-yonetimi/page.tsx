@@ -13,6 +13,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, doc, setDoc, deleteDoc, orderBy, query, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, companyStamp } from '@/lib/company-filter';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -67,7 +69,7 @@ interface Location {
 
 export default function EnvanterYonetimiPage() {
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const { currentCompanyId } = useAuth();
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -85,11 +87,11 @@ export default function EnvanterYonetimiPage() {
     setLoading(true);
     try {
         const [categoriesSnap, assetsSnap, hospitalsSnap, depotsSnap, vehiclesSnap] = await Promise.all([
-            getDocs(query(collection(db, 'assetCategories'), orderBy('name'))),
-            getDocs(collection(db, 'assets')),
-            getDocs(collection(db, 'hospitals')),
-            getDocs(collection(db, 'depots')),
-            getDocs(collection(db, 'vehicles')),
+            getDocs(companyQuery(db, 'assetCategories', currentCompanyId, orderBy('name'))),
+            getDocs(companyQuery(db, 'assets', currentCompanyId)),
+            getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+            getDocs(companyQuery(db, 'depots', currentCompanyId)),
+            getDocs(companyQuery(db, 'vehicles', currentCompanyId)),
         ]);
         setCategories(filterByCompanyScope(
           categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)),
@@ -125,7 +127,7 @@ export default function EnvanterYonetimiPage() {
     } finally {
         setLoading(false);
     }
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();
@@ -159,7 +161,7 @@ export default function EnvanterYonetimiPage() {
       toast({ title: 'Hata', description: 'Kategori adı boş olamaz.', variant: 'destructive' });
       return;
     }
-    const data = { name: editingCategory.name };
+    const data = companyStamp({ name: editingCategory.name }, currentCompanyId, 'assetCategories');
     try {
       if (editingCategory.id) {
         await setDoc(doc(db, 'assetCategories', editingCategory.id), data, { merge: true });

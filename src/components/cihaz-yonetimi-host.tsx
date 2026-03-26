@@ -181,14 +181,14 @@ export default function CihazYonetimiHost() {
         teknikFormsSnap,
         aplikasyonFormsSnap,
       ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
-        getDocs(collection(db, 'hospitalDeviceAssignments')),
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'personnelAvailability')),
-        getDocs(collection(db, 'deviceFaultReports')),
-        getDocs(collection(db, 'deviceActionForms')),
-        getDocs(collection(db, 'aplikasyonActionForms')),
+        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(companyQuery(db, 'devices', currentCompanyId)),
+        getDocs(companyQuery(db, 'hospitalDeviceAssignments', currentCompanyId)),
+        getDocs(companyQuery(db, 'users', currentCompanyId)),
+        getDocs(companyQuery(db, 'personnelAvailability', currentCompanyId)),
+        getDocs(companyQuery(db, 'deviceFaultReports', currentCompanyId)),
+        getDocs(companyQuery(db, 'deviceActionForms', currentCompanyId)),
+        getDocs(companyQuery(db, 'aplikasyonActionForms', currentCompanyId)),
       ]);
 
       setHospitals(filterByCompanyScope(

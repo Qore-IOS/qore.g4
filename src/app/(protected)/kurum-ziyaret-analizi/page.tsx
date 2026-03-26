@@ -202,12 +202,12 @@ export default function KurumZiyaretAnaliziPage() {
       setLoading(true);
       try {
         const [teknikSnap, appSnap, faultSnap, usersSnap, hospitalsSnap, deviceLabPoolsSnap] = await Promise.all([
-          getDocs(query(collection(db, 'teknikServisActionForms'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db, 'aplikasyonActionForms'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))),
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'deviceLabPools')),
+          getDocs(companyQuery(db, 'teknikServisActionForms', currentCompanyId, orderBy('createdAt', 'desc'))),
+          getDocs(companyQuery(db, 'aplikasyonActionForms', currentCompanyId, orderBy('createdAt', 'desc'))),
+          getDocs(companyQuery(db, 'deviceFaultReports', currentCompanyId, orderBy('openedAt', 'desc'))),
+          getDocs(companyQuery(db, 'users', currentCompanyId)),
+          getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+          getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId)),
         ]);
 
         const uMap = new Map<string, User>();

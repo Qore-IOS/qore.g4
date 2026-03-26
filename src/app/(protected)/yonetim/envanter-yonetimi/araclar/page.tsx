@@ -13,6 +13,8 @@ import { PlusCircle, Trash2, Loader2, Car, Edit3, UserCheck, ImageIcon, Check } 
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { companyQuery, companyStamp } from '@/lib/company-filter';
 import BackButton from '@/components/BackButton';
 import type { User as AppUser } from '@/lib/types';
 import Image from 'next/image';
@@ -41,7 +43,7 @@ interface Vehicle {
 
 export default function AraclarPage() {
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const { currentCompanyId } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,8 +54,8 @@ export default function AraclarPage() {
     setLoading(true);
     try {
       const [vehiclesSnap, usersSnap] = await Promise.all([
-        getDocs(collection(db, 'vehicles')),
-        getDocs(collection(db, 'users')),
+        getDocs(companyQuery(db, 'vehicles', currentCompanyId)),
+        getDocs(companyQuery(db, 'users', currentCompanyId)),
       ]);
 
       setVehicles(
@@ -77,7 +79,7 @@ export default function AraclarPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();
@@ -116,13 +118,12 @@ export default function AraclarPage() {
 
     try {
       if (editingVehicle.id) {
-        await setDoc(doc(db, 'vehicles', editingVehicle.id), dataToSave, { merge: true });
+        await setDoc(doc(db, 'vehicles', editingVehicle.id), companyStamp(dataToSave as Record<string, any>, currentCompanyId, 'vehicles'), { merge: true });
       } else {
-        await addDoc(collection(db, 'vehicles'), {
+        await addDoc(collection(db, 'vehicles'), companyStamp({
           ...dataToSave,
           createdAt: new Date(),
-          companyId: currentUserProfile?.companyId || currentCompanyId,
-        });
+        } as Record<string, any>, currentCompanyId, 'vehicles'));
       }
       toast({ title: 'Başarılı', description: 'Araç kaydedildi.' });
       setIsModalOpen(false);
