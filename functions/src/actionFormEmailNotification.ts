@@ -4,8 +4,38 @@ import { logger } from 'firebase-functions';
 import * as nodemailer from 'nodemailer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import fetch from 'node-fetch';
 
 const db = admin.firestore();
+
+// --- Turkish font cache ---
+let turkishFontBase64: string | null = null;
+
+async function loadTurkishFont(): Promise<string | null> {
+  if (turkishFontBase64) return turkishFontBase64;
+  try {
+    const fontUrl = 'https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf';
+    const response = await fetch(fontUrl);
+    if (!response.ok) return null;
+    const buffer = await response.buffer();
+    turkishFontBase64 = buffer.toString('base64');
+    return turkishFontBase64;
+  } catch (e) {
+    logger.warn('[actionFormEmail] Could not load Turkish font:', e);
+    return null;
+  }
+}
+
+function setupTurkishFont(doc: jsPDF, fontBase64: string): boolean {
+  try {
+    doc.addFileToVFS('NotoSans-Regular.ttf', fontBase64);
+    doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+    return true;
+  } catch (e) {
+    logger.warn('[actionFormEmail] Could not setup Turkish font:', e);
+    return false;
+  }
+}
 
 // --- Labels ---
 const TEKNIK_ISLEM_TIPI_LABELS: Record<string, string> = {
@@ -19,49 +49,49 @@ const TEKNIK_ISLEM_TURU_LABELS: Record<string, string> = {
   '': '-',
   kontrol: 'Kontrol',
   rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
-  periyodik_bakim: 'Periyodik Bakim',
+  periyodik_bakim: 'Periyodik Bakım',
   cihaz_kurulumu: 'Cihaz Kurulumu',
-  ariza: 'Ariza',
+  ariza: 'Arıza',
   sw_update: 'SW Update',
   alis: 'ALIS',
-  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arizasi',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 const APLIKASYON_ISLEM_TURU_LABELS: Record<string, string> = {
   '': '-',
   rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
-  periyodik_bakim: 'Periyodik Bakim',
-  ariza: 'Ariza',
+  periyodik_bakim: 'Periyodik Bakım',
+  ariza: 'Arıza',
   alis: 'ALIS',
-  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arizasi',
+  roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
 };
 
 const TEKNIK_OPERATION_LABELS: Record<string, string> = {
-  genel_temizlik_yaglama: 'Genel Temizlik & Yaglama',
+  genel_temizlik_yaglama: 'Genel Temizlik & Yağlama',
   temel_fonksiyon_testleri: 'Temel Fonksiyon Testleri',
   mekanik_ayarlar_kontrol: 'Mekanik Ayarlar & Kontrol',
   optik_ayarlar_kontrol: 'Optik Ayarlar & Kontrol',
-  pipetleme_transfer_ayarlari: 'Pipetleme / Transfer Ayarlari & Kontrol',
+  pipetleme_transfer_ayarlari: 'Pipetleme / Transfer Ayarları & Kontrol',
 };
 
 const APLIKASYON_OPERATION_LABELS: Record<string, string> = {
   aplikasyon_kontrol: 'Aplikasyon Kontrol',
   kalibrasyon_kontrol: 'Kalibrasyon Kontrol',
   qc_materyal_kontrol: 'QC Materyal Kontrol',
-  ornek_sonucu_karsilastirma: 'Ornek Sonucu Karsilastirma',
+  ornek_sonucu_karsilastirma: 'Örnek Sonucu Karşılaştırma',
   reaktif_yenileme: 'Reaktif Yenileme',
-  kalibrator_yenileme: 'Kalibrator Yenileme',
+  kalibrator_yenileme: 'Kalibratör Yenileme',
   qc_yenileme: 'QC Yenileme',
-  cv_calismasi: 'CV Calismasi',
-  diger: 'Diger',
+  cv_calismasi: 'CV Çalışması',
+  diger: 'Diğer',
 };
 
 const CIHAZ_DURUMU_LABELS: Record<string, string> = {
   '': '-',
-  calisiyor: 'Calisiyor',
-  arizali: 'Arizali',
+  calisiyor: 'Çalışıyor',
+  arizali: 'Arızalı',
   denemede: 'Denemede',
-  diger: 'Diger',
+  diger: 'Diğer',
 };
 
 // --- Nodemailer transporter ---
@@ -88,12 +118,16 @@ function getTransporter() {
 }
 
 // --- PDF Generation (matching client-side template) ---
-function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyon', formId: string): Buffer {
+async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyon', formId: string): Promise<Buffer> {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const padX = 40;
-  const FONT = 'helvetica';
+
+  // Load Turkish font for proper ş, ğ, ü, ö, ç, ı, İ support
+  const fontBase64 = await loadTurkishFont();
+  const useTurkish = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
+  const FONT = useTurkish ? 'NotoSans' : 'helvetica';
 
   const ORANGE = { r: 199, g: 137, b: 65 };
 
@@ -121,7 +155,7 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
   let personnelStr = data.createdByName || '-';
   if (data.eslikEdenPersonel && data.eslikEdenPersonel.length > 0) {
     const eslikNames = data.eslikEdenPersonel.map((p: any) => p.name).join(', ');
-    personnelStr += ` (Eslik Eden: ${eslikNames})`;
+    personnelStr += ` (Eşlik Eden: ${eslikNames})`;
   }
 
   // Use baslangicTarihi if available, otherwise createdAt
@@ -139,7 +173,7 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     ['Form No:', formId],
     ['Laboratuvar:', data.labName || '-'],
     ['Cihaz:', `${data.cihazAdi || '-'} (SN: ${data.seriNumarasi || '-'})`],
-    ['Islemi Yapan:', personnelStr],
+    ['İşlemi Yapan:', personnelStr],
     ['Tarih / Saat:', dateStr],
   ];
 
@@ -157,7 +191,7 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Aciklama', padX, currentY + 12);
+    doc.text('Açıklama', padX, currentY + 12);
     currentY += 18;
 
     autoTable(doc, {
@@ -178,27 +212,27 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Islem Turune Ozel Detaylar', padX, currentY + 12);
+    doc.text('İşlem Türüne Özel Detaylar', padX, currentY + 12);
     currentY += 18;
 
     const detailRows: string[][] = [];
 
     if (hasPeriyodikDetay) {
       detailRows.push([
-        'Periyodik Bakim Isleri',
+        'Periyodik Bakım İşleri',
         data.selectedMaintenanceTasks.map((task: any) => task.taskName).join(', '),
       ]);
     }
 
     if (hasArizaDetay) {
       detailRows.push([
-        'Tespit Edilen Ariza',
+        'Tespit Edilen Arıza',
         data.selectedFaultName || '-',
       ]);
 
       if ((data.selectedTests?.length ?? 0) > 0) {
         detailRows.push([
-          'Ariza ile Iliskili Testler',
+          'Arıza ile İlişkili Testler',
           data.selectedTests.join(', '),
         ]);
       }
@@ -220,16 +254,16 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
   doc.setFontSize(10);
   doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
   doc.line(padX, currentY, pageW - padX, currentY);
-  doc.text('Islem Tipi ve Turu', padX, currentY + 12);
+  doc.text('İşlem Tipi ve Türü', padX, currentY + 12);
   currentY += 18;
   doc.setFont(FONT, 'normal');
 
   const islemRows: string[][] = [];
   if (formType === 'teknik_servis' && data.islemTipi) {
-    islemRows.push(['Islem Tipi:', TEKNIK_ISLEM_TIPI_LABELS[data.islemTipi] || data.islemTipi]);
+    islemRows.push(['İşlem Tipi:', TEKNIK_ISLEM_TIPI_LABELS[data.islemTipi] || data.islemTipi]);
   }
   const turuLabels = formType === 'teknik_servis' ? TEKNIK_ISLEM_TURU_LABELS : APLIKASYON_ISLEM_TURU_LABELS;
-  islemRows.push(['Islem Turu:', turuLabels[data.islemTuru || ''] || data.islemTuru || '-']);
+  islemRows.push(['İşlem Türü:', turuLabels[data.islemTuru || ''] || data.islemTuru || '-']);
 
   autoTable(doc, {
     body: islemRows,
@@ -248,11 +282,11 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Yapilan Islemler', padX, currentY + 12);
+    doc.text('Yapılan İşlemler', padX, currentY + 12);
     currentY += 18;
 
     autoTable(doc, {
-      head: [['Islem', 'Adet']],
+      head: [['İşlem', 'Adet']],
       body: operations.map((act: any) => [
         operationLabels[act.action] || act.action,
         String(act.quantity),
@@ -272,11 +306,11 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Degisen Parcalar', padX, currentY + 12);
+    doc.text('Değişen Parçalar', padX, currentY + 12);
     currentY += 18;
 
     autoTable(doc, {
-      head: [['Parca', 'Kod', 'Adet', 'Birim']],
+      head: [['Parça', 'Kod', 'Adet', 'Birim']],
       body: parts.map((act: any) => {
         let partName = act.stokAdi || act.action;
         if (act.isManualEntry && act.stokKodu && act.stokAdi) {
@@ -327,13 +361,13 @@ function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyo
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
-    doc.text('Imzalar', padX, signatureY - 3);
+    doc.text('İmzalar', padX, signatureY - 3);
 
     doc.setFont(FONT, 'normal');
     doc.setFontSize(10);
 
     // Personnel signature with name
-    doc.text('Islemi Yapan Personel', padX, signatureY + 15);
+    doc.text('İşlemi Yapan Personel', padX, signatureY + 15);
     doc.setFont(FONT, 'bold');
     doc.text(data.createdByName || '-', padX, signatureY + 28);
     doc.setFont(FONT, 'normal');
@@ -455,7 +489,7 @@ async function handleActionFormCreated(
 
     // 3. Generate PDF
     logEntry.steps.push('PDF oluşturma: başladı');
-    const pdfBuffer = generateActionFormPDF(data, formType, formId);
+    const pdfBuffer = await generateActionFormPDF(data, formType, formId);
     logEntry.steps.push(`PDF oluşturma: OK (${pdfBuffer.length} byte)`);
 
     // 4. Compose email
