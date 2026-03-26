@@ -12,10 +12,11 @@ import { collection, getDocs, addDoc, deleteDoc, doc, Timestamp, query, where, o
 import { db } from '@/lib/firebase';
 import BackButton from '@/components/BackButton';
 import type { FaultDefinition, FaultDefinitionType } from '@/lib/types';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 export default function ArizaTanimlamalariPage() {
   const router = useRouter();
-  const { currentUserProfile, isAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
@@ -42,11 +43,15 @@ export default function ArizaTanimlamalariPage() {
     const fetchFaults = async () => {
       try {
         const snap = await getDocs(collection(db, 'faultDefinitions'));
-        const faults = snap.docs.map(d => ({
-          id: d.id,
-          ...d.data(),
-          createdAt: d.data().createdAt?.toDate?.() || null,
-        })) as FaultDefinition[];
+        const faults = filterByCompanyScope(
+          snap.docs.map(d => ({
+            id: d.id,
+            ...d.data(),
+            createdAt: d.data().createdAt?.toDate?.() || null,
+          })) as FaultDefinition[],
+          currentCompanyId,
+          isSuperAdmin
+        );
 
         setTeknikFaults(faults.filter(f => f.type === 'teknik_servis'));
         setAplikasyonFaults(faults.filter(f => f.type === 'aplikasyon'));
@@ -59,7 +64,7 @@ export default function ArizaTanimlamalariPage() {
     };
 
     fetchFaults();
-  }, [hasAccess, toast]);
+  }, [hasAccess, toast, currentCompanyId, isSuperAdmin]);
 
   const addFault = async (type: FaultDefinitionType) => {
     const name = type === 'teknik_servis' ? newTeknikFault.trim() : newAplikasyonFault.trim();
@@ -71,13 +76,13 @@ export default function ArizaTanimlamalariPage() {
 
     setIsSaving(true);
     try {
-      const docRef = await addDoc(collection(db, 'faultDefinitions'), {
+      const docRef = await addDoc(collection(db, 'faultDefinitions'), withCompanyScope({
         name,
         type,
         createdAt: Timestamp.now(),
         createdByUid: currentUserProfile?.uid,
         createdByName: currentUserProfile?.name || 'Bilinmeyen',
-      });
+      }, currentUserProfile?.companyId));
 
       const newFault: FaultDefinition = {
         id: docRef.id,
