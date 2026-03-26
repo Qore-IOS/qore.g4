@@ -233,6 +233,7 @@ export default function CihazYonetimiHost() {
             endAt,
             createdAt: toDateValue(data.createdAt),
             createdByUid: data.createdByUid || null,
+            companyId: data.companyId,
           } as PersonnelAvailabilityRecord;
         })
         .filter((item): item is PersonnelAvailabilityRecord => Boolean(item)),
@@ -249,6 +250,7 @@ export default function CihazYonetimiHost() {
           interventionStartedAt: toDateValue(data.interventionStartedAt),
           hospitalId: data.hospitalId || null,
           openedAt: toDateValue(data.openedAt),
+          companyId: data.companyId,
         } as FaultLike;
       }), currentCompanyId, isSuperAdmin);
       setFaultRows(faults);

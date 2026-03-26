@@ -138,7 +138,11 @@ export default function AssetCategoryPage() {
 
       // Fetch assets for the current category
       const assetsSnap = await getDocs(query(collection(db, 'assets'), where('category', '==', categoryName)));
-      setAssets(assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)));
+      setAssets(filterByCompanyScope(
+        assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
