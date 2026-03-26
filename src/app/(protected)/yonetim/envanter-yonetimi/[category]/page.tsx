@@ -16,6 +16,8 @@ import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc } fro
 import { db } from '@/lib/firebase';
 import BackButton from '@/components/BackButton';
 import type { Hospital, Depot, Asset } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -91,6 +93,7 @@ export default function AssetCategoryPage() {
   const router = useRouter();
   const categoryName = decodeURIComponent(Array.isArray(params.category) ? params.category[0] : params.category || '');
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<{ value: string; label: string }[]>([]);
@@ -121,21 +124,33 @@ export default function AssetCategoryPage() {
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'depots')),
       ]);
-      const labLocations = labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}` }));
-      const depotLocations = depotsSnap.docs.map(doc => ({ value: (doc.data() as Depot).name, label: `Depo: ${(doc.data() as Depot).name}` }));
+      const labLocations = filterByCompanyScope(
+        labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}`, companyId: (doc.data() as any).companyId })),
+        currentCompanyId,
+        isSuperAdmin
+      ).map(({ value, label }) => ({ value, label }));
+      const depotLocations = filterByCompanyScope(
+        depotsSnap.docs.map(doc => ({ value: (doc.data() as Depot).name, label: `Depo: ${(doc.data() as Depot).name}`, companyId: (doc.data() as any).companyId })),
+        currentCompanyId,
+        isSuperAdmin
+      ).map(({ value, label }) => ({ value, label }));
       setLocations([...labLocations, ...depotLocations, { value: 'Diğer', label: 'Diğer (Manuel Giriş)' }].sort((a,b) => a.label.localeCompare(b.label)));
 
       // Fetch assets for the current category
       const assetsQuery = query(collection(db, 'assets'), where('category', '==', categoryName));
       const assetsSnap = await getDocs(assetsQuery);
-      setAssets(assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)));
+      setAssets(filterByCompanyScope(
+        assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [categoryName, toast]);
+  }, [categoryName, toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -165,7 +180,7 @@ export default function AssetCategoryPage() {
       if (editingAsset.id) {
         await setDoc(doc(db, 'assets', editingAsset.id), dataToSave, { merge: true });
       } else {
-        await addDoc(collection(db, 'assets'), dataToSave);
+        await addDoc(collection(db, 'assets'), withCompanyScope(dataToSave, currentUserProfile?.companyId));
       }
       toast({ title: 'Başarılı', description: 'Envanter kalemi kaydedildi.' });
       setIsModalOpen(false);

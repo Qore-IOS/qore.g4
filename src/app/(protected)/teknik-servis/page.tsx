@@ -7,11 +7,12 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import TeknikServisPanel from '@/components/teknik-servis-panel';
 import { Loader2 } from 'lucide-react';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 export default function TeknikServisPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, isSuperAdmin, currentCompanyId } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -23,7 +24,11 @@ export default function TeknikServisPage() {
     try {
       const unsubHospitals = onSnapshot(
         query(collection(db, 'hospitals'), orderBy('name', 'asc')),
-        (snap) => setHospitals(snap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital))),
+        (snap) => setHospitals(filterByCompanyScope(
+          snap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)),
+          currentCompanyId,
+          isSuperAdmin
+        )),
         (err) => {
           console.error("Hospitals listener error:", err);
           toast({ title: 'Veri Hatası', description: 'Hastaneler yüklenemedi.', variant: 'destructive' });
@@ -32,7 +37,11 @@ export default function TeknikServisPage() {
 
       const unsubDevices = onSnapshot(
         collection(db, 'devices'),
-        (snap) => setDevices(snap.docs.map(d => ({ id: d.id, ...d.data() } as Device))),
+        (snap) => setDevices(filterByCompanyScope(
+          snap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
+          currentCompanyId,
+          isSuperAdmin
+        )),
         (err) => {
           console.error("Devices listener error:", err);
           toast({ title: 'Veri Hatası', description: 'Cihazlar yüklenemedi.', variant: 'destructive' });
@@ -42,7 +51,11 @@ export default function TeknikServisPage() {
       const unsubAssignments = onSnapshot(
         collection(db, 'hospitalDeviceAssignments'),
         (snap) => {
-          setHospitalDeviceAssignments(snap.docs.map(d => ({ id: d.id, ...d.data() } as AssignedDevice)));
+          setHospitalDeviceAssignments(filterByCompanyScope(
+            snap.docs.map(d => ({ id: d.id, ...d.data() } as AssignedDevice)),
+            currentCompanyId,
+            isSuperAdmin
+          ));
         },
         (err) => {
           console.error("Assignments listener error:", err);
@@ -54,7 +67,11 @@ export default function TeknikServisPage() {
       const unsubLabPools = onSnapshot(
         query(collection(db, 'deviceLabPools'), where('active', '==', true)),
         (snap) => {
-          setDeviceLabPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
+          setDeviceLabPools(filterByCompanyScope(
+            snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)),
+            currentCompanyId,
+            isSuperAdmin
+          ));
           setIsLoading(false);
         },
         (err) => {
@@ -75,7 +92,7 @@ export default function TeknikServisPage() {
       setIsLoading(false);
       return () => {};
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     const cleanupPromise = fetchAllApplicationData();

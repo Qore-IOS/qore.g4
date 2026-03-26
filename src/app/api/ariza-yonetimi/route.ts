@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 // Firestore Timestamp to Date converter
 function convertTimestamp(timestamp: any): string | null {
@@ -47,6 +48,8 @@ export async function GET(request: NextRequest) {
     const lab = searchParams.get('lab') || 'all';
     const device = searchParams.get('device') || 'all';
     const opener = searchParams.get('opener') || 'all';
+    const companyId = searchParams.get('companyId') || undefined;
+    const isSuperAdmin = searchParams.get('isSuperAdmin') === '1';
 
     // Pagination
     const page = parseInt(searchParams.get('page') || '1', 10);
@@ -63,16 +66,20 @@ export async function GET(request: NextRequest) {
       .map(doc => serializeFaultReport(doc))
       .filter(Boolean);
 
+    const scopedReports = allReports.filter((r: any) =>
+      matchesCompanyScope(r, companyId, isSuperAdmin)
+    );
+
     // Calculate status counts before filtering
     const statusCounts = {
-      all: allReports.length,
+      all: scopedReports.length,
       atama_bekliyor: 0,
       mudahale_bekliyor: 0,
       mudahale_ediliyor: 0,
       cozuldu: 0,
     };
 
-    allReports.forEach((r: any) => {
+    scopedReports.forEach((r: any) => {
       const normalized = normalizeStatus(r.status);
       if (normalized === 'atama_bekliyor') statusCounts.atama_bekliyor++;
       else if (normalized === 'mudahale_bekliyor') statusCounts.mudahale_bekliyor++;
@@ -81,12 +88,12 @@ export async function GET(request: NextRequest) {
     });
 
     // Extract unique filter options
-    const uniqueLabs = [...new Set(allReports.map((r: any) => r.labName).filter(Boolean))];
-    const uniqueDevices = [...new Set(allReports.map((r: any) => r.serial).filter(Boolean))];
-    const uniqueOpeners = [...new Set(allReports.map((r: any) => r.openedByName).filter(Boolean))];
+    const uniqueLabs = [...new Set(scopedReports.map((r: any) => r.labName).filter(Boolean))];
+    const uniqueDevices = [...new Set(scopedReports.map((r: any) => r.serial).filter(Boolean))];
+    const uniqueOpeners = [...new Set(scopedReports.map((r: any) => r.openedByName).filter(Boolean))];
 
     // Apply filters
-    let filteredReports = allReports;
+    let filteredReports = scopedReports;
 
     if (status !== 'all') {
       filteredReports = filteredReports.filter((r: any) => normalizeStatus(r.status) === status);
