@@ -16,6 +16,7 @@ import { useUsers, useHospitals } from '@/hooks/useFirebaseQueries';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import type { DutyShiftRole } from '@/lib/types';
+import { withCompanyScope } from '@/lib/company-scope';
 
 export default function VardiyaOlusturPage() {
   const router = useRouter();
@@ -93,7 +94,7 @@ export default function VardiyaOlusturPage() {
       const startDateTime = new Date(`${startDate}T${startTime}:00`);
       const endDateTime = new Date(`${endDate}T${endTime}:00`);
 
-      await addDoc(collection(db, 'dutyShifts'), {
+      await addDoc(collection(db, 'dutyShifts'), withCompanyScope({
         userId: selectedUserId,
         userName: selectedUserName,
         role: selectedRole,
@@ -108,7 +109,7 @@ export default function VardiyaOlusturPage() {
         createdAt: Timestamp.now(),
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentUserProfile?.companyId));
 
       toast({ title: 'Başarılı', description: 'Vardiya oluşturuldu.' });
       router.push('/nobet-yonetimi/aktif-vardiyalar');
