@@ -31,6 +31,8 @@ import {
   ChevronDown,
   AlertCircle,
   Plus,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
@@ -523,6 +525,13 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
 
+  // Voice counting
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const voiceProcessingRef = useRef(false);
+
   // Completion modal
   const [showFinishModal, setShowFinishModal] = useState(false);
 
@@ -813,12 +822,192 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     onScan: handleScan,
   });
 
+  // ---- Voice counting: parse transcript via Gemini ----
+  const processVoiceTranscript = useCallback(async (transcript: string) => {
+    if (!transcript.trim() || voiceProcessingRef.current) return;
+    voiceProcessingRef.current = true;
+    setVoiceProcessing(true);
+
+    try {
+      // Build product list from ALL brands (not just active)
+      const allStokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+      const allProducts = productCodes
+        .filter(p => allStokKoduSet.has(p.stokKodu))
+        .map(p => ({ stokKodu: p.stokKodu, stokAdi: p.stokAdi }));
+
+      if (allProducts.length === 0) {
+        flashFeedback('error', 'Ürün listesi boş');
+        return;
+      }
+
+      const res = await fetch('/api/ai/voice-count', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript, products: allProducts }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Hata' }));
+        flashFeedback('error', err.error || 'Ses tanıma hatası');
+        return;
+      }
+
+      const data = await res.json();
+      const commands: { stokKodu: string; stokAdedi?: number; cihazUstuAdedi?: number }[] = data.commands || [];
+
+      if (commands.length === 0) {
+        flashFeedback('error', `Ürün eşleşemedi: "${transcript}"`);
+        return;
+      }
+
+      // Apply commands to countData
+      const feedbackParts: string[] = [];
+      setCountData(prev => {
+        const next = { ...prev };
+        for (const cmd of commands) {
+          const product = productCodes.find(p => p.stokKodu === cmd.stokKodu);
+          if (!product) continue;
+
+          // Switch to correct brand if needed
+          if (product.marka && product.marka !== activeBrand) {
+            setActiveBrand(product.marka);
+          }
+
+          const existing = next[cmd.stokKodu];
+          const base: ProductCountEntry = {
+            stokKodu: cmd.stokKodu,
+            stokAdi: product.stokAdi,
+            marka: product.marka ?? '',
+            stokAdedi: existing?.stokAdedi ?? '',
+            cihazUstuAdedi: existing?.cihazUstuAdedi ?? '',
+            counted: existing?.counted ?? false,
+            lots: existing?.lots ?? [],
+            serials: existing?.serials ?? [],
+            expiryWarnings: existing?.expiryWarnings ?? [],
+          };
+
+          if (cmd.stokAdedi !== undefined) {
+            base.stokAdedi = String(cmd.stokAdedi);
+          }
+          if (cmd.cihazUstuAdedi !== undefined) {
+            base.cihazUstuAdedi = String(cmd.cihazUstuAdedi);
+          }
+
+          next[cmd.stokKodu] = base;
+
+          const parts = [product.stokAdi.substring(0, 25)];
+          if (cmd.stokAdedi !== undefined) parts.push(`S:${cmd.stokAdedi}`);
+          if (cmd.cihazUstuAdedi !== undefined) parts.push(`C:${cmd.cihazUstuAdedi}`);
+          feedbackParts.push(parts.join(' '));
+        }
+        return next;
+      });
+
+      flashFeedback('success', feedbackParts.join(' | '));
+    } catch (err) {
+      flashFeedback('error', 'Ses işleme hatası');
+    } finally {
+      voiceProcessingRef.current = false;
+      setVoiceProcessing(false);
+    }
+  }, [locationMinMaxRules, productCodes, activeBrand, flashFeedback]);
+
+  // ---- Voice counting: SpeechRecognition lifecycle ----
+  const toggleVoice = useCallback(() => {
+    if (voiceActive) {
+      // Stop
+      recognitionRef.current?.stop();
+      setVoiceActive(false);
+      setVoiceTranscript('');
+      return;
+    }
+
+    // Start
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      flashFeedback('error', 'Tarayıcınız ses tanımayı desteklemiyor');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'tr-TR';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript;
+        } else {
+          interimTranscript += result[0].transcript;
+        }
+      }
+
+      // Show interim text for visual feedback
+      if (interimTranscript) {
+        setVoiceTranscript(interimTranscript);
+      }
+
+      // Process final transcript immediately
+      if (finalTranscript.trim()) {
+        setVoiceTranscript('');
+        processVoiceTranscript(finalTranscript);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        flashFeedback('error', `Mikrofon hatası: ${event.error}`);
+      }
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if still supposed to be active
+      if (recognitionRef.current === recognition) {
+        try {
+          recognition.start();
+        } catch {
+          setVoiceActive(false);
+          setVoiceTranscript('');
+        }
+      }
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setVoiceActive(true);
+  }, [voiceActive, processVoiceTranscript, flashFeedback]);
+
+  // Cleanup voice recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        const ref = recognitionRef.current;
+        recognitionRef.current = null;
+        ref.stop();
+      }
+    };
+  }, []);
+
   const handleSelectLocation = useCallback((type: LocationType, id: string) => {
     setLocationType(type);
     setSelectedLocationId(id);
     setActiveBrand(null);
     setCountData({});
     setSearchQuery('');
+    // Stop voice if active
+    if (recognitionRef.current) {
+      const ref = recognitionRef.current;
+      recognitionRef.current = null;
+      ref.stop();
+    }
+    setVoiceActive(false);
+    setVoiceTranscript('');
     router.replace(`/maliyet-sayim?type=${type}&id=${id}`, { scroll: false });
   }, [router]);
 
@@ -956,6 +1145,34 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
               <ScanBarcode className="w-4 h-4" />
               {scannerActive ? 'Okuyucu Aktif' : 'Barkod'}
             </button>
+
+            <button
+              onClick={toggleVoice}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200',
+                voiceActive
+                  ? 'bg-red-500 text-white shadow-md animate-pulse'
+                  : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+              )}
+            >
+              {voiceActive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              {voiceActive ? 'Mikrofon Aktif' : 'Sesli Sayım'}
+            </button>
+
+            {/* Voice transcript live preview */}
+            {voiceActive && voiceTranscript && (
+              <span className="text-xs font-medium px-2 py-1 rounded-lg bg-blue-500/10 text-blue-600 animate-in fade-in max-w-[200px] truncate">
+                {voiceTranscript}...
+              </span>
+            )}
+
+            {/* Voice processing indicator */}
+            {voiceProcessing && (
+              <span className="text-xs font-medium px-2 py-1 rounded-lg bg-purple-500/10 text-purple-600 flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                İşleniyor
+              </span>
+            )}
 
             {scanFeedback && (
               <span className={cn(
