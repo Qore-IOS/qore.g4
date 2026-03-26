@@ -37,8 +37,6 @@ import { Button } from '@/components/ui/button';
 import { useRowFocus } from '@/hooks/useRowFocus';
 import { Label } from '@/components/ui/label';
 import { siparisGecmisLogger } from '@/lib/logger';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 
 /**
  * Order History Panel Component
@@ -50,7 +48,6 @@ export default function SiparisGecmisPanel(): JSX.Element {
   const router = useRouter();
   const depotIdFromUrl = searchParams.get('depotId') || '';
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
 
   const [depots, setDepots] = useState<Depot[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string>(depotIdFromUrl);
@@ -67,7 +64,7 @@ export default function SiparisGecmisPanel(): JSX.Element {
 
   // Fetch depots once
   useEffect(() => {
-    const unsub = onSnapshot(companyQuery(db, 'depots', currentCompanyId) as any, snap => {
+    const unsub = onSnapshot(collection(db, 'depots'), snap => {
       const depotList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       setDepots(depotList);
       if (!selectedDepotId && depotList.length > 0) {
@@ -75,12 +72,12 @@ export default function SiparisGecmisPanel(): JSX.Element {
       }
     });
     return () => unsub();
-  }, [selectedDepotId, currentCompanyId]);
+  }, [selectedDepotId]);
   
   // Fetch ALL shipments and orders once
   useEffect(() => {
     setLoading(true);
-    const shipmentsQuery = companyQuery(db, 'shipments', currentCompanyId, orderBy('timestamp', 'desc'));
+    const shipmentsQuery = query(collection(db, 'shipments'), orderBy('timestamp', 'desc'));
     
     const unsubscribe = onSnapshot(shipmentsQuery, async (shipmentSnap) => {
         const shipmentList = shipmentSnap.docs.map(d => ({ id: d.id, ...d.data(), timestamp: (d.data().timestamp as Timestamp)?.toDate() } as Shipment));
@@ -94,7 +91,7 @@ export default function SiparisGecmisPanel(): JSX.Element {
             for (let i = 0; i < uniqueOrderIds.length; i += 30) {
                 orderChunks.push(uniqueOrderIds.slice(i, i + 30));
             }
-            const orderPromises = orderChunks.map(chunk => getDocs(companyQuery(db, 'orders', currentCompanyId, where('id', 'in', chunk))));
+            const orderPromises = orderChunks.map(chunk => getDocs(query(collection(db, 'orders'), where('id', 'in', chunk))));
             const orderSnaps = await Promise.all(orderPromises);
             
             const ordersData: Record<string, Order> = {};
@@ -116,7 +113,7 @@ export default function SiparisGecmisPanel(): JSX.Element {
     });
 
     return () => unsubscribe();
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   const filteredShipments = useMemo(() => {
     if (!selectedDepotId) return [];

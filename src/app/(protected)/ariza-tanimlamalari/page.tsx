@@ -10,13 +10,13 @@ import { Loader2, Plus, Trash2, Wrench, FlaskConical, AlertTriangle } from 'luci
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, Timestamp, query, where, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { companyQuery, companyStamp, safeGetDocs } from '@/lib/company-filter';
 import BackButton from '@/components/BackButton';
 import type { FaultDefinition, FaultDefinitionType } from '@/lib/types';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 export default function ArizaTanimlamalariPage() {
   const router = useRouter();
-  const { currentUserProfile, isAdmin, currentCompanyId } = useAuth();
+  const { currentUserProfile, isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
@@ -42,12 +42,16 @@ export default function ArizaTanimlamalariPage() {
 
     const fetchFaults = async () => {
       try {
-        const snap = await safeGetDocs(companyQuery(db, 'faultDefinitions', currentCompanyId));
-        const faults = snap.docs.map(d => ({
-          id: d.id,
-          ...d.data(),
-          createdAt: d.data().createdAt?.toDate?.() || null,
-        })) as FaultDefinition[];
+        const snap = await getDocs(collection(db, 'faultDefinitions'));
+        const faults = filterByCompanyScope(
+          snap.docs.map(d => ({
+            id: d.id,
+            ...d.data(),
+            createdAt: d.data().createdAt?.toDate?.() || null,
+          })) as FaultDefinition[],
+          currentCompanyId,
+          isSuperAdmin
+        );
 
         setTeknikFaults(faults.filter(f => f.type === 'teknik_servis'));
         setAplikasyonFaults(faults.filter(f => f.type === 'aplikasyon'));
@@ -60,7 +64,7 @@ export default function ArizaTanimlamalariPage() {
     };
 
     fetchFaults();
-  }, [hasAccess, toast, currentCompanyId]);
+  }, [hasAccess, toast, currentCompanyId, isSuperAdmin]);
 
   const addFault = async (type: FaultDefinitionType) => {
     const name = type === 'teknik_servis' ? newTeknikFault.trim() : newAplikasyonFault.trim();
@@ -72,13 +76,13 @@ export default function ArizaTanimlamalariPage() {
 
     setIsSaving(true);
     try {
-      const docRef = await addDoc(collection(db, 'faultDefinitions'), companyStamp({
+      const docRef = await addDoc(collection(db, 'faultDefinitions'), withCompanyScope({
         name,
         type,
         createdAt: Timestamp.now(),
         createdByUid: currentUserProfile?.uid,
         createdByName: currentUserProfile?.name || 'Bilinmeyen',
-      }, currentCompanyId, 'faultDefinitions'));
+      }, currentUserProfile?.companyId));
 
       const newFault: FaultDefinition = {
         id: docRef.id,

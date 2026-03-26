@@ -26,7 +26,6 @@ import useHidScanner from '@/hooks/useHidScanner';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 
 
@@ -37,7 +36,7 @@ type ScanRow = DepoStokItem & {
 
 export default function UrunIadePanel() {
   const { toast } = useToast();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const { parseAndResolveBarcode, formats: barcodeFormats } = useBarcodeParser();
   const router = useRouter();
 
@@ -61,8 +60,8 @@ export default function UrunIadePanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, hospitalsSnap, productsSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'depots', currentCompanyId)),
-        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(collection(db, 'depots')),
+        getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
       ]);
       const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));

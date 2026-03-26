@@ -27,7 +27,6 @@ import { addDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import QoreAIPanel from '@/components/QoreAIPanel';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +46,7 @@ import {
   type PersonnelAvailabilityRecord,
   type PersonnelAvailabilityType,
 } from '@/lib/personnel-availability';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 interface ActionTileProps {
   icon: React.ElementType;
@@ -158,7 +158,7 @@ export default function CihazYonetimiHost() {
 
   const { toast } = useToast();
   const router = useRouter();
-  const { isAdmin, currentUserProfile, currentCompanyId } = useAuth();
+  const { isAdmin, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -191,16 +191,33 @@ export default function CihazYonetimiHost() {
         getDocs(companyQuery(db, 'aplikasyonActionForms', currentCompanyId)),
       ]);
 
-      setHospitals(hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Hospital));
-      setDevices(devicesSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Device));
-      setHospitalDeviceAssignments(assignmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssignedDevice));
+      setHospitals(filterByCompanyScope(
+        hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Hospital),
+        currentCompanyId,
+        isSuperAdmin
+      ));
+      setDevices(filterByCompanyScope(
+        devicesSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Device),
+        currentCompanyId,
+        isSuperAdmin
+      ));
+      setHospitalDeviceAssignments(filterByCompanyScope(
+        assignmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssignedDevice),
+        currentCompanyId,
+        isSuperAdmin
+      ));
 
-      const users = usersSnap.docs
+      const users = filterByCompanyScope(
+        usersSnap.docs
         .map((d) => ({ uid: d.id, ...d.data() }) as User)
-        .filter((u) => u.role === 'teknik_servis' || u.role === 'aplikasyon');
+        .filter((u) => u.role === 'teknik_servis' || u.role === 'aplikasyon'),
+        currentCompanyId,
+        isSuperAdmin
+      );
       setPersonnelUsers(users);
 
-      const availability = availabilitySnap.docs
+      const availability = filterByCompanyScope(
+        availabilitySnap.docs
         .map((d) => {
           const data = d.data();
           const startAt = toDateValue(data.startAt);
@@ -218,10 +235,13 @@ export default function CihazYonetimiHost() {
             createdByUid: data.createdByUid || null,
           } as PersonnelAvailabilityRecord;
         })
-        .filter((item): item is PersonnelAvailabilityRecord => Boolean(item));
+        .filter((item): item is PersonnelAvailabilityRecord => Boolean(item)),
+        currentCompanyId,
+        isSuperAdmin
+      );
       setAvailabilityRecords(availability);
 
-      const faults = faultsSnap.docs.map((d) => {
+      const faults = filterByCompanyScope(faultsSnap.docs.map((d) => {
         const data = d.data();
         return {
           assignedToUid: data.assignedToUid || null,
@@ -230,7 +250,7 @@ export default function CihazYonetimiHost() {
           hospitalId: data.hospitalId || null,
           openedAt: toDateValue(data.openedAt),
         } as FaultLike;
-      });
+      }), currentCompanyId, isSuperAdmin);
       setFaultRows(faults);
 
       const mapFormsToWindows = (docs: typeof teknikFormsSnap.docs) => docs
@@ -266,7 +286,7 @@ export default function CihazYonetimiHost() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchAllApplicationData();
@@ -406,7 +426,7 @@ export default function CihazYonetimiHost() {
       setSavingAvailability(true);
       const statusLabel = availabilityType === 'office' ? 'Ofisteyim' : 'Eğitimdeyim';
 
-      const payload = {
+      const payload = withCompanyScope({
         uid: currentUserProfile.uid,
         type: availabilityType,
         description: availabilityDescription.trim(),
@@ -414,11 +434,11 @@ export default function CihazYonetimiHost() {
         endAt,
         createdByUid: currentUserProfile.uid,
         createdAt: serverTimestamp(),
-      };
+      }, currentUserProfile.companyId);
 
       const [recordRef] = await Promise.all([
-        addDoc(collection(db, 'personnelAvailability'), companyStamp(payload, currentCompanyId, 'personnelAvailability')),
-        addDoc(collection(db, 'personnelHistoryLogs'), companyStamp({
+        addDoc(collection(db, 'personnelAvailability'), payload),
+        addDoc(collection(db, 'personnelHistoryLogs'), withCompanyScope({
           uid: currentUserProfile.uid,
           action: 'availability_created',
           actionLabel: statusLabel,
@@ -430,7 +450,7 @@ export default function CihazYonetimiHost() {
           metadata: {
             type: availabilityType,
           },
-        }, currentCompanyId, 'personnelHistoryLogs')),
+        }, currentUserProfile.companyId)),
       ]);
 
       setAvailabilityRecords((prev) => [

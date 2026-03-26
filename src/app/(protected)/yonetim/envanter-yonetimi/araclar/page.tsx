@@ -19,6 +19,8 @@ import BackButton from '@/components/BackButton';
 import type { User as AppUser } from '@/lib/types';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Kullanılabilir araç ikonları - /public/vehicles/ klasöründen
 const VEHICLE_ICONS = [
@@ -57,13 +59,19 @@ export default function AraclarPage() {
       ]);
 
       setVehicles(
-        vehiclesSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Vehicle))
+        filterByCompanyScope(
+          vehiclesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Vehicle)),
+          currentCompanyId,
+          isSuperAdmin
+        )
           .sort((a, b) => a.plaka.localeCompare(b.plaka))
       );
 
-      const driverUsers = usersSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as AppUser))
+      const driverUsers = filterByCompanyScope(
+        usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),
+        currentCompanyId,
+        isSuperAdmin
+      )
         .filter(u => (u as any).role === 'driver');
       setDrivers(driverUsers);
     } catch (e) {

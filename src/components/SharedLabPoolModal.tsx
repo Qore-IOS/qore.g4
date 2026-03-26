@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { db } from '@/lib/firebase';
 import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -18,7 +17,7 @@ type Props = {
 };
 
 export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const { toast } = useToast();
 
   const [labs, setLabs] = useState<Laboratory[]>([]);
@@ -27,7 +26,7 @@ export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
 
   useEffect(() => {
     (async () => {
-      const snap = await getDocs(companyQuery(db, 'hospitals', currentCompanyId));
+      const snap = await getDocs(collection(db, 'hospitals'));
       setLabs(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     })();
   }, []);

@@ -4,7 +4,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, orderBy, query, Timestamp, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { companyQuery, safeOnSnapshot, safeGetDocs } from '@/lib/company-filter';
 import type { Device, Hospital, ProductCode } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -32,6 +31,7 @@ import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
@@ -81,7 +81,7 @@ export default function ArizaIstatistikleriPage() {
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
-  const { isAdmin, currentCompanyId } = useAuth();
+  const { isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
@@ -101,8 +101,11 @@ export default function ArizaIstatistikleriPage() {
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
 
   useEffect(() => {
-    const unsubReports = safeOnSnapshot(
-        companyQuery(db, 'deviceFaultReports', currentCompanyId, orderBy('openedAt', 'desc')),
+    const reportsQuery = query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'));
+    const devicesQuery = query(collection(db, 'devices'));
+    const hospitalsQuery = query(collection(db, 'hospitals'), orderBy('name', 'asc'));
+
+    const unsubReports = onSnapshot(reportsQuery,
         (snapshot) => {
             const reportList: any[] = snapshot.docs.map(d => {
                 const data = d.data();
@@ -112,7 +115,7 @@ export default function ArizaIstatistikleriPage() {
                     closedAt: data.closedAt ? (data.closedAt as Timestamp).toDate() : null,
                 };
             });
-            setReports(reportList);
+            setReports(filterByCompanyScope(reportList, currentCompanyId, isSuperAdmin));
         },
         (error) => {
             console.error('Error fetching fault reports:', error);
@@ -120,10 +123,13 @@ export default function ArizaIstatistikleriPage() {
         }
     );
 
-    const unsubDevices = safeOnSnapshot(
-        companyQuery(db, 'devices', currentCompanyId),
+    const unsubDevices = onSnapshot(devicesQuery,
         (snapshot) => {
-            setDevices(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Device)));
+            setDevices(filterByCompanyScope(
+              snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
+              currentCompanyId,
+              isSuperAdmin
+            ));
         },
         (error) => {
             console.error('Error fetching devices:', error);
@@ -131,10 +137,13 @@ export default function ArizaIstatistikleriPage() {
         }
     );
 
-    const unsubHospitals = safeOnSnapshot(
-        companyQuery(db, 'hospitals', currentCompanyId, orderBy('name', 'asc')),
+    const unsubHospitals = onSnapshot(hospitalsQuery,
         (snapshot) => {
-            setHospitals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
+            setHospitals(filterByCompanyScope(
+              snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)),
+              currentCompanyId,
+              isSuperAdmin
+            ));
             setLoading(false);
         },
         (error) => {
@@ -151,9 +160,13 @@ export default function ArizaIstatistikleriPage() {
       console.error('Error fetching product codes:', err);
     });
 
-    // Fetch fault definitions (company filtered)
-    safeGetDocs(companyQuery(db, 'faultDefinitions', currentCompanyId)).then(snapshot => {
-      setFaultDefinitions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FaultDefinition)));
+    // Fetch fault definitions
+    getDocs(collection(db, 'faultDefinitions')).then(snapshot => {
+      setFaultDefinitions(filterByCompanyScope(
+        snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FaultDefinition)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
     }).catch(err => {
       console.error('Error fetching fault definitions:', err);
     });
@@ -163,7 +176,7 @@ export default function ArizaIstatistikleriPage() {
         unsubDevices();
         unsubHospitals();
     };
-  }, [toast, currentCompanyId]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   // Fetch minMaxRules for all hospitals
   useEffect(() => {

@@ -21,7 +21,6 @@ import type { Depot, Device, DeviceLabPool, Hospital, PersonalStockItem, PoolWar
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
@@ -105,7 +104,7 @@ function getTitle(moduleType: ModuleType) {
 
 export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) {
   const router = useRouter();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [forms, setForms] = useState<ActionRecord[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -115,7 +114,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
   useEffect(() => {
     const fetchForms = async () => {
       setLoading(true);
-      const snap = await getDocs(companyQuery(db, getCollectionName(moduleType), currentCompanyId));
+      const snap = await getDocs(collection(db, getCollectionName(moduleType)));
       setForms(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ActionRecord));
       setLoading(false);
     };
@@ -124,7 +123,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       console.error('Form list fetch error', error);
       setLoading(false);
     });
-  }, [moduleType, currentCompanyId]);
+  }, [moduleType]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -273,7 +272,7 @@ function prettifyActionText(value?: string) {
 
 export function ActionFormDetailView({ moduleType, formId }: { moduleType: ModuleType; formId: string }) {
   const router = useRouter();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<ActionRecord | null>(null);
@@ -332,7 +331,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       }
 
       if (nextForm?.hospitalId) {
-        const q = companyQuery(db, 'devices', currentCompanyId, where('hospitalId', '==', nextForm.hospitalId));
+        const q = query(collection(db, 'devices'), where('hospitalId', '==', nextForm.hospitalId));
         const devicesSnap = await getDocs(q);
         const candidates = devicesSnap.docs
           .map((item) => ({ id: item.id, ...item.data() } as Device))
@@ -368,7 +367,8 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     if (!currentUserProfile?.uid) return;
     (async () => {
       try {
-        const q = companyQuery(db, 'personalStock', currentCompanyId,
+        const q = query(
+          collection(db, 'personalStock'),
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
@@ -378,13 +378,13 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching personal stock:', error);
       }
     })();
-  }, [currentUserProfile?.uid, currentCompanyId]);
+  }, [currentUserProfile?.uid]);
 
   useEffect(() => {
     if (!form?.hospitalId) return;
     (async () => {
       try {
-        const poolsSnap = await getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId));
+        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
         const matchingPoolIds = poolsSnap.docs
           .map((d) => ({ id: d.id, ...d.data() } as DeviceLabPool))
           .filter((pool) => pool.memberIds?.includes(form.hospitalId || ''))
@@ -395,7 +395,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           return;
         }
 
-        const depotsSnap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
+        const depotsSnap = await getDocs(collection(db, 'depots'));
         const poolWarehouseIds = depotsSnap.docs
           .map((d) => ({ id: d.id, ...d.data() } as Depot))
           .filter((depot) => depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some((id) => matchingPoolIds.includes(id)))
@@ -408,7 +408,8 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const warehouseId of poolWarehouseIds) {
-          const stockQ = companyQuery(db, 'poolWarehouseStock', currentCompanyId,
+          const stockQ = query(
+            collection(db, 'poolWarehouseStock'),
             where('poolWarehouseId', '==', warehouseId),
             where('status', '==', 'in_stock')
           );
@@ -420,7 +421,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching pool stock:', error);
       }
     })();
-  }, [form?.hospitalId, currentCompanyId]);
+  }, [form?.hospitalId]);
 
   useEffect(() => {
     (async () => {

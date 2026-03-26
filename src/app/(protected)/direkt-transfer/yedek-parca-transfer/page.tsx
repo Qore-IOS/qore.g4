@@ -20,7 +20,6 @@ import {
 } from 'firebase/firestore';
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -179,7 +178,7 @@ interface PersonnelStockViewItem extends PersonalStockItem {
 export default function YedekParcaTransferPage() {
   const router = useRouter();
   const pathname = usePathname();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const { toast } = useToast();
   const depotExcelInputRef = useRef<HTMLInputElement>(null);
 
@@ -347,7 +346,7 @@ export default function YedekParcaTransferPage() {
         setBorrowedParts(borrowed);
 
         // Fetch pool warehouses (depots with isPoolWarehouse = true)
-        const depotsSnap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
+        const depotsSnap = await getDocs(collection(db, 'depots'));
         const allDepots = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Depot);
         setPoolWarehouses(allDepots.filter(d => d.isPoolWarehouse === true));
 

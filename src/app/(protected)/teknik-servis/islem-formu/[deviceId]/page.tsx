@@ -5,7 +5,6 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, companyStamp, addCompanyFilter, safeGetDocs } from '@/lib/company-filter';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -139,7 +138,7 @@ export default function IslemFormuPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const { toast } = useToast();
 
   const [device, setDevice] = useState<Device | null>(null);
@@ -376,7 +375,7 @@ export default function IslemFormuPage() {
         if (!hospitalId) return;
 
         // 2. Get all device lab pools that include this hospital
-        const poolsSnap = await getDocs(companyQuery(db, 'deviceLabPools', currentCompanyId));
+        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -387,7 +386,7 @@ export default function IslemFormuPage() {
         if (matchingPoolIds.length === 0) return;
 
         // 3. Get pool warehouses linked to these lab groups
-        const depotsSnap = await getDocs(companyQuery(db, 'depots', currentCompanyId));
+        const depotsSnap = await getDocs(collection(db, 'depots'));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -426,7 +425,10 @@ export default function IslemFormuPage() {
   useEffect(() => {
     (async () => {
       try {
-        const q = companyQuery(db, 'faultDefinitions', currentCompanyId, where('type', '==', 'teknik_servis'));
+        const q = query(
+          collection(db, 'faultDefinitions'),
+          where('type', '==', 'teknik_servis')
+        );
         const snap = await getDocs(q);
         const faults = snap.docs.map(d => ({
           id: d.id,
@@ -1521,7 +1523,7 @@ export default function IslemFormuPage() {
 
         // Create form document
         const formRef = doc(collection(db, 'teknikServisActionForms'));
-        batch.set(formRef, companyStamp({
+        batch.set(formRef, {
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
             seriNumarasi: device?.seriNumarasi,
@@ -1557,11 +1559,11 @@ export default function IslemFormuPage() {
               timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
             })) : null,
             continuedFromDraft: !!currentDraftId,
-        }, currentCompanyId, 'teknikServisActionForms'));
+        });
 
         // Mirror form to deviceActionForms for device history page
         const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
-        batch.set(deviceFormRef, companyStamp({
+        batch.set(deviceFormRef, {
             deviceId,
             cihazAdi: device?.cihazAdi || device?.model,
             seriNumarasi: device?.seriNumarasi,
@@ -1590,7 +1592,7 @@ export default function IslemFormuPage() {
             selectedFaultName: resolvedFaultName,
             isCustomFault: isCustomFault || false,
             selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
-        }, currentCompanyId, 'deviceActionForms'));
+        });
 
         // Create closed fault report when ariza is selected
         if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
@@ -1611,7 +1613,7 @@ export default function IslemFormuPage() {
           const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
 
           const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-          batch.set(faultReportRef, companyStamp({
+          batch.set(faultReportRef, {
             deviceId,
             hospitalId: device?.hospitalId,
             labName: hospital?.name,
@@ -1646,7 +1648,7 @@ export default function IslemFormuPage() {
             isCustomFault: isCustomFault || false,
             // Arıza kaydı işlem formundan açıldığı için bildirim gönderilmeyecek
             createdFromActionForm: true,
-          }, currentCompanyId, 'deviceFaultReports'));
+          });
 
           // Arıza geçmişine "opened" kaydı ekle
           const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));

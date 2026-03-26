@@ -29,8 +29,6 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import type { Hospital, EfficiencyPool, DeviceFaultReport } from '@/lib/types';
 import BackButton from '@/components/BackButton';
@@ -564,7 +562,6 @@ const PoolRankCard = ({
 
 export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelProps) {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
 
   // State
   const [isLoading, setIsLoading] = useState(true);
@@ -623,7 +620,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
 
         // Fetch device fault reports
         const faultsSnap = await getDocs(
-          companyQuery(db, 'deviceFaultReports', currentCompanyId, orderBy('openedAt', 'desc'))
+          query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))
         );
         const faults = faultsSnap.docs.map(d => {
           const data = d.data();
@@ -649,7 +646,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
     };
 
     fetchData();
-  }, [toast, last6Months, currentCompanyId]);
+  }, [toast, last6Months]);
 
   // Fetch exchange rates
   useEffect(() => {

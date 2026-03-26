@@ -5,7 +5,6 @@ import { useAuth } from '@/contexts/auth-context';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import type { Hospital, PurchasingTask, User } from '@/lib/types';
 import { ArrowLeft, CalendarClock, Building2, FileText, ImageIcon, Flame, CalendarDays } from 'lucide-react';
 import { endOfDay, endOfWeek, format, isAfter, isBefore, parseISO, startOfDay, startOfMonth, startOfWeek, endOfMonth, subMonths } from 'date-fns';
@@ -29,7 +28,7 @@ function getHeatColor(value: number, max: number): string {
 }
 
 export default function AnalizPlanlamaPanel() {
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const [tasks, setTasks] = useState<PurchasingTask[]>([]);
   const [labs, setLabs] = useState<Hospital[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -41,30 +40,30 @@ export default function AnalizPlanlamaPanel() {
   const [personalCalendarMode, setPersonalCalendarMode] = useState<'weekly' | 'monthly'>('weekly');
 
   useEffect(() => {
-    const q = companyQuery(db, 'purchasingTasks', currentCompanyId, orderBy('date', 'desc'));
+    const q = query(collection(db, 'purchasingTasks'), orderBy('date', 'desc'));
     const unsub = onSnapshot(
-      q as any,
-      (snap: any) => {
-        const items = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as PurchasingTask[];
+      q,
+      (snap) => {
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PurchasingTask[];
         setTasks(items);
         setLoading(false);
       },
       () => setLoading(false)
     );
     return () => unsub();
-  }, [currentCompanyId]);
+  }, []);
 
   useEffect(() => {
     async function fetchRefs() {
       const [labSnap, usersSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
-        getDocs(companyQuery(db, 'users', currentCompanyId, where('role', 'in', ['admin', 'satin_alma']))),
+        getDocs(collection(db, 'hospitals')),
+        getDocs(query(collection(db, 'users'), where('role', 'in', ['admin', 'satin_alma']))),
       ]);
       setLabs(labSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
       setUsers(usersSnap.docs.map((d) => ({ uid: d.id, ...d.data() } as User)));
     }
     fetchRefs();
-  }, [currentCompanyId]);
+  }, []);
 
   const visitTasks = useMemo(
     () => tasks.filter((t) => (t.taskType === 'kurum_ziyareti' || !!t.laboratoryId) && !!t.laboratoryId),

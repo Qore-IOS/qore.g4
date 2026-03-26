@@ -8,7 +8,6 @@ import {
 } from 'firebase/firestore';
 import { emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
-import { companyStamp } from '@/lib/company-filter';
 
 export type DeviceFaultEventType = 'opened' | 'note' | 'status_change' | 'closed' | 'assigned' | 'intervention_started' | 'location_verified';
 
@@ -26,7 +25,6 @@ export type OpenFaultInput = {
   faultDefinitionId?: string; // ID from faultDefinitions collection
   faultName?: string; // Name from faultDefinitions (for statistics)
   deviceImageUrl?: string; // Device model image URL for push notifications
-  companyId?: string;
 };
 
 export async function openDeviceFaultReport(input: OpenFaultInput): Promise<string> {
@@ -71,7 +69,7 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     faultName: faultName ?? null,
   };
 
-  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), companyStamp(report, input.companyId || '', 'deviceFaultReports'));
+  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
 
   // Update device arizaDurumu
   if (deviceId) {
@@ -526,7 +524,6 @@ export type OpenEjectedKitFaultInput = {
   testCount: number;
   quantityType: 'kutu' | 'test';
   deviceImageUrl?: string; // Device model image URL for push notifications
-  companyId?: string;
 };
 
 export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput): Promise<string> {
@@ -568,7 +565,7 @@ export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput)
     kitResolution: null,
   };
 
-  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), companyStamp(report, input.companyId || '', 'deviceFaultReports'));
+  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
 
   // Update device arizaDurumu
   if (deviceId) {

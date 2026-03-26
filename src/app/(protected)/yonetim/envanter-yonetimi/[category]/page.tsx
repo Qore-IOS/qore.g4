@@ -18,6 +18,8 @@ import { useAuth } from '@/contexts/auth-context';
 import { companyQuery, companyStamp } from '@/lib/company-filter';
 import BackButton from '@/components/BackButton';
 import type { Hospital, Depot, Asset } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -124,8 +126,16 @@ export default function AssetCategoryPage() {
         getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
         getDocs(companyQuery(db, 'depots', currentCompanyId)),
       ]);
-      const labLocations = labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}` }));
-      const depotLocations = depotsSnap.docs.map(doc => ({ value: (doc.data() as Depot).name, label: `Depo: ${(doc.data() as Depot).name}` }));
+      const labLocations = filterByCompanyScope(
+        labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}`, companyId: (doc.data() as any).companyId })),
+        currentCompanyId,
+        isSuperAdmin
+      ).map(({ value, label }) => ({ value, label }));
+      const depotLocations = filterByCompanyScope(
+        depotsSnap.docs.map(doc => ({ value: (doc.data() as Depot).name, label: `Depo: ${(doc.data() as Depot).name}`, companyId: (doc.data() as any).companyId })),
+        currentCompanyId,
+        isSuperAdmin
+      ).map(({ value, label }) => ({ value, label }));
       setLocations([...labLocations, ...depotLocations, { value: 'Diğer', label: 'Diğer (Manuel Giriş)' }].sort((a,b) => a.label.localeCompare(b.label)));
 
       // Fetch assets for the current category

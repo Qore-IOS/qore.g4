@@ -8,10 +8,10 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 export default function CihazTanimlamalariPage() {
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [imageFiles, setImageFiles] = useState<string[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,10 +22,14 @@ export default function CihazTanimlamalariPage() {
       try {
         const [images, hospitalsSnap] = await Promise.all([
           getDeviceImages(),
-          getDocs(companyQuery(db, 'hospitals', currentCompanyId))
+          getDocs(collection(db, 'hospitals'))
         ]);
         setImageFiles(images);
-        setHospitals(hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital)));
+        setHospitals(filterByCompanyScope(
+          hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital)),
+          currentCompanyId,
+          isSuperAdmin
+        ));
       } catch (error) {
         console.error("Error loading data for device definitions page:", error);
       } finally {
@@ -33,7 +37,7 @@ export default function CihazTanimlamalariPage() {
       }
     }
     loadData();
-  }, [currentCompanyId]);
+  }, [currentCompanyId, isSuperAdmin]);
 
   if (loading) {
     return (

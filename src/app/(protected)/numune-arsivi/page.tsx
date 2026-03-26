@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Archive, Loader2, Printer, Settings, History, Trash2, Nfc, Bot, Box, Grid3X3 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
 import type { Hospital as Laboratory, Rack } from '@/lib/types';
@@ -56,7 +55,7 @@ interface LastScannedInfo {
 }
 
 export default function NumuneArsiviPage() {
-  const { currentUserProfile, isAdmin, currentCompanyId } = useAuth();
+  const { currentUserProfile, isAdmin } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
@@ -82,7 +81,7 @@ export default function NumuneArsiviPage() {
     async function fetchLaboratories() {
       setLoading({ labs: true, fridges: false });
       try {
-        const labsSnap = await getDocs(companyQuery(db, 'hospitals', currentCompanyId));
+        const labsSnap = await getDocs(collection(db, 'hospitals'));
         const labsData = labsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Laboratory));
         setLaboratories(labsData.sort((a,b) => (a.name || '').localeCompare(b.name || '')));
       } catch (error) {
@@ -97,7 +96,7 @@ export default function NumuneArsiviPage() {
       }
     }
     fetchLaboratories();
-  }, [toast, currentCompanyId]);
+  }, [toast]);
 
   const authorizedLaboratories = useMemo(() => {
     if (isAdmin) return laboratories;

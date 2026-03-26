@@ -19,7 +19,6 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery } from '@/lib/company-filter';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -48,7 +47,7 @@ export default function DashboardPanel({
     tuketimKayitlari,
 }: DashboardPanelProps) {
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile } = useAuth();
   const { theme } = useTheme();
   const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
   const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
@@ -92,9 +91,9 @@ export default function DashboardPanel({
   }, []);
 
   useEffect(() => {
-    const faultQuery = companyQuery(db, 'deviceFaultReports', currentCompanyId);
+    const faultQuery = query(collection(db, 'deviceFaultReports'));
     const unsubscribeFaults = onSnapshot(
-      faultQuery as any,
+      faultQuery,
       (snapshot) => {
         const reports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as DeviceFaultReport[];
         setFaultReports(reports);
@@ -102,9 +101,9 @@ export default function DashboardPanel({
       (error) => console.error('deviceFaultReports fetch error:', error)
     );
 
-    const taskQuery = companyQuery(db, 'purchasingTasks', currentCompanyId);
+    const taskQuery = query(collection(db, 'purchasingTasks'));
     const unsubscribeTasks = onSnapshot(
-      taskQuery as any,
+      taskQuery,
       (snapshot) => {
         const tasks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as PurchasingTask[];
         setPurchasingTasks(tasks);
@@ -116,7 +115,7 @@ export default function DashboardPanel({
       unsubscribeFaults();
       unsubscribeTasks();
     };
-  }, [currentCompanyId]);
+  }, []);
 
   // Total stock cost + risky cost – client-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
@@ -124,16 +123,21 @@ export default function DashboardPanel({
   useEffect(() => {
     (async () => {
       try {
-        const [productSnap, stockSnap, depotsSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(companyQuery(db, 'depoStok', currentCompanyId, where('isShipped', '==', false))),
-        ]);
+        let productDocs: any[] = [];
+        let stockDocs: any[] = [];
+        let depotDocs: any[] = [];
+
+        try { const s = await getDocs(collection(db, 'productCodes')); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+        try { const s = await getDocs(collection(db, 'depoStok')); stockDocs = s.docs; } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
+        try { const s = await getDocs(collection(db, 'depots')); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
         // Build cost map: stokKodu -> birim maliyet
         const costMap = new Map<string, number>();
-        productSnap.docs.forEach((d) => {
+        productDocs.forEach((d) => {
           const data = d.data();
-          if (data.cost && data.stokKodu) costMap.set(data.stokKodu, data.cost);
+          const rawCost = data.cost ?? data.birimFiyat ?? data.unitPrice ?? data.price;
+          const numCost = typeof rawCost === 'number' ? rawCost : parseFloat(rawCost);
+          if (numCost && !isNaN(numCost) && data.stokKodu) costMap.set(data.stokKodu, numCost);
         });
 
         // Toplam maliyet hesapla
@@ -141,7 +145,7 @@ export default function DashboardPanel({
         const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
         const groupedByDepotAndProduct = new Map<string, number>();
 
-        stockSnap.docs.forEach((d) => {
+        stockDocs.forEach((d) => {
           const data = d.data();
           if (data.isShipped === true) return;
           const cost = costMap.get(data.stokKodu);
@@ -162,7 +166,7 @@ export default function DashboardPanel({
         setTotalStockCost(total);
 
         // Riskli maliyet: tüm depolardan minMaxRules çek
-        const depotIds = depotsSnap.docs.map((d) => d.id);
+        const depotIds = depotDocs.map((d) => d.id);
         const allMinMaxRules = new Map<string, { max: number; maxGun: number }>();
 
         const rulePromises = depotIds.map(async (depotId) => {
@@ -227,7 +231,7 @@ export default function DashboardPanel({
         setRiskyCost(0);
       }
     })();
-  }, [currentCompanyId]);
+  }, []);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
   const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
@@ -239,23 +243,29 @@ export default function DashboardPanel({
         const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
         const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
 
-        const [productSnap, consumptionSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(companyQuery(
-            db, 'tuketimKayitlari', currentCompanyId,
+        let productDocs2: any[] = [];
+        let consumptionDocs: any[] = [];
+
+        try { const s = await getDocs(collection(db, 'productCodes')); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
+        try {
+          const s = await getDocs(query(
+            collection(db, 'tuketimKayitlari'),
             where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
             where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
-          )),
-        ]);
+          ));
+          consumptionDocs = s.docs;
+        } catch (e) { console.warn('[Dashboard] yesterday consumption fetch failed:', e); }
 
         const priceMap = new Map<string, number>();
-        productSnap.docs.forEach(d => {
+        productDocs2.forEach(d => {
           const data = d.data();
-          if (data.cost && data.stokKodu) priceMap.set(data.stokKodu, data.cost);
+          const rawCost = data.cost ?? data.birimFiyat ?? data.unitPrice ?? data.price;
+          const numCost = typeof rawCost === 'number' ? rawCost : parseFloat(rawCost);
+          if (numCost && !isNaN(numCost) && data.stokKodu) priceMap.set(data.stokKodu, numCost);
         });
 
         let total = 0;
-        consumptionSnap.docs.forEach(d => {
+        consumptionDocs.forEach(d => {
           const stokKodu = d.data().stokKodu;
           const cost = priceMap.get(stokKodu);
           if (cost) total += cost;
@@ -263,16 +273,17 @@ export default function DashboardPanel({
         setYesterdayConsumptionCost(total);
       } catch (e) { console.error('Yesterday consumption cost error:', e); }
     })();
-  }, [currentCompanyId]);
+  }, []);
 
   // Average efficiency
   const [avgEfficiency, setAvgEfficiency] = useState<number | null>(null);
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(companyQuery(db, 'totalEfficiencyRecords', currentCompanyId));
+        const effSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        if (!effSnap) return;
         const efficiencies: number[] = [];
-        snap.docs.forEach(d => {
+        effSnap.docs.forEach(d => {
           const data = d.data();
           const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
           if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
@@ -283,12 +294,13 @@ export default function DashboardPanel({
         setAvgEfficiency(efficiencies.reduce((sum, v) => sum + v, 0) / efficiencies.length);
       } catch (e) { console.error('Avg efficiency error:', e); }
     })();
-  }, [currentCompanyId]);
+  }, []);
 
   const faultKpis = useMemo(() => faultReports.reduce((acc, report) => {
-    if (report.status === 'atama_bekliyor') acc.atamaBekleyen += 1;
-    if (report.status === 'mudahale_bekliyor') acc.mudahaleBekleyen += 1;
-    if (report.status === 'mudahale_ediliyor') acc.mudahaleEdilen += 1;
+    const status = (report.status || '').toLowerCase().replace(/[\s-]/g, '_');
+    if (status === 'atama_bekliyor') acc.atamaBekleyen += 1;
+    else if (status === 'mudahale_bekliyor' || status === 'müdahale_bekliyor') acc.mudahaleBekleyen += 1;
+    else if (status === 'mudahale_ediliyor' || status === 'müdahale_ediliyor') acc.mudahaleEdilen += 1;
     return acc;
   }, { atamaBekleyen: 0, mudahaleBekleyen: 0, mudahaleEdilen: 0 }), [faultReports]);
 
@@ -296,7 +308,6 @@ export default function DashboardPanel({
     if (!currentUserProfile?.uid) {
       return {
         timelineItems: [] as Array<{ id: string; label: string; type: 'past' | 'today' | 'future' }>,
-        todayTasks: [] as Array<{ id: string; label: string; type: 'today-task' }>,
       };
     }
 
@@ -396,13 +407,36 @@ export default function DashboardPanel({
   const { data: dailyStats = [] } = useDailyConsumptionStats(startDateKey, endDateKey);
 
   // Convert daily stats to chart data format
+  // Fallback: when dailyConsumptionStats collection is empty, compute from tuketimKayitlari
+  const hasDailyStats = dailyStats.length > 0;
+
   const { data: stockConsumptionTrend, title: trendTitle } = useMemo(() => {
     // Create a map of date -> stats for quick lookup
     const statsMap = new Map<string, DailyConsumptionStats>();
     dailyStats.forEach(stat => statsMap.set(stat.date, stat));
 
-    // For 'daily' period (hourly breakdown), we still need tuketimKayitlari
-    // For other periods, use daily aggregated stats
+    // If dailyConsumptionStats is empty, build stats from tuketimKayitlari
+    if (!hasDailyStats && tuketimKayitlari.length > 0) {
+      tuketimKayitlari.forEach(record => {
+        const d = toDateFromAny(record.consumptionTimestamp);
+        if (!d) return;
+        const dateKey = formatDateKey(d);
+        const existing = statsMap.get(dateKey);
+        if (existing) {
+          existing.totalCount += 1;
+          const labId = hospitals.find(h => h.name === record.laboratoryName)?.id;
+          if (labId) {
+            existing.byLab[labId] = (existing.byLab[labId] || 0) + 1;
+          }
+        } else {
+          const byLab: Record<string, number> = {};
+          const labId = hospitals.find(h => h.name === record.laboratoryName)?.id;
+          if (labId) byLab[labId] = 1;
+          statsMap.set(dateKey, { date: dateKey, totalCount: 1, byLab } as DailyConsumptionStats);
+        }
+      });
+    }
+
     let interval: Date[];
     let formatLabel: (date: Date) => string;
     let title = '';
@@ -410,7 +444,6 @@ export default function DashboardPanel({
 
     switch (trendPeriod) {
       case 'daily':
-        // Hourly breakdown still needs real-time data
         interval = Array.from({ length: 24 }, (_, i) =>
           new Date(trendDate.getFullYear(), trendDate.getMonth(), trendDate.getDate(), i)
         );

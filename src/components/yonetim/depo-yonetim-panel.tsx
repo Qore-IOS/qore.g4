@@ -4,8 +4,6 @@ import type { Depot, ProductCode, AddressDefinition, Hospital, DeviceLabPool } f
 import { db } from '@/lib/firebase';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -17,6 +15,8 @@ import { Switch } from '@/components/ui/switch';
 import MapDefinitionModal from '@/components/MapDefinitionModal';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import dynamic from 'next/dynamic';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
   ssr: false,
@@ -25,7 +25,7 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 
 export default function DepoYonetimPanel() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const [depots, setDepots] = useState<Depot[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -46,23 +46,23 @@ export default function DepoYonetimPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap, poolsSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'depots', currentCompanyId)),
+        getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'productCodes')),
-        getDocs(companyQuery(db, 'hospitals', currentCompanyId)),
+        getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'addressDefinitions')),
-        getDocs(addCompanyFilter(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc')), currentCompanyId, 'deviceLabPools')),
+        getDocs(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc'))),
       ]);
-      setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
+      setDepots(filterByCompanyScope(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
       setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setAddressDefinitions(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
-      setDeviceLabPools(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
+      setHospitals(filterByCompanyScope(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
+      setAddressDefinitions(filterByCompanyScope(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
+      setDeviceLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)), currentCompanyId, isSuperAdmin));
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -113,7 +113,7 @@ export default function DepoYonetimPanel() {
       if (currentDepot.id) {
         await setDoc(doc(db, 'depots', currentDepot.id), dataToSave, { merge: true });
       } else {
-        await addDoc(collection(db, 'depots'), companyStamp(dataToSave, currentCompanyId, 'depots'));
+        await addDoc(collection(db, 'depots'), withCompanyScope(dataToSave, currentUserProfile?.companyId));
       }
       toast({ title: 'Başarılı', description: 'Depo kaydedildi.' });
       fetchData();

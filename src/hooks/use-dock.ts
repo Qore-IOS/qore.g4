@@ -26,7 +26,6 @@ import {
   doc,
   arrayUnion,
 } from "firebase/firestore";
-import { addCompanyFilter } from '@/lib/company-filter';
 import type { NotificationDoc } from "@/lib/notifications";
 import {
   Bell,
@@ -298,14 +297,6 @@ const subItemMap: Record<string, DockSubItem[]> = {
       href: "/direkt-transfer",
     },
   ],
-  "direkt-transfer": [
-    {
-      key: "yedek-parca-transfer",
-      label: "Yedek Parça Transfer",
-      icon: Boxes,
-      href: "/direkt-transfer/yedek-parca-transfer",
-    },
-  ],
   "verimlilik-hesaplama": [
     {
       key: "verimlilik-hesaplama",
@@ -347,7 +338,7 @@ const subItemMap: Record<string, DockSubItem[]> = {
 };
 
 export function useDock() {
-  const { currentUser, currentUserProfile, logout, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -443,13 +434,12 @@ export function useDock() {
 
     trackListener("useDock-notifications", "create");
 
-    const baseQ = query(
+    const q = query(
       collection(db, "notifications"),
       where("targets", "array-contains-any", keysArray),
       orderBy("createdAt", "desc"),
       fsLimit(40)
     );
-    const q = addCompanyFilter(baseQ, currentCompanyId, 'notifications');
 
     const unsub = onSnapshot(
       q,
@@ -500,7 +490,7 @@ export function useDock() {
       trackListener("useDock-notifications", "cleanup");
       unsub();
     };
-  }, [membershipKeysString, uid, notificationsAllowed, peekDockStable, currentCompanyId]);
+  }, [membershipKeysString, uid, notificationsAllowed, peekDockStable]);
 
   const unreadCount = useMemo(() => {
     if (!uid || !notificationsAllowed) return 0;

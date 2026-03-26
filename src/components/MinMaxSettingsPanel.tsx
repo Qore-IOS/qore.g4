@@ -4,8 +4,6 @@ import React, { useState, useEffect, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useAuth } from '@/contexts/auth-context';
-import { companyStamp } from '@/lib/company-filter';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,7 +38,6 @@ interface RuleState {
 }
 
 export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetType, productCodes, toast }: MinMaxSettingsPanelProps) {
-  const { currentCompanyId } = useAuth();
   const [rules, setRules] = useState<RuleState>({});
   const [isLoading, setIsLoading] = useState(false);
   const [selectedSearch, setSelectedSearch] = useState('');
@@ -237,16 +234,16 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
 
         batch.set(ruleRef, dataToSet);
         
-        historyWrites.push(addDoc(collection(db, 'minMaxHistory'), companyStamp({
+        historyWrites.push(addDoc(collection(db, 'minMaxHistory'), {
           ...dataToSet,
           locationId: target.id,
           locationType: targetType,
           timestamp: serverTimestamp(),
-        }, currentCompanyId, 'minMaxHistory')));
+        }));
       } else {
         if (existingRuleIds.has(stockCode)) {
             batch.delete(ruleRef);
-            historyWrites.push(addDoc(collection(db, 'minMaxHistory'), companyStamp({
+            historyWrites.push(addDoc(collection(db, 'minMaxHistory'), {
                 stokKodu: stockCode,
                 min: null,
                 max: null,
@@ -256,7 +253,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                 locationType: targetType,
                 timestamp: serverTimestamp(),
                 action: 'deleted',
-            }, currentCompanyId, 'minMaxHistory')));
+            }));
         }
       }
     }

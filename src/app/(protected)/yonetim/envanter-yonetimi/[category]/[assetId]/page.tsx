@@ -89,14 +89,26 @@ export default function AssetDetailPage() {
           toast({ title: 'Bulunamadı', description: 'Bu ID ile eşleşen ürün bulunamadı.', variant: 'destructive' });
         }
         
-        const labLocations = labsSnap.docs.map(d => ({ id: d.id, name: d.data().name }));
-        const depotLocations = depotsSnap.docs.map(d => ({ id: d.id, name: d.data().name }));
+        const labLocations = filterByCompanyScope(
+          labsSnap.docs.map(d => ({ id: d.id, name: d.data().name, companyId: (d.data() as any).companyId })),
+          currentUserProfile?.companyId,
+          currentUserProfile?.role === 'super_admin'
+        ).map(({ id, name }) => ({ id, name }));
+        const depotLocations = filterByCompanyScope(
+          depotsSnap.docs.map(d => ({ id: d.id, name: d.data().name, companyId: (d.data() as any).companyId })),
+          currentUserProfile?.companyId,
+          currentUserProfile?.role === 'super_admin'
+        ).map(({ id, name }) => ({ id, name }));
         setLocations([...labLocations, ...depotLocations].sort((a,b) => a.name.localeCompare(b.name)));
 
         // Fetch history
         const historyQuery = query(collection(db, 'assets', assetId, 'assetHistory'), orderBy('timestamp', 'desc'));
         const historySnap = await getDocs(historyQuery);
-        setHistory(historySnap.docs.map(d => ({ id: d.id, ...d.data() } as AssetHistoryEntry)));
+        setHistory(filterByCompanyScope(
+          historySnap.docs.map(d => ({ id: d.id, ...d.data() } as AssetHistoryEntry)),
+          currentUserProfile?.companyId,
+          currentUserProfile?.role === 'super_admin'
+        ));
 
       } catch (e) {
         toast({ title: 'Hata', description: 'Ürün bilgileri yüklenemedi.', variant: 'destructive' });
@@ -145,7 +157,7 @@ export default function AssetDetailPage() {
         },
       };
 
-      await addDoc(collection(db, 'assets', asset.id, 'assetHistory'), historyEntry);
+      await addDoc(collection(db, 'assets', asset.id, 'assetHistory'), withCompanyScope(historyEntry, currentUserProfile?.companyId));
       await updateDoc(doc(db, 'assets', asset.id), {
         konum: newLocation,
         teslimEdilenPersonel: newPersonel,

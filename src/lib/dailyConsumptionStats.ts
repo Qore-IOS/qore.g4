@@ -24,7 +24,6 @@ import {
 } from 'firebase/firestore';
 import { format, startOfDay, endOfDay, eachDayOfInterval, subDays } from 'date-fns';
 import type { DailyConsumptionStats, ConsumptionRecord } from '@/lib/types';
-import { companyQuery, companyStamp } from '@/lib/company-filter';
 
 const COLLECTION_NAME = 'dailyConsumptionStats';
 
@@ -39,14 +38,14 @@ export function formatDateKey(date: Date): string {
  * Calculate daily consumption stats for a specific date
  * Queries tuketimKayitlari and aggregates by laboratory
  */
-export async function calculateDailyStats(date: Date, companyId?: string): Promise<Omit<DailyConsumptionStats, 'id'>> {
+export async function calculateDailyStats(date: Date): Promise<Omit<DailyConsumptionStats, 'id'>> {
   const dateKey = formatDateKey(date);
   const dayStart = Timestamp.fromDate(startOfDay(date));
   const dayEnd = Timestamp.fromDate(endOfDay(date));
 
   // Query consumption records for this day
   const q = query(
-    companyQuery(db, 'tuketimKayitlari', companyId || ''),
+    collection(db, 'tuketimKayitlari'),
     where('consumptionTimestamp', '>=', dayStart),
     where('consumptionTimestamp', '<=', dayEnd),
     orderBy('consumptionTimestamp', 'asc')

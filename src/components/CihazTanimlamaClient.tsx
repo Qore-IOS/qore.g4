@@ -31,8 +31,8 @@ import { cn, exportDevicesToPdf } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
-import { companyQuery, addCompanyFilter, companyStamp } from '@/lib/company-filter';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 // Periyot birimi etiketleri
 const PERIOD_UNIT_LABELS: Record<MaintenancePeriodUnit, string> = {
@@ -91,7 +91,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [current, setCurrent] = useState<Partial<Device>>({});
   const [customPath, setCustomPath] = useState('');
   const { toast } = useToast();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const router = useRouter();
 
   // Cihaz Laboratuvar Gruplandırma State
@@ -133,11 +133,15 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
   const fetchDevices = async () => {
     setLoading(true);
-    const snap = await getDocs(companyQuery(db, 'devices', currentCompanyId));
-    setDevices(snap.docs.map(d => ({ id: d.id, ...d.data() } as Device)));
+    const snap = await getDocs(collection(db, 'devices'));
+    setDevices(filterByCompanyScope(
+      snap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
+      currentCompanyId,
+      isSuperAdmin
+    ));
     setLoading(false);
   };
-  useEffect(() => { fetchDevices(); }, [currentCompanyId]);
+  useEffect(() => { fetchDevices(); }, [currentCompanyId, isSuperAdmin]);
 
   // Yedek parça ürünlerini getir
   useEffect(() => {
@@ -171,7 +175,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const id = current.id
       ?? `${current.brand}-${current.model}-${current.seriNumarasi}`.toLowerCase().replace(/\s+/g, '-');
       
-    await setDoc(doc(db, 'devices', id), { 
+    await setDoc(doc(db, 'devices', id), withCompanyScope({ 
       brand: current.brand,
       model: current.model,
       imageUrl,
@@ -179,7 +183,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       seriNumarasi: current.seriNumarasi,
       hospitalId: current.hospitalId,
       order: current.order
-    }, { merge: true });
+    }, currentUserProfile?.companyId), { merge: true });
 
     toast({ title: 'Kaydedildi', description: 'Cihaz tanımı kaydedildi.' });
     setModalOpen(false);
@@ -207,19 +211,29 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
     try {
       // Bakım planlarını getir
-      const plansQuery = companyQuery(db, 'maintenancePlans', currentCompanyId,
+      const plansQuery = query(
+        collection(db, 'maintenancePlans'),
         where('deviceId', '==', device.id)
       );
       const plansSnap = await getDocs(plansQuery);
-      const plans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan);
+      const plans = filterByCompanyScope(
+        plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
+        currentCompanyId,
+        isSuperAdmin
+      );
       setExistingPlans(plans);
 
       // Periyodik parça değişimlerini getir
-      const partsQuery = companyQuery(db, 'periodicPartChanges', currentCompanyId,
+      const partsQuery = query(
+        collection(db, 'periodicPartChanges'),
         where('deviceId', '==', device.id)
       );
       const partsSnap = await getDocs(partsQuery);
-      const parts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange);
+      const parts = filterByCompanyScope(
+        partsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange),
+        currentCompanyId,
+        isSuperAdmin
+      );
       setExistingPeriodicParts(parts);
     } catch (err) {
       console.error('Bakım planları yüklenemedi:', err);
@@ -458,7 +472,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       for (const device of targetDevices) {
         // Bakım planlarını kaydet
         for (const row of allBulkRows) {
-          await addDoc(collection(db, 'maintenancePlans'), companyStamp({
+          await addDoc(collection(db, 'maintenancePlans'), withCompanyScope({
             deviceId: device.id,
             taskName: row.taskName.trim(),
             periodValue: row.periodValue,
@@ -467,13 +481,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             createdAt: serverTimestamp(),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
-          }, currentCompanyId, 'maintenancePlans'));
+          }, currentUserProfile?.companyId));
           totalSaved++;
         }
 
         // Periyodik parça değişimlerini kaydet
         for (const row of bulkPeriodicPartRows) {
-          await addDoc(collection(db, 'periodicPartChanges'), companyStamp({
+          await addDoc(collection(db, 'periodicPartChanges'), withCompanyScope({
             deviceId: device.id,
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
@@ -488,7 +502,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             createdAt: serverTimestamp(),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
-          }, currentCompanyId, 'periodicPartChanges'));
+          }, currentUserProfile?.companyId));
           totalSaved++;
         }
       }
@@ -577,7 +591,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     try {
       // Bakım planlarını kaydet
       for (const row of allNewRows) {
-        await addDoc(collection(db, 'maintenancePlans'), companyStamp({
+        await addDoc(collection(db, 'maintenancePlans'), withCompanyScope({
           deviceId: maintenanceDevice.id,
           taskName: row.taskName.trim(),
           periodValue: row.periodValue,
@@ -586,12 +600,12 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           createdAt: serverTimestamp(),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId, 'maintenancePlans'));
+        }, currentUserProfile?.companyId));
       }
 
       // Periyodik parça değişimlerini kaydet
       for (const row of newPeriodicPartRows) {
-        await addDoc(collection(db, 'periodicPartChanges'), companyStamp({
+        await addDoc(collection(db, 'periodicPartChanges'), withCompanyScope({
           deviceId: maintenanceDevice.id,
           productCodeId: row.productCodeId,
           stokKodu: row.stokKodu,
@@ -606,7 +620,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           createdAt: serverTimestamp(),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId, 'periodicPartChanges'));
+        }, currentUserProfile?.companyId));
       }
 
       const totalSaved = allNewRows.length + newPeriodicPartRows.length;
@@ -633,11 +647,19 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     try {
       // Fetch all maintenance plans and periodic parts for all devices
       const [allPlansSnap, allPartsSnap] = await Promise.all([
-        getDocs(companyQuery(db, 'maintenancePlans', currentCompanyId)),
-        getDocs(companyQuery(db, 'periodicPartChanges', currentCompanyId)),
+        getDocs(collection(db, 'maintenancePlans')),
+        getDocs(collection(db, 'periodicPartChanges')),
       ]);
-      const allPlans = allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan);
-      const allParts = allPartsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange);
+      const allPlans = filterByCompanyScope(
+        allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
+        currentCompanyId,
+        isSuperAdmin
+      );
+      const allParts = filterByCompanyScope(
+        allPartsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange),
+        currentCompanyId,
+        isSuperAdmin
+      );
 
       const devicesData = devices.map(dev => {
         const hospitalName = hospitals.find(h => h.id === dev.hospitalId)?.name || '';

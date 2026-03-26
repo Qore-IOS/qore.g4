@@ -35,7 +35,6 @@ import {
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
-import { companyQuery } from '@/lib/company-filter';
 
 // Neumorphic score circle component
 function ScoreCircle({ score }: { score: number }) {
@@ -864,7 +863,7 @@ function ComparisonView({
 
 export default function PersonelIzlemPage() {
   const router = useRouter();
-  const { currentUserProfile, isAdmin, currentCompanyId } = useAuth();
+  const { currentUserProfile, isAdmin } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [performances, setPerformances] = useState<PersonnelPerformance[]>([]);
@@ -903,7 +902,7 @@ export default function PersonelIzlemPage() {
   useEffect(() => {
     const loadHospitals = async () => {
       try {
-        const hospitalsSnap = await getDocs(companyQuery(db, 'hospitals', currentCompanyId));
+        const hospitalsSnap = await getDocs(collection(db, 'hospitals'));
         const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Hospital);
         setHospitals(hospitalsData.sort((a, b) => a.name.localeCompare(b.name, 'tr')));
       } catch (err) {
@@ -911,7 +910,7 @@ export default function PersonelIzlemPage() {
       }
     };
     loadHospitals();
-  }, [currentCompanyId]);
+  }, []);
 
   const loadPerformanceData = async (filters?: PerformanceFilters) => {
     setLoading(true);
