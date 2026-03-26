@@ -71,13 +71,18 @@ interface ProductCountEntry {
   expiryWarnings: ExpiryWarning[];
 }
 
+interface CostByCurrency {
+  TRY: number;
+  EUR: number;
+  USD: number;
+}
+
 interface BrandProgress {
   brand: string;
   total: number;
   completed: number;
   status: 'idle' | 'in_progress' | 'completed';
-  cost: number;           // total cost for this brand based on count data
-  costCurrency: string;   // dominant currency symbol
+  costs: CostByCurrency;
 }
 
 type LocationType = 'lab' | 'depot';
@@ -125,13 +130,22 @@ function expiryColor(days: number | null): string {
 }
 
 /** Calculate total cost for a single product based on count data */
-function calcProductCost(product: ProductCode, entry?: ProductCountEntry): number {
-  if (!entry || !product.cost || !product.ambalajDegeri) return 0;
+function calcProductCost(product: ProductCode, entry?: ProductCountEntry): { amount: number; currency: string } {
+  if (!entry || !product.cost || !product.ambalajDegeri) return { amount: 0, currency: product.currency || 'TRY' };
   const stokNum = parseInt(entry.stokAdedi, 10) || 0;
   const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
   const toplamTest = (stokNum * product.ambalajDegeri) + cihazNum;
-  if (toplamTest <= 0) return 0;
-  return (product.cost / product.ambalajDegeri) * toplamTest;
+  if (toplamTest <= 0) return { amount: 0, currency: product.currency || 'TRY' };
+  return { amount: (product.cost / product.ambalajDegeri) * toplamTest, currency: product.currency || 'TRY' };
+}
+
+/** Format CostByCurrency as display string */
+function formatCosts(costs: CostByCurrency): string {
+  const parts: string[] = [];
+  if (costs.EUR > 0) parts.push(`${costs.EUR.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}€`);
+  if (costs.USD > 0) parts.push(`${costs.USD.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}$`);
+  if (costs.TRY > 0) parts.push(`${costs.TRY.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}₺`);
+  return parts.join(' + ');
 }
 
 function getBrandsFromRules(
@@ -213,9 +227,9 @@ function BrandChecklistItem({
         <span className="text-xs text-[var(--dashboard-muted)]">
           {brand.completed} / {brand.total} ürün
         </span>
-        {showCost && brand.cost > 0 && (
+        {showCost && (brand.costs.TRY > 0 || brand.costs.EUR > 0 || brand.costs.USD > 0) && (
           <span className="text-[10px] font-semibold text-emerald-600">
-            {brand.cost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}{brand.costCurrency}
+            {formatCosts(brand.costs)}
           </span>
         )}
       </div>
@@ -589,10 +603,13 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       let status: BrandProgress['status'] = 'idle';
       if (completed > 0 && completed < products.length) status = 'in_progress';
       if (completed === products.length && products.length > 0) status = 'completed';
-      const cost = products.reduce((sum, p) => sum + calcProductCost(p, countData[p.stokKodu]), 0);
-      const currencies = products.map(p => p.currency || 'TRY');
-      const costCurrency = currencies.includes('TRY') ? '₺' : currencies.includes('EUR') ? '€' : '₺';
-      return { brand, total: products.length, completed, status, cost, costCurrency };
+      const costs: CostByCurrency = { TRY: 0, EUR: 0, USD: 0 };
+      products.forEach(p => {
+        const { amount, currency } = calcProductCost(p, countData[p.stokKodu]);
+        const key = (currency === 'EUR' || currency === 'USD') ? currency : 'TRY';
+        costs[key] += amount;
+      });
+      return { brand, total: products.length, completed, status, costs };
     });
   }, [brands, countData, locationMinMaxRules, productCodes]);
 
@@ -601,7 +618,11 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const totalProducts = brandProgressList.reduce((s, b) => s + b.total, 0);
   const totalCounted = brandProgressList.reduce((s, b) => s + b.completed, 0);
   const overallPct = totalProducts > 0 ? Math.round((totalCounted / totalProducts) * 100) : 0;
-  const totalCost = brandProgressList.reduce((s, b) => s + b.cost, 0);
+  const totalCosts: CostByCurrency = brandProgressList.reduce(
+    (s, b) => ({ TRY: s.TRY + b.costs.TRY, EUR: s.EUR + b.costs.EUR, USD: s.USD + b.costs.USD }),
+    { TRY: 0, EUR: 0, USD: 0 }
+  );
+  const totalCostStr = formatCosts(totalCosts);
 
   // Filtered products for display
   const filteredProducts = useMemo(() => {
@@ -950,8 +971,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           <div className="flex items-center gap-4 ml-auto text-xs text-[var(--dashboard-muted)]">
             <span>{completedBrands} / {totalBrands} marka</span>
             <span>{totalCounted} / {totalProducts} ürün</span>
-            {canSeeCost && totalCost > 0 && (
-              <span className="font-semibold text-emerald-600">{totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}₺</span>
+            {canSeeCost && totalCostStr && (
+              <span className="font-semibold text-emerald-600">{totalCostStr}</span>
             )}
             <div className="hidden sm:flex items-center gap-2">
               <div className="w-24 h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
