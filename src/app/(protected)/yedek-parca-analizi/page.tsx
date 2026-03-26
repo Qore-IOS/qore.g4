@@ -17,6 +17,8 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
 import type { Hospital } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 interface TransferLog {
   id: string;
@@ -64,6 +66,7 @@ interface PartDetail {
 
 export default function YedekParcaAnaliziPage() {
   const router = useRouter();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [transferLogs, setTransferLogs] = useState<TransferLog[]>([]);
@@ -86,32 +89,43 @@ export default function YedekParcaAnaliziPage() {
           getDocs(collection(db, 'devices')),
         ]);
 
+        const scopedHospitals = filterByCompanyScope(
+          hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
+          currentCompanyId,
+          isSuperAdmin
+        );
         const hMap = new Map<string, Hospital>();
-        hospitalsSnap.docs.forEach((d) => { hMap.set(d.id, { id: d.id, ...d.data() } as Hospital); });
+        scopedHospitals.forEach((h) => { hMap.set(h.id, h); });
 
         const dlMap = new Map<string, { labId: string; labName: string }>();
-        devicesSnap.docs.forEach((d) => {
-          const data = d.data();
+        filterByCompanyScope(
+          devicesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          currentCompanyId,
+          isSuperAdmin
+        ).forEach((data) => {
           const labId = data.hospitalId || data.hastaneId || '';
           if (labId) {
             const lab = hMap.get(labId);
-            dlMap.set(d.id, { labId, labName: lab?.name || 'Bilinmiyor' });
+            dlMap.set(data.id, { labId, labName: lab?.name || 'Bilinmiyor' });
           }
         });
-        assignmentsSnap.docs.forEach((d) => {
-          const data = d.data();
+        filterByCompanyScope(
+          assignmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          currentCompanyId,
+          isSuperAdmin
+        ).forEach((data) => {
           const labId = data.hastaneId || '';
           if (!labId) return;
           const lab = hMap.get(labId);
           const entry = { labId, labName: lab?.name || 'Bilinmiyor' };
-          if (!dlMap.has(d.id)) dlMap.set(d.id, entry);
+          if (!dlMap.has(data.id)) dlMap.set(data.id, entry);
           if (data.cihazId && !dlMap.has(data.cihazId)) dlMap.set(data.cihazId, entry);
           if (data.deviceId && !dlMap.has(data.deviceId)) dlMap.set(data.deviceId, entry);
         });
         setDeviceLabMap(dlMap);
 
         setTransferLogs(
-          transferSnap.docs.map((d) => {
+          filterByCompanyScope(transferSnap.docs.map((d) => {
             const data = d.data();
             return {
               id: d.id, action: data.action, stokKodu: data.stokKodu || '', stokAdi: data.stokAdi || '',
@@ -120,7 +134,7 @@ export default function YedekParcaAnaliziPage() {
               createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
               formType: data.formType,
             };
-          })
+          }), currentCompanyId, isSuperAdmin)
         );
       } catch (error) {
         console.error('Yedek parça analizi veri hatası:', error);
@@ -129,7 +143,7 @@ export default function YedekParcaAnaliziPage() {
       }
     };
     fetchData();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const partSummaries = useMemo(() => {
     const map = new Map<string, PartSummary>();
@@ -198,12 +212,19 @@ export default function YedekParcaAnaliziPage() {
       ]);
 
       let depoStokCount = 0;
-      for (const doc of depoSnap.docs) { depoStokCount += doc.data().quantity || 1; }
+      for (const doc of filterByCompanyScope(
+        depoSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        currentCompanyId,
+        isSuperAdmin
+      )) { depoStokCount += doc.quantity || 1; }
 
       const personnelStokMap = new Map<string, { uid: string; name: string; count: number }>();
       let totalPersonnelStok = 0;
-      for (const doc of personalSnap.docs) {
-        const data = doc.data();
+      for (const data of filterByCompanyScope(
+        personalSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        currentCompanyId,
+        isSuperAdmin
+      )) {
         totalPersonnelStok++;
         const existing = personnelStokMap.get(data.ownerUid);
         if (existing) existing.count++;
@@ -223,7 +244,7 @@ export default function YedekParcaAnaliziPage() {
     } finally {
       setDetailLoading(false);
     }
-  }, [transferLogs, deviceLabMap]);
+  }, [transferLogs, deviceLabMap, currentCompanyId, isSuperAdmin]);
 
   const formatDate = (date: Date | null) => {
     if (!date) return '-';
