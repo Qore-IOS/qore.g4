@@ -88,6 +88,7 @@ interface BrandProgress {
 }
 
 type LocationType = 'lab' | 'depot';
+type VoiceAssistantActionType = 'complete_count' | 'complete_brand' | 'next_brand' | 'go_to_brand';
 
 interface MaliyetSayimPanelProps {
   hospitals: Hospital[];
@@ -175,6 +176,15 @@ function getProductsForBrandFromRules(
   return productCodes
     .filter(p => p.marka === brand && stokKoduSet.has(p.stokKodu))
     .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLocaleLowerCase('tr')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // ============================================================================
@@ -531,11 +541,16 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const recognitionRef = useRef<any>(null);
   const voiceProcessingRef = useRef(false);
+  const activeBrandRef = useRef<string | null>(null);
 
   // Completion modal
   const [showFinishModal, setShowFinishModal] = useState(false);
 
   const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    activeBrandRef.current = activeBrand;
+  }, [activeBrand]);
 
   // Fetch minMaxRules from Firestore when location changes
   useEffect(() => {
@@ -843,7 +858,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       const res = await fetch('/api/ai/voice-count', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript, products: allProducts }),
+        body: JSON.stringify({ transcript, products: allProducts, brands }),
       });
 
       if (!res.ok) {
@@ -853,15 +868,78 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       }
 
       const data = await res.json();
+      const actions: { type: VoiceAssistantActionType; brand?: string }[] = data.actions || [];
       const commands: { stokKodu: string; stokAdedi?: number; cihazUstuAdedi?: number }[] = data.commands || [];
 
-      if (commands.length === 0) {
+      if (commands.length === 0 && actions.length === 0) {
         flashFeedback('error', `Ürün eşleşemedi: "${transcript}"`);
         return;
       }
 
-      // Apply commands to countData
       const feedbackParts: string[] = [];
+
+      // Apply assistant actions
+      let shouldOpenFinishModal = false;
+      let effectiveBrand = activeBrandRef.current;
+      const brandsToComplete = new Set<string>();
+
+      for (const commandAction of actions) {
+        if (commandAction.type === 'complete_count') {
+          shouldOpenFinishModal = true;
+          feedbackParts.push('Sayım tamamlama ekranı açıldı');
+        } else if (commandAction.type === 'complete_brand') {
+          if (effectiveBrand) {
+            brandsToComplete.add(effectiveBrand);
+            feedbackParts.push(`${effectiveBrand} marka sayımı tamamlandı`);
+          } else {
+            feedbackParts.push('Aktif marka bulunamadı');
+          }
+        } else if (commandAction.type === 'next_brand') {
+          const nextIncomplete = brandProgressList.find(b => b.status !== 'completed' && b.brand !== effectiveBrand)
+            ?? brandProgressList.find(b => b.status !== 'completed');
+          if (nextIncomplete) {
+            effectiveBrand = nextIncomplete.brand;
+            feedbackParts.push(`${nextIncomplete.brand} markasına geçildi`);
+          } else {
+            feedbackParts.push('Geçilecek tamamlanmamış marka yok');
+          }
+        } else if (commandAction.type === 'go_to_brand' && commandAction.brand) {
+          const target = brands.find(brand => {
+            const normalizedBrand = normalizeText(brand);
+            const normalizedTarget = normalizeText(commandAction.brand ?? '');
+            return normalizedBrand === normalizedTarget ||
+              normalizedBrand.includes(normalizedTarget) ||
+              normalizedTarget.includes(normalizedBrand);
+          });
+          if (target) {
+            effectiveBrand = target;
+            feedbackParts.push(`${target} markasına geçildi`);
+          } else {
+            feedbackParts.push(`Marka bulunamadı: ${commandAction.brand}`);
+          }
+        }
+      }
+
+      if (brandsToComplete.size > 0) {
+        setCountData(prev => {
+          const next = { ...prev };
+          brandsToComplete.forEach(brand => {
+            const products = getProductsForBrandFromRules(brand, locationMinMaxRules, productCodes);
+            products.forEach(p => {
+              const existing = next[p.stokKodu];
+              if (!existing) return;
+              next[p.stokKodu] = { ...existing, counted: true };
+            });
+          });
+          return next;
+        });
+      }
+
+      if (shouldOpenFinishModal) {
+        setShowFinishModal(true);
+      }
+
+      // Apply product commands to countData
       setCountData(prev => {
         const next = { ...prev };
         for (const cmd of commands) {
@@ -869,8 +947,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           if (!product) continue;
 
           // Switch to correct brand if needed
-          if (product.marka && product.marka !== activeBrand) {
-            setActiveBrand(product.marka);
+          if (product.marka && product.marka !== effectiveBrand) {
+            effectiveBrand = product.marka;
           }
 
           const existing = next[cmd.stokKodu];
@@ -903,14 +981,20 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
         return next;
       });
 
-      flashFeedback('success', feedbackParts.join(' | '));
+      if (effectiveBrand && effectiveBrand !== activeBrandRef.current) {
+        setActiveBrand(effectiveBrand);
+      }
+
+      if (feedbackParts.length > 0) {
+        flashFeedback('success', feedbackParts.join(' | '));
+      }
     } catch (err) {
       flashFeedback('error', 'Ses işleme hatası');
     } finally {
       voiceProcessingRef.current = false;
       setVoiceProcessing(false);
     }
-  }, [locationMinMaxRules, productCodes, activeBrand, flashFeedback]);
+  }, [locationMinMaxRules, productCodes, activeBrand, flashFeedback, brands, brandProgressList]);
 
   // ---- Voice counting: SpeechRecognition lifecycle ----
   const toggleVoice = useCallback(() => {
