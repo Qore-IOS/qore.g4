@@ -477,13 +477,17 @@ export async function emitUserRequestCompleted(params: {
   requestCreatorUid: string;
   requestCreatorName: string;
 }) {
+  const targets = Array.from(
+    new Set([`user:${params.requestCreatorUid}`, `user:${params.actor.uid}`])
+  );
+
   await createNotification({
     type: "user_request_completed",
     title: "Talebiniz Tamamlandı",
     message: `"${params.title}" başlıklı talebiniz ${params.actor.name} tarafından tamamlandı.`,
     href: "/kullanici-talepleri",
     actor: params.actor,
-    targets: [`user:${params.requestCreatorUid}`],
+    targets,
     meta: {
       requestId: params.requestId,
       requestTitle: params.title,
