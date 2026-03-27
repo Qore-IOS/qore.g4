@@ -179,8 +179,10 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Delete the report
-    await adminDb.collection('deviceFaultReports').doc(reportId).delete();
+    const reportRef = adminDb.collection('deviceFaultReports').doc(reportId);
+    const reportSnap = await reportRef.get();
+    const reportData = reportSnap.data() || {};
+    const deviceId = typeof reportData.deviceId === 'string' ? reportData.deviceId : '';
 
     // Also delete any history subcollection documents
     const historySnapshot = await adminDb
@@ -193,7 +195,26 @@ export async function DELETE(request: NextRequest) {
     historySnapshot.docs.forEach(doc => {
       batch.delete(doc.ref);
     });
+    batch.delete(reportRef);
     await batch.commit();
+
+    // Keep devices collection consistent with arıza yönetimi:
+    // if no open report remains for this device, clear arızaDurumu.
+    if (deviceId) {
+      const remainingOpenSnap = await adminDb
+        .collection('deviceFaultReports')
+        .where('deviceId', '==', deviceId)
+        .where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+        .limit(1)
+        .get();
+
+      if (remainingOpenSnap.empty) {
+        await adminDb.collection('devices').doc(deviceId).set({
+          arizaDurumu: 'yok',
+          arizaAciklamasi: '',
+        }, { merge: true });
+      }
+    }
 
     return NextResponse.json({
       success: true,
