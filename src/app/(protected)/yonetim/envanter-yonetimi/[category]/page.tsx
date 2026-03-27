@@ -388,6 +388,32 @@ export default function AssetCategoryPage() {
               value={editingAsset.alimFiyatiTl ?? ''}
               onChange={e => setEditingAsset({ ...editingAsset, alimFiyatiTl: Number(e.target.value) || 0 })}
             />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Input type="date" placeholder="Satın Alma Tarihi" value={editingAsset.satinAlmaTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, satinAlmaTarihi: e.target.value })} />
+              <Input type="date" placeholder="Garanti Bitiş Tarihi" value={editingAsset.garantiBitisTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, garantiBitisTarihi: e.target.value })} />
+              <Input type="number" min={0} placeholder="Planlı Kullanım Ömrü (Yıl)" value={editingAsset.planliKullanimOmruYil ?? ''} onChange={e => setEditingAsset({ ...editingAsset, planliKullanimOmruYil: Number(e.target.value) || 0 })} />
+              <Select value={editingAsset.amortismanYontemi || 'dogrusal'} onValueChange={value => setEditingAsset({ ...editingAsset, amortismanYontemi: value as 'dogrusal' | 'azalan_bakiye' })}>
+                <SelectTrigger><SelectValue placeholder="Amortisman Yöntemi" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dogrusal">Doğrusal</SelectItem>
+                  <SelectItem value="azalan_bakiye">Azalan Bakiye</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input type="date" placeholder="Amortisman Başlangıç Tarihi" value={editingAsset.amortismanBaslangicTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, amortismanBaslangicTarihi: e.target.value })} />
+              <Input type="date" placeholder="Hurda Tarihi" value={editingAsset.hurdaTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, hurdaTarihi: e.target.value })} />
+              <Input type="date" placeholder="İmha Tarihi" value={editingAsset.imhaTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, imhaTarihi: e.target.value })} />
+              <Input type="date" placeholder="Satış Tarihi" value={editingAsset.satisTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, satisTarihi: e.target.value })} />
+              <Input type="date" placeholder="Son Bakım Tarihi" value={editingAsset.sonBakimTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, sonBakimTarihi: e.target.value })} />
+              <Input type="date" placeholder="Sonraki Bakım Tarihi" value={editingAsset.sonrakiBakimTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, sonrakiBakimTarihi: e.target.value })} />
+              <Input type="date" placeholder="Son Kalibrasyon Tarihi" value={editingAsset.sonKalibrasyonTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, sonKalibrasyonTarihi: e.target.value })} />
+              <Input type="date" placeholder="Sonraki Kalibrasyon Tarihi" value={editingAsset.sonrakiKalibrasyonTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, sonrakiKalibrasyonTarihi: e.target.value })} />
+              <Input type="number" min={0} step="0.01" placeholder="Bakım Maliyeti (TL)" value={editingAsset.bakimMaliyetiTl ?? ''} onChange={e => setEditingAsset({ ...editingAsset, bakimMaliyetiTl: Number(e.target.value) || 0 })} />
+              <Input placeholder="Zimmetli Kişi" value={editingAsset.zimmetliKisi || ''} onChange={e => setEditingAsset({ ...editingAsset, zimmetliKisi: e.target.value })} />
+              <Input type="date" placeholder="Check-Out Tarihi" value={editingAsset.checkOutTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, checkOutTarihi: e.target.value })} />
+              <Input type="date" placeholder="Check-In Tarihi" value={editingAsset.checkInTarihi || ''} onChange={e => setEditingAsset({ ...editingAsset, checkInTarihi: e.target.value })} />
+              <Input placeholder="Dijital İmza" value={editingAsset.dijitalImza || ''} onChange={e => setEditingAsset({ ...editingAsset, dijitalImza: e.target.value })} />
+              <Input placeholder="Zimmet Fiş No" value={editingAsset.zimmetFisNo || ''} onChange={e => setEditingAsset({ ...editingAsset, zimmetFisNo: e.target.value })} />
+            </div>
             <Textarea placeholder="Açıklama" value={editingAsset.aciklama || ''} onChange={e => setEditingAsset({ ...editingAsset, aciklama: e.target.value })} />
           </div>
           <DialogFooter>

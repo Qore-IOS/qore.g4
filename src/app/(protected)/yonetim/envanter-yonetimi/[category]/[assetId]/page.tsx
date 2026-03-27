@@ -1,9 +1,9 @@
 
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, QrCode, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -32,6 +32,25 @@ interface Asset {
   konum: string;
   teslimEdilenPersonel: string;
   aciklama: string;
+  alimFiyatiTl?: number;
+  satinAlmaTarihi?: string;
+  garantiBitisTarihi?: string;
+  planliKullanimOmruYil?: number;
+  amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
+  amortismanBaslangicTarihi?: string;
+  hurdaTarihi?: string;
+  imhaTarihi?: string;
+  satisTarihi?: string;
+  sonBakimTarihi?: string;
+  sonrakiBakimTarihi?: string;
+  sonKalibrasyonTarihi?: string;
+  sonrakiKalibrasyonTarihi?: string;
+  bakimMaliyetiTl?: number;
+  zimmetliKisi?: string;
+  checkOutTarihi?: string;
+  checkInTarihi?: string;
+  dijitalImza?: string;
+  zimmetFisNo?: string;
 }
 
 interface Location {
@@ -45,6 +64,17 @@ interface AssetHistoryEntry {
     changedBy: string;
     previousState: { konum: string; teslimEdilenPersonel: string };
     newState: { konum: string; teslimEdilenPersonel: string };
+}
+
+interface CustodyEntry {
+  id: string;
+  action: 'check_out' | 'check_in';
+  personel: string;
+  digitalSignature?: string;
+  zimmetFisNo?: string;
+  note?: string;
+  timestamp: any;
+  changedBy: string;
 }
 
 export default function AssetDetailPage() {
@@ -63,6 +93,10 @@ export default function AssetDetailPage() {
   const [newLocation, setNewLocation] = useState('');
   const [newPersonel, setNewPersonel] = useState('');
   const [history, setHistory] = useState<AssetHistoryEntry[]>([]);
+  const [custodyHistory, setCustodyHistory] = useState<CustodyEntry[]>([]);
+  const [assignmentPerson, setAssignmentPerson] = useState('');
+  const [assignmentSignature, setAssignmentSignature] = useState('');
+  const [assignmentNote, setAssignmentNote] = useState('');
 
   useEffect(() => {
     if (!assetId) {
@@ -85,6 +119,8 @@ export default function AssetDetailPage() {
           setAsset(assetData);
           setNewLocation(assetData.konum);
           setNewPersonel(assetData.teslimEdilenPersonel);
+          setAssignmentPerson(assetData.zimmetliKisi || assetData.teslimEdilenPersonel || '');
+          setAssignmentSignature(assetData.dijitalImza || '');
         } else {
           toast({ title: 'Bulunamadı', description: 'Bu ID ile eşleşen ürün bulunamadı.', variant: 'destructive' });
         }
@@ -106,6 +142,14 @@ export default function AssetDetailPage() {
         const historySnap = await getDocs(historyQuery);
         setHistory(filterByCompanyScope(
           historySnap.docs.map(d => ({ id: d.id, ...d.data() } as AssetHistoryEntry)),
+          currentUserProfile?.companyId,
+          currentUserProfile?.role === 'super_admin'
+        ));
+
+        const custodyQuery = query(collection(db, 'assets', assetId, 'custodyHistory'), orderBy('timestamp', 'desc'));
+        const custodySnap = await getDocs(custodyQuery);
+        setCustodyHistory(filterByCompanyScope(
+          custodySnap.docs.map(d => ({ id: d.id, ...d.data() } as CustodyEntry)),
           currentUserProfile?.companyId,
           currentUserProfile?.role === 'super_admin'
         ));
@@ -176,6 +220,99 @@ export default function AssetDetailPage() {
     }
   };
 
+  const createReceiptNo = () => `ZIM-${new Date().getFullYear()}-${generateId().slice(0, 8).toUpperCase()}`;
+
+  const handleCheckOut = async () => {
+    if (!asset || !assignmentPerson.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Check-out için personel zorunludur.', variant: 'destructive' });
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const receiptNo = createReceiptNo();
+      const nowIso = new Date().toISOString().slice(0, 10);
+      const entry = withCompanyScope({
+        action: 'check_out',
+        personel: assignmentPerson.trim(),
+        digitalSignature: assignmentSignature.trim(),
+        zimmetFisNo: receiptNo,
+        note: assignmentNote.trim(),
+        timestamp: serverTimestamp(),
+        changedBy: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+      }, currentCompanyId);
+      await addDoc(collection(db, 'assets', asset.id, 'custodyHistory'), entry);
+      await updateDoc(doc(db, 'assets', asset.id), {
+        zimmetliKisi: assignmentPerson.trim(),
+        teslimEdilenPersonel: assignmentPerson.trim(),
+        checkOutTarihi: nowIso,
+        checkInTarihi: '',
+        dijitalImza: assignmentSignature.trim(),
+        zimmetFisNo: receiptNo,
+      });
+      setAsset(prev => prev ? ({
+        ...prev,
+        zimmetliKisi: assignmentPerson.trim(),
+        teslimEdilenPersonel: assignmentPerson.trim(),
+        checkOutTarihi: nowIso,
+        checkInTarihi: '',
+        dijitalImza: assignmentSignature.trim(),
+        zimmetFisNo: receiptNo,
+      }) : prev);
+      toast({ title: 'Check-Out Tamamlandı', description: `Zimmet fişi oluşturuldu: ${receiptNo}` });
+    } catch {
+      toast({ title: 'Hata', description: 'Check-out kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCheckIn = async () => {
+    if (!asset) return;
+    setIsSaving(true);
+    try {
+      const nowIso = new Date().toISOString().slice(0, 10);
+      const entry = withCompanyScope({
+        action: 'check_in',
+        personel: assignmentPerson.trim() || asset.zimmetliKisi || '',
+        digitalSignature: assignmentSignature.trim(),
+        zimmetFisNo: asset.zimmetFisNo || '',
+        note: assignmentNote.trim(),
+        timestamp: serverTimestamp(),
+        changedBy: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+      }, currentCompanyId);
+      await addDoc(collection(db, 'assets', asset.id, 'custodyHistory'), entry);
+      await updateDoc(doc(db, 'assets', asset.id), {
+        checkInTarihi: nowIso,
+        zimmetliKisi: '',
+      });
+      setAsset(prev => prev ? ({ ...prev, checkInTarihi: nowIso, zimmetliKisi: '' }) : prev);
+      toast({ title: 'Check-In Tamamlandı', description: 'Teslim alma kaydı oluşturuldu.' });
+    } catch {
+      toast({ title: 'Hata', description: 'Check-in kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const depreciationInfo = useMemo(() => {
+    if (!asset?.alimFiyatiTl || !asset?.planliKullanimOmruYil || !asset?.amortismanBaslangicTarihi) return null;
+    const start = new Date(asset.amortismanBaslangicTarihi);
+    if (Number.isNaN(start.getTime())) return null;
+    const today = new Date();
+    const elapsedYears = Math.max(0, (today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+    const usefulLife = asset.planliKullanimOmruYil;
+    const rate = 1 / usefulLife;
+
+    let netBookValue = asset.alimFiyatiTl;
+    if (asset.amortismanYontemi === 'azalan_bakiye') {
+      netBookValue = asset.alimFiyatiTl * Math.pow(1 - rate, elapsedYears);
+    } else {
+      netBookValue = asset.alimFiyatiTl * Math.max(0, 1 - (elapsedYears / usefulLife));
+    }
+    const kalanOmurYil = Math.max(0, usefulLife - elapsedYears);
+    return { netBookValue, kalanOmurYil };
+  }, [asset]);
+
   if (loading) {
     return <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>;
   }
@@ -205,7 +342,20 @@ export default function AssetDetailPage() {
                             <p><strong>Model:</strong> {asset.model}</p>
                             <p><strong>Konum:</strong> {asset.konum}</p>
                             <p><strong>Personel:</strong> {asset.teslimEdilenPersonel}</p>
+                            <p><strong>Alım Fiyatı:</strong> {(asset.alimFiyatiTl || 0).toLocaleString('tr-TR')} ₺</p>
+                            <p><strong>Planlı Ömür:</strong> {asset.planliKullanimOmruYil || 0} yıl</p>
+                            <p><strong>Satın Alma:</strong> {asset.satinAlmaTarihi || '-'}</p>
+                            <p><strong>Garanti Bitişi:</strong> {asset.garantiBitisTarihi || '-'}</p>
+                            <p><strong>Sonraki Bakım:</strong> {asset.sonrakiBakimTarihi || '-'}</p>
+                            <p><strong>Sonraki Kalibrasyon:</strong> {asset.sonrakiKalibrasyonTarihi || '-'}</p>
                         </div>
+                        {depreciationInfo && (
+                          <div className="rounded-md border p-3 text-sm space-y-1">
+                            <p><strong>Amortisman Yöntemi:</strong> {asset.amortismanYontemi === 'azalan_bakiye' ? 'Azalan Bakiye' : 'Doğrusal'}</p>
+                            <p><strong>Net Defter Değeri:</strong> {depreciationInfo.netBookValue.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} ₺</p>
+                            <p><strong>Kalan Kullanım Ömrü:</strong> {depreciationInfo.kalanOmurYil.toFixed(1)} yıl</p>
+                          </div>
+                        )}
                         {asset.aciklama && (
                             <div>
                                 <p><strong>Açıklama:</strong></p>
@@ -241,6 +391,30 @@ export default function AssetDetailPage() {
                                 </Button>
                              </div>
                          </div>
+                         <div className="rounded-md border p-4 space-y-3">
+                            <h4 className="font-medium">Check-In / Check-Out & Zimmet</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-sm font-medium">Personel</label>
+                                <Input value={assignmentPerson} onChange={e => setAssignmentPerson(e.target.value)} />
+                              </div>
+                              <div>
+                                <label className="text-sm font-medium">Dijital İmza (Ad Soyad)</label>
+                                <Input value={assignmentSignature} onChange={e => setAssignmentSignature(e.target.value)} />
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="text-sm font-medium">Not</label>
+                                <Input value={assignmentNote} onChange={e => setAssignmentNote(e.target.value)} />
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button onClick={handleCheckOut} disabled={isSaving}>Check-Out Yap</Button>
+                              <Button variant="outline" onClick={handleCheckIn} disabled={isSaving}>Check-In Yap</Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Aktif Zimmet: {asset.zimmetliKisi || '-'} | Check-Out: {asset.checkOutTarihi || '-'} | Check-In: {asset.checkInTarihi || '-'} | Zimmet Fiş: {asset.zimmetFisNo || '-'}
+                            </p>
+                         </div>
                          <div>
                             <h4 className="font-medium mb-2">Değişiklik Geçmişi</h4>
                             <ScrollArea className="h-40 border rounded-md">
@@ -274,6 +448,37 @@ export default function AssetDetailPage() {
                                         </TableBody>
                                     </Table>
                                 )}
+                            </ScrollArea>
+                         </div>
+                         <div>
+                            <h4 className="font-medium mb-2">Zimmet Geçmişi</h4>
+                            <ScrollArea className="h-40 border rounded-md">
+                              {custodyHistory.length === 0 ? (
+                                <p className="p-4 text-sm text-muted-foreground text-center">Zimmet hareketi yok.</p>
+                              ) : (
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Tarih</TableHead>
+                                      <TableHead>İşlem</TableHead>
+                                      <TableHead>Personel</TableHead>
+                                      <TableHead>Fiş</TableHead>
+                                      <TableHead>İmza</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {custodyHistory.map((h) => (
+                                      <TableRow key={h.id}>
+                                        <TableCell className="text-xs">{h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}</TableCell>
+                                        <TableCell className="text-xs">{h.action === 'check_out' ? 'Check-Out' : 'Check-In'}</TableCell>
+                                        <TableCell className="text-xs">{h.personel || '-'}</TableCell>
+                                        <TableCell className="text-xs">{h.zimmetFisNo || '-'}</TableCell>
+                                        <TableCell className="text-xs">{h.digitalSignature || '-'}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              )}
                             </ScrollArea>
                          </div>
                     </CardContent>
