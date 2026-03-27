@@ -996,13 +996,35 @@ function RequestDetail({
         createdAt: new Date(),
       };
       const existingComments = liveRequest.comments || [];
-      await updateDoc(doc(db, "userRequests", request.id), {
+      const shouldAutoComplete = isAssignedAdmin && liveRequest.status !== "done";
+      const updateData: Record<string, any> = {
         comments: [...existingComments, newComment],
         updatedAt: serverTimestamp(),
         unreadByUser: source !== "my",
-      });
+      };
+
+      if (shouldAutoComplete) {
+        updateData.status = "done";
+        updateData.resolvedAt = serverTimestamp();
+        updateData.resolvedBy = uid;
+        updateData.resolvedByName = userName;
+        updateData.unreadByUser = true;
+      }
+
+      await updateDoc(doc(db, "userRequests", request.id), updateData);
       setCommentText("");
-      toast({ title: "Yorum eklendi" });
+
+      if (shouldAutoComplete && liveRequest.createdBy) {
+        emitUserRequestCompleted({
+          actor: { uid, name: userName },
+          requestId: request.id,
+          title: liveRequest.title,
+          requestCreatorUid: liveRequest.createdBy,
+          requestCreatorName: liveRequest.createdByName || "",
+        }).catch(console.error);
+      }
+
+      toast({ title: shouldAutoComplete ? "Yanıt eklendi ve talep tamamlandı" : "Yorum eklendi" });
     } catch {
       toast({ title: "Hata", variant: "destructive" });
     }
