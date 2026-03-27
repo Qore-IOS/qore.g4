@@ -213,6 +213,7 @@ export default function AplikasyonIslemFormuPage() {
   const [isHucreDegisimiModalOpen, setIsHucreDegisimiModalOpen] = useState(false);
   const [hucreDegisimiSelectedItem, setHucreDegisimiSelectedItem] = useState<PersonalStockItem | null>(null);
   const [hucreDegisimiSelectedDepotItem, setHucreDegisimiSelectedDepotItem] = useState<DepotSelectableStockItem | null>(null);
+  const [showHucreDegisimiInIslemTuru, setShowHucreDegisimiInIslemTuru] = useState(false);
   const [hucreStockSourceTab, setHucreStockSourceTab] = useState<'personal' | 'depot'>('personal');
   const [hucreDegisimiRemovedHucre, setHucreDegisimiRemovedHucre] = useState('');
   const [hucreDegisimiDescription, setHucreDegisimiDescription] = useState('');
@@ -2202,14 +2203,6 @@ export default function AplikasyonIslemFormuPage() {
         : undefined,
     },
     {
-      id: 'hucre_degisimi',
-      label: 'HÜCRE DEĞİŞİMİ',
-      isComplete: actions.some(a => a.type === 'hucre_degisimi'),
-      completedSublabel: actions.filter(a => a.type === 'hucre_degisimi').length > 0
-        ? `${actions.filter(a => a.type === 'hucre_degisimi').length} hücre`
-        : undefined,
-    },
-    {
       id: 'yapilan_islem',
       label: 'YAPILAN İŞLEM',
       isComplete: actions.some(a => a.type === 'operation'),
@@ -2247,6 +2240,21 @@ export default function AplikasyonIslemFormuPage() {
   const renderWizardDetail = (headingId: string, goBack: () => void) => {
     switch (headingId) {
       case 'islem_turu':
+        if (showHucreDegisimiInIslemTuru) {
+          return (
+            <div>
+              <button
+                type="button"
+                className="wizard-btn wizard-btn-secondary"
+                style={{ marginBottom: '12px' }}
+                onClick={() => setShowHucreDegisimiInIslemTuru(false)}
+              >
+                ← İşlem Türüne Dön
+              </button>
+              {renderWizardDetail('hucre_degisimi', () => setShowHucreDegisimiInIslemTuru(false))}
+            </div>
+          );
+        }
         return (
           <div className="wizard-option-list">
             {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi'] as IslemTuru[]).map(tur => {
@@ -2409,6 +2417,12 @@ export default function AplikasyonIslemFormuPage() {
                 </React.Fragment>
               );
             })}
+            <button
+              className={`wizard-option-item ${actions.some(a => a.type === 'hucre_degisimi') ? 'selected' : ''}`}
+              onClick={() => setShowHucreDegisimiInIslemTuru(true)}
+            >
+              HÜCRE DEĞİŞİMİ
+            </button>
           </div>
         );
 
