@@ -541,11 +541,16 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const recognitionRef = useRef<any>(null);
   const voiceProcessingRef = useRef(false);
+  const activeBrandRef = useRef<string | null>(null);
 
   // Completion modal
   const [showFinishModal, setShowFinishModal] = useState(false);
 
   const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    activeBrandRef.current = activeBrand;
+  }, [activeBrand]);
 
   // Fetch minMaxRules from Firestore when location changes
   useEffect(() => {
@@ -875,21 +880,25 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
 
       // Apply assistant actions
       let shouldOpenFinishModal = false;
-      let nextBrandSelection: string | null = null;
-      let shouldCompleteCurrentBrand = false;
-      const commandAction = actions[0];
-      if (commandAction) {
+      let effectiveBrand = activeBrandRef.current;
+      const brandsToComplete = new Set<string>();
+
+      for (const commandAction of actions) {
         if (commandAction.type === 'complete_count') {
           shouldOpenFinishModal = true;
           feedbackParts.push('Sayım tamamlama ekranı açıldı');
         } else if (commandAction.type === 'complete_brand') {
-          shouldCompleteCurrentBrand = true;
-          feedbackParts.push('Aktif marka sayımı tamamlandı');
+          if (effectiveBrand) {
+            brandsToComplete.add(effectiveBrand);
+            feedbackParts.push(`${effectiveBrand} marka sayımı tamamlandı`);
+          } else {
+            feedbackParts.push('Aktif marka bulunamadı');
+          }
         } else if (commandAction.type === 'next_brand') {
-          const nextIncomplete = brandProgressList.find(b => b.status !== 'completed' && b.brand !== activeBrand)
+          const nextIncomplete = brandProgressList.find(b => b.status !== 'completed' && b.brand !== effectiveBrand)
             ?? brandProgressList.find(b => b.status !== 'completed');
           if (nextIncomplete) {
-            nextBrandSelection = nextIncomplete.brand;
+            effectiveBrand = nextIncomplete.brand;
             feedbackParts.push(`${nextIncomplete.brand} markasına geçildi`);
           } else {
             feedbackParts.push('Geçilecek tamamlanmamış marka yok');
@@ -903,7 +912,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
               normalizedTarget.includes(normalizedBrand);
           });
           if (target) {
-            nextBrandSelection = target;
+            effectiveBrand = target;
             feedbackParts.push(`${target} markasına geçildi`);
           } else {
             feedbackParts.push(`Marka bulunamadı: ${commandAction.brand}`);
@@ -911,22 +920,21 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
         }
       }
 
-      if (shouldCompleteCurrentBrand && activeBrand) {
+      if (brandsToComplete.size > 0) {
         setCountData(prev => {
           const next = { ...prev };
-          const products = getProductsForBrandFromRules(activeBrand, locationMinMaxRules, productCodes);
-          products.forEach(p => {
-            const existing = next[p.stokKodu];
-            if (!existing) return;
-            next[p.stokKodu] = { ...existing, counted: true };
+          brandsToComplete.forEach(brand => {
+            const products = getProductsForBrandFromRules(brand, locationMinMaxRules, productCodes);
+            products.forEach(p => {
+              const existing = next[p.stokKodu];
+              if (!existing) return;
+              next[p.stokKodu] = { ...existing, counted: true };
+            });
           });
           return next;
         });
       }
 
-      if (nextBrandSelection) {
-        setActiveBrand(nextBrandSelection);
-      }
       if (shouldOpenFinishModal) {
         setShowFinishModal(true);
       }
@@ -939,8 +947,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           if (!product) continue;
 
           // Switch to correct brand if needed
-          if (product.marka && product.marka !== activeBrand) {
-            setActiveBrand(product.marka);
+          if (product.marka && product.marka !== effectiveBrand) {
+            effectiveBrand = product.marka;
           }
 
           const existing = next[cmd.stokKodu];
@@ -972,6 +980,10 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
         }
         return next;
       });
+
+      if (effectiveBrand && effectiveBrand !== activeBrandRef.current) {
+        setActiveBrand(effectiveBrand);
+      }
 
       if (feedbackParts.length > 0) {
         flashFeedback('success', feedbackParts.join(' | '));

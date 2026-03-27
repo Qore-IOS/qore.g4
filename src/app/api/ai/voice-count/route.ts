@@ -25,6 +25,8 @@ interface ProductMatchContext {
   stokKodu: string;
   stokAdi: string;
   aliases: string[];
+  kind: 'control' | 'calibrator' | 'reagent' | 'other';
+  familyKey: string;
 }
 
 function normalizeForMatch(value: string): string {
@@ -43,6 +45,21 @@ function compact(value: string): string {
 
 function consonantSkeleton(value: string): string {
   return compact(value).replace(/[aeiou]/g, '');
+}
+
+function inferKind(name: string): ProductMatchContext['kind'] {
+  const n = normalizeForMatch(name);
+  if (/(^|\s)(kontrol|control|precicontrol|pc)(\s|$)/.test(n)) return 'control';
+  if (/(^|\s)(kalibrator|kalibrat[oö]r|calibrator|calset|cal set|cs)(\s|$)/.test(n)) return 'calibrator';
+  if (/(^|\s)(reagent|kit|test)(\s|$)/.test(n)) return 'reagent';
+  return 'other';
+}
+
+function buildFamilyKey(name: string): string {
+  return normalizeForMatch(name)
+    .replace(/\b(kontrol|control|precicontrol|pc|kalibrator|kalibrat[oö]r|calibrator|calset|cal set|cs|kit|reagent|test)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function buildProductAliasContext(products: VoiceProduct[]): ProductMatchContext[] {
@@ -87,10 +104,15 @@ function buildProductAliasContext(products: VoiceProduct[]): ProductMatchContext
       .filter(a => a && a.length >= 2)
       .slice(0, 16);
 
+    const kind = inferKind(product.stokAdi);
+    const familyKey = buildFamilyKey(product.stokAdi);
+
     return {
       stokKodu: product.stokKodu,
       stokAdi: product.stokAdi,
       aliases: sanitizedAliases,
+      kind,
+      familyKey,
     };
   });
 }
@@ -109,6 +131,14 @@ KURALLAR:
 - Sadece eşleşen ürünleri döndür, emin olmadığın ürünleri dahil etme
 - Kullanıcı test adını farklı telaffuz/abreviasyonla söyleyebilir; ürün için verilen "alias" anahtarlarını aktif kullan
 - Telaffuz farklı olsa bile en yakın kit/test eşleşmesini bulmaya çalış (örn. harf düşmesi, birleşik söyleyiş, kısaltma)
+- Miktar kuralları:
+  - Ürün adı + sayı söylendiyse ve "cihaz üstü" belirtilmediyse sayı varsayılan olarak stokAdedi kabul edilir
+  - "x9" gibi bitişik söylemde x ürün + 9 stok olarak yorumla (ürün adı gerçekten x9 değilse)
+  - Ürün adı içinde sayı varsa (örn. "x3"), sonrasında ayrı gelen sayı (örn. "x3, 9") stokAdedi=9 olarak alınır
+  - "cihaz üstü" dendiğinde sayı cihazUstuAdedi alanına yazılır
+- Benzer ürün ayrımı kuralları:
+  - Aynı ailede control/kontrol (pc/precicontrol) ve calibrator/kalibratör (cs/calset) ürünlerini karıştırma
+  - Ürün satırındaki kind ve family alanlarını bu ayrım için kullan
 - Yönetim komutlarını da algıla:
   - "sayımı tamamla", "sayımı bitir" => complete_count
   - "marka sayımını tamamla", "markayı tamamla" => complete_brand
@@ -151,7 +181,7 @@ export async function POST(request: NextRequest) {
 
     // Build product list context with alias map for stronger spoken matching
     const productListStr = productContexts
-      .map(p => `${p.stokKodu} | ${p.stokAdi} | alias: ${p.aliases.join(', ')}`)
+      .map(p => `${p.stokKodu} | ${p.stokAdi} | kind:${p.kind} | family:${p.familyKey || '-'} | alias: ${p.aliases.join(', ')}`)
       .join('\n');
 
     const brandListStr = (brands ?? []).join(', ');
