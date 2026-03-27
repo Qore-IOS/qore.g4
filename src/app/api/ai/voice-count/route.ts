@@ -21,6 +21,80 @@ interface ParsedCommand {
   cihazUstuAdedi?: number;
 }
 
+interface ProductMatchContext {
+  stokKodu: string;
+  stokAdi: string;
+  aliases: string[];
+}
+
+function normalizeForMatch(value: string): string {
+  return value
+    .toLocaleLowerCase('tr')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compact(value: string): string {
+  return normalizeForMatch(value).replace(/\s+/g, '');
+}
+
+function consonantSkeleton(value: string): string {
+  return compact(value).replace(/[aeiou]/g, '');
+}
+
+function buildProductAliasContext(products: VoiceProduct[]): ProductMatchContext[] {
+  return products.map(product => {
+    const aliasSet = new Set<string>();
+    const stokAdiNorm = normalizeForMatch(product.stokAdi);
+    const stokKoduNorm = normalizeForMatch(product.stokKodu);
+    const stokAdiCompact = compact(product.stokAdi);
+    const stokKoduCompact = compact(product.stokKodu);
+
+    if (stokAdiNorm) aliasSet.add(stokAdiNorm);
+    if (stokKoduNorm) aliasSet.add(stokKoduNorm);
+    if (stokAdiCompact) aliasSet.add(stokAdiCompact);
+    if (stokKoduCompact) aliasSet.add(stokKoduCompact);
+
+    const words = stokAdiNorm.split(' ').filter(Boolean);
+    words.forEach(w => {
+      if (w.length >= 3) aliasSet.add(w);
+      aliasSet.add(consonantSkeleton(w));
+    });
+
+    const initials = words.map(w => w[0]).join('');
+    if (initials.length >= 2) aliasSet.add(initials);
+
+    if (words.length >= 2) {
+      const wordPrefixes = words.map(w => w.slice(0, 3)).join('');
+      if (wordPrefixes.length >= 4) aliasSet.add(wordPrefixes);
+      const noSpace = words.join('');
+      if (noSpace.length >= 4) aliasSet.add(noSpace);
+      aliasSet.add(consonantSkeleton(noSpace));
+    }
+
+    // Numeric/alpha variations for codes like "MG2", "CMV IgG", etc.
+    const alphaOnlyCode = stokKoduCompact.replace(/[0-9]/g, '');
+    const digitOnlyCode = stokKoduCompact.replace(/[a-z]/g, '');
+    if (alphaOnlyCode.length >= 2) aliasSet.add(alphaOnlyCode);
+    if (digitOnlyCode.length > 0 && alphaOnlyCode.length >= 2) {
+      aliasSet.add(`${alphaOnlyCode} ${digitOnlyCode}`);
+    }
+
+    const sanitizedAliases = Array.from(aliasSet)
+      .filter(a => a && a.length >= 2)
+      .slice(0, 16);
+
+    return {
+      stokKodu: product.stokKodu,
+      stokAdi: product.stokAdi,
+      aliases: sanitizedAliases,
+    };
+  });
+}
+
 const SYSTEM_PROMPT = `Sen bir tıbbi laboratuvar envanter sayım asistanısın. Kullanıcı sesli olarak ürün sayımı yapıyor.
 
 GÖREV:
@@ -33,6 +107,8 @@ KURALLAR:
 - "cihaz üstü" veya "cihaz" veya "açık" = cihaz üstü test adedi
 - Birden fazla ürün tek cümlede söylenebilir
 - Sadece eşleşen ürünleri döndür, emin olmadığın ürünleri dahil etme
+- Kullanıcı test adını farklı telaffuz/abreviasyonla söyleyebilir; ürün için verilen "alias" anahtarlarını aktif kullan
+- Telaffuz farklı olsa bile en yakın kit/test eşleşmesini bulmaya çalış (örn. harf düşmesi, birleşik söyleyiş, kısaltma)
 - Yönetim komutlarını da algıla:
   - "sayımı tamamla", "sayımı bitir" => complete_count
   - "marka sayımını tamamla", "markayı tamamla" => complete_brand
@@ -71,9 +147,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Ürün listesi boş' }, { status: 400 });
     }
 
-    // Build product list context - keep it compact for speed
-    const productListStr = products
-      .map(p => `${p.stokKodu} | ${p.stokAdi}`)
+    const productContexts = buildProductAliasContext(products);
+
+    // Build product list context with alias map for stronger spoken matching
+    const productListStr = productContexts
+      .map(p => `${p.stokKodu} | ${p.stokAdi} | alias: ${p.aliases.join(', ')}`)
       .join('\n');
 
     const brandListStr = (brands ?? []).join(', ');
