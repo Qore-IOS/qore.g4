@@ -351,24 +351,44 @@ export default function PostClosurePartChangeButton({
         });
       }
 
-      // If removed part has serial number, create personal stock entry
-      if (removedPartSerialNumber.trim()) {
-        const removedStockRef = doc(collection(db, 'personalStock'));
-        batch.set(removedStockRef, {
-          ownerUid: currentUser.uid,
-          ownerName: currentUserProfile?.name || '',
-          productCodeId: null,
-          stokKodu: removedPartStokKodu.trim() || resolvedStokKodu,
-          stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
-          serialNumber: removedPartSerialNumber.trim(),
-          imageUrl: removedImgUrl || null,
-          source: 'device',
-          sourceDeviceId: deviceId,
-          sourceDeviceName: deviceName || '',
-          status: 'in_stock',
-          createdAt: Timestamp.fromDate(now),
-          replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
+      // If removed part has serial number, create personal stock entry.
+      // Protect against re-adding used part serial as a new active stock row.
+      const removedSerial = removedPartSerialNumber.trim();
+      const removedStokKoduValue = removedPartStokKodu.trim() || resolvedStokKodu;
+      const isReusableStockStatus = (status: unknown) => {
+        const normalized = String(status || '').trim().toLowerCase();
+        return normalized === 'in_stock' || normalized === 'pending_approval';
+      };
+
+      if (removedSerial && removedSerial !== resolvedSerialNumber.trim()) {
+        const duplicateSnap = await getDocs(query(
+          collection(db, 'personalStock'),
+          where('ownerUid', '==', currentUser.uid),
+          where('serialNumber', '==', removedSerial)
+        ));
+        const hasActiveDuplicate = duplicateSnap.docs.some((docSnap) => {
+          const data = docSnap.data();
+          return data.stokKodu === removedStokKoduValue && isReusableStockStatus(data.status);
         });
+
+        if (!hasActiveDuplicate) {
+          const removedStockRef = doc(collection(db, 'personalStock'));
+          batch.set(removedStockRef, {
+            ownerUid: currentUser.uid,
+            ownerName: currentUserProfile?.name || '',
+            productCodeId: null,
+            stokKodu: removedStokKoduValue,
+            stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
+            serialNumber: removedSerial,
+            imageUrl: removedImgUrl || null,
+            source: 'device',
+            sourceDeviceId: deviceId,
+            sourceDeviceName: deviceName || '',
+            status: 'in_stock',
+            createdAt: Timestamp.fromDate(now),
+            replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
+          });
+        }
       }
 
       // Log to dedicated audit collection
