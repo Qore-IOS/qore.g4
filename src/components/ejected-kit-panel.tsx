@@ -314,6 +314,7 @@ export default function EjectedKitPanel() {
                 testCount: calculatedTestCount,
                 quantityType,
                 deviceImageUrl: selectedDevice.imageUrl || undefined,
+                companyId: currentUserProfile?.companyId ?? null,
             });
 
             // Create ejected kit record

@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
+import { withCompanyScope } from '@/lib/company-scope';
 
 export type DeviceFaultEventType = 'opened' | 'note' | 'status_change' | 'closed' | 'assigned' | 'intervention_started' | 'location_verified';
 
@@ -25,13 +26,14 @@ export type OpenFaultInput = {
   faultDefinitionId?: string; // ID from faultDefinitions collection
   faultName?: string; // Name from faultDefinitions (for statistics)
   deviceImageUrl?: string; // Device model image URL for push notifications
+  companyId?: string | null;
 };
 
 export async function openDeviceFaultReport(input: OpenFaultInput): Promise<string> {
   const {
     hospitalId, labName, deviceId, model, serial,
     faultType, openedByUid, openedByName, openDescription, title,
-    faultDefinitionId, faultName
+    faultDefinitionId, faultName, companyId
   } = input;
 
   // Corrected flat structure for Google Sheets extension
@@ -69,7 +71,7 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     faultName: faultName ?? null,
   };
 
-  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
+  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), withCompanyScope(report, companyId));
 
   // Update device arizaDurumu
   if (deviceId) {
@@ -524,13 +526,14 @@ export type OpenEjectedKitFaultInput = {
   testCount: number;
   quantityType: 'kutu' | 'test';
   deviceImageUrl?: string; // Device model image URL for push notifications
+  companyId?: string | null;
 };
 
 export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput): Promise<string> {
   const {
     hospitalId, labName, deviceId, model, serial,
     openedByUid, openedByName, openDescription,
-    stokKodu, stokAdi, cihazGrubu, testCount, quantityType
+    stokKodu, stokAdi, cihazGrubu, testCount, quantityType, companyId
   } = input;
 
   const report = {
@@ -565,7 +568,7 @@ export async function openEjectedKitFaultReport(input: OpenEjectedKitFaultInput)
     kitResolution: null,
   };
 
-  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), report);
+  const reportRef = await addDoc(collection(db, 'deviceFaultReports'), withCompanyScope(report, companyId));
 
   // Update device arizaDurumu
   if (deviceId) {
