@@ -154,6 +154,37 @@ export default function EnvanterYonetimiPage() {
     return counts;
   }, [assets]);
 
+  const totalInventoryCost = React.useMemo(
+    () => assets.reduce((sum, asset) => sum + (Number(asset.alimFiyatiTl) || 0), 0),
+    [assets]
+  );
+
+  const costByCategory = React.useMemo(() => {
+    const costs: Record<string, number> = {};
+    for (const asset of assets) {
+      const key = asset.category || 'Diğer';
+      costs[key] = (costs[key] || 0) + (Number(asset.alimFiyatiTl) || 0);
+    }
+    return costs;
+  }, [assets]);
+
+  const costByLocation = React.useMemo(() => {
+    const costs: Record<string, number> = {};
+    for (const asset of assets) {
+      const key = asset.konum || 'Bilinmeyen Konum';
+      costs[key] = (costs[key] || 0) + (Number(asset.alimFiyatiTl) || 0);
+    }
+    return costs;
+  }, [assets]);
+
+  const formatCurrencyTry = (value: number) =>
+    value.toLocaleString('tr-TR', {
+      style: 'currency',
+      currency: 'TRY',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
   const includesSearch = (value: string, q: string) => value.toLocaleLowerCase('tr').includes(q);
 
   const filteredCategoryCards = React.useMemo(() => {
@@ -436,6 +467,9 @@ export default function EnvanterYonetimiPage() {
             <Card>
                 <CardHeader>
                     <CardTitle className="text-base">Envanter Toplu İşlemleri</CardTitle>
+                    <CardDescription>
+                      Toplam Envanter Maliyeti: <span className="font-semibold">{formatCurrencyTry(totalInventoryCost)}</span>
+                    </CardDescription>
                 </CardHeader>
                 <CardContent className="flex items-center gap-2">
                     <Button onClick={() => assetFileInputRef.current?.click()} size="sm" variant="outline"><Upload className="mr-2 h-4 w-4"/>Envanter Yükle</Button>
@@ -504,6 +538,7 @@ export default function EnvanterYonetimiPage() {
                         {filteredCategoryCards.map((category) => {
                           const Icon = getIconForCategory(category.name);
                           const count = assetCountsByCategory[category.name] || 0;
+                          const categoryCost = costByCategory[category.name] || 0;
                           return (
                             <Card
                               key={category.id}
@@ -517,6 +552,7 @@ export default function EnvanterYonetimiPage() {
                                     <Icon className="h-10 w-10 mb-3 text-primary" />
                                   )}
                                   <CardTitle className="text-base font-semibold">{category.name}</CardTitle>
+                                  <p className="mt-2 text-xs text-muted-foreground font-medium">{formatCurrencyTry(categoryCost)}</p>
                                   </CardContent>
                               </Link>
                               <Badge variant="secondary" className="absolute top-2 right-2">{count}</Badge>
@@ -583,6 +619,7 @@ export default function EnvanterYonetimiPage() {
                         {filteredLocationCards.map((location) => {
                           const Icon = getIconForCategory(location.name);
                           const count = assetCountsByLocation[location.name] || 0;
+                          const locationCost = costByLocation[location.name] || 0;
                           return (
                             <Card
                               key={location.id}
@@ -592,6 +629,7 @@ export default function EnvanterYonetimiPage() {
                                   <CardContent className="flex flex-col items-center justify-center p-6 text-center">
                                   <Icon className="h-10 w-10 mb-3 text-primary" />
                                   <CardTitle className="text-base font-semibold">{location.name}</CardTitle>
+                                  <p className="mt-2 text-xs text-muted-foreground font-medium">{formatCurrencyTry(locationCost)}</p>
                                   </CardContent>
                               </Link>
                               <Badge variant="secondary" className="absolute top-2 right-2">{count}</Badge>
