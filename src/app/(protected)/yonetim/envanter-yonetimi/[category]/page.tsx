@@ -101,6 +101,7 @@ export default function AssetCategoryPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Partial<Asset>>({});
   const [manualLocation, setManualLocation] = useState('');
+  const [globalSearch, setGlobalSearch] = useState('');
 
   const [filters, setFilters] = useState<Record<FilterableColumn, Set<string>>>({
       demirbasNo: new Set(),
@@ -260,16 +261,23 @@ export default function AssetCategoryPage() {
     const activeFilterKeys = (Object.keys(filters) as FilterableColumn[]).filter(
         key => filters[key].size > 0
     );
-    if (activeFilterKeys.length === 0) return assets;
+    let scopedAssets = assets;
+    if (globalSearch.trim()) {
+      const q = globalSearch.toLocaleLowerCase('tr').trim();
+      scopedAssets = scopedAssets.filter((asset) =>
+        `${asset.urunAdi || ''} ${asset.demirbasNo || ''} ${asset.konum || ''} ${asset.category || ''}`.toLocaleLowerCase('tr').includes(q)
+      );
+    }
+    if (activeFilterKeys.length === 0) return scopedAssets;
 
-    return assets.filter(asset => {
+    return scopedAssets.filter(asset => {
         return activeFilterKeys.every(key => {
             const selectedValues = filters[key];
             const assetValue = asset[key];
             return selectedValues.has(assetValue!);
         });
     });
-  }, [assets, filters]);
+  }, [assets, filters, globalSearch]);
 
   return (
     <>
@@ -286,6 +294,12 @@ export default function AssetCategoryPage() {
           <CardHeader>
             <CardTitle className="text-2xl font-headline capitalize">{categoryName}</CardTitle>
             <CardDescription>Bu kategoriye ait demirbaş envanteri.</CardDescription>
+            <Input
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              placeholder="Ürün, konum veya kategori ara..."
+              className="max-w-md"
+            />
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -301,12 +315,13 @@ export default function AssetCategoryPage() {
                       <TableHead><FilterPopover column="durum" title="Durum" options={uniqueFilterOptions.durum} selectedValues={filters.durum} onSelectionChange={handleFilterChange} /></TableHead>
                       <TableHead><FilterPopover column="marka" title="Marka" options={uniqueFilterOptions.marka} selectedValues={filters.marka} onSelectionChange={handleFilterChange} /></TableHead>
                       <TableHead><FilterPopover column="konum" title="Konum" options={uniqueFilterOptions.konum} selectedValues={filters.konum} onSelectionChange={handleFilterChange} /></TableHead>
+                      <TableHead>Alım Fiyatı (TL)</TableHead>
                       <TableHead className="text-right">İşlemler</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredAssets.length === 0 ? (
-                      <TableRow><TableCell colSpan={7} className="text-center py-8">Bu kategori için kayıtlı ürün yok veya filtre ile eşleşmiyor.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={8} className="text-center py-8">Bu kategori için kayıtlı ürün yok veya filtre ile eşleşmiyor.</TableCell></TableRow>
                     ) : (
                       filteredAssets.map(asset => (
                         <TableRow key={asset.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/yonetim/envanter-yonetimi/${categoryName}/${asset.id}`)}>
@@ -316,6 +331,7 @@ export default function AssetCategoryPage() {
                           <TableCell className="capitalize">{asset.durum}</TableCell>
                           <TableCell>{asset.marka}</TableCell>
                           <TableCell>{asset.konum}</TableCell>
+                          <TableCell>{typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl.toLocaleString('tr-TR') : '-'}</TableCell>
                           <TableCell className="text-right">
                             <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleDelete(asset.id); }} disabled={loading}>
                               <Trash2 className="h-4 w-4 text-destructive" />
@@ -364,6 +380,14 @@ export default function AssetCategoryPage() {
               <Input placeholder="Manuel Konum Girin" value={manualLocation} onChange={e => setManualLocation(e.target.value)} />
             )}
             <Input placeholder="Teslim Edilen Personel" value={editingAsset.teslimEdilenPersonel || ''} onChange={e => setEditingAsset({ ...editingAsset, teslimEdilenPersonel: e.target.value })} />
+            <Input
+              placeholder="Alım Fiyatı (TL)"
+              type="number"
+              min={0}
+              step="0.01"
+              value={editingAsset.alimFiyatiTl ?? ''}
+              onChange={e => setEditingAsset({ ...editingAsset, alimFiyatiTl: Number(e.target.value) || 0 })}
+            />
             <Textarea placeholder="Açıklama" value={editingAsset.aciklama || ''} onChange={e => setEditingAsset({ ...editingAsset, aciklama: e.target.value })} />
           </div>
           <DialogFooter>

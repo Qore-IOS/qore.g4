@@ -99,6 +99,7 @@ declare module "@/lib/types" {
     durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü'; // NEW
     konum: string;
     manuelKonum?: string; // NEW
+    alimFiyatiTl?: number;
     teslimEdilenPersonel: string;
     aciklama: string;
   }
