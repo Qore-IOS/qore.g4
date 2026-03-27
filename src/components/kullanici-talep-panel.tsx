@@ -910,6 +910,9 @@ function RequestDetail({
   }, [liveRequest.unreadByUser, source, uid, request.id, liveRequest.createdBy]);
 
   const isAssignedAdmin = liveRequest.assignedTo === uid;
+  const canMarkAsDone =
+    liveRequest.status !== "done" &&
+    (isAssignedAdmin || isAdminDeveloper || liveRequest.createdBy === uid);
 
   const changeStatus = async (newStatus: UserRequestStatus) => {
     setUpdating(true);
@@ -996,13 +999,35 @@ function RequestDetail({
         createdAt: new Date(),
       };
       const existingComments = liveRequest.comments || [];
-      await updateDoc(doc(db, "userRequests", request.id), {
+      const shouldAutoComplete = isAssignedAdmin && liveRequest.status !== "done";
+      const updateData: Record<string, any> = {
         comments: [...existingComments, newComment],
         updatedAt: serverTimestamp(),
         unreadByUser: source !== "my",
-      });
+      };
+
+      if (shouldAutoComplete) {
+        updateData.status = "done";
+        updateData.resolvedAt = serverTimestamp();
+        updateData.resolvedBy = uid;
+        updateData.resolvedByName = userName;
+        updateData.unreadByUser = true;
+      }
+
+      await updateDoc(doc(db, "userRequests", request.id), updateData);
       setCommentText("");
-      toast({ title: "Yorum eklendi" });
+
+      if (shouldAutoComplete && liveRequest.createdBy) {
+        emitUserRequestCompleted({
+          actor: { uid, name: userName },
+          requestId: request.id,
+          title: liveRequest.title,
+          requestCreatorUid: liveRequest.createdBy,
+          requestCreatorName: liveRequest.createdByName || "",
+        }).catch(console.error);
+      }
+
+      toast({ title: shouldAutoComplete ? "Yanıt eklendi ve talep tamamlandı" : "Yorum eklendi" });
     } catch {
       toast({ title: "Hata", variant: "destructive" });
     }
@@ -1269,6 +1294,17 @@ function RequestDetail({
             >
               {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
+            {canMarkAsDone && (
+              <Button
+                onClick={() => changeStatus("done")}
+                disabled={updating}
+                size="sm"
+                className="rounded-lg self-end bg-emerald-500 hover:bg-emerald-600 text-white h-9 px-3 gap-1.5"
+              >
+                {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Tamamlandı
+              </Button>
+            )}
           </div>
         </div>
       </div>
