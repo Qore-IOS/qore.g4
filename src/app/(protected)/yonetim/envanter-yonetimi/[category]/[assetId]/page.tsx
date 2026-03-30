@@ -5,7 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, QrCode, Save } from 'lucide-react';
+import { Loader2, QrCode, Save, UserCheck, ShieldCheck, History, Printer, Download } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { doc, getDoc, collection, getDocs, updateDoc, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -19,7 +20,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { generateId } from '@/lib/utils';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 interface Asset {
   id: string;
@@ -327,181 +327,133 @@ export default function AssetDetailPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-        <BackButton fallback={`/yonetim/envanter-yonetimi/${asset.category}`} />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-2">
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-2xl font-headline">{asset.urunAdi}</CardTitle>
-                        <CardDescription>Demirbaş No: {asset.demirbasNo} | Ürün Kodu: {asset.urunKodu}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                            <p><strong>Marka:</strong> {asset.marka}</p>
-                            <p><strong>Model:</strong> {asset.model}</p>
-                            <p><strong>Konum:</strong> {asset.konum}</p>
-                            <p><strong>Personel:</strong> {asset.teslimEdilenPersonel}</p>
-                            <p><strong>Alım Fiyatı:</strong> {(asset.alimFiyatiTl || 0).toLocaleString('tr-TR')} ₺</p>
-                            <p><strong>Planlı Ömür:</strong> {asset.planliKullanimOmruYil || 0} yıl</p>
-                            <p><strong>Satın Alma:</strong> {asset.satinAlmaTarihi || '-'}</p>
-                            <p><strong>Garanti Bitişi:</strong> {asset.garantiBitisTarihi || '-'}</p>
-                            <p><strong>Sonraki Bakım:</strong> {asset.sonrakiBakimTarihi || '-'}</p>
-                            <p><strong>Sonraki Kalibrasyon:</strong> {asset.sonrakiKalibrasyonTarihi || '-'}</p>
-                        </div>
-                        {depreciationInfo && (
-                          <div className="rounded-md border p-3 text-sm space-y-1">
-                            <p><strong>Amortisman Yöntemi:</strong> {asset.amortismanYontemi === 'azalan_bakiye' ? 'Azalan Bakiye' : 'Doğrusal'}</p>
-                            <p><strong>Net Defter Değeri:</strong> {depreciationInfo.netBookValue.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} ₺</p>
-                            <p><strong>Kalan Kullanım Ömrü:</strong> {depreciationInfo.kalanOmurYil.toFixed(1)} yıl</p>
-                          </div>
-                        )}
-                        {asset.aciklama && (
-                            <div>
-                                <p><strong>Açıklama:</strong></p>
-                                <p className="text-muted-foreground">{asset.aciklama}</p>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+    <div className="p-6 lg:p-8 space-y-6 cihaz-shell">
+      <BackButton fallback={`/yonetim/envanter-yonetimi/${asset.category}`} />
+      <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.65fr] gap-6">
+        <Card className="cihaz-card-strong">
+          <CardHeader>
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle className="text-2xl font-headline">{asset.urunAdi || `${asset.marka} ${asset.model}`}</CardTitle>
+              <Badge className="bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]">{asset.category}</Badge>
+              <Badge className={asset.zimmetliKisi ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'}>
+                {asset.zimmetliKisi ? 'Zimmetli' : 'Boşta'}
+              </Badge>
+            </div>
+            <CardDescription>Demirbaş No: {asset.demirbasNo} · Seri No: {asset.seriNumarasi || '-'} · Ürün Kodu: {asset.urunKodu || '-'}</CardDescription>
+          </CardHeader>
+          <CardContent className="grid md:grid-cols-2 gap-4 text-sm">
+            <p><strong>Marka / Model:</strong> {asset.marka || '-'} / {asset.model || '-'}</p>
+            <p><strong>Konum:</strong> {asset.konum || '-'}</p>
+            <p><strong>Personel:</strong> {asset.teslimEdilenPersonel || '-'}</p>
+            <p><strong>Aktif Zimmet:</strong> {asset.zimmetliKisi || '-'}</p>
+            <p><strong>Alım Fiyatı:</strong> {(asset.alimFiyatiTl || 0).toLocaleString('tr-TR')} ₺</p>
+            <p><strong>Planlı Ömür:</strong> {asset.planliKullanimOmruYil || 0} yıl</p>
+            <p><strong>Garanti Bitişi:</strong> {asset.garantiBitisTarihi || '-'}</p>
+            <p><strong>Sonraki Bakım / Kalibrasyon:</strong> {asset.sonrakiBakimTarihi || '-'} / {asset.sonrakiKalibrasyonTarihi || '-'}</p>
+            {depreciationInfo && (
+              <div className="md:col-span-2 rounded-md border p-3 text-sm space-y-1 bg-[var(--dashboard-surface-2)]">
+                <p><strong>Net Defter Değeri:</strong> {depreciationInfo.netBookValue.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} ₺</p>
+                <p><strong>Kalan Kullanım Ömrü:</strong> {depreciationInfo.kalanOmurYil.toFixed(1)} yıl</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-                <Card className="mt-6">
-                    <CardHeader>
-                        <CardTitle>Düzenleme ve Geçmiş</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                             <div>
-                                <label className="text-sm font-medium">Yeni Konum</label>
-                                <Select value={newLocation} onValueChange={setNewLocation}>
-                                    <SelectTrigger><SelectValue/></SelectTrigger>
-                                    <SelectContent>
-                                        {locations.map(loc => <SelectItem key={loc.id} value={loc.name}>{loc.name}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                             </div>
-                             <div>
-                                <label className="text-sm font-medium">Yeni Personel</label>
-                                <Input value={newPersonel} onChange={e => setNewPersonel(e.target.value)} />
-                             </div>
-                             <div className="md:col-span-2">
-                                <Button onClick={handleSaveChanges} disabled={isSaving}>
-                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Save className="h-4 w-4 mr-2"/>}
-                                    Değişiklikleri Kaydet
-                                </Button>
-                             </div>
-                         </div>
-                         <div className="rounded-md border p-4 space-y-3">
-                            <h4 className="font-medium">Check-In / Check-Out & Zimmet</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div>
-                                <label className="text-sm font-medium">Personel</label>
-                                <Input value={assignmentPerson} onChange={e => setAssignmentPerson(e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="text-sm font-medium">Dijital İmza (Ad Soyad)</label>
-                                <Input value={assignmentSignature} onChange={e => setAssignmentSignature(e.target.value)} />
-                              </div>
-                              <div className="md:col-span-2">
-                                <label className="text-sm font-medium">Not</label>
-                                <Input value={assignmentNote} onChange={e => setAssignmentNote(e.target.value)} />
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Button onClick={handleCheckOut} disabled={isSaving}>Check-Out Yap</Button>
-                              <Button variant="outline" onClick={handleCheckIn} disabled={isSaving}>Check-In Yap</Button>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              Aktif Zimmet: {asset.zimmetliKisi || '-'} | Check-Out: {asset.checkOutTarihi || '-'} | Check-In: {asset.checkInTarihi || '-'} | Zimmet Fiş: {asset.zimmetFisNo || '-'}
-                            </p>
-                         </div>
-                         <div>
-                            <h4 className="font-medium mb-2">Değişiklik Geçmişi</h4>
-                            <ScrollArea className="h-40 border rounded-md">
-                                {history.length === 0 ? (
-                                    <p className="p-4 text-sm text-muted-foreground text-center">Geçmiş kayıt yok.</p>
-                                ) : (
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Tarih</TableHead>
-                                                <TableHead>Değişiklik</TableHead>
-                                                <TableHead>Yapan</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {history.map(h => {
-                                                const prev = h.previousState;
-                                                const curr = h.newState;
-                                                let desc = '';
-                                                if (prev.konum !== curr.konum) desc += `Konum: ${prev.konum} → ${curr.konum}. `;
-                                                if (prev.teslimEdilenPersonel !== curr.teslimEdilenPersonel) desc += `Personel: ${prev.teslimEdilenPersonel} → ${curr.teslimEdilenPersonel}.`;
-                                                
-                                                return (
-                                                <TableRow key={h.id}>
-                                                    <TableCell className="text-xs">{h.timestamp ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', {locale: tr}) : '-'}</TableCell>
-                                                    <TableCell className="text-xs">{desc}</TableCell>
-                                                    <TableCell className="text-xs">{h.changedBy}</TableCell>
-                                                </TableRow>
-                                                )
-                                            })}
-                                        </TableBody>
-                                    </Table>
-                                )}
-                            </ScrollArea>
-                         </div>
-                         <div>
-                            <h4 className="font-medium mb-2">Zimmet Geçmişi</h4>
-                            <ScrollArea className="h-40 border rounded-md">
-                              {custodyHistory.length === 0 ? (
-                                <p className="p-4 text-sm text-muted-foreground text-center">Zimmet hareketi yok.</p>
-                              ) : (
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow>
-                                      <TableHead>Tarih</TableHead>
-                                      <TableHead>İşlem</TableHead>
-                                      <TableHead>Personel</TableHead>
-                                      <TableHead>Fiş</TableHead>
-                                      <TableHead>İmza</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {custodyHistory.map((h) => (
-                                      <TableRow key={h.id}>
-                                        <TableCell className="text-xs">{h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}</TableCell>
-                                        <TableCell className="text-xs">{h.action === 'check_out' ? 'Check-Out' : 'Check-In'}</TableCell>
-                                        <TableCell className="text-xs">{h.personel || '-'}</TableCell>
-                                        <TableCell className="text-xs">{h.zimmetFisNo || '-'}</TableCell>
-                                        <TableCell className="text-xs">{h.digitalSignature || '-'}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              )}
-                            </ScrollArea>
-                         </div>
-                    </CardContent>
-                </Card>
+        <Card className="cihaz-card-strong">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><QrCode className="h-5 w-5"/> QR & Etiket</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center gap-3">
+            {qrCodeDataUrl ? (
+              <Image src={qrCodeDataUrl} alt="QR Code" width={240} height={240} />
+            ) : (
+              <div className="w-60 h-60 bg-muted flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </div>
+            )}
+            <div className="w-full grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4 mr-2" />Etiket Yazdır</Button>
+              <Button variant="outline" onClick={() => qrCodeDataUrl && window.open(qrCodeDataUrl, '_blank')}><Download className="h-4 w-4 mr-2" />QR İndir</Button>
             </div>
-            <div className="md:col-span-1">
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><QrCode className="h-5 w-5"/> QR Kod</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex flex-col items-center">
-                        {qrCodeDataUrl ? (
-                            <Image src={qrCodeDataUrl} alt="QR Code" width={256} height={256} />
-                        ) : (
-                            <div className="w-64 h-64 bg-muted flex items-center justify-center">
-                                <Loader2 className="h-8 w-8 animate-spin" />
-                            </div>
-                        )}
-                        <p className="text-xs text-center mt-2 text-muted-foreground">Bu QR kodu okutarak bu sayfaya doğrudan erişebilirsiniz.</p>
-                    </CardContent>
-                </Card>
+            <p className="text-xs text-center text-muted-foreground">QR kod bu ürün sayfasına doğrudan erişim sağlar.</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="cihaz-card">
+          <CardHeader><CardTitle className="text-lg">Bilgi Güncelle</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Yeni Konum</label>
+              <Select value={newLocation} onValueChange={setNewLocation}>
+                <SelectTrigger><SelectValue/></SelectTrigger>
+                <SelectContent>{locations.map(loc => <SelectItem key={loc.id} value={loc.name}>{loc.name}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
-        </div>
+            <div>
+              <label className="text-sm font-medium">Yeni Personel</label>
+              <Input value={newPersonel} onChange={e => setNewPersonel(e.target.value)} />
+            </div>
+            <Button onClick={handleSaveChanges} disabled={isSaving}>
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Save className="h-4 w-4 mr-2"/>}
+              Değişiklikleri Kaydet
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="cihaz-card">
+          <CardHeader><CardTitle className="text-lg">Zimmet ve Hareket</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <Input placeholder="Personel" value={assignmentPerson} onChange={e => setAssignmentPerson(e.target.value)} />
+            <Input placeholder="Dijital İmza (Ad Soyad)" value={assignmentSignature} onChange={e => setAssignmentSignature(e.target.value)} />
+            <Input placeholder="Not" value={assignmentNote} onChange={e => setAssignmentNote(e.target.value)} />
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={handleCheckOut} disabled={isSaving}><UserCheck className="h-4 w-4 mr-2" />Check-Out Yap</Button>
+              <Button variant="outline" onClick={handleCheckIn} disabled={isSaving}><ShieldCheck className="h-4 w-4 mr-2" />Check-In Yap</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Check-Out: {asset.checkOutTarihi || '-'} · Check-In: {asset.checkInTarihi || '-'} · Fiş: {asset.zimmetFisNo || '-'}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="cihaz-card-strong">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><History className="h-5 w-5" /> Hareket Geçmişi</CardTitle>
+        </CardHeader>
+        <CardContent className="grid lg:grid-cols-2 gap-4">
+          <ScrollArea className="h-56 border rounded-md">
+            {history.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground text-center">Değişiklik geçmişi yok.</p>
+            ) : (
+              <div className="space-y-2 p-3">
+                {history.map(h => (
+                  <div key={h.id} className="rounded-md border p-3 text-sm">
+                    <p className="font-medium">{h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', {locale: tr}) : '-'}</p>
+                    <p className="text-muted-foreground">
+                      Konum: {h.previousState?.konum || '-'} → {h.newState?.konum || '-'} · Personel: {h.previousState?.teslimEdilenPersonel || '-'} → {h.newState?.teslimEdilenPersonel || '-'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+          <ScrollArea className="h-56 border rounded-md">
+            {custodyHistory.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground text-center">Zimmet hareketi yok.</p>
+            ) : (
+              <div className="space-y-2 p-3">
+                {custodyHistory.map(h => (
+                  <div key={h.id} className="rounded-md border p-3 text-sm">
+                    <p className="font-medium">{h.action === 'check_out' ? 'Check-Out' : 'Check-In'} · {h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}</p>
+                    <p className="text-muted-foreground">{h.personel || '-'} · Fiş: {h.zimmetFisNo || '-'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
     </div>
   );
 }

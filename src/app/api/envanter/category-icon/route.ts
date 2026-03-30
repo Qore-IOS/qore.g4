@@ -30,15 +30,30 @@ export async function POST(req: NextRequest) {
 
     const result = await generateWithGemini({
       systemPrompt:
-        'Sen minimal ikon tasarımcısısın. Sadece SVG döndür. İkonlar 2-6 çizgilik, sade, tek renk #f59e0b stroke ile olmalı. Dolgu kullanma.',
+        [
+          'Sen premium UI ikon tasarımcısısın ve sadece SVG döndürürsün.',
+          'İkon dili: turkuvaz + turuncu aksanlı, yarı-gerçekçi 3D, yumuşak gölge ve gradient efektli.',
+          'Kalın çizgi ikon üretme; dolgu, gradient, highlight ve depth kullan.',
+          'Tasarım temiz olmalı: tek obje, beyaz/transparent arka plan, kart içinde taşma yok.',
+          'Sadece tek bir <svg> döndür, açıklama/metin/markdown döndürme.',
+        ].join(' '),
       messages: [
         {
           role: 'user',
-          content: `"${categoryName}" kategorisi için 96x96 viewBox'ta bir çizgi ikon üret. Kurallar: sadece bir adet <svg> döndür, arka plan olmasın, stroke-width 2.5, fill="none", round linecap ve linejoin kullan.`,
+          content: [
+            `"${categoryName}" kategorisi için 128x128 viewBox'ta premium bir SVG ikon üret.`,
+            'Kurallar:',
+            '- Renk paleti: turkuvaz/cyan tonları + turuncu vurgu (ör: #06b6d4, #0ea5e9, #2563eb, #f59e0b).',
+            '- 3D hissi ver: linear/radial gradient, yumuşak iç-dış gölge (filter), hafif parlama.',
+            '- İkon gerçekçi ama sade olsun; görseldeki modern paket/servis ikonları diline benzesin.',
+            '- Arka plan shape kullanma, sadece ikon objesi olsun.',
+            '- SVG güvenli ve render edilebilir olsun (defs/linearGradient/filter kullanılabilir).',
+            '- Sadece tek bir <svg> döndür.',
+          ].join(' '),
         },
       ],
-      temperature: 0.2,
-      maxOutputTokens: 600,
+      temperature: 0.45,
+      maxOutputTokens: 1400,
     });
 
     const iconSvg = normalizeSvg(result.text);
