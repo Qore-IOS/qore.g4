@@ -910,6 +910,9 @@ function RequestDetail({
   }, [liveRequest.unreadByUser, source, uid, request.id, liveRequest.createdBy]);
 
   const isAssignedAdmin = liveRequest.assignedTo === uid;
+  const canMarkAsDone =
+    liveRequest.status !== "done" &&
+    (isAssignedAdmin || isAdminDeveloper || liveRequest.createdBy === uid);
 
   const changeStatus = async (newStatus: UserRequestStatus) => {
     setUpdating(true);
@@ -1291,6 +1294,17 @@ function RequestDetail({
             >
               {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
+            {canMarkAsDone && (
+              <Button
+                onClick={() => changeStatus("done")}
+                disabled={updating}
+                size="sm"
+                className="rounded-lg self-end bg-emerald-500 hover:bg-emerald-600 text-white h-9 px-3 gap-1.5"
+              >
+                {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Tamamlandı
+              </Button>
+            )}
           </div>
         </div>
       </div>
