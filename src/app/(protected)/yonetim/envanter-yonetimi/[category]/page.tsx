@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { PlusCircle, Trash2, Loader2, Filter } from 'lucide-react';
+import { PlusCircle, Trash2, Loader2, Filter, Search, Eye, Pencil } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -22,6 +22,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 
 
 type FilterableColumn = keyof Omit<Asset, 'id' | 'aciklama'>;
@@ -279,27 +280,50 @@ export default function AssetCategoryPage() {
     });
   }, [assets, filters, globalSearch]);
 
+  const statusStyles: Record<string, string> = {
+    iyi: 'bg-emerald-100 text-emerald-700',
+    orta: 'bg-amber-100 text-amber-700',
+    kötü: 'bg-rose-100 text-rose-700',
+    'çok kötü': 'bg-rose-200 text-rose-800',
+  };
+
+  const stats = useMemo(() => ({
+    total: assets.length,
+    assigned: assets.filter(a => Boolean(a.zimmetliKisi || a.teslimEdilenPersonel)).length,
+    unassigned: assets.filter(a => !a.zimmetliKisi && !a.teslimEdilenPersonel).length,
+    totalCost: assets.reduce((sum, a) => sum + (Number(a.alimFiyatiTl) || 0), 0),
+  }), [assets]);
+
   return (
     <>
-      <div className="p-6 space-y-6">
+      <div className="p-6 lg:p-8 space-y-6 cihaz-shell">
         <div className="flex items-center justify-between">
           <BackButton fallback="/yonetim/envanter-yonetimi" />
-          <Button onClick={() => handleOpenModal()} size="sm" disabled={loading}>
+          <Button onClick={() => handleOpenModal()} size="sm" disabled={loading} className="bg-[var(--dashboard-accent)] text-white">
             <PlusCircle className="mr-2 h-4 w-4" />
             Yeni Ürün Ekle
           </Button>
         </div>
 
-        <Card className="shadow-lg">
+        <Card className="cihaz-card-strong">
           <CardHeader>
             <CardTitle className="text-2xl font-headline capitalize">{categoryName}</CardTitle>
             <CardDescription>Bu kategoriye ait demirbaş envanteri.</CardDescription>
-            <Input
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Ürün, konum veya kategori ara..."
-              className="max-w-md"
-            />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+              <div className="cihaz-card p-3"><p className="text-xs text-muted-foreground">Toplam Ürün</p><p className="text-xl font-semibold">{stats.total}</p></div>
+              <div className="cihaz-card p-3"><p className="text-xs text-muted-foreground">Zimmetli</p><p className="text-xl font-semibold text-sky-600">{stats.assigned}</p></div>
+              <div className="cihaz-card p-3"><p className="text-xs text-muted-foreground">Boşta</p><p className="text-xl font-semibold text-amber-600">{stats.unassigned}</p></div>
+              <div className="cihaz-card p-3"><p className="text-xs text-muted-foreground">Toplam Maliyet</p><p className="text-xl font-semibold">{stats.totalCost.toLocaleString('tr-TR')} ₺</p></div>
+            </div>
+            <div className="relative max-w-md">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="Ürün, konum veya kategori ara..."
+                className="max-w-md pl-9 bg-[var(--dashboard-surface-2)]"
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -310,11 +334,11 @@ export default function AssetCategoryPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead><FilterPopover column="demirbasNo" title="Demirbaş No" options={uniqueFilterOptions.demirbasNo} selectedValues={filters.demirbasNo} onSelectionChange={handleFilterChange} /></TableHead>
-                      <TableHead>Ürün Kategorisi</TableHead>
                       <TableHead><FilterPopover column="seriNumarasi" title="Seri No" options={uniqueFilterOptions.seriNumarasi} selectedValues={filters.seriNumarasi} onSelectionChange={handleFilterChange} /></TableHead>
                       <TableHead><FilterPopover column="durum" title="Durum" options={uniqueFilterOptions.durum} selectedValues={filters.durum} onSelectionChange={handleFilterChange} /></TableHead>
                       <TableHead><FilterPopover column="marka" title="Marka" options={uniqueFilterOptions.marka} selectedValues={filters.marka} onSelectionChange={handleFilterChange} /></TableHead>
                       <TableHead><FilterPopover column="konum" title="Konum" options={uniqueFilterOptions.konum} selectedValues={filters.konum} onSelectionChange={handleFilterChange} /></TableHead>
+                      <TableHead>Personel</TableHead>
                       <TableHead>Alım Fiyatı (TL)</TableHead>
                       <TableHead className="text-right">İşlemler</TableHead>
                     </TableRow>
@@ -326,13 +350,23 @@ export default function AssetCategoryPage() {
                       filteredAssets.map(asset => (
                         <TableRow key={asset.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/yonetim/envanter-yonetimi/${categoryName}/${asset.id}`)}>
                           <TableCell className="font-mono text-xs">{asset.demirbasNo}</TableCell>
-                          <TableCell className="font-medium">{asset.category}</TableCell>
                           <TableCell className="font-mono text-xs">{asset.seriNumarasi}</TableCell>
-                          <TableCell className="capitalize">{asset.durum}</TableCell>
+                          <TableCell className="capitalize">
+                            <Badge className={cn("font-medium", statusStyles[(asset.durum || '').toLowerCase()] || 'bg-slate-100 text-slate-700')}>
+                              {asset.durum || '-'}
+                            </Badge>
+                          </TableCell>
                           <TableCell>{asset.marka}</TableCell>
                           <TableCell>{asset.konum}</TableCell>
+                          <TableCell>{asset.zimmetliKisi || asset.teslimEdilenPersonel || '-'}</TableCell>
                           <TableCell>{typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl.toLocaleString('tr-TR') : '-'}</TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-right space-x-1">
+                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); router.push(`/yonetim/envanter-yonetimi/${categoryName}/${asset.id}`); }} disabled={loading}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleOpenModal(asset); }} disabled={loading}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleDelete(asset.id); }} disabled={loading}>
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
