@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import {
   PlusCircle, Computer, Server, Barcode, Printer, BookCopy, Loader2, Edit3, Trash2, MapPin, Upload, Download,
-  Fan, Beaker, FlaskConical, Archive, QrCode, Car
+  Fan, Beaker, FlaskConical, Archive, QrCode, Car, Sparkles, Search
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -158,6 +158,19 @@ export default function EnvanterYonetimiPage() {
     () => assets.reduce((sum, asset) => sum + (Number(asset.alimFiyatiTl) || 0), 0),
     [assets]
   );
+
+  const summaryStats = React.useMemo(() => {
+    const assigned = assets.filter(asset => Boolean(asset.zimmetliKisi || asset.teslimEdilenPersonel)).length;
+    const unassigned = Math.max(0, assets.length - assigned);
+    const unlabeled = assets.filter(asset => !asset.demirbasNo || !asset.demirbasNo.trim()).length;
+    return {
+      totalCategories: categories.length,
+      totalAssets: assets.length,
+      assigned,
+      unassigned,
+      unlabeled,
+    };
+  }, [assets, categories.length]);
 
   const costByCategory = React.useMemo(() => {
     const costs: Record<string, number> = {};
@@ -509,11 +522,11 @@ export default function EnvanterYonetimiPage() {
     <>
       <input type="file" ref={assetFileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleAssetImport} />
       <input type="file" ref={categoryFileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleCategoryImport} />
-      <div className="p-6 space-y-6">
+      <div className="p-6 lg:p-8 space-y-6 cihaz-shell">
         <div className="flex items-center justify-between">
           <BackButton fallback="/yonetim" />
           <div className="flex items-center gap-2">
-            <Button onClick={() => handleOpenModal()} size="sm" disabled={loading}>
+            <Button onClick={() => handleOpenModal()} size="sm" disabled={loading} className="bg-[var(--dashboard-accent)] text-white">
               <PlusCircle className="mr-2 h-4 w-4" />
               Yeni Kategori
             </Button>
@@ -528,61 +541,58 @@ export default function EnvanterYonetimiPage() {
             </Button>
           </div>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Envanter Toplu İşlemleri</CardTitle>
-                    <CardDescription>
-                      Toplam Envanter Maliyeti: <span className="font-semibold">{formatCurrencyTry(totalInventoryCost)}</span>
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="flex items-center gap-2">
-                    <Button onClick={() => assetFileInputRef.current?.click()} size="sm" variant="outline"><Upload className="mr-2 h-4 w-4"/>Envanter Yükle</Button>
-                    <Button onClick={handleDownloadAssetTemplate} size="sm" variant="outline"><Download className="mr-2 h-4 w-4"/>Envanter Şablonu</Button>
-                    <Button onClick={handleDownloadCurrentInventory} size="sm" variant="outline"><Download className="mr-2 h-4 w-4"/>Mevcut Envanteri İndir</Button>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Kategori Toplu İşlemleri</CardTitle>
-                </CardHeader>
-                <CardContent className="flex items-center gap-2">
-                    <Button onClick={() => categoryFileInputRef.current?.click()} size="sm" variant="outline"><Upload className="mr-2 h-4 w-4"/>Kategori Yükle</Button>
-                    <Button onClick={handleDownloadCategoryTemplate} size="sm" variant="outline"><Download className="mr-2 h-4 w-4"/>Kategori Şablonu</Button>
-                </CardContent>
-            </Card>
+
+        <div className="cihaz-card-strong p-5 lg:p-6 space-y-5">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Envanter Yönetimi</h1>
+            <p className="text-sm text-[var(--dashboard-muted)] mt-1">Demirbaş kategorilerini, konumlarını, tekil ürün kayıtlarını ve zimmet hareketlerini yönetin.</p>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Toplam Kategori</p><p className="text-2xl font-semibold">{summaryStats.totalCategories}</p></div>
+            <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Toplam Ürün</p><p className="text-2xl font-semibold">{summaryStats.totalAssets}</p></div>
+            <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Zimmetli</p><p className="text-2xl font-semibold text-sky-600">{summaryStats.assigned}</p></div>
+            <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Boşta</p><p className="text-2xl font-semibold text-amber-600">{summaryStats.unassigned}</p></div>
+            <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Toplam Maliyet</p><p className="text-xl font-semibold">{formatCurrencyTry(totalInventoryCost)}</p></div>
+          </div>
+          <div className="cihaz-card p-4">
+            <p className="cihaz-section-label mb-3">Toplu İşlemler</p>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => assetFileInputRef.current?.click()} size="sm" variant="outline" className="bg-[var(--dashboard-surface-2)]"><Upload className="mr-2 h-4 w-4"/>Envanter Yükle</Button>
+              <Button onClick={handleDownloadAssetTemplate} size="sm" variant="outline" className="bg-[var(--dashboard-surface-2)]"><Download className="mr-2 h-4 w-4"/>Envanter Şablonu</Button>
+              <Button onClick={handleDownloadCurrentInventory} size="sm" variant="outline" className="bg-[var(--dashboard-surface-2)]"><Download className="mr-2 h-4 w-4"/>Mevcut Envanteri İndir</Button>
+              <Button onClick={() => categoryFileInputRef.current?.click()} size="sm" variant="outline" className="bg-[var(--dashboard-surface-2)]"><Upload className="mr-2 h-4 w-4"/>Kategori Yükle</Button>
+              <Button onClick={handleDownloadCategoryTemplate} size="sm" variant="outline" className="bg-[var(--dashboard-surface-2)]"><Download className="mr-2 h-4 w-4"/>Kategori Şablonu</Button>
+              <Button size="sm" variant="ghost" onClick={handleGenerateAllCategoryIcons} disabled={bulkGeneratingIcons || loading} className="ml-auto">
+                {(bulkGeneratingIcons || loading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                İkonları Yenile
+              </Button>
+            </div>
+          </div>
         </div>
 
         <Tabs defaultValue="category">
-            <TabsList className="mb-4">
-                <TabsTrigger value="category">Kategori Görünümü</TabsTrigger>
-                <TabsTrigger value="location">Konum Görünümü</TabsTrigger>
+            <TabsList className="mb-4 bg-[var(--dashboard-surface-2)] p-1 rounded-xl">
+                <TabsTrigger value="category" className="data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)]">Kategori Görünümü</TabsTrigger>
+                <TabsTrigger value="location" className="data-[state=active]:bg-[var(--dashboard-surface)] data-[state=active]:shadow-[var(--dashboard-raised-soft)]">Konum Görünümü</TabsTrigger>
             </TabsList>
 
             <TabsContent value="category">
-                <Card className="shadow-lg">
+                <Card className="cihaz-card-strong">
                   <CardHeader>
                     <CardTitle className="text-2xl font-headline">Kategoriye Göre Envanter</CardTitle>
                     <CardDescription>
                       Şirkete ait demirbaş malların (bilgisayar, dolap vb.) kategorilerini yönetin.
                     </CardDescription>
                     <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="relative w-full max-w-md">
+                        <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--dashboard-muted)]" />
                       <Input
                         placeholder="Kategori, ürün veya konum ara..."
                         value={categorySearch}
                         onChange={(e) => setCategorySearch(e.target.value)}
-                        className="max-w-md"
+                        className="max-w-md pl-9 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"
                       />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleGenerateAllCategoryIcons}
-                        disabled={bulkGeneratingIcons || loading}
-                      >
-                        {(bulkGeneratingIcons || loading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Gemini ile İkonları Oluştur
-                      </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -591,11 +601,12 @@ export default function EnvanterYonetimiPage() {
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {/* Araçlar - Özel Kategori */}
-                        <Card className="group relative bg-gradient-to-br from-blue-500/10 to-cyan-500/10 hover:from-blue-500/20 hover:to-cyan-500/20 border-blue-500/20 hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1">
+                        <Card className="group relative bg-gradient-to-br from-blue-500/10 to-cyan-500/20 border-blue-500/20 hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1">
                           <Link href="/yonetim/envanter-yonetimi/araclar" className="block cursor-pointer">
                             <CardContent className="flex flex-col items-center justify-center p-6 text-center">
-                              <Car className="h-10 w-10 mb-3 text-blue-500" />
+                              <Car className="h-8 w-8 mb-3 text-blue-500" />
                               <CardTitle className="text-base font-semibold">Araçlar</CardTitle>
+                              <p className="text-xs text-muted-foreground mt-2">{formatCurrencyTry(0)}</p>
                             </CardContent>
                           </Link>
                           <Badge variant="default" className="absolute top-2 right-2 bg-blue-500">{vehicleCount}</Badge>
@@ -608,17 +619,22 @@ export default function EnvanterYonetimiPage() {
                           return (
                             <Card
                               key={category.id}
-                              className="group relative bg-card/60 hover:bg-accent/10 hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1"
+                              className="group relative cihaz-card hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1"
                             >
                               <Link href={`/yonetim/envanter-yonetimi/${encodeURIComponent(category.name)}`} className="block cursor-pointer">
-                                  <CardContent className="flex flex-col items-center justify-center p-6 text-center">
+                                  <CardContent className="p-5 text-center">
+                                  <div className="flex items-center justify-center mb-3">
                                   {category.iconSvg ? (
-                                    <div className="h-10 w-10 mb-3 text-primary" dangerouslySetInnerHTML={{ __html: category.iconSvg }} />
+                                    <div className="h-9 w-9 text-primary" dangerouslySetInnerHTML={{ __html: category.iconSvg }} />
                                   ) : (
-                                    <Icon className="h-10 w-10 mb-3 text-primary" />
+                                    <Icon className="h-9 w-9 text-primary" />
                                   )}
+                                  </div>
                                   <CardTitle className="text-base font-semibold">{category.name}</CardTitle>
-                                  <p className="mt-2 text-xs text-muted-foreground font-medium">{formatCurrencyTry(categoryCost)}</p>
+                                  <div className="mt-3 space-y-1">
+                                    <p className="text-xs text-muted-foreground">{count} ürün</p>
+                                    <p className="text-sm font-medium">{formatCurrencyTry(categoryCost)}</p>
+                                  </div>
                                   </CardContent>
                               </Link>
                               <Badge variant="secondary" className="absolute top-2 right-2">{count}</Badge>
@@ -664,18 +680,21 @@ export default function EnvanterYonetimiPage() {
             </TabsContent>
             
             <TabsContent value="location">
-                 <Card className="shadow-lg">
+                 <Card className="cihaz-card-strong">
                   <CardHeader>
                     <CardTitle className="text-2xl font-headline">Konuma Göre Envanter</CardTitle>
                     <CardDescription>
                         Varlıkların fiziksel konumlarına göre gruplanmış hali.
                     </CardDescription>
-                    <Input
-                      placeholder="Ürün, konum veya kategori ara..."
-                      value={locationSearch}
-                      onChange={(e) => setLocationSearch(e.target.value)}
-                      className="max-w-md"
-                    />
+                    <div className="relative max-w-md">
+                      <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--dashboard-muted)]" />
+                      <Input
+                        placeholder="Ürün, konum veya kategori ara..."
+                        value={locationSearch}
+                        onChange={(e) => setLocationSearch(e.target.value)}
+                        className="max-w-md pl-9 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"
+                      />
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {loading ? (
