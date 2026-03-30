@@ -15,7 +15,6 @@ import {
   orderBy,
   doc,
   getDocs,
-  limit as firestoreLimit,
   updateDoc,
   addDoc,
   serverTimestamp,
@@ -165,41 +164,6 @@ export default function AplikasyonPaneliDetayPage() {
     });
     return () => unsub();
   }, [devicesByHospital]);
-
-  // Auto-cleanup orphaned fault reports: if device.arizaDurumu is 'yok' but openFaultMap has entries
-  useEffect(() => {
-    if (devicesByHospital.length === 0 || Object.keys(openFaultMap).length === 0) return;
-
-    const orphanedReportIds: string[] = [];
-    devicesByHospital.forEach((device) => {
-      const deviceFaultStatus = device.arizaDurumu;
-      const hasOpenReports = openFaultMap[device.id];
-      if (hasOpenReports && (!deviceFaultStatus || deviceFaultStatus === 'yok')) {
-        const ids = openFaultReportIds[device.id] || [];
-        orphanedReportIds.push(...ids);
-      }
-    });
-
-    if (orphanedReportIds.length === 0) return;
-
-    const closeOrphans = async () => {
-      for (const reportId of orphanedReportIds) {
-        try {
-          const reportRef = doc(db, 'deviceFaultReports', reportId);
-          await updateDoc(reportRef, {
-            status: 'cozuldu',
-            closedAt: serverTimestamp(),
-            closedByUid: 'system',
-            closedByName: 'Sistem (Otomatik Temizlik)',
-            closeDescription: 'Cihaz sağlıklı durumda olduğu için yetim arıza kaydı otomatik kapatıldı.',
-          });
-        } catch (err) {
-          console.error('Failed to auto-close orphaned fault report:', reportId, err);
-        }
-      }
-    };
-    closeOrphans();
-  }, [devicesByHospital, openFaultMap, openFaultReportIds]);
 
   // Fetch fault history for all devices
   useEffect(() => {
@@ -398,28 +362,12 @@ export default function AplikasyonPaneliDetayPage() {
     // - If device has aplikasyon fault, show modal with options
     // - If device has teknik_servis fault, show info that it's a teknik servis fault (can't manage)
     // - If no fault, go directly to islem-formu
-    if (device.arizaDurumu && device.arizaDurumu !== 'yok') {
+    const activeFaultType = openFaultMap[device.id];
+    if (activeFaultType) {
       setSelectedDevice(device);
-      setSelectedDeviceFaultType(device.arizaDurumu);
-
-      // Find the open fault report for this device
-      try {
-        const q = query(
-          collection(db, 'deviceFaultReports'),
-          where('deviceId', '==', device.id),
-          where('status', '==', 'open'),
-          firestoreLimit(1)
-        );
-        const faultSnap = await getDocs(q);
-        if (!faultSnap.empty) {
-          setFaultIdForSelectedDevice(faultSnap.docs[0].id);
-        } else {
-          setFaultIdForSelectedDevice(null);
-        }
-      } catch (error) {
-        console.error("Error finding open fault report:", error);
-        setFaultIdForSelectedDevice(null);
-      }
+      setSelectedDeviceFaultType(activeFaultType);
+      const openIds = openFaultReportIds[device.id] || [];
+      setFaultIdForSelectedDevice(openIds.length > 0 ? openIds[0] : null);
       setIsModalOpen(true);
     } else {
       // No fault, go directly to operation form
@@ -692,10 +640,9 @@ export default function AplikasyonPaneliDetayPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {devicesByHospital.map((device) => {
                 // For aplikasyon panel: red for aplikasyon faults, amber for teknik_servis faults
-                // Check both device.arizaDurumu and real-time open fault reports
+                // Source of truth: real-time open arıza kayıtları
                 const faultFromReports = openFaultMap[device.id];
-                const faultFromDevice = device.arizaDurumu && device.arizaDurumu !== 'yok' ? device.arizaDurumu : null;
-                const effectiveFaultType = faultFromReports || faultFromDevice;
+                const effectiveFaultType = faultFromReports || null;
                 const isAplikasyonFaulty = effectiveFaultType === 'aplikasyon';
                 const isTeknikServisFaulty = effectiveFaultType === 'teknik_servis';
                 const isFaulty = isAplikasyonFaulty || isTeknikServisFaulty;

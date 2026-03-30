@@ -979,6 +979,7 @@ export default function UrunKullanimPanel() {
         faultDefinitionId: faultDefinition.id,
         faultName: faultDefinition.name,
         deviceImageUrl: selectedDevice.imageUrl || undefined,
+        companyId: currentUserProfile?.companyId ?? null,
       });
 
       urunKullanimLogger.info('Arıza kaydı oluşturuldu', {
@@ -1030,6 +1031,7 @@ export default function UrunKullanimPanel() {
         faultDefinitionId: undefined,
         faultName: customFaultTitle.trim(),
         deviceImageUrl: selectedDevice.imageUrl || undefined,
+        companyId: currentUserProfile?.companyId ?? null,
       });
 
       urunKullanimLogger.info('Özel arıza kaydı oluşturuldu', {

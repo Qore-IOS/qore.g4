@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
 /* ─── Types ─── */
 
@@ -64,24 +64,21 @@ export default function TeknikServisPanel({
   const [faultyDeviceIds, setFaultyDeviceIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const fetchOpenFaults = async () => {
-      try {
-        const q = query(
-          collection(db, 'deviceFaultReports'),
-          where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
-        );
-        const snap = await getDocs(q);
-        const ids = new Set<string>();
-        snap.docs.forEach(d => {
-          const data = d.data();
-          if (data.deviceId) ids.add(data.deviceId);
-        });
-        setFaultyDeviceIds(ids);
-      } catch (err) {
-        console.error('Error fetching open fault reports:', err);
-      }
-    };
-    fetchOpenFaults();
+    const q = query(
+      collection(db, 'deviceFaultReports'),
+      where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const ids = new Set<string>();
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        if (data.deviceId) ids.add(data.deviceId);
+      });
+      setFaultyDeviceIds(ids);
+    }, (err) => {
+      console.error('Error listening open fault reports:', err);
+    });
+    return () => unsub();
   }, []);
 
   /* ── Device helpers ── */
@@ -130,8 +127,7 @@ export default function TeknikServisPanel({
     return { poolGroups, standaloneLabs };
   }, [filteredHospitals, labPools, userAssignedLabs, isAdmin]);
 
-  const isDeviceFaulty = (d: Device) =>
-    (d.arizaDurumu !== undefined && d.arizaDurumu !== 'yok') || faultyDeviceIds.has(d.id);
+  const isDeviceFaulty = (d: Device) => faultyDeviceIds.has(d.id);
 
   const getHospitalStats = (hospitalId: string) => {
     const hospitalDevices = getDevicesForHospital(hospitalId);

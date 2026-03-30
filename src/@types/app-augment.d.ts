@@ -99,6 +99,25 @@ declare module "@/lib/types" {
     durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü'; // NEW
     konum: string;
     manuelKonum?: string; // NEW
+    alimFiyatiTl?: number;
+    satinAlmaTarihi?: string;
+    garantiBitisTarihi?: string;
+    planliKullanimOmruYil?: number;
+    amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
+    amortismanBaslangicTarihi?: string;
+    hurdaTarihi?: string;
+    imhaTarihi?: string;
+    satisTarihi?: string;
+    sonBakimTarihi?: string;
+    sonrakiBakimTarihi?: string;
+    sonKalibrasyonTarihi?: string;
+    sonrakiKalibrasyonTarihi?: string;
+    bakimMaliyetiTl?: number;
+    zimmetliKisi?: string;
+    checkOutTarihi?: string;
+    checkInTarihi?: string;
+    dijitalImza?: string;
+    zimmetFisNo?: string;
     teslimEdilenPersonel: string;
     aciklama: string;
   }

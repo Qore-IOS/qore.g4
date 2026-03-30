@@ -218,6 +218,7 @@ export default function IslemFormuPage() {
   const [hucreDegisimiSelectedItem, setHucreDegisimiSelectedItem] = useState<PersonalStockItem | null>(null);
   const [hucreDegisimiSelectedDepotItem, setHucreDegisimiSelectedDepotItem] = useState<DepotSelectableStockItem | null>(null);
   const [hucreStockSourceTab, setHucreStockSourceTab] = useState<'personal' | 'depot'>('personal');
+  const [showHucreDegisimiInIslemTuru, setShowHucreDegisimiInIslemTuru] = useState(false);
   const [hucreDegisimiRemovedHucre, setHucreDegisimiRemovedHucre] = useState('');
   const [hucreDegisimiDescription, setHucreDegisimiDescription] = useState('');
   const [hucreDegisimiSearchQuery, setHucreDegisimiSearchQuery] = useState('');
@@ -1810,28 +1811,49 @@ export default function IslemFormuPage() {
           if (pc.periodicPartChangeId) processedPeriodicIds.add(pc.periodicPartChangeId);
         }
 
+        const isReusableStockStatus = (status: unknown) => {
+          const normalized = String(status || '').trim().toLowerCase();
+          return normalized === 'in_stock' || normalized === 'pending_approval';
+        };
+
         for (const partChange of partChanges) {
           let removedStockRefId: string | null = null;
 
           // Create new personal stock entry for removed part (from device) first
-          if (partChange.removedPartSerialNumber) {
-            const removedStockRef = doc(collection(db, 'personalStock'));
-            removedStockRefId = removedStockRef.id;
-            batch.set(removedStockRef, {
-              ownerUid: currentUserProfile?.uid || '',
-              ownerName: currentUserProfile?.name || '',
-              productCodeId: partChange.personalStockId ? partChange.action : null,
-              stokKodu: partChange.removedPartStokKodu || partChange.stokKodu,
-              stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
-              serialNumber: partChange.removedPartSerialNumber,
-              imageUrl: partChange.removedPartImageUrl || null,
-              source: 'device',
-              sourceDeviceId: deviceId,
-              sourceDeviceName: device?.cihazAdi || device?.model || '',
-              status: 'in_stock',
-              createdAt: Timestamp.fromDate(now),
-              replacedPartId: partChange.personalStockId || null,
+          const removedSerial = String(partChange.removedPartSerialNumber || '').trim();
+          const installedSerial = String(partChange.serialNumber || '').trim();
+          const removedStokKodu = partChange.removedPartStokKodu || partChange.stokKodu;
+
+          if (removedSerial && removedSerial !== installedSerial) {
+            const duplicateSnap = await getDocs(query(
+              collection(db, 'personalStock'),
+              where('ownerUid', '==', currentUserProfile?.uid || ''),
+              where('serialNumber', '==', removedSerial)
+            ));
+            const hasActiveDuplicate = duplicateSnap.docs.some((docSnap) => {
+              const data = docSnap.data();
+              return data.stokKodu === removedStokKodu && isReusableStockStatus(data.status);
             });
+
+            if (!hasActiveDuplicate) {
+              const removedStockRef = doc(collection(db, 'personalStock'));
+              removedStockRefId = removedStockRef.id;
+              batch.set(removedStockRef, {
+                ownerUid: currentUserProfile?.uid || '',
+                ownerName: currentUserProfile?.name || '',
+                productCodeId: partChange.personalStockId ? partChange.action : null,
+                stokKodu: removedStokKodu,
+                stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
+                serialNumber: removedSerial,
+                imageUrl: partChange.removedPartImageUrl || null,
+                source: 'device',
+                sourceDeviceId: deviceId,
+                sourceDeviceName: device?.cihazAdi || device?.model || '',
+                status: 'in_stock',
+                createdAt: Timestamp.fromDate(now),
+                replacedPartId: partChange.personalStockId || null,
+              });
+            }
           }
 
           // If this is from personal stock, mark as used (single update with all fields)
@@ -2198,14 +2220,6 @@ export default function IslemFormuPage() {
         : undefined,
     },
     {
-      id: 'hucre_degisimi',
-      label: 'HÜCRE DEĞİŞİMİ',
-      isComplete: actions.some(a => a.type === 'hucre_degisimi'),
-      completedSublabel: actions.filter(a => a.type === 'hucre_degisimi').length > 0
-        ? `${actions.filter(a => a.type === 'hucre_degisimi').length} hücre`
-        : undefined,
-    },
-    {
       id: 'yapilan_islem',
       label: 'YAPILAN İŞLEM',
       isComplete: actions.some(a => a.type === 'operation'),
@@ -2258,6 +2272,21 @@ export default function IslemFormuPage() {
         );
 
       case 'islem_turu':
+        if (showHucreDegisimiInIslemTuru) {
+          return (
+            <div>
+              <button
+                type="button"
+                className="wizard-btn wizard-btn-secondary"
+                style={{ marginBottom: '12px' }}
+                onClick={() => setShowHucreDegisimiInIslemTuru(false)}
+              >
+                ← İşlem Türüne Dön
+              </button>
+              {renderWizardDetail('hucre_degisimi', () => setShowHucreDegisimiInIslemTuru(false))}
+            </div>
+          );
+        }
         return (
           <div className="wizard-option-list">
             {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'cihaz_kurulumu', 'ariza', 'sw_update', 'alis', 'roche_bilgisayar_arizasi'] as IslemTuru[]).map(tur => {
@@ -2416,6 +2445,12 @@ export default function IslemFormuPage() {
                 </React.Fragment>
               );
             })}
+            <button
+              className={`wizard-option-item ${actions.some(a => a.type === 'hucre_degisimi') ? 'selected' : ''}`}
+              onClick={() => setShowHucreDegisimiInIslemTuru(true)}
+            >
+              HÜCRE DEĞİŞİMİ
+            </button>
           </div>
         );
 

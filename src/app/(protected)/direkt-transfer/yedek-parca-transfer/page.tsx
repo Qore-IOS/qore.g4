@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -3345,14 +3345,21 @@ export default function YedekParcaTransferPage() {
 
     setMenuSelection(selection);
 
+    const basePath = '/direkt-transfer/yedek-parca-transfer';
     if (selection.section === 'personnel' && selection.personnelUid) {
       router.push(`/direkt-transfer/yedek-parca-transfer/${selection.personnelUid}`);
-    } else if (pathname !== '/direkt-transfer/yedek-parca-transfer') {
-      router.push('/direkt-transfer/yedek-parca-transfer');
+    } else if (selection.section === 'depo-stok') {
+      router.push(`${basePath}?section=depo-stok`);
+    } else if (selection.section === 'toplam-stok') {
+      router.push(`${basePath}?section=toplam-stok`);
+    } else if (selection.section === 'pool-stok' && selection.poolWarehouseId) {
+      router.push(`${basePath}?section=pool-stok&poolWarehouseId=${selection.poolWarehouseId}`);
+    } else if (pathname !== basePath || searchParams.toString()) {
+      router.push(basePath);
     }
 
     closeMenu?.();
-  }, [canAccessTransferPanel, pathname, router]);
+  }, [canAccessTransferPanel, pathname, router, searchParams]);
 
 
   useEffect(() => {
@@ -3375,13 +3382,43 @@ export default function YedekParcaTransferPage() {
   }, [pathname, users]);
 
   useEffect(() => {
+    const sectionParam = searchParams.get('section');
+    const poolWarehouseId = searchParams.get('poolWarehouseId');
+    const basePath = '/direkt-transfer/yedek-parca-transfer';
+    if (pathname !== basePath) return;
+    if (!sectionParam || sectionParam === 'transfer') return;
+
+    if (sectionParam === 'depo-stok') {
+      setMenuSelection((prev) => (prev.section === 'depo-stok' ? prev : { section: 'depo-stok' }));
+      return;
+    }
+
+    if (sectionParam === 'toplam-stok') {
+      setMenuSelection((prev) => (prev.section === 'toplam-stok' ? prev : { section: 'toplam-stok' }));
+      return;
+    }
+
+    if (sectionParam === 'pool-stok') {
+      if (!poolWarehouseId) return;
+      const warehouse = poolWarehouses.find((w) => w.id === poolWarehouseId);
+      if (!warehouse) return;
+      setMenuSelection((prev) => {
+        if (prev.section === 'pool-stok' && prev.poolWarehouseId === poolWarehouseId) return prev;
+        return { section: 'pool-stok', poolWarehouseId, poolWarehouseName: warehouse.name };
+      });
+    }
+  }, [pathname, poolWarehouses, searchParams]);
+
+  useEffect(() => {
     if (!isFieldPersonnel || !currentUserProfile?.uid) return;
 
     const segments = pathname.split('/').filter(Boolean);
     const routePersonnelUid = segments.length > 2 ? segments[2] : '';
+    const sectionParam = searchParams.get('section');
     const ownUid = currentUserProfile.uid;
 
     if (routePersonnelUid) return;
+    if (sectionParam === 'depo-stok' || sectionParam === 'toplam-stok' || sectionParam === 'pool-stok') return;
 
     setMenuSelection((prev) => {
       if (prev.section === 'personnel' && prev.personnelUid === ownUid) return prev;
@@ -3394,7 +3431,7 @@ export default function YedekParcaTransferPage() {
     });
 
     router.replace(`/direkt-transfer/yedek-parca-transfer/${ownUid}`);
-  }, [currentUserProfile, isFieldPersonnel, pathname, router]);
+  }, [currentUserProfile, isFieldPersonnel, pathname, router, searchParams]);
 
   const renderManagementMenu = (closeMenu?: () => void) => {
     const menuItem = (section: MenuSection, icon: React.ReactNode, label: string, sub: string, extra?: React.ReactNode) => {
