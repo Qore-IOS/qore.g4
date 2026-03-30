@@ -28,33 +28,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'categoryName zorunludur.' }, { status: 400 });
     }
 
+    const masterStylePrompt = [
+      'Create a premium mobile app icon in a soft 3D glossy illustration style.',
+      'Use rounded geometry, simplified forms, smooth volumetric gradients, polished plastic-like materials, cool blue and cyan color palette, subtle white highlights, and soft ambient contact shadows.',
+      'The object should be shown in a front three-quarter view with a slight top-down angle.',
+      'Use soft studio lighting from the top-left, gentle fill light, faint cool rim light, and a clean transparent background.',
+      'The icon must feel modern, friendly, high-tech, minimal, and consistent with premium automotive or digital service app icons.',
+      'No hard outlines, no photorealism, no clutter, no excessive detail, no dark dramatic shadows.',
+    ].join(' ');
+
+    const negativePrompt = [
+      'no flat icon',
+      'no line art',
+      'no cartoon',
+      'no hand-drawn style',
+      'no low-poly',
+      'no realistic photo',
+      'no metallic industrial grime',
+      'no dark background',
+      'no hard shadows',
+      'no black outlines',
+      'no busy composition',
+      'no text',
+      'no watermark',
+      'no excessive tiny details',
+    ].join(', ');
+
     const result = await generateWithGemini({
-      systemPrompt:
-        [
-          'Sen premium UI ikon tasarımcısısın ve sadece SVG döndürürsün.',
-          'İkon dili: turkuvaz + turuncu aksanlı, yarı-gerçekçi 3D, yumuşak gölge ve gradient efektli.',
-          'Kategori adının anlamına uygun nesne üret; asla rastgele kare/çerçeve/soyut ikon üretme.',
-          'Kalın çizgi ikon üretme; dolgu, gradient, highlight ve depth kullan.',
-          'Tasarım temiz olmalı: tek obje, beyaz/transparent arka plan, kart içinde taşma yok.',
-          'Perspektif: hafif izometrik/3-çeyrek açı (front flat görünüm verme).',
-          'Sadece tek bir <svg> döndür, açıklama/metin/markdown döndürme.',
-        ].join(' '),
+      systemPrompt: [
+        'You are an expert icon designer for inventory systems. Return only one valid SVG.',
+        'Always design the icon semantically from category meaning, never by transforming a previous icon.',
+        'Use this fixed style guide for consistency across the icon set:',
+        masterStylePrompt,
+      ].join(' '),
       messages: [
         {
           role: 'user',
           content: [
-            `"${categoryName}" kategorisi için 128x128 viewBox'ta premium bir SVG ikon üret.`,
-            'Kurallar:',
-            '- Renk paleti: turkuvaz/cyan tonları + turuncu vurgu (ör: #06b6d4, #0ea5e9, #2563eb, #f59e0b).',
-            '- 3D hissi ver: linear/radial gradient, yumuşak iç-dış gölge (filter), hafif parlama.',
-            '- İkon kategoriyle semantik olarak eşleşsin (örn. buzdolabı→dolap/soğutucu, kamera→kamera gövdesi, terazi→terazi objesi).',
-            '- Mevcut ikonu dönüştürmeye çalışma; kategori için sıfırdan yeni obje tasarla.',
-            '- Düz/çizgisel frame ikonlarından kaçın; merkezi nesne belirgin olsun.',
-            '- Perspektif: hafif açılı (isometric 3/4), daha gerçekçi görünüm.',
-            '- İkon gerçekçi ama sade olsun; görseldeki modern paket/servis ikonları diline benzesin.',
-            '- Arka plan shape kullanma, sadece ikon objesi olsun.',
-            '- SVG güvenli ve render edilebilir olsun (defs/linearGradient/filter kullanılabilir).',
-            '- Sadece tek bir <svg> döndür.',
+            `Create a "${categoryName}" icon in a premium soft 3D glossy app illustration style.`,
+            'Semantic rule: main object must directly represent the category name (inventory context).',
+            'Composition rules: 1 main object + optional 0-2 small supporting elements; keep it clean.',
+            'Form rules: rounded corners, no sharp edges, low-to-medium detail, highly readable silhouette.',
+            'Perspective rules: front three-quarter view, slight top-down angle, lightly right-facing by default.',
+            'Material rules: smooth glossy plastic/acrylic feel with subtle specular highlights.',
+            'Lighting rules: soft studio key light from top-left, gentle fill, faint cool rim light.',
+            'Shadow rules: soft ambient contact shadow + short diffused drop shadow (blue-gray tint).',
+            'Palette rules: cool blue/cyan dominant with optional subtle orange accent.',
+            'Canvas rules: 1:1 icon, transparent background, object fills around 55-70% of canvas.',
+            'Do not create abstract square/frame-only shapes.',
+            `Negative prompt: ${negativePrompt}.`,
+            'Output strictly one SVG only. No explanation, no markdown, no text in icon.',
           ].join(' '),
         },
       ],
