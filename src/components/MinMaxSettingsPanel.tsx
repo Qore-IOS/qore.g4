@@ -111,19 +111,21 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     }));
   };
 
-  const handleExcelUpdateExisting = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleExcelUpsertRules = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setIsLoading(true);
     try {
       const jsonData = await readExcelData(file, toast);
       const updatedRules: RuleState = {};
-      let updatedRows = 0;
+      const validProductCodes = new Set(productCodes.map(product => product.stokKodu).filter(Boolean) as string[]);
+      let upsertedRows = 0;
+      let newlyEnabledRows = 0;
       let skippedRows = 0;
 
       jsonData.forEach((row: any) => {
         const stockCode = String(row['stock_code'] || row['Stok Kodu'] || '').trim();
-        if (!existingRuleCodes.has(stockCode)) {
+        if (!stockCode || !validProductCodes.has(stockCode)) {
           skippedRows++;
           return;
         }
@@ -140,6 +142,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           return;
         }
 
+        const willBeNewRule = !existingRuleCodes.has(stockCode);
         updatedRules[stockCode] = {
           min,
           max,
@@ -147,23 +150,26 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti,
           ortalamaTuketimSuresi: isNaN(ortalamaTuketimSuresi) ? '' : ortalamaTuketimSuresi,
           tuketimSuresiBirimi: tuketimBirimi === 'saat' ? 'saat' : (rules[stockCode]?.tuketimSuresiBirimi ?? 'gun'),
-          enabled: rules[stockCode]?.enabled ?? true
+          enabled: true
         };
-        updatedRows++;
+        upsertedRows++;
+        if (willBeNewRule) newlyEnabledRows++;
       });
 
-      if (updatedRows === 0) {
-        toast({ title: "Güncellenecek Veri Yok", description: "Excel dosyasında mevcut kurallarla eşleşen geçerli satır bulunamadı.", variant: "destructive" });
+      if (upsertedRows === 0) {
+        toast({ title: "İşlenecek Veri Yok", description: "Excel dosyasında geçerli ürün kodu ve min-max değerine sahip satır bulunamadı.", variant: "destructive" });
         return;
       }
 
-      setRules(prev => ({ ...prev, ...updatedRules }));
+      const mergedRules = { ...rules, ...updatedRules };
+      setRules(mergedRules);
+      setExistingRuleCodes(new Set(Object.keys(mergedRules).filter(code => mergedRules[code]?.enabled)));
       toast({
         title: "Başarılı",
-        description: `${updatedRows} mevcut kural Excel ile güncellendi${skippedRows > 0 ? `, ${skippedRows} satır atlandı` : ''}.`
+        description: `${upsertedRows} kural Excel ile işlendi${newlyEnabledRows > 0 ? `, ${newlyEnabledRows} yeni kural eklendi` : ''}${skippedRows > 0 ? `, ${skippedRows} satır atlandı` : ''}.`
       });
     } catch (error) {
-      toast({ title: "Excel Hatası", description: "Güncelleme Excel'i işlenirken bir sorun oluştu.", variant: "destructive" });
+      toast({ title: "Excel Hatası", description: "Excel dosyası işlenirken bir sorun oluştu.", variant: "destructive" });
     } finally {
       setIsLoading(false);
       if(event.target) event.target.value = '';
@@ -342,10 +348,10 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
               <p className="w-full text-xs text-muted-foreground">
-                Güncelle butonu sadece mevcut kuralları (Mevcut Kuralları İndir çıktısı) Excel üzerinden günceller, yeni kural eklemez.
+                Mevcut Kuralları İndir çıktısını düzenleyip aynı şablonla tekrar yükleyerek kuralları toplu güncelleyebilir ve yeni min-max kuralı ekleyebilirsiniz.
               </p>
               <Button onClick={handleExportCurrentRules} variant="outline" size="sm" disabled={isLoading}><Download className="mr-2 h-4 w-4"/>Mevcut Kuralları İndir</Button>
-              <Button asChild variant="outline" size="sm" disabled={isLoading || existingRuleCodes.size === 0}><label htmlFor="minmax-excel-update" className="cursor-pointer flex items-center"><Upload className="mr-2 h-4 w-4"/>Güncelle<input id="minmax-excel-update" type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpdateExisting} /></label></Button>
+              <Button asChild variant="outline" size="sm" disabled={isLoading}><label htmlFor="minmax-excel-update" className="cursor-pointer flex items-center"><Upload className="mr-2 h-4 w-4"/>Excel ile Ekle/Güncelle<input id="minmax-excel-update" type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpsertRules} /></label></Button>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm" disabled={isLoading}><Trash2 className="mr-2 h-4 w-4"/>Tüm Kuralları Sıfırla</Button>
