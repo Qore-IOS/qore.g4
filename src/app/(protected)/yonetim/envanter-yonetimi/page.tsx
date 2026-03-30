@@ -443,8 +443,7 @@ export default function EnvanterYonetimiPage() {
     }
   };
 
-  const generateCategoryIcon = async (category: AssetCategory) => {
-    if (category.iconSvg) return;
+  const generateCategoryIcon = async (category: AssetCategory, options?: { silent?: boolean }) => {
     setIconGeneratingId(category.id);
     try {
       const res = await fetch('/api/envanter/category-icon', {
@@ -457,27 +456,31 @@ export default function EnvanterYonetimiPage() {
       }
       const data = await res.json();
       await setDoc(doc(db, 'assetCategories', category.id), withCompanyScope({ iconSvg: data.iconSvg }, currentCompanyId), { merge: true });
-      toast({ title: 'Başarılı', description: `"${category.name}" için ikon oluşturuldu.` });
+      if (!options?.silent) {
+        toast({ title: 'Başarılı', description: `"${category.name}" için ikon oluşturuldu.` });
+      }
       fetchData();
     } catch (error) {
-      toast({ title: 'Hata', description: `"${category.name}" için ikon üretilemedi.`, variant: 'destructive' });
+      if (!options?.silent) {
+        toast({ title: 'Hata', description: `"${category.name}" için ikon üretilemedi.`, variant: 'destructive' });
+      }
     } finally {
       setIconGeneratingId(null);
     }
   };
 
   const handleGenerateAllCategoryIcons = async () => {
-    const pendingCategories = categories.filter((category) => !category.iconSvg);
-    if (pendingCategories.length === 0) {
-      toast({ title: 'Bilgi', description: 'Tüm kategorilerde kayıtlı ikon zaten mevcut.' });
+    if (categories.length === 0) {
+      toast({ title: 'Bilgi', description: 'İkon üretilecek kategori bulunamadı.' });
       return;
     }
     setBulkGeneratingIcons(true);
     try {
-      for (const category of pendingCategories) {
+      for (const category of categories) {
         // eslint-disable-next-line no-await-in-loop
-        await generateCategoryIcon(category);
+        await generateCategoryIcon(category, { silent: true });
       }
+      toast({ title: 'Tamamlandı', description: `${categories.length} kategori için ikonlar yenilendi.` });
     } finally {
       setBulkGeneratingIcons(false);
     }
