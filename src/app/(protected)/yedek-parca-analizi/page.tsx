@@ -149,18 +149,22 @@ export default function YedekParcaAnaliziPage() {
         });
         setDeviceLabMap(dlMap);
 
+        // Transfer loglarını şirketin cihazlarına göre filtrele (eski kayıtlarda companyId olmayabilir)
+        const allLogs = transferSnap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id, action: data.action, stokKodu: data.stokKodu || '', stokAdi: data.stokAdi || '',
+            serialNumber: data.serialNumber, deviceId: data.deviceId, deviceName: data.deviceName,
+            createdByUid: data.createdByUid || '', createdByName: data.createdByName || 'Bilinmiyor',
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
+            formType: data.formType,
+            companyId: data.companyId,
+          };
+        });
         setTransferLogs(
-          filterByCompanyScope(transferSnap.docs.map((d) => {
-            const data = d.data();
-            return {
-              id: d.id, action: data.action, stokKodu: data.stokKodu || '', stokAdi: data.stokAdi || '',
-              serialNumber: data.serialNumber, deviceId: data.deviceId, deviceName: data.deviceName,
-              createdByUid: data.createdByUid || '', createdByName: data.createdByName || 'Bilinmiyor',
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
-              formType: data.formType,
-              companyId: data.companyId,
-            };
-          }), currentCompanyId, isSuperAdmin)
+          isSuperAdmin
+            ? allLogs
+            : allLogs.filter((log) => log.companyId === currentCompanyId || dlMap.has(log.deviceId))
         );
       } catch (error) {
         logFirestoreIndexHint(error, 'yedek-parca-analizi/fetchData');
