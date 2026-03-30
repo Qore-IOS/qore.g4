@@ -15,7 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '@/components/ui/select';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription
 } from '@/components/ui/dialog';
 import BackButton from '@/components/BackButton';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -23,7 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -84,12 +84,23 @@ interface Props {
   hospitals: Hospital[];
 }
 
+type DeviceModelDefinition = {
+  id: string;
+  brand: string;
+  model: string;
+};
+
 export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [current, setCurrent] = useState<Partial<Device>>({});
   const [customPath, setCustomPath] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [brandFilter, setBrandFilter] = useState('all');
+  const [labFilter, setLabFilter] = useState('all');
+  const [planFilter, setPlanFilter] = useState<'all' | 'planned' | 'unplanned'>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'brand' | 'order'>('name');
   const { toast } = useToast();
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const router = useRouter();
@@ -113,6 +124,14 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [showPeriodicPartSection, setShowPeriodicPartSection] = useState(false);
   const [exportPdfLoading, setExportPdfLoading] = useState(false);
+  const [plannedDeviceIds, setPlannedDeviceIds] = useState<Set<string>>(new Set());
+
+  // Marka/Model tanım state'leri
+  const [modelDefinitions, setModelDefinitions] = useState<DeviceModelDefinition[]>([]);
+  const [definitionModalOpen, setDefinitionModalOpen] = useState(false);
+  const [newDefinitionBrand, setNewDefinitionBrand] = useState('');
+  const [newDefinitionModel, setNewDefinitionModel] = useState('');
+  const [isSavingDefinition, setIsSavingDefinition] = useState(false);
 
   // Toplu Bakım Planı State'leri
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
@@ -133,15 +152,40 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
   const fetchDevices = async () => {
     setLoading(true);
-    const snap = await getDocs(collection(db, 'devices'));
-    setDevices(filterByCompanyScope(
-      snap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
+    const [deviceSnap, planSnap] = await Promise.all([
+      getDocs(collection(db, 'devices')),
+      getDocs(collection(db, 'maintenancePlans')),
+    ]);
+    const scopedDevices = filterByCompanyScope(
+      deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
       currentCompanyId,
       isSuperAdmin
-    ));
+    );
+    const scopedPlans = filterByCompanyScope(
+      planSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
+      currentCompanyId,
+      isSuperAdmin
+    );
+    setDevices(scopedDevices);
+    setPlannedDeviceIds(new Set(scopedPlans.map(plan => plan.deviceId)));
     setLoading(false);
   };
   useEffect(() => { fetchDevices(); }, [currentCompanyId, isSuperAdmin]);
+
+  const fetchModelDefinitions = async () => {
+    const snap = await getDocs(collection(db, 'deviceModelDefinitions'));
+    const rows = filterByCompanyScope(
+      snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceModelDefinition)),
+      currentCompanyId,
+      isSuperAdmin
+    );
+    rows.sort((a, b) => `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`, 'tr'));
+    setModelDefinitions(rows);
+  };
+
+  useEffect(() => {
+    fetchModelDefinitions().catch(err => console.error('Model tanımları alınamadı:', err));
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Yedek parça ürünlerini getir
   useEffect(() => {
@@ -699,17 +743,182 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const saveModelDefinition = async () => {
+    if (!newDefinitionBrand.trim() || !newDefinitionModel.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Marka ve model zorunludur.', variant: 'destructive' });
+      return;
+    }
+    const duplicate = modelDefinitions.some(
+      row =>
+        row.brand.trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
+        row.model.trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
+    );
+    if (duplicate) {
+      toast({ title: 'Mevcut Tanım', description: 'Bu marka/model zaten tanımlı.', variant: 'destructive' });
+      return;
+    }
+    setIsSavingDefinition(true);
+    try {
+      await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
+        brand: newDefinitionBrand.trim(),
+        model: newDefinitionModel.trim(),
+        createdAt: serverTimestamp(),
+      }, currentUserProfile?.companyId));
+      setNewDefinitionBrand('');
+      setNewDefinitionModel('');
+      await fetchModelDefinitions();
+      toast({ title: 'Başarılı', description: 'Marka/model tanımı eklendi.' });
+    } catch (error) {
+      console.error('Model tanımı kaydedilemedi:', error);
+      toast({ title: 'Hata', description: 'Model tanımı kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingDefinition(false);
+    }
+  };
+
+  const handleDefinitionExcelImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { raw: false });
+      const normalized = rows
+        .map(row => ({
+          brand: (row.Marka || row.marka || '').trim(),
+          model: (row.Model || row.model || '').trim(),
+        }))
+        .filter(row => row.brand && row.model);
+
+      if (normalized.length === 0) {
+        toast({ title: 'Veri Bulunamadı', description: 'Excel içinde Marka ve Model kolonları olmalı.', variant: 'destructive' });
+        return;
+      }
+
+      let added = 0;
+      for (const row of normalized) {
+        const exists = modelDefinitions.some(
+          item =>
+            item.brand.toLowerCase() === row.brand.toLowerCase() &&
+            item.model.toLowerCase() === row.model.toLowerCase()
+        );
+        if (exists) continue;
+        await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
+          brand: row.brand,
+          model: row.model,
+          createdAt: serverTimestamp(),
+        }, currentUserProfile?.companyId));
+        added++;
+      }
+      await fetchModelDefinitions();
+      toast({ title: 'Tamamlandı', description: `${added} yeni marka/model tanımı eklendi.` });
+    } catch (error) {
+      console.error('Excel import hatası:', error);
+      toast({ title: 'Hata', description: 'Excel dosyası işlenemedi.', variant: 'destructive' });
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const brands = Array.from(new Set(modelDefinitions.map(row => row.brand))).sort((a, b) => a.localeCompare(b, 'tr'));
+  const availableModels = modelDefinitions
+    .filter(row => row.brand === (current.brand || ''))
+    .map(row => row.model);
+
+  const filteredDevices = devices
+    .filter(device => {
+      const name = `${device.brand} ${device.model} ${device.cihazAdi || ''} ${device.seriNumarasi || ''}`.toLowerCase();
+      const hospitalName = (hospitals.find(h => h.id === device.hospitalId)?.name || '').toLowerCase();
+      const matchesSearch = !searchQuery.trim() || name.includes(searchQuery.toLowerCase()) || hospitalName.includes(searchQuery.toLowerCase());
+      const matchesBrand = brandFilter === 'all' || device.brand === brandFilter;
+      const matchesLab = labFilter === 'all' || device.hospitalId === labFilter;
+      const hasPlan = plannedDeviceIds.has(device.id);
+      const matchesPlan = planFilter === 'all' || (planFilter === 'planned' ? hasPlan : !hasPlan);
+      return matchesSearch && matchesBrand && matchesLab && matchesPlan;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'brand') return `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`, 'tr');
+      if (sortBy === 'order') return (a.order || 0) - (b.order || 0);
+      return `${a.cihazAdi || ''} ${a.model || ''}`.localeCompare(`${b.cihazAdi || ''} ${b.model || ''}`, 'tr');
+    });
+
+  const stats = {
+    total: devices.length,
+    planned: devices.filter(d => plannedDeviceIds.has(d.id)).length,
+    unplanned: devices.filter(d => !plannedDeviceIds.has(d.id)).length,
+    brands: new Set(devices.map(d => d.brand).filter(Boolean)).size,
+  };
+
   const effectiveImageUrl = current.imageUrl || customPath;
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-6 lg:p-8 space-y-6 cihaz-shell">
       <BackButton fallback="/cihaz-yonetimi-ana"/>
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-headline">Cihaz Tanımlamaları</h1>
-        <div className="flex items-center gap-2">
+      <div className="cihaz-card-strong p-5 lg:p-6 space-y-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--dashboard-text)]">Cihaz Yönetimi</h1>
+            <p className="text-sm mt-1 text-[var(--dashboard-muted)]">
+              Cihazları tanımlayın, gruplayın, bakım planlarını yönetin ve laboratuvar yerleşimini takip edin.
+            </p>
+          </div>
+          <Button className="bg-[var(--dashboard-accent)] text-white hover:opacity-95" onClick={() => { setCurrent({}); setCustomPath(''); setModalOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Yeni Cihaz
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Toplam Cihaz</p><p className="text-2xl font-semibold">{stats.total}</p></div>
+          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Bakım Planı Atanmış</p><p className="text-2xl font-semibold text-emerald-600">{stats.planned}</p></div>
+          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Plansız Cihaz</p><p className="text-2xl font-semibold text-amber-600">{stats.unplanned}</p></div>
+          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Marka Sayısı</p><p className="text-2xl font-semibold">{stats.brands}</p></div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+          <div className="xl:col-span-2 relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--dashboard-muted)]" />
+            <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Cihaz adı, seri no veya laboratuvar ara..." className="pl-9 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]" />
+          </div>
+          <Select value={brandFilter} onValueChange={setBrandFilter}>
+            <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue placeholder="Marka" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm Markalar</SelectItem>
+              {Array.from(new Set(devices.map(d => d.brand).filter(Boolean))).map(brand => <SelectItem key={brand} value={brand}>{brand}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={labFilter} onValueChange={setLabFilter}>
+            <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue placeholder="Laboratuvar" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
+              {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={planFilter} onValueChange={(v) => setPlanFilter(v as 'all' | 'planned' | 'unplanned')}>
+            <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm Durumlar</SelectItem>
+              <SelectItem value="planned">Bakım Planlı</SelectItem>
+              <SelectItem value="unplanned">Bakım Planı Yok</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as 'name' | 'brand' | 'order')}>
+            <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Ada Göre</SelectItem>
+              <SelectItem value="brand">Markaya Göre</SelectItem>
+              <SelectItem value="order">Sıraya Göre</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
             onClick={() => setDeviceLabPoolModalOpen(true)}
+            className="bg-[var(--dashboard-surface-2)]"
           >
             <Server className="h-4 w-4 mr-2" />
             Gruplandırma
@@ -717,6 +926,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           <Button
             variant="secondary"
             onClick={() => router.push('/cihaz-tanimlamalari/periyodik-bakim-yonetimi')}
+            className="bg-[var(--dashboard-surface-2)]"
           >
             <Settings className="h-4 w-4 mr-2" />
             Periyodik Bakım Yönetimi
@@ -724,6 +934,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           <Button
             variant="secondary"
             onClick={openBulkModal}
+            className="bg-[var(--dashboard-surface-2)]"
           >
             <ClipboardList className="h-4 w-4 mr-2" />
             Toplu Bakım Planı Ata
@@ -732,6 +943,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             variant="secondary"
             onClick={handleExportDevicesPdf}
             disabled={exportPdfLoading || devices.length === 0}
+            className="bg-[var(--dashboard-surface-2)]"
           >
             {exportPdfLoading ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -740,16 +952,17 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             )}
             PDF Döküm
           </Button>
-          <Button onClick={() => { setCurrent({}); setCustomPath(''); setModalOpen(true); }}>
-            + Yeni Cihaz
+          <Button variant="outline" onClick={() => setDefinitionModalOpen(true)} className="bg-[var(--dashboard-surface-2)]">
+            <Boxes className="h-4 w-4 mr-2" />
+            Marka / Model Tanımları
           </Button>
         </div>
       </div>
 
-      <ScrollArea className="h-[70vh]">
-        <Table>
+      <ScrollArea className="h-[65vh] cihaz-card-strong p-2">
+        <Table className="rounded-xl overflow-hidden">
           <TableHeader>
-          <TableRow>
+          <TableRow className="bg-[var(--dashboard-surface-2)]">
             <TableHead>Marka</TableHead>
             <TableHead>Model</TableHead>
             <TableHead>Cihaz Adı</TableHead>
@@ -761,14 +974,14 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {!loading && devices.map(dev => (
+            {!loading && filteredDevices.map(dev => (
               <TableRow key={dev.id}>
-                <TableCell>{dev.brand}</TableCell>
+                <TableCell className="font-medium">{dev.brand}</TableCell>
                 <TableCell>{dev.model}</TableCell>
                 <TableCell>{dev.cihazAdi}</TableCell>
                 <TableCell>{dev.seriNumarasi}</TableCell>
                 <TableCell>{hospitals.find(h => h.id === dev.hospitalId)?.name}</TableCell>
-                <TableCell>{dev.order}</TableCell>
+                <TableCell><span className="px-2 py-1 rounded-md bg-[var(--dashboard-surface-2)]">{dev.order}</span></TableCell>
                 <TableCell>
                   {dev.imageUrl ? (
                   <Image
@@ -778,119 +991,190 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                     height={100}
                     className="w-24 h-24 object-cover rounded-md"
                   />
-                  ) : "Resim Yok"}
+                  ) : <span className="text-xs text-amber-600">Resim yok</span>}
                 </TableCell>
                 <TableCell className="space-x-2">
                   <Button size="sm" variant="outline" onClick={() => openMaintenanceModal(dev)}>
                     <Calendar className="h-4 w-4 mr-1" /> Bakım Planı
                   </Button>
-                  <Button size="sm" onClick={() => {
+                  <Button size="icon" variant="ghost" onClick={() => {
                     setCurrent(dev);
                     setCustomPath('');
                     setModalOpen(true);
-                  }}>Düzenle</Button>
-                  <Button variant="destructive" size="sm" onClick={() => remove(dev.id)}>
-                    Sil
+                  }}>
+                    <Pencil className="h-4 w-4" />
                   </Button>
+                  <Button variant="ghost" size="icon" onClick={() => remove(dev.id)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                  <span className={cn("ml-1 inline-flex text-xs px-2 py-1 rounded-full", plannedDeviceIds.has(dev.id) ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
+                    {plannedDeviceIds.has(dev.id) ? 'Bakım Planlı' : 'Bakım Planı Yok'}
+                  </span>
                 </TableCell>
               </TableRow>
             ))}
+            {!loading && filteredDevices.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center py-12 text-[var(--dashboard-muted)]">
+                  Filtrelere uygun cihaz bulunamadı.
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </ScrollArea>
 
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{current.id ? 'Cihaz Düzenle' : 'Yeni Cihaz'}</DialogTitle>
+            <DialogTitle>{current.id ? 'Cihazı Düzenle' : 'Yeni Cihaz Oluştur'}</DialogTitle>
+            <DialogDescription>
+              Cihazın kimlik, görsel ve laboratuvar yerleşim bilgilerini tanımlayın.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <Input
-              placeholder="Marka"
-              value={current.brand || ''}
-              onChange={e => setCurrent({ ...current, brand: e.target.value })}
-            />
-            <Input
-              placeholder="Model"
-              value={current.model || ''}
-              onChange={e => setCurrent({ ...current, model: e.target.value })}
-            />
-            <Input
-              placeholder="Cihaz Adı"
-              value={current.cihazAdi || ''}
-              onChange={e => setCurrent({ ...current, cihazAdi: e.target.value })}
-            />
-             <Input
-              placeholder="Seri Numarası"
-              value={current.seriNumarasi || ''}
-              onChange={e => setCurrent({ ...current, seriNumarasi: e.target.value })}
-            />
-            <Select
-              value={current.imageUrl || ''}
-              onValueChange={val => {
-                setCurrent({ ...current, imageUrl: val });
-                setCustomPath('');
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Mevcut Resimlerden Seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {images.map(img => (
-                  <SelectItem key={img} value={img}>{img}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              placeholder="Veya özel resim yolu girin (örn: devices/xyz.png)"
-              value={customPath}
-              onChange={e => {
-                setCustomPath(e.target.value);
-                setCurrent({ ...current, imageUrl: undefined });
-              }}
-            />
-            {effectiveImageUrl && (
-              <div className="flex justify-center">
-                 <Image
-                    src={resolveImageSrc(effectiveImageUrl)}
-                    alt="Preview"
-                    width={200}
-                    height={200}
-                    className="w-48 h-48 object-cover rounded-lg"
-                  />
+          <div className="space-y-6 py-2">
+            <div className="cihaz-card p-4 space-y-3">
+              <p className="cihaz-section-label">Temel Kimlik</p>
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Marka</Label>
+                  <Select
+                    value={current.brand || ''}
+                    onValueChange={val => setCurrent({ ...current, brand: val, model: '' })}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Marka seçin" /></SelectTrigger>
+                    <SelectContent>{brands.map(brand => <SelectItem key={brand} value={brand}>{brand}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Model</Label>
+                  <Select
+                    value={current.model || ''}
+                    onValueChange={val => setCurrent({ ...current, model: val })}
+                    disabled={!current.brand}
+                  >
+                    <SelectTrigger><SelectValue placeholder={current.brand ? 'Model seçin' : 'Önce marka seçin'} /></SelectTrigger>
+                    <SelectContent>{availableModels.map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Cihaz Adı</Label>
+                  <Input placeholder="Örn: GATA-B3" value={current.cihazAdi || ''} onChange={e => setCurrent({ ...current, cihazAdi: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Seri Numarası</Label>
+                  <Input placeholder="Örn: 13A1-20" value={current.seriNumarasi || ''} onChange={e => setCurrent({ ...current, seriNumarasi: e.target.value })} />
+                </div>
               </div>
-            )}
-             <Select
-              value={current.hospitalId || ''}
-              onValueChange={val => setCurrent({ ...current, hospitalId: val })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Laboratuvar Seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {hospitals.map(h => (
-                  <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={String(current.order || '')}
-              onValueChange={val => setCurrent({ ...current, order: Number(val) })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Dizilim Sırası Seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {Array.from({ length: 10 }, (_, i) => i + 1).map(i => (
-                  <SelectItem key={i} value={String(i)}>{i}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            </div>
+            <div className="cihaz-card p-4 space-y-3">
+              <p className="cihaz-section-label">Görsel</p>
+              <div className="grid md:grid-cols-[1fr_180px] gap-4">
+                <div className="space-y-3">
+                  <Select
+                    value={current.imageUrl || ''}
+                    onValueChange={val => {
+                      setCurrent({ ...current, imageUrl: val });
+                      setCustomPath('');
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Mevcut cihaz görseli seçin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {images.map(img => (
+                        <SelectItem key={img} value={img}>{img}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    placeholder="Özel görsel yolu (opsiyonel)"
+                    value={customPath}
+                    onChange={e => {
+                      setCustomPath(e.target.value);
+                      setCurrent({ ...current, imageUrl: undefined });
+                    }}
+                  />
+                </div>
+                <div className="rounded-xl border bg-[var(--dashboard-surface-2)] p-2 min-h-[140px] flex items-center justify-center">
+                  {effectiveImageUrl ? (
+                    <Image src={resolveImageSrc(effectiveImageUrl)} alt="Preview" width={140} height={140} className="w-32 h-32 object-cover rounded-lg" />
+                  ) : (
+                    <span className="text-xs text-[var(--dashboard-muted)]">Önizleme yok</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="cihaz-card p-4 space-y-3">
+              <p className="cihaz-section-label">Konumlandırma</p>
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Laboratuvar</Label>
+                  <Select value={current.hospitalId || ''} onValueChange={val => setCurrent({ ...current, hospitalId: val })}>
+                    <SelectTrigger><SelectValue placeholder="Laboratuvar seçin" /></SelectTrigger>
+                    <SelectContent>{hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Dizilim Sırası</Label>
+                  <Select value={String(current.order || '')} onValueChange={val => setCurrent({ ...current, order: Number(val) })}>
+                    <SelectTrigger><SelectValue placeholder="Sıra seçin" /></SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 25 }, (_, i) => i + 1).map(i => (
+                        <SelectItem key={i} value={String(i)}>{i}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
           </div>
           <DialogFooter className="space-x-2">
             <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
             <Button onClick={save}>{current.id ? 'Güncelle' : 'Oluştur'}</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={definitionModalOpen} onOpenChange={setDefinitionModalOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Cihaz Marka / Model Tanımları</DialogTitle>
+            <DialogDescription>Yeni cihaz girişlerinde kullanılacak marka ve markaya bağlı model listesini yönetin.</DialogDescription>
+          </DialogHeader>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="cihaz-card p-4 space-y-3">
+              <p className="cihaz-section-label">Yeni Tanım</p>
+              <Input value={newDefinitionBrand} onChange={e => setNewDefinitionBrand(e.target.value)} placeholder="Marka" />
+              <Input value={newDefinitionModel} onChange={e => setNewDefinitionModel(e.target.value)} placeholder="Model" />
+              <div className="flex gap-2">
+                <Button onClick={saveModelDefinition} disabled={isSavingDefinition}>
+                  {isSavingDefinition ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
+                  Tanım Ekle
+                </Button>
+                <Button asChild variant="outline">
+                  <label className="cursor-pointer">
+                    <Upload className="h-4 w-4 mr-2 inline" />
+                    Excel ile Yükle
+                    <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleDefinitionExcelImport} />
+                  </label>
+                </Button>
+              </div>
+            </div>
+            <div className="cihaz-card p-4 space-y-3">
+              <p className="cihaz-section-label">Mevcut Tanımlar ({modelDefinitions.length})</p>
+              <ScrollArea className="h-72 pr-3">
+                <div className="space-y-2">
+                  {modelDefinitions.map(def => (
+                    <div key={def.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                      <span className="font-medium">{def.brand}</span>
+                      <span className="text-sm text-[var(--dashboard-muted)]">{def.model}</span>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
