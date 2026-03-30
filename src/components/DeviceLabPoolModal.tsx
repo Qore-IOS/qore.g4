@@ -164,13 +164,16 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
           <Server className="h-5 w-5 text-primary" />
           Cihaz Laboratuvar Grupları
         </DialogTitle>
+        <p className="text-sm text-muted-foreground">
+          Cihazları laboratuvar kümelerine ayırarak toplu planlama ve filtreleme işlemlerini kolaylaştırın.
+        </p>
       </DialogHeader>
 
       <div className="py-4">
         <div className="flex justify-end mb-4">
           <Button onClick={handleStartCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />
-            Yeni Grup Oluştur
+            Yeni Grup
           </Button>
         </div>
 
@@ -186,16 +189,22 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
           </div>
         ) : (
           <ScrollArea className="h-72">
-            <div className="space-y-2">
+            <div className="space-y-3">
               {pools.map(pool => (
                 <div
                   key={pool.id}
-                  className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50 cursor-pointer"
+                  className="flex items-center justify-between p-4 border rounded-xl hover:bg-muted/50 cursor-pointer"
                   onClick={() => handleShowDetails(pool)}
                 >
-                  <div>
+                  <div className="space-y-1">
                     <p className="font-semibold">{pool.name}</p>
-                    <p className="text-xs text-muted-foreground">{pool.memberIds.length} laboratuvar</p>
+                    <p className="text-xs text-muted-foreground">
+                      {pool.memberIds.length} laboratuvar · {pool.memberIds.reduce((sum, labId) => sum + getDeviceCountForLab(labId), 0)} cihaz
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate max-w-[360px]">
+                      {pool.memberIds.slice(0, 4).map(labId => hospitals.find(h => h.id === labId)?.name).filter(Boolean).join(', ')}
+                      {pool.memberIds.length > 4 ? '…' : ''}
+                    </p>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button
