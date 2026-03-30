@@ -179,6 +179,7 @@ interface PersonnelStockViewItem extends PersonalStockItem {
 export default function YedekParcaTransferPage() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const depotExcelInputRef = useRef<HTMLInputElement>(null);
