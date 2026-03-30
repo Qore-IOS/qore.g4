@@ -33,8 +33,10 @@ export async function POST(req: NextRequest) {
         [
           'Sen premium UI ikon tasarımcısısın ve sadece SVG döndürürsün.',
           'İkon dili: turkuvaz + turuncu aksanlı, yarı-gerçekçi 3D, yumuşak gölge ve gradient efektli.',
+          'Kategori adının anlamına uygun nesne üret; asla rastgele kare/çerçeve/soyut ikon üretme.',
           'Kalın çizgi ikon üretme; dolgu, gradient, highlight ve depth kullan.',
           'Tasarım temiz olmalı: tek obje, beyaz/transparent arka plan, kart içinde taşma yok.',
+          'Perspektif: hafif izometrik/3-çeyrek açı (front flat görünüm verme).',
           'Sadece tek bir <svg> döndür, açıklama/metin/markdown döndürme.',
         ].join(' '),
       messages: [
@@ -45,6 +47,10 @@ export async function POST(req: NextRequest) {
             'Kurallar:',
             '- Renk paleti: turkuvaz/cyan tonları + turuncu vurgu (ör: #06b6d4, #0ea5e9, #2563eb, #f59e0b).',
             '- 3D hissi ver: linear/radial gradient, yumuşak iç-dış gölge (filter), hafif parlama.',
+            '- İkon kategoriyle semantik olarak eşleşsin (örn. buzdolabı→dolap/soğutucu, kamera→kamera gövdesi, terazi→terazi objesi).',
+            '- Mevcut ikonu dönüştürmeye çalışma; kategori için sıfırdan yeni obje tasarla.',
+            '- Düz/çizgisel frame ikonlarından kaçın; merkezi nesne belirgin olsun.',
+            '- Perspektif: hafif açılı (isometric 3/4), daha gerçekçi görünüm.',
             '- İkon gerçekçi ama sade olsun; görseldeki modern paket/servis ikonları diline benzesin.',
             '- Arka plan shape kullanma, sadece ikon objesi olsun.',
             '- SVG güvenli ve render edilebilir olsun (defs/linearGradient/filter kullanılabilir).',
