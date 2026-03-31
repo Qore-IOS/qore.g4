@@ -45,7 +45,8 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { openAI } = useAI();
-  const { mappings: iconMappings } = useIconMappings();
+  const iconData = useIconMappings();
+  const mobileIcons = iconData?.mappings?.mobile || {};
 
   // Long press handling
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -338,9 +339,9 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
                     : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff] hover:shadow-[2px_2px_4px_#bebebe,-2px_-2px_4px_#ffffff] active:shadow-[inset_4px_4px_8px_#bebebe,inset_-4px_-4px_8px_#ffffff] text-[#333]"
                 )}
               >
-                {iconMappings?.mobile?.[item.key] ? (
+                {mobileIcons[item.key] ? (
                   <Image
-                    src={getIconSrc(iconMappings.mobile[item.key])}
+                    src={getIconSrc(mobileIcons[item.key])}
                     alt={item.label}
                     width={20}
                     height={20}

@@ -802,7 +802,8 @@ const DockLogo = () => {
 export function Dock({ items, currentView, className, setTheme, isVisible }: DockProps) {
   const { dockStyle } = useAuth();
   const isLiquidMode = dockStyle === 'liquid';
-  const { mappings: iconMappings } = useIconMappings();
+  const iconData = useIconMappings();
+  const dockIcons = iconData?.mappings?.dock || {};
 
   // Refs for each item to track positions
   const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -926,7 +927,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 isLiquidMode={isLiquidMode}
                 isLiquidHovered={isLiquidMode && activeItemKey === item.key}
                 onRefSet={(el) => setItemRef(item.key, el)}
-                customIcon={iconMappings?.dock?.[item.key]}
+                customIcon={dockIcons[item.key]}
               />
             ))}
           </div>
