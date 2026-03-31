@@ -17,24 +17,32 @@ export function useIconMappings() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      doc(db, 'settings', 'iconMappings'),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as Partial<IconMappings>;
-          setMappings({
-            dock: data.dock || {},
-            mobile: data.mobile || {},
-            envanter: data.envanter || {},
-          });
-        } else {
+    try {
+      const unsub = onSnapshot(
+        doc(db, 'settings', 'iconMappings'),
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data() as Partial<IconMappings>;
+            setMappings({
+              dock: data.dock || {},
+              mobile: data.mobile || {},
+              envanter: data.envanter || {},
+            });
+          } else {
+            setMappings(EMPTY);
+          }
+          setLoading(false);
+        },
+        () => {
           setMappings(EMPTY);
+          setLoading(false);
         }
-        setLoading(false);
-      },
-      () => setLoading(false)
-    );
-    return unsub;
+      );
+      return unsub;
+    } catch {
+      setMappings(EMPTY);
+      setLoading(false);
+    }
   }, []);
 
   const updateMapping = useCallback(
