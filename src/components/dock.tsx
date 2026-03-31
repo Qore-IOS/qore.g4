@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock"
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
+import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 
 // Apple-like colorful icon colors - applied directly to the icon SVG via CSS gradient text
 // Each icon gets a unique vibrant color pair for a 3D gradient feel
@@ -406,6 +407,7 @@ const DockItem = ({
   isLiquidMode,
   isLiquidHovered,
   onRefSet,
+  customIcon,
 }: {
   item: DockItemData;
   isActive: boolean;
@@ -413,6 +415,7 @@ const DockItem = ({
   isLiquidMode?: boolean;
   isLiquidHovered?: boolean;
   onRefSet?: (el: HTMLDivElement | null) => void;
+  customIcon?: string;
 }) => {
 
   const { isOrbAnimationEnabled, toggleOrbAnimation, toggleNavMode, navMode } = useAuth();
@@ -691,7 +694,11 @@ const DockItem = ({
               transition={fastSpring}
               onClick={(e) => handleNavigate(e, item.href)}
             >
-              <item.icon className="dock-item-icon" style={iconGradientStyle} />
+              {customIcon ? (
+                <Image src={getIconSrc(customIcon)} alt={item.label} width={28} height={28} className="dock-item-icon object-contain" />
+              ) : (
+                <item.icon className="dock-item-icon" style={iconGradientStyle} />
+              )}
             </motion.div>
           </TooltipTrigger>
           {!isLiquidMode && !isHovered && (
@@ -730,7 +737,11 @@ const DockItem = ({
         transition={fastSpring}
         onClick={(e) => handleNavigate(e, item.href)}
       >
-        <item.icon className="dock-item-icon" style={iconGradientStyle} />
+        {customIcon ? (
+          <Image src={getIconSrc(customIcon)} alt={item.label} width={28} height={28} className="dock-item-icon object-contain" />
+        ) : (
+          <item.icon className="dock-item-icon" style={iconGradientStyle} />
+        )}
       </motion.div>
     </div>
   );
@@ -791,6 +802,7 @@ const DockLogo = () => {
 export function Dock({ items, currentView, className, setTheme, isVisible }: DockProps) {
   const { dockStyle } = useAuth();
   const isLiquidMode = dockStyle === 'liquid';
+  const { mappings: iconMappings } = useIconMappings();
 
   // Refs for each item to track positions
   const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -914,6 +926,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 isLiquidMode={isLiquidMode}
                 isLiquidHovered={isLiquidMode && activeItemKey === item.key}
                 onRefSet={(el) => setItemRef(item.key, el)}
+                customIcon={iconMappings.dock[item.key]}
               />
             ))}
           </div>

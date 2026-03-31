@@ -13,6 +13,7 @@ import NotificationsBell from "@/components/notifications/NotificationsBell";
 import { useAI } from "@/contexts/ai-context";
 import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
 import Image from "next/image";
+import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
 
 // --- HELPERS ---
 
@@ -44,6 +45,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { openAI } = useAI();
+  const { mappings: iconMappings } = useIconMappings();
 
   // Long press handling
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -336,14 +338,22 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
                     : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff] hover:shadow-[2px_2px_4px_#bebebe,-2px_-2px_4px_#ffffff] active:shadow-[inset_4px_4px_8px_#bebebe,inset_-4px_-4px_8px_#ffffff] text-[#333]"
                 )}
               >
-                {item.icon && (
+                {iconMappings.mobile[item.key] ? (
+                  <Image
+                    src={getIconSrc(iconMappings.mobile[item.key])}
+                    alt={item.label}
+                    width={20}
+                    height={20}
+                    className="w-5 h-5 shrink-0 object-contain"
+                  />
+                ) : item.icon ? (
                   <item.icon
                     className={cn(
                       "w-5 h-5 shrink-0",
                       isDark ? "text-amber-400" : "text-amber-600"
                     )}
                   />
-                )}
+                ) : null}
                 <span className="text-lg font-medium">{item.label}</span>
               </button>
             </motion.li>
