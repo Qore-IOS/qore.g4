@@ -19,6 +19,8 @@ import * as XLSX from 'xlsx';
 import type { Asset, Depot, Hospital } from '@/lib/types';
 import LabelPrinter from '@/components/yonetim/LabelPrinter';
 import { cn } from '@/lib/utils';
+import NextImage from 'next/image';
+import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 
 const iconMap: Record<string, React.ElementType> = {
   bilgisayar: Computer,
@@ -77,6 +79,7 @@ export default function EnvanterYonetimiPage() {
   const [isLabelModalOpen, setIsLabelModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'category' | 'location'>('category');
   const [searchQuery, setSearchQuery] = useState('');
+  const { mappings: iconMappings } = useIconMappings();
 
   const assetFileInputRef = useRef<HTMLInputElement>(null);
   const categoryFileInputRef = useRef<HTMLInputElement>(null);
@@ -552,8 +555,12 @@ export default function EnvanterYonetimiPage() {
                     <div key={category.id} className="group relative">
                       <Link href={`/yonetim/envanter-yonetimi/${encodeURIComponent(category.name)}`} className="block">
                         <div className="cihaz-action-tile relative p-5 flex flex-col items-center text-center min-h-[130px] justify-center">
-                          <div className="w-11 h-11 rounded-2xl bg-[var(--dashboard-surface-2)] flex items-center justify-center mb-3">
-                            <Icon className="w-5 h-5 text-[var(--dashboard-muted)]" />
+                          <div className="w-11 h-11 rounded-2xl bg-[var(--dashboard-surface-2)] flex items-center justify-center mb-3 overflow-hidden">
+                            {iconMappings.envanter[category.name] ? (
+                              <NextImage src={getIconSrc(iconMappings.envanter[category.name])} alt="" width={28} height={28} className="object-contain" />
+                            ) : (
+                              <Icon className="w-5 h-5 text-[var(--dashboard-muted)]" />
+                            )}
                           </div>
                           <p className="text-sm font-semibold text-[var(--dashboard-text)] leading-tight line-clamp-2">{category.name}</p>
                           <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">{count} urun</p>
