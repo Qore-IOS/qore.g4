@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, doc, setDoc, deleteDoc, orderBy, query, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { readExcelDataSmart, exportDataToExcel } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -50,6 +52,7 @@ const getIconForCategory = (name: string): React.ElementType => {
 interface AssetCategory {
   id: string;
   name: string;
+  iconSvg?: string;
 }
 
 interface Location {
@@ -59,10 +62,15 @@ interface Location {
 
 export default function EnvanterYonetimiPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [vehicleCount, setVehicleCount] = useState(0);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [locationSearch, setLocationSearch] = useState('');
+  const [iconGeneratingId, setIconGeneratingId] = useState<string | null>(null);
+  const [bulkGeneratingIcons, setBulkGeneratingIcons] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Partial<AssetCategory>>({});
@@ -95,7 +103,7 @@ export default function EnvanterYonetimiPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();
@@ -133,12 +141,22 @@ export default function EnvanterYonetimiPage() {
       toast({ title: 'Hata', description: 'Kategori adı boş olamaz.', variant: 'destructive' });
       return;
     }
-    const data = { name: editingCategory.name };
+    const categoryName = editingCategory.name.trim();
+    const data: Record<string, unknown> = withCompanyScope({ name: categoryName }, currentCompanyId);
     try {
       if (editingCategory.id) {
         await setDoc(doc(db, 'assetCategories', editingCategory.id), data, { merge: true });
       } else {
-        await addDoc(collection(db, 'assetCategories'), data);
+        const iconRes = await fetch('/api/envanter/category-icon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categoryName }),
+        });
+        if (iconRes.ok) {
+          const iconData = await iconRes.json();
+          data.iconSvg = iconData.iconSvg;
+        }
+        await addDoc(collection(db, 'assetCategories'), withCompanyScope(data, currentCompanyId));
       }
       toast({ title: 'Basarili', description: 'Kategori kaydedildi.' });
       setIsModalOpen(false);
@@ -164,7 +182,37 @@ export default function EnvanterYonetimiPage() {
   const handleDownloadAssetTemplate = () => {
     const workbook = XLSX.utils.book_new();
     const templateSheet = XLSX.utils.json_to_sheet([
-      { Kategori: '', 'Demirbaş No': '', 'Ürün Adı': '', 'Seri Numarası': '', Durum: 'iyi', Marka: '', Model: '', Konum: '', 'Teslim Edilen Personel': '', Açıklama: '' },
+      {
+        Kategori: '',
+        'Demirbaş No': '',
+        'Ürün Adı': '',
+        'Seri Numarası': '',
+        Durum: 'iyi',
+        Marka: '',
+        Model: '',
+        Konum: '',
+        'Teslim Edilen Personel': '',
+        'Alım Fiyatı (TL)': '',
+        'Satın Alma Tarihi': '',
+        'Garanti Bitiş Tarihi': '',
+        'Planlı Kullanım Ömrü (Yıl)': '',
+        'Amortisman Yöntemi': 'dogrusal',
+        'Amortisman Başlangıç Tarihi': '',
+        'Hurda Tarihi': '',
+        'İmha Tarihi': '',
+        'Satış Tarihi': '',
+        'Son Bakım Tarihi': '',
+        'Sonraki Bakım Tarihi': '',
+        'Son Kalibrasyon Tarihi': '',
+        'Sonraki Kalibrasyon Tarihi': '',
+        'Bakım Maliyeti (TL)': '',
+        'Zimmetli Kişi': '',
+        'Check-Out Tarihi': '',
+        'Check-In Tarihi': '',
+        'Dijital İmza': '',
+        'Zimmet Fiş No': '',
+        Açıklama: '',
+      },
     ]);
     XLSX.utils.book_append_sheet(workbook, templateSheet, 'Envanter Şablonu');
 
@@ -184,6 +232,41 @@ export default function EnvanterYonetimiPage() {
     XLSX.utils.book_append_sheet(workbook, refSheet, 'Referans Tanımlar');
 
     XLSX.writeFile(workbook, 'Envanter_Giris_Sablonu.xlsx');
+  };
+
+  const handleDownloadCurrentInventory = () => {
+    const data = assets.map((asset) => ({
+      Kategori: asset.category || '',
+      'Demirbaş No': asset.demirbasNo || '',
+      'Ürün Adı': asset.urunAdi || '',
+      'Seri Numarası': asset.seriNumarasi || '',
+      Durum: asset.durum || '',
+      Marka: asset.marka || '',
+      Model: asset.model || '',
+      Konum: asset.konum || '',
+      'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
+      'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
+      'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
+      'Garanti Bitiş Tarihi': asset.garantiBitisTarihi || '',
+      'Planlı Kullanım Ömrü (Yıl)': asset.planliKullanimOmruYil ?? '',
+      'Amortisman Yöntemi': asset.amortismanYontemi || '',
+      'Amortisman Başlangıç Tarihi': asset.amortismanBaslangicTarihi || '',
+      'Hurda Tarihi': asset.hurdaTarihi || '',
+      'İmha Tarihi': asset.imhaTarihi || '',
+      'Satış Tarihi': asset.satisTarihi || '',
+      'Son Bakım Tarihi': asset.sonBakimTarihi || '',
+      'Sonraki Bakım Tarihi': asset.sonrakiBakimTarihi || '',
+      'Son Kalibrasyon Tarihi': asset.sonKalibrasyonTarihi || '',
+      'Sonraki Kalibrasyon Tarihi': asset.sonrakiKalibrasyonTarihi || '',
+      'Bakım Maliyeti (TL)': asset.bakimMaliyetiTl ?? '',
+      'Zimmetli Kişi': asset.zimmetliKisi || '',
+      'Check-Out Tarihi': asset.checkOutTarihi || '',
+      'Check-In Tarihi': asset.checkInTarihi || '',
+      'Dijital İmza': asset.dijitalImza || '',
+      'Zimmet Fiş No': asset.zimmetFisNo || '',
+      Açıklama: asset.aciklama || '',
+    }));
+    exportDataToExcel(data, 'Mevcut_Envanter', 'Envanter', toast);
   };
 
   const handleDownloadCategoryTemplate = () => {
@@ -220,6 +303,25 @@ export default function EnvanterYonetimiPage() {
           model: String(row['Model'] || row['model'] || '').trim(),
           konum: String(row['Konum'] || row['konum'] || '').trim(),
           teslimEdilenPersonel: String(row['Teslim Edilen Personel'] || row['teslimedilenpersonel'] || '').trim(),
+          alimFiyatiTl: Number(row['Alım Fiyatı (TL)'] || row['Alim Fiyati (TL)'] || row['alimfiyatitl'] || row['alim_fiyati_tl'] || 0) || 0,
+          satinAlmaTarihi: String(row['Satın Alma Tarihi'] || row['Satin Alma Tarihi'] || row['satinalmatarihi'] || '').trim(),
+          garantiBitisTarihi: String(row['Garanti Bitiş Tarihi'] || row['Garanti Bitis Tarihi'] || row['garantibitistarihi'] || '').trim(),
+          planliKullanimOmruYil: Number(row['Planlı Kullanım Ömrü (Yıl)'] || row['Planli Kullanim Omru (Yil)'] || row['planlikullanimomruyil'] || 0) || 0,
+          amortismanYontemi: String(row['Amortisman Yöntemi'] || row['Amortisman Yontemi'] || row['amortismanyontemi'] || 'dogrusal').trim() as 'dogrusal' | 'azalan_bakiye',
+          amortismanBaslangicTarihi: String(row['Amortisman Başlangıç Tarihi'] || row['Amortisman Baslangic Tarihi'] || row['amortismanbaslangictarihi'] || '').trim(),
+          hurdaTarihi: String(row['Hurda Tarihi'] || row['hurdatarihi'] || '').trim(),
+          imhaTarihi: String(row['İmha Tarihi'] || row['Imha Tarihi'] || row['imhatarihi'] || '').trim(),
+          satisTarihi: String(row['Satış Tarihi'] || row['Satis Tarihi'] || row['satistarihi'] || '').trim(),
+          sonBakimTarihi: String(row['Son Bakım Tarihi'] || row['Son Bakim Tarihi'] || row['sonbakimtarihi'] || '').trim(),
+          sonrakiBakimTarihi: String(row['Sonraki Bakım Tarihi'] || row['Sonraki Bakim Tarihi'] || row['sonrakibakimtarihi'] || '').trim(),
+          sonKalibrasyonTarihi: String(row['Son Kalibrasyon Tarihi'] || row['Son Kalibrasyon Tarihi'] || row['sonkalibrasyontarihi'] || '').trim(),
+          sonrakiKalibrasyonTarihi: String(row['Sonraki Kalibrasyon Tarihi'] || row['Sonraki Kalibrasyon Tarihi'] || row['sonrakikalibrasyontarihi'] || '').trim(),
+          bakimMaliyetiTl: Number(row['Bakım Maliyeti (TL)'] || row['Bakim Maliyeti (TL)'] || row['bakimmaliyetitl'] || 0) || 0,
+          zimmetliKisi: String(row['Zimmetli Kişi'] || row['Zimmetli Kisi'] || row['zimmetlikisi'] || '').trim(),
+          checkOutTarihi: String(row['Check-Out Tarihi'] || row['checkOutTarihi'] || '').trim(),
+          checkInTarihi: String(row['Check-In Tarihi'] || row['checkInTarihi'] || '').trim(),
+          dijitalImza: String(row['Dijital İmza'] || row['Dijital Imza'] || row['dijitalimza'] || '').trim(),
+          zimmetFisNo: String(row['Zimmet Fiş No'] || row['Zimmet Fis No'] || row['zimmetfisno'] || '').trim(),
           aciklama: String(row['Açıklama'] || row['aciklama'] || '').trim(),
           manuelKonum: locations.some(l => l.name === String(row['Konum'] || '').trim()) ? undefined : String(row['Konum'] || '').trim(),
         };
@@ -230,7 +332,7 @@ export default function EnvanterYonetimiPage() {
           batch.set(doc(db, 'assets', existingAsset.id), assetData, { merge: true });
           updatedCount++;
         } else {
-          batch.set(doc(collection(db, 'assets')), assetData);
+          batch.set(doc(collection(db, 'assets')), withCompanyScope(assetData, currentCompanyId));
           newCount++;
         }
       }

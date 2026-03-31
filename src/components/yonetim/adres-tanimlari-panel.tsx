@@ -12,9 +12,12 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { AddressDefinition } from '@/lib/types';
 import BackButton from '@/components/BackButton';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 export default function AdresTanimlariPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const [addresses, setAddresses] = useState<AddressDefinition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -24,13 +27,17 @@ export default function AdresTanimlariPanel() {
     setIsLoading(true);
     try {
       const snap = await getDocs(collection(db, 'addressDefinitions'));
-      setAddresses(snap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)));
+      setAddresses(filterByCompanyScope(
+        snap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
     } catch (e) {
       toast({ title: 'Hata', description: 'Adresler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchAddresses();
@@ -41,7 +48,7 @@ export default function AdresTanimlariPanel() {
       toast({ title: 'Hata', description: 'Tüm alanlar zorunludur.', variant: 'destructive' });
       return;
     }
-    await addDoc(collection(db, 'addressDefinitions'), newAddress);
+    await addDoc(collection(db, 'addressDefinitions'), withCompanyScope(newAddress, currentUserProfile?.companyId));
     toast({ title: 'Başarılı', description: 'Adres tanımı eklendi.' });
     fetchAddresses();
     setIsModalOpen(false);

@@ -7,8 +7,11 @@ import { Loader2 } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 export default function CihazTanimlamalariPage() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [imageFiles, setImageFiles] = useState<string[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +25,11 @@ export default function CihazTanimlamalariPage() {
           getDocs(collection(db, 'hospitals'))
         ]);
         setImageFiles(images);
-        setHospitals(hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital)));
+        setHospitals(filterByCompanyScope(
+          hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital)),
+          currentCompanyId,
+          isSuperAdmin
+        ));
       } catch (error) {
         console.error("Error loading data for device definitions page:", error);
       } finally {
@@ -30,7 +37,7 @@ export default function CihazTanimlamalariPage() {
       }
     }
     loadData();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   if (loading) {
     return (

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 // Firestore Timestamp to Date converter
 function convertTimestamp(timestamp: any): string | null {
@@ -37,6 +38,22 @@ function normalizeStatus(status: string): string {
   return status;
 }
 
+function toUnixMs(value: any): number {
+  if (!value) return 0;
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? 0 : ms;
+  }
+  if (typeof value === 'number') return value;
+  if (value._seconds !== undefined) return value._seconds * 1000;
+  if (value.seconds !== undefined) return value.seconds * 1000;
+  if (typeof value.toDate === 'function') {
+    const d = value.toDate();
+    return d instanceof Date && !Number.isNaN(d.getTime()) ? d.getTime() : 0;
+  }
+  return 0;
+}
+
 // GET handler - fetch fault reports with filtering and pagination
 export async function GET(request: NextRequest) {
   try {
@@ -47,15 +64,18 @@ export async function GET(request: NextRequest) {
     const lab = searchParams.get('lab') || 'all';
     const device = searchParams.get('device') || 'all';
     const opener = searchParams.get('opener') || 'all';
+    const companyId = searchParams.get('companyId') || undefined;
+    const isSuperAdmin = searchParams.get('isSuperAdmin') === '1';
 
     // Pagination
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '20', 10);
 
-    // Fetch all reports ordered by openedAt desc
+    // Fetch all reports.
+    // NOTE: orderBy('openedAt') hides documents where openedAt is missing.
+    // After company filter rollout, some records may only have createdAt.
     const snapshot = await adminDb
       .collection('deviceFaultReports')
-      .orderBy('openedAt', 'desc')
       .get();
 
     // Serialize all documents
@@ -63,16 +83,27 @@ export async function GET(request: NextRequest) {
       .map(doc => serializeFaultReport(doc))
       .filter(Boolean);
 
+    const scopedReports = allReports.filter((r: any) =>
+      matchesCompanyScope(r, companyId, isSuperAdmin)
+    );
+
+    // Keep newest reports first using openedAt, then createdAt fallback.
+    scopedReports.sort((a: any, b: any) => {
+      const aMs = toUnixMs(a.openedAt) || toUnixMs(a.createdAt);
+      const bMs = toUnixMs(b.openedAt) || toUnixMs(b.createdAt);
+      return bMs - aMs;
+    });
+
     // Calculate status counts before filtering
     const statusCounts = {
-      all: allReports.length,
+      all: scopedReports.length,
       atama_bekliyor: 0,
       mudahale_bekliyor: 0,
       mudahale_ediliyor: 0,
       cozuldu: 0,
     };
 
-    allReports.forEach((r: any) => {
+    scopedReports.forEach((r: any) => {
       const normalized = normalizeStatus(r.status);
       if (normalized === 'atama_bekliyor') statusCounts.atama_bekliyor++;
       else if (normalized === 'mudahale_bekliyor') statusCounts.mudahale_bekliyor++;
@@ -81,12 +112,12 @@ export async function GET(request: NextRequest) {
     });
 
     // Extract unique filter options
-    const uniqueLabs = [...new Set(allReports.map((r: any) => r.labName).filter(Boolean))];
-    const uniqueDevices = [...new Set(allReports.map((r: any) => r.serial).filter(Boolean))];
-    const uniqueOpeners = [...new Set(allReports.map((r: any) => r.openedByName).filter(Boolean))];
+    const uniqueLabs = [...new Set(scopedReports.map((r: any) => r.labName).filter(Boolean))];
+    const uniqueDevices = [...new Set(scopedReports.map((r: any) => r.serial).filter(Boolean))];
+    const uniqueOpeners = [...new Set(scopedReports.map((r: any) => r.openedByName).filter(Boolean))];
 
     // Apply filters
-    let filteredReports = allReports;
+    let filteredReports = scopedReports;
 
     if (status !== 'all') {
       filteredReports = filteredReports.filter((r: any) => normalizeStatus(r.status) === status);
@@ -148,8 +179,10 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Delete the report
-    await adminDb.collection('deviceFaultReports').doc(reportId).delete();
+    const reportRef = adminDb.collection('deviceFaultReports').doc(reportId);
+    const reportSnap = await reportRef.get();
+    const reportData = reportSnap.data() || {};
+    const deviceId = typeof reportData.deviceId === 'string' ? reportData.deviceId : '';
 
     // Also delete any history subcollection documents
     const historySnapshot = await adminDb
@@ -162,7 +195,26 @@ export async function DELETE(request: NextRequest) {
     historySnapshot.docs.forEach(doc => {
       batch.delete(doc.ref);
     });
+    batch.delete(reportRef);
     await batch.commit();
+
+    // Keep devices collection consistent with arıza yönetimi:
+    // if no open report remains for this device, clear arızaDurumu.
+    if (deviceId) {
+      const remainingOpenSnap = await adminDb
+        .collection('deviceFaultReports')
+        .where('deviceId', '==', deviceId)
+        .where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+        .limit(1)
+        .get();
+
+      if (remainingOpenSnap.empty) {
+        await adminDb.collection('devices').doc(deviceId).set({
+          arizaDurumu: 'yok',
+          arizaAciklamasi: '',
+        }, { merge: true });
+      }
+    }
 
     return NextResponse.json({
       success: true,

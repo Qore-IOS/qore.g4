@@ -11,6 +11,8 @@ import { Loader2, Search, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import BackButton from '@/components/BackButton';
 
 interface Asset {
@@ -26,6 +28,7 @@ interface Asset {
   aciklama: string;
   seriNumarasi?: string;
   durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü';
+  alimFiyatiTl?: number;
 }
 
 export default function AssetLocationPage() {
@@ -33,6 +36,7 @@ export default function AssetLocationPage() {
   const router = useRouter();
   const locationName = decodeURIComponent(Array.isArray(params.locationName) ? params.locationName[0] : params.locationName || '');
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,15 +46,18 @@ export default function AssetLocationPage() {
     if (!locationName) return;
     setLoading(true);
     try {
-      const assetsQuery = query(collection(db, 'assets'), where('konum', '==', locationName));
-      const assetsSnap = await getDocs(assetsQuery);
-      setAssets(assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)));
+      const assetsSnap = await getDocs(query(collection(db, 'assets'), where('konum', '==', locationName)));
+      setAssets(filterByCompanyScope(
+        assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)),
+        currentCompanyId,
+        isSuperAdmin
+      ));
     } catch (e) {
       toast({ title: 'Hata', description: 'Bu konuma ait veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [locationName, toast]);
+  }, [locationName, toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();
@@ -94,7 +101,7 @@ export default function AssetLocationPage() {
           <div className="relative mb-4 max-w-sm">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Listede ara..."
+              placeholder="Ürün, kategori veya konum ara..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-8"
@@ -114,13 +121,14 @@ export default function AssetLocationPage() {
                     <TableHead>Marka</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Personel</TableHead>
+                    <TableHead>Alım Fiyatı (TL)</TableHead>
                     <TableHead>Açıklama</TableHead>
                     <TableHead className="text-right">İşlemler</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredAssets.length === 0 ? (
-                    <TableRow><TableCell colSpan={9} className="text-center py-8">Bu konum için kayıtlı ürün yok veya filtre ile eşleşmiyor.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={10} className="text-center py-8">Bu konum için kayıtlı ürün yok veya filtre ile eşleşmiyor.</TableCell></TableRow>
                   ) : (
                     filteredAssets.map(asset => (
                       <TableRow key={asset.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/yonetim/envanter-yonetimi/${asset.category}/${asset.id}`)}>
@@ -131,6 +139,7 @@ export default function AssetLocationPage() {
                         <TableCell>{asset.marka}</TableCell>
                         <TableCell>{asset.model}</TableCell>
                         <TableCell>{asset.teslimEdilenPersonel}</TableCell>
+                        <TableCell>{typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl.toLocaleString('tr-TR') : '-'}</TableCell>
                         <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]" title={asset.aciklama}>{asset.aciklama}</TableCell>
                         <TableCell className="text-right">
                           <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleDelete(asset.id); }} disabled={loading}>

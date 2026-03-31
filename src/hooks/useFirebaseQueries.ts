@@ -26,6 +26,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { useEffect, useRef } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import type {
   Hospital,
   Depot,
@@ -41,6 +42,7 @@ import type {
   AddressDefinition,
   User as AppUser
 } from '@/lib/types';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -78,11 +80,13 @@ export function useProductCodes() {
  * Depots - Used in 12+ places
  */
 export function useDepots() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['depots'],
+    queryKey: ['depots', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'depots'));
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
+      const depots = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
+      return filterByCompanyScope(depots, currentCompanyId, isSuperAdmin);
     },
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
@@ -94,11 +98,13 @@ export function useDepots() {
  * Hospitals/Laboratories - Used in 10+ places
  */
 export function useHospitals() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['hospitals'],
+    queryKey: ['hospitals', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'hospitals'));
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
+      const hospitals = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
+      return filterByCompanyScope(hospitals, currentCompanyId, isSuperAdmin);
     },
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
@@ -110,11 +116,13 @@ export function useHospitals() {
  * Devices
  */
 export function useDevices() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['devices'],
+    queryKey: ['devices', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'devices'));
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
+      const devices = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
+      return filterByCompanyScope(devices, currentCompanyId, isSuperAdmin);
     },
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000,
@@ -126,11 +134,13 @@ export function useDevices() {
  * Lab Pools
  */
 export function useLabPools() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['labPools'],
+    queryKey: ['labPools', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'labPools'));
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool));
+      const labPools = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool));
+      return filterByCompanyScope(labPools, currentCompanyId, isSuperAdmin);
     },
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
@@ -157,11 +167,13 @@ export function useBarcodeFormatsQuery() {
  * Address Definitions
  */
 export function useAddressDefinitions() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['addressDefinitions'],
+    queryKey: ['addressDefinitions', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'addressDefinitions'));
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AddressDefinition));
+      const addresses = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AddressDefinition));
+      return filterByCompanyScope(addresses, currentCompanyId, isSuperAdmin);
     },
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
@@ -172,11 +184,13 @@ export function useAddressDefinitions() {
  * Users
  */
 export function useUsers() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['users'],
+    queryKey: ['users', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'users'));
-      return snap.docs.map(d => ({ uid: d.id, ...processTimestamp(d.data()) } as AppUser));
+      const users = snap.docs.map(d => ({ uid: d.id, ...processTimestamp(d.data()) } as AppUser));
+      return filterByCompanyScope(users, currentCompanyId, isSuperAdmin);
     },
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
@@ -561,8 +575,9 @@ import type { DutyShift } from '@/lib/types';
  * Considers startTime/endTime fields for accurate time-based filtering
  */
 export function useActiveDutyShifts() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', 'active'],
+    queryKey: ['dutyShifts', 'active', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const now = new Date();
       const snap = await getDocs(
@@ -572,7 +587,8 @@ export function useActiveDutyShifts() {
         )
       );
       // Filter to only include shifts where current datetime is within range (including startTime/endTime)
-      return snap.docs
+      return filterByCompanyScope(
+        snap.docs
         .map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift))
         .filter(shift => {
           const startDate = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
@@ -597,7 +613,10 @@ export function useActiveDutyShifts() {
           }
 
           return now >= effectiveStart && now <= effectiveEnd;
-        });
+        }),
+        currentCompanyId,
+        isSuperAdmin
+      );
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 30 * 60 * 1000, // 30 minutes
@@ -610,8 +629,9 @@ export function useActiveDutyShifts() {
  * Used in DutyScheduleModal component
  */
 export function useUpcomingDutyShifts(labId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', 'upcoming30', labId],
+    queryKey: ['dutyShifts', 'upcoming30', labId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!labId) return [];
       const now = new Date();
@@ -626,7 +646,8 @@ export function useUpcomingDutyShifts(labId: string | null) {
           where('status', '==', 'active')
         )
       );
-      return snap.docs
+      return filterByCompanyScope(
+        snap.docs
         .map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift))
         .filter(shift => {
           const startDate = shift.startDate instanceof Date ? shift.startDate : new Date(shift.startDate as any);
@@ -639,7 +660,10 @@ export function useUpcomingDutyShifts(labId: string | null) {
           const aStart = a.startDate instanceof Date ? a.startDate : new Date(a.startDate as any);
           const bStart = b.startDate instanceof Date ? b.startDate : new Date(b.startDate as any);
           return aStart.getTime() - bStart.getTime();
-        });
+        }),
+        currentCompanyId,
+        isSuperAdmin
+      );
     },
     enabled: !!labId,
     staleTime: 5 * 60 * 1000,
@@ -652,15 +676,20 @@ export function useUpcomingDutyShifts(labId: string | null) {
  * Get all duty shifts (for admin view)
  */
 export function useAllDutyShifts() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', 'all'],
+    queryKey: ['dutyShifts', 'all', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(
         query(
           collection(db, 'dutyShifts')
         )
       );
-      const shifts = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      const shifts = filterByCompanyScope(
+        snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift)),
+        currentCompanyId,
+        isSuperAdmin
+      );
       // Sort client-side by startDate descending to avoid composite index requirement
       shifts.sort((a, b) => {
         const aTime = a.startDate instanceof Date ? a.startDate.getTime() : new Date(a.startDate as any).getTime();
@@ -679,8 +708,9 @@ export function useAllDutyShifts() {
  * Get duty shifts by status
  */
 export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelled') {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['dutyShifts', status],
+    queryKey: ['dutyShifts', status, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(
         query(
@@ -688,7 +718,11 @@ export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelle
           where('status', '==', status)
         )
       );
-      const shifts = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift));
+      const shifts = filterByCompanyScope(
+        snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift)),
+        currentCompanyId,
+        isSuperAdmin
+      );
       // Sort client-side by startDate descending to avoid composite index requirement
       shifts.sort((a, b) => {
         const aTime = a.startDate instanceof Date ? a.startDate.getTime() : new Date(a.startDate as any).getTime();

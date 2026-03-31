@@ -13,6 +13,8 @@ import { PlusCircle, Trash2, Loader2, Car, Edit3, UserCheck, ImageIcon, Check } 
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import BackButton from '@/components/BackButton';
 import type { User as AppUser } from '@/lib/types';
 import Image from 'next/image';
@@ -39,6 +41,7 @@ interface Vehicle {
 
 export default function AraclarPage() {
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,13 +57,19 @@ export default function AraclarPage() {
       ]);
 
       setVehicles(
-        vehiclesSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Vehicle))
+        filterByCompanyScope(
+          vehiclesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Vehicle)),
+          currentCompanyId,
+          isSuperAdmin
+        )
           .sort((a, b) => a.plaka.localeCompare(b.plaka))
       );
 
-      const driverUsers = usersSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as AppUser))
+      const driverUsers = filterByCompanyScope(
+        usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),
+        currentCompanyId,
+        isSuperAdmin
+      )
         .filter(u => (u as any).role === 'driver');
       setDrivers(driverUsers);
     } catch (e) {
@@ -68,7 +77,7 @@ export default function AraclarPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId]);
 
   useEffect(() => {
     fetchData();
@@ -107,12 +116,12 @@ export default function AraclarPage() {
 
     try {
       if (editingVehicle.id) {
-        await setDoc(doc(db, 'vehicles', editingVehicle.id), dataToSave, { merge: true });
+        await setDoc(doc(db, 'vehicles', editingVehicle.id), withCompanyScope(dataToSave as Record<string, any>, currentCompanyId), { merge: true });
       } else {
-        await addDoc(collection(db, 'vehicles'), {
+        await addDoc(collection(db, 'vehicles'), withCompanyScope({
           ...dataToSave,
           createdAt: new Date(),
-        });
+        } as Record<string, any>, currentCompanyId));
       }
       toast({ title: 'Başarılı', description: 'Araç kaydedildi.' });
       setIsModalOpen(false);

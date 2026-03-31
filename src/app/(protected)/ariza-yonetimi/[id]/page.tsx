@@ -24,7 +24,8 @@ import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, Pr
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
+import QRCode from 'qrcode';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1206,24 +1207,46 @@ export default function FaultDetailPage() {
         });
       }
 
-      // If removed part has serial number, create personal stock entry for removed part
-      if (removedPartSerialNumber.trim()) {
-        const removedStockRef = doc(collection(db, 'personalStock'));
-        batch.set(removedStockRef, {
-          ownerUid: currentUser.uid,
-          ownerName: currentUserProfile?.name || '',
-          productCodeId: null,
-          stokKodu: removedPartStokKodu.trim() || resolvedStokKodu,
-          stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
-          serialNumber: removedPartSerialNumber.trim(),
-          imageUrl: removedImgUrl || null,
-          source: 'device',
-          sourceDeviceId: fault.deviceId,
-          sourceDeviceName: fault.model || '',
-          status: 'in_stock',
-          createdAt: Timestamp.fromDate(now),
-          replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
+      // If removed part has serial number, create personal stock entry for removed part.
+      // Guardrails:
+      // 1) Do not re-add when removed serial equals installed serial.
+      // 2) Do not create duplicate active stock for same owner + stokKodu + serial.
+      const removedSerial = removedPartSerialNumber.trim();
+      const removedStokKoduValue = removedPartStokKodu.trim() || resolvedStokKodu;
+      const isReusableStockStatus = (status: unknown) => {
+        const normalized = String(status || '').trim().toLowerCase();
+        return normalized === 'in_stock' || normalized === 'pending_approval';
+      };
+
+      if (removedSerial && removedSerial !== (resolvedSerialNumber || '').trim()) {
+        const duplicateSnap = await getDocs(query(
+          collection(db, 'personalStock'),
+          where('ownerUid', '==', currentUser.uid),
+          where('serialNumber', '==', removedSerial)
+        ));
+        const hasActiveDuplicate = duplicateSnap.docs.some((docSnap) => {
+          const data = docSnap.data();
+          return data.stokKodu === removedStokKoduValue && isReusableStockStatus(data.status);
         });
+
+        if (!hasActiveDuplicate) {
+          const removedStockRef = doc(collection(db, 'personalStock'));
+          batch.set(removedStockRef, {
+            ownerUid: currentUser.uid,
+            ownerName: currentUserProfile?.name || '',
+            productCodeId: null,
+            stokKodu: removedStokKoduValue,
+            stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
+            serialNumber: removedSerial,
+            imageUrl: removedImgUrl || null,
+            source: 'device',
+            sourceDeviceId: fault.deviceId,
+            sourceDeviceName: fault.model || '',
+            status: 'in_stock',
+            createdAt: Timestamp.fromDate(now),
+            replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
+          });
+        }
       }
 
       // Add history entry for part change (with post-closure flag)
@@ -1338,66 +1361,350 @@ export default function FaultDetailPage() {
 
   const generatePdf = async () => {
     if (!fault) return;
-    const doc = new jsPDF();
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text(`Arıza Raporu: #${fault.id}`, 14, 22);
 
-    let yPos = 30;
+    // Turkish font loading (same approach as Teknik Servis Formu)
+    let turkishFontBase64: string | null = null;
+    try {
+      const fontUrl = 'https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf';
+      const fontResp = await fetch(fontUrl);
+      if (fontResp.ok) {
+        const fontBlob = await fontResp.blob();
+        turkishFontBase64 = await new Promise<string | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]);
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(fontBlob);
+        });
+      }
+    } catch (e) {
+      console.error('Could not load Turkish font:', e);
+    }
 
-    if (device?.imageUrl) {
-        try {
-            const response = await fetch(resolveImageSrc(device.imageUrl));
-            const blob = await response.blob();
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => {
-                const base64data = reader.result;
-                doc.addImage(base64data as string, 'PNG', 14, yPos, 40, 40);
-                addPdfContent(doc, yPos + 50);
-            };
-        } catch (e) {
-            console.error("PDF image load error:", e);
-            addPdfContent(doc, yPos);
+    const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const pageW = pdfDoc.internal.pageSize.getWidth();
+    const pageH = pdfDoc.internal.pageSize.getHeight();
+    const padX = 40;
+
+    let useTurkish = false;
+    if (turkishFontBase64) {
+      try {
+        pdfDoc.addFileToVFS('NotoSans-Regular.ttf', turkishFontBase64);
+        pdfDoc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+        useTurkish = true;
+      } catch (e) {
+        console.error('Could not setup Turkish font:', e);
+      }
+    }
+    const FONT = useTurkish ? 'NotoSans' : 'helvetica';
+    const txt = (str: string | null | undefined): string => {
+      if (!str) return '';
+      if (useTurkish) return str;
+      return str
+        .replace(/İ/g, 'I').replace(/ı/g, 'i')
+        .replace(/Ş/g, 'S').replace(/ş/g, 's')
+        .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
+        .replace(/Ü/g, 'U').replace(/ü/g, 'u')
+        .replace(/Ö/g, 'O').replace(/ö/g, 'o')
+        .replace(/Ç/g, 'C').replace(/ç/g, 'c');
+    };
+
+    pdfDoc.setFont(FONT);
+
+    const ORANGE = { r: 199, g: 137, b: 65 };
+    pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    pdfDoc.setLineWidth(2);
+    pdfDoc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
+
+    // --- HEADER: Title (left), Logo (center), QR Code (right) ---
+    const headerY = 30;
+
+    pdfDoc.setTextColor(0, 0, 0);
+    pdfDoc.setFontSize(14);
+    pdfDoc.setFont(FONT, 'bold');
+    pdfDoc.text(txt('Arıza Raporu'), padX, headerY + 20);
+
+    // Logo in center
+    try {
+      let logoResponse = await fetch('/invlogo.png');
+      if (!logoResponse.ok) {
+        logoResponse = await fetch('/invitrolab_LOGO__-_Kopya__1_-removebg.png');
+      }
+      if (logoResponse.ok) {
+        const logoBlob = await logoResponse.blob();
+        const logoData = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(logoBlob);
+        });
+        const logoWidth = 132;
+        const logoHeight = 40;
+        const logoX = (pageW / 2) - (logoWidth / 2);
+        pdfDoc.addImage(logoData, 'PNG', logoX, headerY + 5, logoWidth, logoHeight, undefined, 'FAST');
+      }
+    } catch (e) {
+      console.error('Could not load header logo:', e);
+    }
+
+    // QR Code on right with orange rounded border
+    const recordUrl = `${window.location.origin}/ariza-yonetimi/${fault.id}`;
+    const qrDataUrl = await QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 });
+
+    const qrSize = 60;
+    const qrX = pageW - padX - qrSize - 10;
+    const qrY = headerY;
+
+    pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    pdfDoc.setFillColor(255, 255, 255);
+    pdfDoc.setLineWidth(2);
+    pdfDoc.roundedRect(qrX - 5, qrY - 5, qrSize + 10, qrSize + 10, 5, 5, 'FD');
+    pdfDoc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize, undefined, 'FAST');
+
+    // System logo below QR
+    try {
+      const sysLogoResponse = await fetch('/newlogoblk.png');
+      if (sysLogoResponse.ok) {
+        const sysLogoBlob = await sysLogoResponse.blob();
+        const sysLogoData = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(sysLogoBlob);
+        });
+        const sysLogoSize = 28;
+        const sysLogoX = qrX + (qrSize / 2) - (sysLogoSize / 2);
+        pdfDoc.addImage(sysLogoData, 'PNG', sysLogoX, qrY + qrSize + 5, sysLogoSize, sysLogoSize, undefined, 'FAST');
+      }
+    } catch (e) {
+      console.error('Could not load system logo:', e);
+    }
+
+    // --- FORM INFO SECTION ---
+    pdfDoc.setFontSize(10);
+    pdfDoc.setFont(FONT, 'normal');
+    let currentY = 100;
+
+    // Resolve pool main lab name
+    let labDisplayName = fault.labName || '';
+    const hospitalId = fault.hospitalId || fault.labId;
+    if (hospitalId) {
+      try {
+        const poolsSnap = await getDocs(collection(db, 'labPools'));
+        const allPools = poolsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const matchingPool = allPools.find((p: any) => p.active && p.memberIds?.includes(hospitalId));
+        if (matchingPool) {
+          const pool = matchingPool as any;
+          if (pool.mainLabId && pool.mainLabId !== hospitalId) {
+            const mainLabDoc = await getDoc(doc(db, 'hospitals', pool.mainLabId));
+            if (mainLabDoc.exists()) {
+              labDisplayName = `${mainLabDoc.data().name} - ${fault.labName || ''}`;
+            }
+          }
         }
-    } else {
-        addPdfContent(doc, yPos);
+      } catch (e) {
+        console.error('Could not resolve pool main lab:', e);
+      }
     }
-  };
 
-  const addPdfContent = (doc: jsPDF, startY: number) => {
-    if (!fault) return;
+    const normalized = normalizeStatus(fault.status);
+    const statusLabel = STATUS_CONFIG[normalized]?.label || fault.status;
+    const faultTypeLabel = fault.faultType === 'teknik_servis' ? 'Teknik Servis' : fault.faultType === 'aplikasyon' ? 'Aplikasyon' : (fault.faultType || '-');
 
-    let y = startY;
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'normal');
-    
-    doc.text(`Laboratuvar: ${fault.labName}`, 14, y); y += 7;
-    doc.text(`Cihaz: ${fault.model} (SN: ${fault.serial})`, 14, y); y += 7;
-    doc.text(`Arıza Tipi: ${fault.faultType?.replace('_',' ')}`, 14, y); y += 7;
-    doc.text(`Durum: ${fault.status === 'open' ? 'Açık' : 'Giderildi'}`, 14, y); y += 10;
-    
-    doc.text(`Açan: ${fault.openedByName} - ${fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', {locale: tr}) : ''}`, 14, y); y += 7;
-    if (fault.status === 'closed') {
-        doc.text(`Kapatan: ${fault.closedByName} - ${fault.closedAt ? format(fault.closedAt, 'dd.MM.yyyy HH:mm', {locale: tr}) : ''}`, 14, y); y += 7;
-        if(resolutionTime !== null) doc.text(`Çözüm Süresi: ${resolutionTime} dakika`, 14, y); y += 7;
-    }
-    y+= 5;
-    
-    (doc as any).autoTable({
-        startY: y,
-        head: [['Tarih', 'Tür', 'Kullanıcı', 'Açıklama']],
-        body: history.map(ev => [
-            ev.timestamp ? format(ev.timestamp, 'dd.MM.yy HH:mm', { locale: tr }) : '-',
-            ev.type.replace('_', ' '),
-            ev.actorName || '-',
-            ev.description || '-'
-        ]),
-        styles: { font: 'helvetica', fontSize: 10 },
-        headStyles: { fillColor: [220, 220, 220] }
+    const info: string[][] = [
+      [txt('Arıza No:'), fault.id],
+      [txt('Laboratuvar:'), txt(labDisplayName)],
+      [txt('Cihaz:'), txt(`${fault.model} (SN: ${fault.serial})`)],
+      [txt('Arıza Tipi:'), txt(faultTypeLabel)],
+      ['Durum:', txt(statusLabel)],
+      [txt('Açan:'), txt(`${fault.openedByName}${fault.supportPersonnelName ? ` (Eşlik Eden: ${fault.supportPersonnelName})` : ''}`)],
+      ['Tarih / Saat:', fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'],
+    ];
+
+    autoTable(pdfDoc, {
+      body: info,
+      startY: currentY,
+      theme: 'plain',
+      styles: { font: FONT, fontSize: 10, cellPadding: { top: 4, bottom: 4 } },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
     });
 
-    doc.save(`Ariza_Raporu_${fault.id}.pdf`);
+    currentY = (pdfDoc as any).lastAutoTable.finalY + 15;
+
+    // --- ACIKLAMA SECTION ---
+    if (fault.description?.trim()) {
+      pdfDoc.setFont(FONT, 'bold');
+      pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      pdfDoc.line(padX, currentY, pageW - padX, currentY);
+      pdfDoc.text(txt('Açıklama'), padX, currentY + 12);
+      currentY += 18;
+
+      autoTable(pdfDoc, {
+        body: [[txt(fault.description)]],
+        startY: currentY,
+        theme: 'grid',
+        styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
+        margin: { left: padX, right: padX },
+      });
+
+      currentY = (pdfDoc as any).lastAutoTable.finalY + 15;
+    }
+
+    // --- COZUM BILGILERI SECTION (when resolved) ---
+    if (normalized === 'cozuldu') {
+      pdfDoc.setFont(FONT, 'bold');
+      pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      pdfDoc.line(padX, currentY, pageW - padX, currentY);
+      pdfDoc.text(txt('Çözüm Bilgileri'), padX, currentY + 12);
+      currentY += 18;
+
+      const cozumRows: string[][] = [];
+      if (fault.closedByName) {
+        cozumRows.push([txt('Kapatan:'), txt(fault.closedByName)]);
+      }
+      if (fault.closedAt) {
+        cozumRows.push([txt('Kapanış Tarihi:'), format(fault.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr })]);
+      }
+      if (resolutionTime !== null) {
+        cozumRows.push([txt('Çözüm Süresi:'), `${resolutionTime} dk`]);
+      }
+      if (fault.closeDescription) {
+        cozumRows.push([txt('Çözüm Açıklaması:'), txt(fault.closeDescription)]);
+      }
+
+      if (cozumRows.length > 0) {
+        autoTable(pdfDoc, {
+          body: cozumRows,
+          startY: currentY,
+          theme: 'plain',
+          styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
+          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 120 } },
+          margin: { left: padX, right: padX },
+        });
+        currentY = (pdfDoc as any).lastAutoTable.finalY + 15;
+      }
+    }
+
+    // --- DEGISEN PARCALAR SECTION ---
+    if (faultPartChanges.length > 0) {
+      pdfDoc.setFont(FONT, 'bold');
+      pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      pdfDoc.line(padX, currentY, pageW - padX, currentY);
+      pdfDoc.text(txt('Değişen Parçalar'), padX, currentY + 12);
+      currentY += 18;
+
+      autoTable(pdfDoc, {
+        head: [[txt('Parça'), 'Kod', txt('Seri No'), 'Adet']],
+        body: faultPartChanges.map(part => [
+          txt(part.stokAdi || '-'),
+          txt(part.stokKodu || '-'),
+          txt(part.serialNumber || '-'),
+          String(part.quantity || 1),
+        ]),
+        startY: currentY,
+        theme: 'grid',
+        styles: { font: FONT, fontSize: 10 },
+        headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
+        margin: { left: padX, right: padX },
+      });
+
+      currentY = (pdfDoc as any).lastAutoTable.finalY + 15;
+    }
+
+    // --- HUCRE DEGISIMLERI SECTION ---
+    if (faultHucreDegisimleri.length > 0) {
+      pdfDoc.setFont(FONT, 'bold');
+      pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      pdfDoc.line(padX, currentY, pageW - padX, currentY);
+      pdfDoc.text(txt('Hücre Değişimleri'), padX, currentY + 12);
+      currentY += 18;
+
+      autoTable(pdfDoc, {
+        head: [[txt('Parça'), txt('Takılan Hücre'), txt('Çıkan Hücre'), txt('Açıklama')]],
+        body: faultHucreDegisimleri.map(h => [
+          txt(h.stokAdi || '-'),
+          txt(h.hucreNumarasi || '-'),
+          txt(h.removedHucreNumarasi || '-'),
+          txt(h.description || '-'),
+        ]),
+        startY: currentY,
+        theme: 'grid',
+        styles: { font: FONT, fontSize: 10 },
+        headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
+        margin: { left: padX, right: padX },
+      });
+
+      currentY = (pdfDoc as any).lastAutoTable.finalY + 15;
+    }
+
+    // --- CIHAZ DURUMU SECTION ---
+    pdfDoc.setFont(FONT, 'bold');
+    pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+    pdfDoc.line(padX, currentY, pageW - padX, currentY);
+    pdfDoc.text('Cihaz Durumu', padX, currentY + 12);
+    currentY += 18;
+
+    autoTable(pdfDoc, {
+      body: [
+        ['Durum:', txt(statusLabel)],
+      ],
+      startY: currentY,
+      theme: 'plain',
+      styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
+      margin: { left: padX, right: padX },
+    });
+
+    currentY = (pdfDoc as any).lastAutoTable.finalY + 15;
+
+    // --- ARIZA GECMISI TABLE ---
+    if (history.length > 0) {
+      pdfDoc.setFont(FONT, 'bold');
+      pdfDoc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      pdfDoc.line(padX, currentY, pageW - padX, currentY);
+      pdfDoc.text(txt('Arıza Geçmişi'), padX, currentY + 12);
+      currentY += 18;
+
+      autoTable(pdfDoc, {
+        head: [['Tarih', txt('Tür'), txt('Kullanıcı'), txt('Açıklama')]],
+        body: history.map(ev => [
+          ev.timestamp ? format(ev.timestamp, 'dd.MM.yy HH:mm', { locale: tr }) : '-',
+          txt(ev.type.replace('_', ' ')),
+          txt(ev.actorName || '-'),
+          txt(ev.description || '-'),
+        ]),
+        startY: currentY,
+        theme: 'grid',
+        styles: { font: FONT, fontSize: 10 },
+        headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
+        margin: { left: padX, right: padX },
+      });
+
+      currentY = (pdfDoc as any).lastAutoTable.finalY + 15;
+    }
+
+    // --- DEVICE IMAGE (if available) ---
+    if (device?.imageUrl) {
+      try {
+        const imgResponse = await fetch(resolveImageSrc(device.imageUrl));
+        const imgBlob = await imgResponse.blob();
+        const imgData = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(imgBlob);
+        });
+        // Check if we need a new page
+        if (currentY + 120 > pageH - padX) {
+          pdfDoc.addPage();
+          currentY = padX;
+        }
+        pdfDoc.addImage(imgData, 'PNG', padX, currentY, 80, 80, undefined, 'FAST');
+      } catch (e) {
+        console.error('PDF image load error:', e);
+      }
+    }
+
+    pdfDoc.save(`Ariza_Raporu_${fault.id}.pdf`);
   };
 
   const openEditModal = (historyItem: HistoryEvent) => {

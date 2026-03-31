@@ -9,7 +9,7 @@ import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
 
 
@@ -62,24 +62,21 @@ export default function AplikasyonPanel({
   const [faultyDeviceIds, setFaultyDeviceIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const fetchOpenFaults = async () => {
-      try {
-        const q = query(
-          collection(db, 'deviceFaultReports'),
-          where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
-        );
-        const snap = await getDocs(q);
-        const ids = new Set<string>();
-        snap.docs.forEach(d => {
-          const data = d.data();
-          if (data.deviceId) ids.add(data.deviceId);
-        });
-        setFaultyDeviceIds(ids);
-      } catch (err) {
-        console.error('Error fetching open fault reports:', err);
-      }
-    };
-    fetchOpenFaults();
+    const q = query(
+      collection(db, 'deviceFaultReports'),
+      where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const ids = new Set<string>();
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        if (data.deviceId) ids.add(data.deviceId);
+      });
+      setFaultyDeviceIds(ids);
+    }, (err) => {
+      console.error('Error listening open fault reports:', err);
+    });
+    return () => unsub();
   }, []);
 
   const getDevicesForHospital = (hospitalId: string): Device[] => {
@@ -144,9 +141,8 @@ export default function AplikasyonPanel({
     return { poolGroups, standaloneLabs };
   }, [filteredHospitals, labPools, userAssignedLabs, isAdmin]);
 
-  // Helper: is device faulty? Check both device field AND open fault reports
-  const isDeviceFaulty = (d: Device) =>
-    (d.arizaDurumu !== undefined && d.arizaDurumu !== 'yok') || faultyDeviceIds.has(d.id);
+  // Helper: is device faulty? Use live open fault reports.
+  const isDeviceFaulty = (d: Device) => faultyDeviceIds.has(d.id);
 
   // Calculate device stats for a hospital
   const getHospitalStats = (hospitalId: string) => {

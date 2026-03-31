@@ -15,7 +15,6 @@ import {
   orderBy,
   doc,
   getDocs,
-  limit as firestoreLimit,
   updateDoc,
   addDoc,
   serverTimestamp,
@@ -30,6 +29,7 @@ import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
+import { withCompanyScope } from '@/lib/company-scope';
 import {
   Dialog,
   DialogContent,
@@ -48,7 +48,7 @@ export default function TeknikServisDetayPage() {
   const hospitalId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
@@ -164,43 +164,6 @@ export default function TeknikServisDetayPage() {
     });
     return () => unsub();
   }, [devicesByHospital]);
-
-  // Auto-cleanup orphaned fault reports: if device.arizaDurumu is 'yok' but openFaultMap has entries
-  useEffect(() => {
-    if (devicesByHospital.length === 0 || Object.keys(openFaultMap).length === 0) return;
-
-    const orphanedReportIds: string[] = [];
-    devicesByHospital.forEach((device) => {
-      const deviceFaultStatus = device.arizaDurumu;
-      const hasOpenReports = openFaultMap[device.id];
-      if (hasOpenReports && (!deviceFaultStatus || deviceFaultStatus === 'yok')) {
-        // Device says healthy but there are open fault reports -> orphaned
-        const ids = openFaultReportIds[device.id] || [];
-        orphanedReportIds.push(...ids);
-      }
-    });
-
-    if (orphanedReportIds.length === 0) return;
-
-    // Auto-close orphaned fault reports
-    const closeOrphans = async () => {
-      for (const reportId of orphanedReportIds) {
-        try {
-          const reportRef = doc(db, 'deviceFaultReports', reportId);
-          await updateDoc(reportRef, {
-            status: 'cozuldu',
-            closedAt: serverTimestamp(),
-            closedByUid: 'system',
-            closedByName: 'Sistem (Otomatik Temizlik)',
-            closeDescription: 'Cihaz sağlıklı durumda olduğu için yetim arıza kaydı otomatik kapatıldı.',
-          });
-        } catch (err) {
-          console.error('Failed to auto-close orphaned fault report:', reportId, err);
-        }
-      }
-    };
-    closeOrphans();
-  }, [devicesByHospital, openFaultMap, openFaultReportIds]);
 
   // Fetch fault history for all devices
   useEffect(() => {
@@ -402,27 +365,12 @@ export default function TeknikServisDetayPage() {
     // - If device has teknik_servis fault, show modal with options
     // - If device has aplikasyon fault, show info that it's an aplikasyon fault (can't manage)
     // - If no fault, go directly to islem-formu
-    if (device.arizaDurumu && device.arizaDurumu !== 'yok') {
+    const activeFaultType = openFaultMap[device.id];
+    if (activeFaultType) {
       setSelectedDevice(device);
-      setSelectedDeviceFaultType(device.arizaDurumu);
-      // Find the open fault report for this device
-      try {
-        const q = query(
-          collection(db, 'deviceFaultReports'),
-          where('deviceId', '==', device.id),
-          where('status', '==', 'open'),
-          firestoreLimit(1)
-        );
-        const faultSnap = await getDocs(q);
-        if (!faultSnap.empty) {
-          setFaultIdForSelectedDevice(faultSnap.docs[0].id);
-        } else {
-          setFaultIdForSelectedDevice(null); // No open fault found
-        }
-      } catch (error) {
-        console.error("Error finding open fault report:", error);
-        setFaultIdForSelectedDevice(null);
-      }
+      setSelectedDeviceFaultType(activeFaultType);
+      const openIds = openFaultReportIds[device.id] || [];
+      setFaultIdForSelectedDevice(openIds.length > 0 ? openIds[0] : null);
       setIsModalOpen(true);
     } else {
       router.push(`/teknik-servis/islem-formu/${device.id}`);
@@ -495,7 +443,7 @@ export default function TeknikServisDetayPage() {
       });
 
       // Create log entry
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'return_to_depot',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -506,7 +454,7 @@ export default function TeknikServisDetayPage() {
         performedByName: currentUserProfile.displayName || currentUser.email || '',
         timestamp: serverTimestamp(),
         details: `${item.stokAdi} (${item.serialNumber}) depoya iade talebi oluşturuldu.`,
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Başarılı', description: 'Depoya iade talebi oluşturuldu.' });
       loadPersonalStock();
@@ -549,7 +497,7 @@ export default function TeknikServisDetayPage() {
       });
 
       // Create log entry
-      await addDoc(collection(db, 'sparePartTransferLogs'), {
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
         action: 'submit_to_depot',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -560,7 +508,7 @@ export default function TeknikServisDetayPage() {
         performedByName: currentUserProfile.displayName || currentUser.email || '',
         timestamp: serverTimestamp(),
         details: `${item.stokAdi} (${item.serialNumber}) depoya teslim talebi oluşturuldu. Kaynak cihaz: ${item.sourceDeviceName || 'Bilinmiyor'}`,
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Başarılı', description: 'Depoya teslim talebi oluşturuldu.' });
       loadPersonalStock();
@@ -699,11 +647,10 @@ export default function TeknikServisDetayPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {devicesByHospital.map((device) => {
-                // For teknik servis panel: red for teknik_servis faults, amber for aplikasyon faults
-                // Check both device.arizaDurumu and real-time open fault reports
+                // For teknik servis panel: red for teknik_servis faults, amber for aplikasyon faults.
+                // Use real-time arıza yönetimi records as source of truth.
                 const faultFromReports = openFaultMap[device.id];
-                const faultFromDevice = device.arizaDurumu && device.arizaDurumu !== 'yok' ? device.arizaDurumu : null;
-                const effectiveFaultType = faultFromReports || faultFromDevice;
+                const effectiveFaultType = faultFromReports || null;
                 const isTeknikServisFaulty = effectiveFaultType === 'teknik_servis';
                 const isAplikasyonFaulty = effectiveFaultType === 'aplikasyon';
                 const isFaulty = isTeknikServisFaulty || isAplikasyonFaulty;

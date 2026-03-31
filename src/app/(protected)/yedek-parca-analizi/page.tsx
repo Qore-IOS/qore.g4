@@ -17,6 +17,8 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
 import type { Hospital } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 interface TransferLog {
   id: string;
@@ -62,8 +64,34 @@ interface PartDetail {
   changeHistory: ChangeHistoryEntry[];
 }
 
+function logFirestoreIndexHint(error: unknown, context: string) {
+  const err = (error as { message?: string; code?: string; name?: string } | null) || {};
+  const message = err.message || '';
+  const code = err.code || 'unknown';
+  const name = err.name || 'UnknownError';
+  const indexUrlMatch = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
+
+  console.error(`[${context}] Firestore sorgu hatası`, { code, name, message });
+
+  if (indexUrlMatch) {
+    console.error(`[${context}] Firestore index gerekli. Oluşturma linki: ${indexUrlMatch[0]}`);
+    return;
+  }
+
+  if (code === 'failed-precondition') {
+    console.error(`[${context}] Firestore sorgusu index bekliyor. Hata:`, error);
+    console.error(`[${context}] Hata mesajında otomatik index linki bulunamadı. Firebase Console > Firestore > Indexes bölümünden kontrol edin.`);
+    return;
+  }
+
+  if (code.includes('cors') || message.toLowerCase().includes('cors') || message.includes('ERR_FAILED') || message.includes('302')) {
+    console.error(`[${context}] Bu hata index değil, ağ/CORS/proxy kaynaklı görünüyor. Index linki bu yüzden üretilemiyor.`);
+  }
+}
+
 export default function YedekParcaAnaliziPage() {
   const router = useRouter();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [transferLogs, setTransferLogs] = useState<TransferLog[]>([]);
@@ -86,50 +114,67 @@ export default function YedekParcaAnaliziPage() {
           getDocs(collection(db, 'devices')),
         ]);
 
+        const scopedHospitals = filterByCompanyScope(
+          hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
+          currentCompanyId,
+          isSuperAdmin
+        );
         const hMap = new Map<string, Hospital>();
-        hospitalsSnap.docs.forEach((d) => { hMap.set(d.id, { id: d.id, ...d.data() } as Hospital); });
+        scopedHospitals.forEach((h) => { hMap.set(h.id, h); });
 
         const dlMap = new Map<string, { labId: string; labName: string }>();
-        devicesSnap.docs.forEach((d) => {
-          const data = d.data();
+        filterByCompanyScope(
+          devicesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          currentCompanyId,
+          isSuperAdmin
+        ).forEach((data) => {
           const labId = data.hospitalId || data.hastaneId || '';
           if (labId) {
             const lab = hMap.get(labId);
-            dlMap.set(d.id, { labId, labName: lab?.name || 'Bilinmiyor' });
+            dlMap.set(data.id, { labId, labName: lab?.name || 'Bilinmiyor' });
           }
         });
-        assignmentsSnap.docs.forEach((d) => {
-          const data = d.data();
+        filterByCompanyScope(
+          assignmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          currentCompanyId,
+          isSuperAdmin
+        ).forEach((data) => {
           const labId = data.hastaneId || '';
           if (!labId) return;
           const lab = hMap.get(labId);
           const entry = { labId, labName: lab?.name || 'Bilinmiyor' };
-          if (!dlMap.has(d.id)) dlMap.set(d.id, entry);
+          if (!dlMap.has(data.id)) dlMap.set(data.id, entry);
           if (data.cihazId && !dlMap.has(data.cihazId)) dlMap.set(data.cihazId, entry);
           if (data.deviceId && !dlMap.has(data.deviceId)) dlMap.set(data.deviceId, entry);
         });
         setDeviceLabMap(dlMap);
 
+        // Transfer loglarını şirketin cihazlarına göre filtrele (eski kayıtlarda companyId olmayabilir)
+        const allLogs = transferSnap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id, action: data.action, stokKodu: data.stokKodu || '', stokAdi: data.stokAdi || '',
+            serialNumber: data.serialNumber, deviceId: data.deviceId, deviceName: data.deviceName,
+            createdByUid: data.createdByUid || '', createdByName: data.createdByName || 'Bilinmiyor',
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
+            formType: data.formType,
+            companyId: data.companyId,
+          };
+        });
         setTransferLogs(
-          transferSnap.docs.map((d) => {
-            const data = d.data();
-            return {
-              id: d.id, action: data.action, stokKodu: data.stokKodu || '', stokAdi: data.stokAdi || '',
-              serialNumber: data.serialNumber, deviceId: data.deviceId, deviceName: data.deviceName,
-              createdByUid: data.createdByUid || '', createdByName: data.createdByName || 'Bilinmiyor',
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
-              formType: data.formType,
-            };
-          })
+          isSuperAdmin
+            ? allLogs
+            : allLogs.filter((log) => log.companyId === currentCompanyId || dlMap.has(log.deviceId))
         );
       } catch (error) {
+        logFirestoreIndexHint(error, 'yedek-parca-analizi/fetchData');
         console.error('Yedek parça analizi veri hatası:', error);
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const partSummaries = useMemo(() => {
     const map = new Map<string, PartSummary>();
@@ -198,12 +243,19 @@ export default function YedekParcaAnaliziPage() {
       ]);
 
       let depoStokCount = 0;
-      for (const doc of depoSnap.docs) { depoStokCount += doc.data().quantity || 1; }
+      for (const doc of filterByCompanyScope(
+        depoSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        currentCompanyId,
+        isSuperAdmin
+      )) { depoStokCount += doc.quantity || 1; }
 
       const personnelStokMap = new Map<string, { uid: string; name: string; count: number }>();
       let totalPersonnelStok = 0;
-      for (const doc of personalSnap.docs) {
-        const data = doc.data();
+      for (const data of filterByCompanyScope(
+        personalSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        currentCompanyId,
+        isSuperAdmin
+      )) {
         totalPersonnelStok++;
         const existing = personnelStokMap.get(data.ownerUid);
         if (existing) existing.count++;
@@ -219,11 +271,12 @@ export default function YedekParcaAnaliziPage() {
         changeHistory,
       });
     } catch (error) {
+      logFirestoreIndexHint(error, 'yedek-parca-analizi/selectPart');
       console.error('Parça detay hatası:', error);
     } finally {
       setDetailLoading(false);
     }
-  }, [transferLogs, deviceLabMap]);
+  }, [transferLogs, deviceLabMap, currentCompanyId, isSuperAdmin]);
 
   const formatDate = (date: Date | null) => {
     if (!date) return '-';
