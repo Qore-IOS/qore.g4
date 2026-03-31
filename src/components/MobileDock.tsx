@@ -257,6 +257,8 @@ interface FullScreenMenuProps {
 
 function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
   const router = useRouter();
+  const iconData = useIconMappings();
+  const mobileIcons = iconData?.mappings?.mobile || {};
 
   const handleItemClick = (item: DockItemData) => {
     triggerHaptic();
