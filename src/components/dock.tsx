@@ -926,7 +926,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 isLiquidMode={isLiquidMode}
                 isLiquidHovered={isLiquidMode && activeItemKey === item.key}
                 onRefSet={(el) => setItemRef(item.key, el)}
-                customIcon={iconMappings.dock[item.key]}
+                customIcon={iconMappings?.dock?.[item.key]}
               />
             ))}
           </div>

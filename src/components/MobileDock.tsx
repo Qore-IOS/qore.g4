@@ -338,7 +338,7 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
                     : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff] hover:shadow-[2px_2px_4px_#bebebe,-2px_-2px_4px_#ffffff] active:shadow-[inset_4px_4px_8px_#bebebe,inset_-4px_-4px_8px_#ffffff] text-[#333]"
                 )}
               >
-                {iconMappings.mobile[item.key] ? (
+                {iconMappings?.mobile?.[item.key] ? (
                   <Image
                     src={getIconSrc(iconMappings.mobile[item.key])}
                     alt={item.label}
