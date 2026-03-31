@@ -2,22 +2,46 @@
 'use client';
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, Timestamp } from 'firebase/firestore';
-import type { ProductCode, DepoStokItem, ConsumptionRecord, Currency } from '@/lib/types';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
+import type { ProductCode, Currency } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { LineChart, PieChart, ResponsiveContainer, Line, Pie, Cell, Tooltip, XAxis, YAxis, Legend, BarChart, Bar } from 'recharts';
+import { Badge } from '@/components/ui/badge';
+import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis } from 'recharts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Loader2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isValid } from 'date-fns';
+import {
+  Loader2, ChevronLeft, ChevronRight, TrendingUp, PieChart as PieChartIcon,
+  Wallet, BarChart3, Calendar, ArrowLeft, Package,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { format, eachMonthOfInterval, endOfMonth, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { toDateSafe } from '@/lib/date';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from '@/hooks/use-toast';
 
+// ============================================================================
+// TYPES
+// ============================================================================
 
-const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7f50', '#d0ed57', '#ff8042', '#00C49F'];
+interface SayimSessionItem {
+  stokKodu: string;
+  stokAdi: string;
+  marka: string;
+  stokAdedi: number;
+  cihazUstuAdedi: number;
+}
+
+interface SayimSession {
+  id: string;
+  locationType: 'lab' | 'depot';
+  locationId: string;
+  locationName: string;
+  createdAt: any;
+  createdByUid?: string;
+  createdByName?: string;
+  items: SayimSessionItem[];
+  totalBrands: number;
+  totalProducts: number;
+}
 
 const CURRENCY_SYMBOLS: Record<Currency, string> = {
   EUR: '€',
@@ -26,324 +50,653 @@ const CURRENCY_SYMBOLS: Record<Currency, string> = {
 };
 
 const PRIMARY_API_KEY = 'e69314b14644080788775553';
-const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+const CACHE_TTL = 1000 * 60 * 60;
 
-async function fetchPrimaryRates(): Promise<Record<Currency, number>> {
-  const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/EUR`);
-  if (!res.ok) throw new Error('Primary API fetch failed');
-  const data = await res.json();
-  if (!data.conversion_rates?.USD || !data.conversion_rates?.TRY) {
-      throw new Error('Primary API missing required currency rates');
+const PIE_COLORS = [
+  '#F2994A', '#6FCF97', '#56CCF2', '#BB6BD9', '#F2C94C',
+  '#EB5757', '#2F80ED', '#27AE60', '#E2B93B', '#9B51E0',
+  '#219653', '#F2994A', '#828282', '#4F4F4F', '#2D9CDB',
+];
+
+async function fetchExchangeRates(): Promise<Record<Currency, number>> {
+  const cacheKey = 'exchange_rates_cache';
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < CACHE_TTL) return data;
+    }
+  } catch {}
+
+  try {
+    const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/EUR`);
+    if (!res.ok) throw new Error('Primary failed');
+    const data = await res.json();
+    const rates = { EUR: 1, USD: data.conversion_rates.USD, TRY: data.conversion_rates.TRY };
+    localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
+    return rates;
+  } catch {
+    try {
+      const res = await fetch(`https://api.frankfurter.app/latest?from=EUR&to=USD,TRY`);
+      if (!res.ok) throw new Error('Backup failed');
+      const data = await res.json();
+      const rates = { EUR: 1, USD: data.rates.USD, TRY: data.rates.TRY };
+      localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
+      return rates;
+    } catch {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached).data;
+      return { EUR: 1, USD: 1.08, TRY: 38.5 };
+    }
   }
-  return {
-    EUR: 1,
-    USD: data.conversion_rates.USD,
-    TRY: data.conversion_rates.TRY,
-  };
 }
 
-async function fetchBackupRates(): Promise<Record<Currency, number>> {
-  const res = await fetch(`https://api.frankfurter.app/latest?from=EUR&to=USD,TRY`);
-  if (!res.ok) throw new Error('Backup API fetch failed');
-  const data = await res.json();
-  if (!data.rates?.USD || !data.rates?.TRY) {
-    throw new Error('Backup API missing required currency rates');
-  }
-  return {
-    EUR: 1,
-    USD: data.rates.USD,
-    TRY: data.rates.TRY,
-  };
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+function formatCurrency(value: number, symbol: string): string {
+  return `${symbol}${value.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
+
+function formatCurrencyDetailed(value: number, symbol: string): string {
+  return `${symbol}${value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function getSessionDate(session: SayimSession): Date | null {
+  if (!session.createdAt) return null;
+  if (session.createdAt.toDate) return session.createdAt.toDate();
+  if (session.createdAt.seconds) return new Date(session.createdAt.seconds * 1000);
+  const d = new Date(session.createdAt);
+  return isValid(d) ? d : null;
+}
+
+// ============================================================================
+// PROPS
+// ============================================================================
 
 interface CostDashboardPanelProps {
   productCodes: ProductCode[];
-  depoStok: DepoStokItem[];
-  tuketimKayitlari: ConsumptionRecord[];
+  depoStok: any[];
+  tuketimKayitlari: any[];
 }
 
+// ============================================================================
+// COMPONENT
+// ============================================================================
 
-export default function CostDashboardPanel({ productCodes, depoStok, tuketimKayitlari }: CostDashboardPanelProps) {
+export default function CostDashboardPanel({ productCodes }: CostDashboardPanelProps) {
   const [rates, setRates] = useState<Record<Currency, number> | null>(null);
   const [currency, setCurrency] = useState<Currency>('TRY');
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessions, setSessions] = useState<SayimSession[]>([]);
+  const [detailView, setDetailView] = useState<'closed' | 'brands' | 'products'>('closed');
+  const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const fetchAndCacheRates = useCallback(async () => {
-    const cacheKey = 'exchange_rates_cache';
-    try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-            const { data, timestamp } = JSON.parse(cached);
-            if (Date.now() - timestamp < CACHE_TTL) {
-                setRates(data);
-                return;
-            }
-        }
-    } catch (e) {
-        console.error("Error reading from cache", e);
-    }
-    
-    try {
-        const primaryData = await fetchPrimaryRates();
-        setRates(primaryData);
-        localStorage.setItem(cacheKey, JSON.stringify({ data: primaryData, timestamp: Date.now() }));
-    } catch (primaryError) {
-        console.warn("Primary API failed:", primaryError, "Trying backup.");
-        try {
-            const backupData = await fetchBackupRates();
-            setRates(backupData);
-            localStorage.setItem(cacheKey, JSON.stringify({ data: backupData, timestamp: Date.now() }));
-        } catch (backupError) {
-            console.error("Backup API failed:", backupError);
-            toast({
-                title: 'Döviz Kuru Hatası',
-                description: 'Döviz kurları alınamadı. Lütfen daha sonra tekrar deneyin.',
-                variant: 'destructive'
-            });
-            // Use stale cache if available
-            const cached = localStorage.getItem(cacheKey);
-            if (cached) setRates(JSON.parse(cached).data);
-        }
-    }
-  }, [toast]);
-
-
+  // Fetch exchange rates and sayım sessions
   useEffect(() => {
-    const fetchRates = async () => {
+    const load = async () => {
       setIsLoading(true);
-      await fetchAndCacheRates();
-      setIsLoading(false);
+      try {
+        const [ratesData, sessionsSnap] = await Promise.all([
+          fetchExchangeRates(),
+          getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
+        ]);
+        setRates(ratesData);
+        setSessions(sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession)));
+      } catch (err) {
+        console.error('Error loading cost dashboard:', err);
+        // Still try to get rates even if sessions fail
+        try {
+          const ratesData = await fetchExchangeRates();
+          setRates(ratesData);
+        } catch {}
+      } finally {
+        setIsLoading(false);
+      }
     };
-    fetchRates();
-  }, [fetchAndCacheRates]);
-  
+    load();
+  }, []);
+
   const productMap = useMemo(() => {
     const map = new Map<string, ProductCode>();
     productCodes.forEach(p => map.set(p.stokKodu, p));
     return map;
   }, [productCodes]);
 
-  const getCostInEur = useCallback((itemStokKodu: string) => {
-    if (!rates) return 0;
-    const product = productMap.get(itemStokKodu);
-    if (!product || !product.cost || !product.currency) return 0;
+  // Get cost in selected currency for a product
+  const getProductCost = useCallback((stokKodu: string, quantity: number, cihazUstu: number): { amount: number; currency: Currency } => {
+    if (!rates) return { amount: 0, currency: 'TRY' };
+    const product = productMap.get(stokKodu);
+    if (!product?.cost || !product?.ambalajDegeri) return { amount: 0, currency: (product?.currency || 'TRY') as Currency };
 
-    switch (product.currency) {
-        case 'EUR': return product.cost;
-        case 'USD': return product.cost / (rates.USD || 1);
-        case 'TRY': return product.cost / (rates.TRY || 1);
-        default: return 0;
+    const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
+    const costPerTest = product.cost / product.ambalajDegeri;
+    const totalCostNative = costPerTest * totalTest;
+    const productCurrency = (product.currency || 'TRY') as Currency;
+
+    // Convert to EUR first, then to selected currency
+    let costEUR: number;
+    switch (productCurrency) {
+      case 'EUR': costEUR = totalCostNative; break;
+      case 'USD': costEUR = totalCostNative / (rates.USD || 1); break;
+      case 'TRY': costEUR = totalCostNative / (rates.TRY || 1); break;
+      default: costEUR = totalCostNative / (rates.TRY || 1);
     }
-  }, [rates, productMap]);
 
-  const totalCosts = useMemo(() => {
-    if (!rates) return { EUR: 0, USD: 0, TRY: 0, byProduct: [] };
-    let totalEUR = 0;
-    const costByProduct: Record<string, { name: string; costEUR: number }> = {};
-    const currentStock = depoStok.filter(item => !item.isShipped);
+    return { amount: costEUR * (rates[currency] || 1), currency: productCurrency };
+  }, [rates, productMap, currency]);
 
-    currentStock.forEach(item => {
-      const costEUR = getCostInEur(item.stokKodu);
-      totalEUR += costEUR;
-      if (!costByProduct[item.stokKodu]) {
-        costByProduct[item.stokKodu] = { name: item.stokAdi, costEUR: 0 };
-      }
-      costByProduct[item.stokKodu].costEUR += costEUR;
+  // Latest session (most recent completed sayım)
+  const latestSession = sessions[0] || null;
+
+  // ---- COMPUTED DATA FROM SESSIONS ----
+
+  // Total cost from latest session
+  const totalCost = useMemo(() => {
+    if (!latestSession || !rates) return 0;
+    return latestSession.items.reduce((sum, item) => {
+      return sum + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
+    }, 0);
+  }, [latestSession, rates, getProductCost]);
+
+  // Brand-based costs from latest session
+  const brandCosts = useMemo(() => {
+    if (!latestSession || !rates) return [];
+    const map = new Map<string, number>();
+    latestSession.items.forEach(item => {
+      const brand = item.marka || 'Diğer';
+      const cost = getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
+      map.set(brand, (map.get(brand) || 0) + cost);
     });
+    return Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .filter(d => d.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [latestSession, rates, getProductCost]);
 
-    return {
-      EUR: totalEUR,
-      USD: totalEUR * rates.USD,
-      TRY: totalEUR * rates.TRY,
-      byProduct: Object.entries(costByProduct).map(([code, { name, costEUR }]) => ({
-        code,
-        name,
-        cost: costEUR * (rates?.[currency] ?? 1),
-      })),
-    };
-  }, [depoStok, currency, rates, productMap, getCostInEur]);
+  // Product costs per brand from latest session (for drill-down)
+  const productCostsByBrand = useMemo(() => {
+    if (!latestSession || !rates || !selectedBrand) return [];
+    return latestSession.items
+      .filter(item => (item.marka || 'Diğer') === selectedBrand)
+      .map(item => ({
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        stokAdedi: item.stokAdedi,
+        cihazUstuAdedi: item.cihazUstuAdedi,
+        cost: getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount,
+        nativeCurrency: productMap.get(item.stokKodu)?.currency || 'TRY',
+      }))
+      .filter(p => p.cost > 0)
+      .sort((a, b) => b.cost - a.cost);
+  }, [latestSession, rates, selectedBrand, getProductCost, productMap]);
 
-  const monthlyChartData = useMemo(() => {
-    if (!rates) return [];
+  // Monthly cost trend from sessions
+  const monthlyTrend = useMemo(() => {
+    if (!rates || sessions.length === 0) return [];
     const now = new Date();
-    const lastYear = new Date(now.getFullYear() -1, now.getMonth(), now.getDate());
-    const months = eachMonthOfInterval({ start: lastYear, end: now });
+    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+    const months = eachMonthOfInterval({ start: oneYearAgo, end: now });
 
     return months.map(monthStart => {
-        const monthEnd = endOfMonth(monthStart);
-        const monthConsumptions = tuketimKayitlari.filter(k => {
-            const d = toDateSafe(k.consumptionTimestamp);
-            if (!d || !isValid(d)) return false;
-            return d >= monthStart && d <= monthEnd;
-        });
-
-        const monthCostEUR = monthConsumptions.reduce((sum, k) => sum + getCostInEur(k.stokKodu), 0);
-        return {
-            month: format(monthStart, 'MMM yy', { locale: tr }),
-            cost: monthCostEUR * (rates?.[currency] ?? 1),
-        };
-    });
-  }, [tuketimKayitlari, rates, currency, getCostInEur]);
-
-  const brandPieData = useMemo(() => {
-    if (!rates) return [];
-    const brandMap = new Map<string, number>();
-    const currentStock = depoStok.filter(item => !item.isShipped);
-    currentStock.forEach(item => {
-      const product = productMap.get(item.stokKodu);
-      if (!product?.marka) return;
-      const costEUR = getCostInEur(item.stokKodu);
-      brandMap.set(product.marka, (brandMap.get(product.marka) || 0) + costEUR);
-    });
-    return Array.from(brandMap.entries()).map(([name, value]) => ({ name, value: value * (rates?.[currency] ?? 1) }));
-  }, [depoStok, rates, currency, productMap, getCostInEur]);
-  
-  const labDailyCosts = useMemo(() => {
-      if (!rates) return [];
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const startOfDay = new Date(yesterday.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(yesterday.setHours(23, 59, 59, 999));
-
-      const costs: Record<string, number> = {};
-
-      tuketimKayitlari.forEach(k => {
-          if (!k.consumptionTimestamp || !isValid(new Date(k.consumptionTimestamp))) return;
-          const d = new Date(k.consumptionTimestamp);
-          if (d >= startOfDay && d <= endOfDay && k.laboratoryName) {
-              costs[k.laboratoryName] = (costs[k.laboratoryName] || 0) + getCostInEur(k.stokKodu);
-          }
+      const monthEnd = endOfMonth(monthStart);
+      // Find sessions in this month
+      const monthSessions = sessions.filter(s => {
+        const d = getSessionDate(s);
+        return d && d >= monthStart && d <= monthEnd;
       });
-      return Object.entries(costs).map(([name, costEUR]) => ({
-          name, cost: costEUR * (rates?.[currency] ?? 1)
-      })).sort((a,b) => b.cost - a.cost);
 
-  }, [tuketimKayitlari, rates, currency, getCostInEur]);
-  
-  const quarterlyData = useMemo(() => {
-    if (!rates) return [0,0,0,0];
-    const quarters = [0, 0, 0, 0];
-    tuketimKayitlari.forEach(k => {
-      if (!k.consumptionTimestamp || !isValid(new Date(k.consumptionTimestamp))) return;
-      const d = new Date(k.consumptionTimestamp);
-      const q = Math.floor(d.getMonth() / 3);
-      quarters[q] += getCostInEur(k.stokKodu);
+      // Use latest session in the month for cost calculation
+      const latestInMonth = monthSessions[0]; // already sorted desc
+      let cost = 0;
+      if (latestInMonth) {
+        cost = latestInMonth.items.reduce((sum, item) => {
+          return sum + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
+        }, 0);
+      }
+
+      return {
+        month: format(monthStart, 'MMM yy', { locale: tr }),
+        cost,
+      };
     });
-    return quarters.map(q => q * (rates?.[currency] ?? 1));
-  }, [tuketimKayitlari, rates, currency, getCostInEur]);
+  }, [sessions, rates, getProductCost]);
 
+  // Quarterly costs from sessions
+  const quarterlyData = useMemo(() => {
+    if (!rates || sessions.length === 0) return [0, 0, 0, 0];
+    const currentYear = new Date().getFullYear();
+    const quarters = [0, 0, 0, 0];
 
-  if (isLoading) return <div className="flex items-center justify-center h-screen"><Loader2 className="animate-spin h-10 w-10 text-primary" /></div>;
+    // For each quarter, find sessions and take the latest one per month, then average/sum
+    for (let q = 0; q < 4; q++) {
+      const qStart = new Date(currentYear, q * 3, 1);
+      const qEnd = endOfMonth(new Date(currentYear, q * 3 + 2, 1));
+
+      const qSessions = sessions.filter(s => {
+        const d = getSessionDate(s);
+        return d && d >= qStart && d <= qEnd;
+      });
+
+      // Sum costs of all sessions in this quarter (each session = a snapshot)
+      // Use the latest session per location to avoid double counting
+      const latestByLocation = new Map<string, SayimSession>();
+      qSessions.forEach(s => {
+        const key = `${s.locationType}-${s.locationId}`;
+        if (!latestByLocation.has(key)) latestByLocation.set(key, s);
+      });
+
+      quarters[q] = Array.from(latestByLocation.values()).reduce((sum, session) => {
+        return sum + session.items.reduce((s, item) => {
+          return s + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
+        }, 0);
+      }, 0);
+    }
+
+    return quarters;
+  }, [sessions, rates, getProductCost]);
+
+  // Session count and location stats
+  const stats = useMemo(() => {
+    const brands = new Set<string>();
+    const locations = new Set<string>();
+    if (latestSession) {
+      latestSession.items.forEach(item => {
+        if (item.marka) brands.add(item.marka);
+      });
+      locations.add(latestSession.locationName);
+    }
+    sessions.forEach(s => locations.add(s.locationName));
+    return {
+      sessionCount: sessions.length,
+      brandCount: brands.size,
+      locationCount: locations.size,
+      productCount: latestSession?.items.length || 0,
+    };
+  }, [sessions, latestSession]);
+
+  // ---- RENDER ----
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full w-full items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+      </div>
+    );
+  }
+
+  const sym = CURRENCY_SYMBOLS[currency];
 
   return (
-    <div className="p-4 sm:p-6 space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Top Left */}
-        <Card className="col-span-1 lg:col-span-2 glass-card">
-          <CardHeader>
-            <CardTitle>Toplam Envanter Maliyeti</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-primary mb-4">{CURRENCY_SYMBOLS[currency]} {(totalCosts[currency as keyof Pick<typeof totalCosts, 'EUR' | 'USD' | 'TRY'>] as number).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            <div className="flex gap-2">
-                {(['EUR', 'USD', 'TRY'] as Currency[]).map(cur => (
-                    <Button size="sm" variant={currency === cur ? 'default' : 'outline'} onClick={() => setCurrency(cur)} key={cur}>
-                        {cur}
-                    </Button>
-                ))}
-                 <Button size="sm" variant="secondary" onClick={() => setIsDetailOpen(true)} className="ml-auto">Detaylar</Button>
+    <div className="cihaz-shell min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
+
+        {/* ===== HEADER ===== */}
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+              <BarChart3 className="h-5 w-5 text-[var(--dashboard-accent)]" />
+            </span>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">Maliyet Gözlem</h1>
+              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Sayım verilerine dayalı maliyet analizi</p>
             </div>
-          </CardContent>
-        </Card>
-        
-        {/* Top Right */}
-        <Card className="col-span-1 lg:col-span-3 glass-card">
-            <CardHeader><CardTitle>Aylık Maliyet Trendi</CardTitle></CardHeader>
-            <CardContent className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={monthlyChartData}>
-                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${CURRENCY_SYMBOLS[currency]}${Number(value).toLocaleString('tr-TR')}`} />
-                    <Tooltip contentStyle={{backgroundColor: 'hsl(var(--background)/0.8)', border: '1px solid hsl(var(--border))'}} />
-                    <Line type="monotone" dataKey="cost" stroke="hsl(var(--primary))" strokeWidth={2} dot={{r:4}} activeDot={{r:6}} />
-                    </LineChart>
-                </ResponsiveContainer>
-            </CardContent>
-        </Card>
-        
-        {/* Middle Left */}
-        <Card className="col-span-1 lg:col-span-2 glass-card">
-            <CardHeader><CardTitle>Marka Bazlı Maliyet Dağılımı</CardTitle></CardHeader>
-            <CardContent className="h-[250px]">
-                 <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                    <Pie data={brandPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                        {brandPieData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(value) => `${CURRENCY_SYMBOLS[currency]}${Number(value).toLocaleString('tr-TR', {minimumFractionDigits: 2})}`} />
-                    <Legend />
-                    </PieChart>
-                </ResponsiveContainer>
-            </CardContent>
-        </Card>
-        
-        {/* Middle Right */}
-        <Card className="col-span-1 lg:col-span-3 glass-card">
-            <CardHeader><CardTitle>Laboratuvar Günlük Tüketim Maliyetleri (Dün)</CardTitle></CardHeader>
-            <CardContent>
-                <ScrollArea className="h-[250px]">
-                    <ul className="space-y-2 pr-4">
-                        {labDailyCosts.length > 0 ? labDailyCosts.map(lab => (
-                            <li key={lab.name} className="flex justify-between items-center text-sm p-2 rounded-md bg-muted/30">
-                                <span className="font-medium">{lab.name}</span>
-                                <span className="font-semibold">{CURRENCY_SYMBOLS[currency]} {lab.cost.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span>
-                            </li>
-                        )) : <p className="text-muted-foreground text-center pt-8">Dün için tüketim verisi bulunamadı.</p>}
-                    </ul>
-                </ScrollArea>
-            </CardContent>
-        </Card>
-        
-        {/* Bottom */}
-        <div className="col-span-1 lg:col-span-5 glass-card p-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {quarterlyData.map((val, i) => (
-                <Card key={i} className="text-center bg-background/50">
-                    <CardHeader className="pb-2"><CardTitle>Çeyrek {i + 1}</CardTitle></CardHeader>
-                    <CardContent className="text-2xl font-bold text-primary">
-                        {CURRENCY_SYMBOLS[currency]} {val.toLocaleString('tr-TR', {minimumFractionDigits: 2})}
-                    </CardContent>
-                </Card>
+          </div>
+
+          {/* Currency switcher */}
+          <div className="flex items-center gap-1.5">
+            {(['EUR', 'USD', 'TRY'] as Currency[]).map(cur => (
+              <button
+                key={cur}
+                onClick={() => setCurrency(cur)}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200',
+                  currency === cur
+                    ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
+                    : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+                )}
+              >
+                {CURRENCY_SYMBOLS[cur]} {cur}
+              </button>
             ))}
+          </div>
+        </div>
+
+        {/* ===== STATS ROW ===== */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {[
+            { label: 'Toplam Sayım', value: stats.sessionCount, icon: ClipboardIcon },
+            { label: 'Marka', value: stats.brandCount, icon: Package },
+            { label: 'Lokasyon', value: stats.locationCount, icon: MapPinIcon },
+            { label: 'Ürün', value: stats.productCount, icon: Package },
+          ].map((s, i) => (
+            <div key={i} className="cihaz-pressed px-4 py-3 flex items-center gap-3">
+              <span className="text-lg font-bold text-[var(--dashboard-text)]">{s.value}</span>
+              <span className="text-[11px] text-[var(--dashboard-muted)]">{s.label}</span>
             </div>
+          ))}
+        </div>
+
+        {/* ===== MAIN GRID ===== */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+
+          {/* ---- TOP LEFT: Total Cost ---- */}
+          <div className="lg:col-span-2 cihaz-card-strong p-5 sm:p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Wallet className="w-5 h-5 text-[var(--dashboard-accent)]" />
+              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Toplam Envanter Maliyeti</h2>
+            </div>
+            <div className="text-3xl sm:text-4xl font-bold text-[var(--dashboard-accent)] mb-3">
+              {formatCurrency(totalCost, sym)}
+            </div>
+            {latestSession && (
+              <p className="text-[11px] text-[var(--dashboard-muted)] mb-4">
+                Son sayım: {latestSession.locationName}
+                {getSessionDate(latestSession) && ` · ${format(getSessionDate(latestSession)!, 'dd MMM yyyy', { locale: tr })}`}
+              </p>
+            )}
+            <Button
+              size="sm"
+              onClick={() => setDetailView('brands')}
+              className="h-9 text-xs rounded-xl bg-[var(--dashboard-accent)] hover:bg-[var(--dashboard-accent)]/90 text-white"
+            >
+              Detaylar
+              <ChevronRight className="w-3.5 h-3.5 ml-1" />
+            </Button>
+          </div>
+
+          {/* ---- TOP RIGHT: Monthly Trend ---- */}
+          <div className="lg:col-span-3 cihaz-card-strong p-5 sm:p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp className="w-5 h-5 text-[var(--dashboard-accent)]" />
+              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Aylık Maliyet Trendi</h2>
+            </div>
+            <div className="h-[220px]">
+              {monthlyTrend.some(m => m.cost > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={monthlyTrend}>
+                    <XAxis
+                      dataKey="month"
+                      stroke="var(--dashboard-muted)"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      stroke="var(--dashboard-muted)"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v) => `${sym}${(v / 1000).toFixed(0)}k`}
+                      width={55}
+                    />
+                    <RechartsTooltip
+                      contentStyle={{
+                        background: 'var(--dashboard-surface)',
+                        border: '1px solid var(--dashboard-stroke)',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        boxShadow: 'var(--dashboard-raised-soft)',
+                      }}
+                      formatter={(value: number) => [formatCurrencyDetailed(value, sym), 'Maliyet']}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="cost"
+                      stroke="var(--dashboard-accent)"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: 'var(--dashboard-accent)', stroke: 'var(--dashboard-surface)', strokeWidth: 2 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
+                  Henüz sayım verisi bulunmuyor.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ---- MIDDLE LEFT: Pie Chart ---- */}
+          <div className="lg:col-span-2 cihaz-card-strong p-5 sm:p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <PieChartIcon className="w-5 h-5 text-[var(--dashboard-accent)]" />
+              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Marka Bazlı Dağılım</h2>
+            </div>
+            <div className="h-[200px]">
+              {brandCosts.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={brandCosts}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={75}
+                      paddingAngle={2}
+                      strokeWidth={0}
+                    >
+                      {brandCosts.map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip
+                      contentStyle={{
+                        background: 'var(--dashboard-surface)',
+                        border: '1px solid var(--dashboard-stroke)',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        boxShadow: 'var(--dashboard-raised-soft)',
+                      }}
+                      formatter={(value: number) => [formatCurrencyDetailed(value, sym), '']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
+                  Veri yok
+                </div>
+              )}
+            </div>
+            {/* Legend */}
+            {brandCosts.length > 0 && (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3">
+                {brandCosts.slice(0, 8).map((b, i) => (
+                  <div key={b.name} className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <span className="text-[10px] text-[var(--dashboard-muted)] truncate max-w-[80px]">{b.name}</span>
+                  </div>
+                ))}
+                {brandCosts.length > 8 && (
+                  <span className="text-[10px] text-[var(--dashboard-muted)]">+{brandCosts.length - 8} diğer</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ---- MIDDLE RIGHT: Session List ---- */}
+          <div className="lg:col-span-3 cihaz-card-strong p-5 sm:p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Calendar className="w-5 h-5 text-[var(--dashboard-accent)]" />
+              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Son Sayımlar</h2>
+            </div>
+            <ScrollArea className="h-[240px]">
+              {sessions.length > 0 ? (
+                <div className="space-y-2 pr-2">
+                  {sessions.slice(0, 10).map(session => {
+                    const date = getSessionDate(session);
+                    const sessionCost = session.items.reduce((sum, item) => {
+                      return sum + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
+                    }, 0);
+                    return (
+                      <div
+                        key={session.id}
+                        className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50 hover:bg-[var(--dashboard-surface-2)] transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">
+                            {session.locationName}
+                          </p>
+                          <p className="text-[11px] text-[var(--dashboard-muted)]">
+                            {date ? format(date, 'dd MMM yyyy HH:mm', { locale: tr }) : '—'}
+                            {' · '}{session.items.length} ürün
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold text-[var(--dashboard-accent)] shrink-0 ml-3">
+                          {formatCurrency(sessionCost, sym)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
+                  Henüz sayım yapılmamış.
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+
+          {/* ---- BOTTOM: Quarterly Cards ---- */}
+          <div className="lg:col-span-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {quarterlyData.map((val, i) => (
+              <div key={i} className="cihaz-card p-4 sm:p-5 text-center">
+                <p className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-2">
+                  Çeyrek {i + 1}
+                </p>
+                <p className={cn(
+                  'text-xl sm:text-2xl font-bold',
+                  val > 0 ? 'text-[var(--dashboard-accent)]' : 'text-[var(--dashboard-muted)]'
+                )}>
+                  {formatCurrency(val, sym)}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Ürün Bazlı Maliyet Dağılımı</DialogTitle></DialogHeader>
-          <ScrollArea className="h-[400px] mt-4 border rounded-md">
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Ürün</TableHead>
-                        <TableHead className="text-right">Maliyet</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {totalCosts.byProduct.filter(p => p.cost > 0).sort((a,b) => b.cost - a.cost).map(p => (
-                        <TableRow key={p.code}>
-                            <TableCell className="font-medium">{p.name}</TableCell>
-                            <TableCell className="text-right font-mono">{CURRENCY_SYMBOLS[currency]} {p.cost.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</TableCell>
-                        </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
+      {/* ===== DETAIL DIALOG: Brand → Product drill-down ===== */}
+      <Dialog open={detailView !== 'closed'} onOpenChange={(open) => {
+        if (!open) { setDetailView('closed'); setSelectedBrand(null); }
+      }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col cihaz-card-strong !rounded-3xl !p-0 !gap-0 border-0">
+          {/* Header */}
+          <div className="px-6 pt-6 pb-4 border-b border-[var(--dashboard-stroke)]">
+            <div className="flex items-center gap-3">
+              {detailView === 'products' && (
+                <button
+                  onClick={() => { setDetailView('brands'); setSelectedBrand(null); }}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+              )}
+              <div>
+                <DialogTitle className="text-base font-bold text-[var(--dashboard-text)]">
+                  {detailView === 'brands' ? 'Marka Bazlı Maliyet' : selectedBrand}
+                </DialogTitle>
+                <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">
+                  {detailView === 'brands'
+                    ? `${brandCosts.length} marka · Toplam ${formatCurrency(totalCost, sym)}`
+                    : `${productCostsByBrand.length} ürün`
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Content */}
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-4 space-y-2">
+              {detailView === 'brands' ? (
+                brandCosts.map((brand, i) => (
+                  <button
+                    key={brand.name}
+                    onClick={() => { setSelectedBrand(brand.name); setDetailView('products'); }}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-[var(--dashboard-surface-2)]/50 hover:bg-[var(--dashboard-surface-2)] transition-all duration-200 text-left group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className="w-3 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                      />
+                      <span className="text-sm font-medium text-[var(--dashboard-text)] truncate">{brand.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-sm font-semibold text-[var(--dashboard-accent)]">
+                        {formatCurrency(brand.value, sym)}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-[var(--dashboard-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </button>
+                ))
+              ) : (
+                productCostsByBrand.map(product => (
+                  <div
+                    key={product.stokKodu}
+                    className="px-4 py-3 rounded-2xl bg-[var(--dashboard-surface-2)]/50"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[var(--dashboard-text)] leading-snug">
+                          {product.stokAdi}
+                        </p>
+                        <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
+                          {product.stokKodu}
+                          {' · '}Stok: {product.stokAdedi}
+                          {product.cihazUstuAdedi > 0 && ` · Cihaz Üstü: ${product.cihazUstuAdedi}`}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-sm font-semibold text-[var(--dashboard-accent)]">
+                          {formatCurrencyDetailed(product.cost, sym)}
+                        </span>
+                        {product.nativeCurrency !== currency && (
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">
+                            {CURRENCY_SYMBOLS[product.nativeCurrency as Currency]}{product.nativeCurrency}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {((detailView === 'brands' && brandCosts.length === 0) ||
+                (detailView === 'products' && productCostsByBrand.length === 0)) && (
+                <div className="text-center py-12 text-sm text-[var(--dashboard-muted)]">
+                  Veri bulunamadı.
+                </div>
+              )}
+            </div>
           </ScrollArea>
+
+          {/* Footer */}
+          <div className="px-6 py-4 border-t border-[var(--dashboard-stroke)]">
+            <Button
+              variant="outline"
+              onClick={() => { setDetailView('closed'); setSelectedBrand(null); }}
+              className="w-full h-10 rounded-xl"
+            >
+              Kapat
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
   );
+}
+
+// Mini icon components to avoid extra lucide imports
+function ClipboardIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>;
+}
+function MapPinIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>;
 }

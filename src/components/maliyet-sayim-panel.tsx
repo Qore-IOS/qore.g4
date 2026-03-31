@@ -2,7 +2,7 @@
 'use client';
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital, Depot, ProductCode, MinMaxRule } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -39,6 +39,7 @@ import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import useHidScanner from '@/hooks/useHidScanner';
 import { parseAndResolveBarcode } from '@/lib/barcode';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 // ============================================================================
 // TYPES
@@ -543,8 +544,10 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const voiceProcessingRef = useRef(false);
   const activeBrandRef = useRef<string | null>(null);
 
-  // Completion modal
+  // Completion modal & saving
   const [showFinishModal, setShowFinishModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
 
   const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -739,6 +742,42 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       setActiveBrand(nextIncomplete.brand);
     }
   }, [brandProgressList, activeBrand]);
+
+  const saveSessionToFirestore = useCallback(async () => {
+    if (!locationType || !selectedLocationId || isSaving) return;
+    setIsSaving(true);
+    try {
+      const entries = Object.values(countData) as ProductCountEntry[];
+      const items = entries
+        .filter(entry => entry.counted)
+        .map(entry => ({
+          stokKodu: entry.stokKodu,
+          stokAdi: entry.stokAdi,
+          marka: entry.marka,
+          stokAdedi: parseInt(entry.stokAdedi) || 0,
+          cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
+        }));
+
+      await addDoc(collection(db, 'maliyetSayimSessions'), {
+        locationType,
+        locationId: selectedLocationId,
+        locationName,
+        createdAt: serverTimestamp(),
+        createdByUid: currentUserProfile?.uid ?? '',
+        createdByName: currentUserProfile?.displayName ?? '',
+        items,
+        totalBrands,
+        totalProducts: items.length,
+      });
+
+      toast({ title: 'Sayım kaydedildi', description: `${items.length} ürün ${locationName} için kaydedildi.` });
+    } catch (err) {
+      console.error('Error saving session:', err);
+      toast({ title: 'Hata', description: 'Sayım kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast]);
 
   const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
     if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
@@ -1484,10 +1523,11 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => {/* TODO: save logic */}}
+                      onClick={saveSessionToFirestore}
+                      disabled={isSaving}
                       className="h-9 text-xs"
                     >
-                      <Save className="w-3.5 h-3.5 mr-1" />
+                      {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1" />}
                       Kaydet
                     </Button>
 
@@ -1556,11 +1596,14 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
             <Button variant="outline" onClick={() => setShowFinishModal(false)}>
               Düzenlemeye Dön
             </Button>
-            <Button onClick={() => {
-              // TODO: Save count session to Firestore
-              setShowFinishModal(false);
-            }}>
-              <CheckCircle2 className="w-4 h-4 mr-1.5" />
+            <Button
+              onClick={async () => {
+                await saveSessionToFirestore();
+                setShowFinishModal(false);
+              }}
+              disabled={isSaving}
+            >
+              {isSaving ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-1.5" />}
               Sayımı Kaydet
             </Button>
           </DialogFooter>
