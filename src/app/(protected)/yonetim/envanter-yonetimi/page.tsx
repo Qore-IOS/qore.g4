@@ -1,27 +1,22 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef, ChangeEvent } from 'react';
 import Link from 'next/link';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   PlusCircle, Computer, Server, Barcode, Printer, BookCopy, Loader2, Edit3, Trash2, MapPin, Upload, Download,
-  Fan, Beaker, FlaskConical, Archive, QrCode, Car
+  Fan, Beaker, FlaskConical, Archive, QrCode, Car, Search, ChevronLeft, Package, Grid3x3, LayoutList
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, doc, setDoc, deleteDoc, orderBy, query, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import BackButton from '@/components/BackButton';
 import { readExcelDataSmart, exportDataToExcel } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import type { Asset, Depot, Hospital } from '@/lib/types';
 import LabelPrinter from '@/components/yonetim/LabelPrinter';
-
+import { cn } from '@/lib/utils';
 
 const iconMap: Record<string, React.ElementType> = {
   bilgisayar: Computer,
@@ -38,7 +33,7 @@ const iconMap: Record<string, React.ElementType> = {
   cihaz: Beaker,
   mikroskop: FlaskConical,
   default: BookCopy,
-  hastane: MapPin, 
+  hastane: MapPin,
   depo: MapPin,
 };
 
@@ -58,10 +53,9 @@ interface AssetCategory {
 }
 
 interface Location {
-    id: string;
-    name: string;
+  id: string;
+  name: string;
 }
-
 
 export default function EnvanterYonetimiPage() {
   const { toast } = useToast();
@@ -73,33 +67,33 @@ export default function EnvanterYonetimiPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Partial<AssetCategory>>({});
   const [isLabelModalOpen, setIsLabelModalOpen] = useState(false);
-  
+  const [activeTab, setActiveTab] = useState<'category' | 'location'>('category');
+  const [searchQuery, setSearchQuery] = useState('');
+
   const assetFileInputRef = useRef<HTMLInputElement>(null);
   const categoryFileInputRef = useRef<HTMLInputElement>(null);
-
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-        const [categoriesSnap, assetsSnap, hospitalsSnap, depotsSnap, vehiclesSnap] = await Promise.all([
-            getDocs(query(collection(db, 'assetCategories'), orderBy('name'))),
-            getDocs(collection(db, 'assets')),
-            getDocs(collection(db, 'hospitals')),
-            getDocs(collection(db, 'depots')),
-            getDocs(collection(db, 'vehicles')),
-        ]);
-        setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)));
-        setAssets(assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-        setVehicleCount(vehiclesSnap.size);
+      const [categoriesSnap, assetsSnap, hospitalsSnap, depotsSnap, vehiclesSnap] = await Promise.all([
+        getDocs(query(collection(db, 'assetCategories'), orderBy('name'))),
+        getDocs(collection(db, 'assets')),
+        getDocs(collection(db, 'hospitals')),
+        getDocs(collection(db, 'depots')),
+        getDocs(collection(db, 'vehicles')),
+      ]);
+      setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)));
+      setAssets(assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
+      setVehicleCount(vehiclesSnap.size);
 
-        const hospitalLocations = hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string }));
-        const depotLocations = depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string }));
-        setLocations([...hospitalLocations, ...depotLocations].sort((a, b) => a.name.localeCompare(b.name)));
-
+      const hospitalLocations = hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string }));
+      const depotLocations = depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string }));
+      setLocations([...hospitalLocations, ...depotLocations].sort((a, b) => a.name.localeCompare(b.name)));
     } catch (e) {
-        toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   }, [toast]);
 
@@ -114,22 +108,26 @@ export default function EnvanterYonetimiPage() {
     }
     return counts;
   }, [assets]);
-  
+
   const assetCountsByLocation = React.useMemo(() => {
     const counts: Record<string, number> = {};
     for (const asset of assets) {
-      if(asset.konum) {
+      if (asset.konum) {
         counts[asset.konum] = (counts[asset.konum] || 0) + 1;
       }
     }
     return counts;
   }, [assets]);
 
+  const totalAssets = assets.length;
+  const totalCategories = categories.length;
+  const totalLocations = locations.length;
+
   const handleOpenModal = (category?: AssetCategory) => {
     setEditingCategory(category || {});
     setIsModalOpen(true);
   };
-  
+
   const handleSaveCategory = async () => {
     if (!editingCategory.name) {
       toast({ title: 'Hata', description: 'Kategori adı boş olamaz.', variant: 'destructive' });
@@ -142,27 +140,27 @@ export default function EnvanterYonetimiPage() {
       } else {
         await addDoc(collection(db, 'assetCategories'), data);
       }
-      toast({ title: 'Başarılı', description: 'Kategori kaydedildi.' });
+      toast({ title: 'Basarili', description: 'Kategori kaydedildi.' });
       setIsModalOpen(false);
       fetchData();
-    } catch(e) {
-      toast({ title: 'Hata', description: 'Kayıt sırasında bir hata oluştu.', variant: 'destructive' });
+    } catch (e) {
+      toast({ title: 'Hata', description: 'Kayit sirasinda bir hata olustu.', variant: 'destructive' });
     }
   };
-  
+
   const handleDeleteCategory = async (categoryId: string) => {
     setLoading(true);
     try {
-        await deleteDoc(doc(db, 'assetCategories', categoryId));
-        toast({ title: 'Silindi', description: 'Kategori silindi.', variant: 'destructive' });
-        fetchData();
+      await deleteDoc(doc(db, 'assetCategories', categoryId));
+      toast({ title: 'Silindi', description: 'Kategori silindi.', variant: 'destructive' });
+      fetchData();
     } catch (e) {
-        toast({ title: 'Hata', description: 'Kategori silinemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', description: 'Kategori silinemedi.', variant: 'destructive' });
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
-  
+
   const handleDownloadAssetTemplate = () => {
     const workbook = XLSX.utils.book_new();
     const templateSheet = XLSX.utils.json_to_sheet([
@@ -171,16 +169,16 @@ export default function EnvanterYonetimiPage() {
     XLSX.utils.book_append_sheet(workbook, templateSheet, 'Envanter Şablonu');
 
     const refs = {
-        Kategoriler: categories.map(c => c.name),
-        Konumlar: locations.map(l => l.name)
+      Kategoriler: categories.map(c => c.name),
+      Konumlar: locations.map(l => l.name)
     };
     const refData: any[] = [];
     const maxLen = Math.max(refs.Kategoriler.length, refs.Konumlar.length);
-    for(let i=0; i < maxLen; i++) {
-        refData.push({
-            'Kategoriler': refs.Kategoriler[i] || '',
-            'Konumlar': refs.Konumlar[i] || ''
-        });
+    for (let i = 0; i < maxLen; i++) {
+      refData.push({
+        'Kategoriler': refs.Kategoriler[i] || '',
+        'Konumlar': refs.Konumlar[i] || ''
+      });
     }
     const refSheet = XLSX.utils.json_to_sheet(refData);
     XLSX.utils.book_append_sheet(workbook, refSheet, 'Referans Tanımlar');
@@ -192,7 +190,7 @@ export default function EnvanterYonetimiPage() {
     const templateData = [{ 'Kategori Adı': '' }];
     exportDataToExcel(templateData, 'Kategori_Giris_Sablonu', 'Kategoriler', toast);
   };
-  
+
   const handleAssetImport = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -200,18 +198,18 @@ export default function EnvanterYonetimiPage() {
     try {
       const data = await readExcelDataSmart(file, 'product', toast);
       if (!data || data.length === 0) {
-        toast({ title: 'Boş Dosya', description: 'Excel dosyasında veri bulunamadı.', variant: 'default' });
+        toast({ title: 'Bos Dosya', description: 'Excel dosyasinda veri bulunamadi.', variant: 'default' });
         setLoading(false);
         return;
       }
-      
+
       const batch = writeBatch(db);
       let newCount = 0, updatedCount = 0;
 
       for (const row of data) {
         const demirbasNo = String(row['Demirbaş No'] || row['demirbasno'] || '').trim();
         if (!demirbasNo) continue;
-        
+
         const assetData: Partial<Asset> = {
           category: String(row['Kategori'] || row['kategori'] || '').trim(),
           demirbasNo,
@@ -225,7 +223,7 @@ export default function EnvanterYonetimiPage() {
           aciklama: String(row['Açıklama'] || row['aciklama'] || '').trim(),
           manuelKonum: locations.some(l => l.name === String(row['Konum'] || '').trim()) ? undefined : String(row['Konum'] || '').trim(),
         };
-        
+
         const existingAsset = assets.find(a => a.demirbasNo === demirbasNo);
 
         if (existingAsset) {
@@ -236,244 +234,344 @@ export default function EnvanterYonetimiPage() {
           newCount++;
         }
       }
-      
+
       if (newCount > 0 || updatedCount > 0) {
         await batch.commit();
       }
-      toast({ title: 'İçe Aktarma Başarılı', description: `${newCount} yeni kayıt eklendi, ${updatedCount} kayıt güncellendi.` });
+      toast({ title: 'Ice Aktarma Basarili', description: `${newCount} yeni kayit eklendi, ${updatedCount} kayit guncellendi.` });
       fetchData();
-    } catch(err) {
-      toast({ title: 'Hata', description: 'Excel işlenirken bir sorun oluştu.', variant: 'destructive' });
+    } catch (err) {
+      toast({ title: 'Hata', description: 'Excel islenirken bir sorun olustu.', variant: 'destructive' });
     } finally {
       setLoading(false);
       if (e.target) e.target.value = '';
     }
   };
-  
+
   const handleCategoryImport = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setLoading(true);
     try {
-        const data = await readExcelDataSmart(file, 'product', toast);
-        const existingCategoryNames = new Set(categories.map(c => c.name.toLowerCase()));
-        const batch = writeBatch(db);
-        let newCount = 0;
-        
-        for (const row of data) {
-            const categoryName = String(row['Kategori Adı'] || Object.values(row)[0] || '').trim();
-            if (categoryName && !existingCategoryNames.has(categoryName.toLowerCase())) {
-                const newDocRef = doc(collection(db, 'assetCategories'));
-                batch.set(newDocRef, { name: categoryName });
-                existingCategoryNames.add(categoryName.toLowerCase());
-                newCount++;
-            }
+      const data = await readExcelDataSmart(file, 'product', toast);
+      const existingCategoryNames = new Set(categories.map(c => c.name.toLowerCase()));
+      const batch = writeBatch(db);
+      let newCount = 0;
+
+      for (const row of data) {
+        const categoryName = String(row['Kategori Adı'] || Object.values(row)[0] || '').trim();
+        if (categoryName && !existingCategoryNames.has(categoryName.toLowerCase())) {
+          const newDocRef = doc(collection(db, 'assetCategories'));
+          batch.set(newDocRef, { name: categoryName });
+          existingCategoryNames.add(categoryName.toLowerCase());
+          newCount++;
         }
-        
-        if (newCount > 0) {
-            await batch.commit();
-            toast({ title: 'Başarılı', description: `${newCount} yeni kategori eklendi.` });
-            fetchData();
-        } else {
-            toast({ title: 'Değişiklik Yok', description: 'Excel dosyasında yeni bir kategori bulunamadı.', variant: 'default' });
-        }
-    } catch(err) {
-        toast({ title: 'Hata', description: 'Kategori Excel\'i işlenirken bir sorun oluştu.', variant: 'destructive' });
+      }
+
+      if (newCount > 0) {
+        await batch.commit();
+        toast({ title: 'Basarili', description: `${newCount} yeni kategori eklendi.` });
+        fetchData();
+      } else {
+        toast({ title: 'Degisiklik Yok', description: 'Excel dosyasinda yeni bir kategori bulunamadi.', variant: 'default' });
+      }
+    } catch (err) {
+      toast({ title: 'Hata', description: 'Kategori Excel\'i islenirken bir sorun olustu.', variant: 'destructive' });
     } finally {
-        setLoading(false);
-        if (e.target) e.target.value = '';
+      setLoading(false);
+      if (e.target) e.target.value = '';
     }
   };
+
+  // Filter items by search
+  const filteredCategories = categories.filter(c =>
+    c.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  const filteredLocations = locations.filter(l =>
+    l.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <>
       <input type="file" ref={assetFileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleAssetImport} />
       <input type="file" ref={categoryFileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleCategoryImport} />
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <BackButton fallback="/yonetim" />
-          <div className="flex items-center gap-2">
-            <Button onClick={() => handleOpenModal()} size="sm" disabled={loading}>
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Yeni Kategori
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsLabelModalOpen(true)}
-              title="Etiket Yazdır"
-            >
-              <QrCode className="w-4 h-4 mr-2" />
-              Etiket Yazdır
-            </Button>
+
+      <div className="cihaz-shell min-h-screen">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
+
+          {/* ===== HEADER ===== */}
+          <div className="flex items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <Link
+                href="/yonetim"
+                className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </Link>
+              <div>
+                <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">Envanter Yonetimi</h1>
+                <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Demirbaş ve varlık takibi</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsLabelModalOpen(true)}
+                className="h-9 px-3 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors flex items-center gap-1.5"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Etiket Yazdir</span>
+              </button>
+              <button
+                onClick={() => handleOpenModal()}
+                disabled={loading}
+                className="h-9 px-3 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                Yeni Kategori
+              </button>
+            </div>
+          </div>
+
+          {/* ===== STATS ROW ===== */}
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            {[
+              { label: 'Toplam Varlik', value: totalAssets + vehicleCount },
+              { label: 'Kategori', value: totalCategories + 1 },
+              { label: 'Konum', value: totalLocations },
+            ].map((s, i) => (
+              <div key={i} className="cihaz-pressed px-4 py-3 flex items-center gap-3">
+                <span className="text-lg font-bold text-[var(--dashboard-text)]">{s.value}</span>
+                <span className="text-[11px] text-[var(--dashboard-muted)]">{s.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* ===== BULK OPERATIONS ===== */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+            <div className="cihaz-card p-4">
+              <p className="text-xs font-semibold text-[var(--dashboard-text)] mb-3 uppercase tracking-wider">Envanter Toplu Islemleri</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => assetFileInputRef.current?.click()}
+                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5" /> Yukle
+                </button>
+                <button
+                  onClick={handleDownloadAssetTemplate}
+                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" /> Sablon
+                </button>
+              </div>
+            </div>
+            <div className="cihaz-card p-4">
+              <p className="text-xs font-semibold text-[var(--dashboard-text)] mb-3 uppercase tracking-wider">Kategori Toplu Islemleri</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => categoryFileInputRef.current?.click()}
+                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5" /> Yukle
+                </button>
+                <button
+                  onClick={handleDownloadCategoryTemplate}
+                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" /> Sablon
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ===== SEARCH + TAB SWITCHER ===== */}
+          <div className="cihaz-card-strong p-5 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5">
+              {/* Tab switcher */}
+              <div className="flex items-center gap-1.5">
+                {([
+                  { key: 'category' as const, label: 'Kategori', icon: Grid3x3 },
+                  { key: 'location' as const, label: 'Konum', icon: LayoutList },
+                ]).map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
+                    className={cn(
+                      'px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center gap-1.5',
+                      activeTab === tab.key
+                        ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
+                        : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+                    )}
+                  >
+                    <tab.icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search */}
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--dashboard-muted)]" />
+                <input
+                  type="text"
+                  placeholder={activeTab === 'category' ? 'Kategori ara...' : 'Konum ara...'}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-9 pl-9 pr-3 rounded-xl text-sm bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] outline-none focus:ring-2 focus:ring-[var(--dashboard-accent)]/30"
+                />
+              </div>
+            </div>
+
+            {/* ===== CONTENT ===== */}
+            {loading ? (
+              <div className="flex justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+              </div>
+            ) : activeTab === 'category' ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {/* Araclar - special card */}
+                <Link href="/yonetim/envanter-yonetimi/araclar" className="block">
+                  <div className="cihaz-action-tile relative p-5 flex flex-col items-center text-center min-h-[130px] justify-center">
+                    <div className="w-11 h-11 rounded-2xl bg-[var(--dashboard-accent)]/10 flex items-center justify-center mb-3">
+                      <Car className="w-5 h-5 text-[var(--dashboard-accent)]" />
+                    </div>
+                    <p className="text-sm font-semibold text-[var(--dashboard-text)] leading-tight">Araclar</p>
+                    <span className="absolute top-2.5 right-2.5 min-w-[22px] h-[22px] rounded-full bg-[var(--dashboard-accent)] text-white text-[10px] font-bold flex items-center justify-center px-1.5">
+                      {vehicleCount}
+                    </span>
+                  </div>
+                </Link>
+
+                {filteredCategories.map((category) => {
+                  const Icon = getIconForCategory(category.name);
+                  const count = assetCountsByCategory[category.name] || 0;
+                  return (
+                    <div key={category.id} className="group relative">
+                      <Link href={`/yonetim/envanter-yonetimi/${encodeURIComponent(category.name)}`} className="block">
+                        <div className="cihaz-action-tile relative p-5 flex flex-col items-center text-center min-h-[130px] justify-center">
+                          <div className="w-11 h-11 rounded-2xl bg-[var(--dashboard-surface-2)] flex items-center justify-center mb-3">
+                            <Icon className="w-5 h-5 text-[var(--dashboard-muted)]" />
+                          </div>
+                          <p className="text-sm font-semibold text-[var(--dashboard-text)] leading-tight line-clamp-2">{category.name}</p>
+                          <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">{count} urun</p>
+                          <span className="absolute top-2.5 right-2.5 min-w-[22px] h-[22px] rounded-full bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)] text-[10px] font-bold flex items-center justify-center px-1.5 shadow-sm">
+                            {count}
+                          </span>
+                        </div>
+                      </Link>
+                      {/* Edit / Delete on hover */}
+                      <div className="absolute top-2 left-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <button
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenModal(category); }}
+                          className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface)] shadow-sm flex items-center justify-center text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <button
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface)] shadow-sm flex items-center justify-center text-red-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                &quot;{category.name}&quot; kategorisini silmek, iliskili tum envanter kalemlerini silmez, sadece kategoriyi kaldirir. Devam etmek istiyor musunuz?
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Iptal</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDeleteCategory(category.id)} className="bg-destructive hover:bg-destructive/90">
+                                Evet, Sil
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredCategories.length === 0 && !loading && (
+                  <div className="col-span-full text-center py-12 text-sm text-[var(--dashboard-muted)]">
+                    {searchQuery ? 'Aramayla eslesen kategori bulunamadi.' : 'Henuz kategori olusturulmadi.'}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {filteredLocations.map((location) => {
+                  const count = assetCountsByLocation[location.name] || 0;
+                  return (
+                    <Link key={location.id} href={`/yonetim/envanter-yonetimi/konum/${encodeURIComponent(location.name)}`} className="block">
+                      <div className="cihaz-action-tile relative p-5 flex flex-col items-center text-center min-h-[130px] justify-center">
+                        <div className="w-11 h-11 rounded-2xl bg-[var(--dashboard-surface-2)] flex items-center justify-center mb-3">
+                          <MapPin className="w-5 h-5 text-[var(--dashboard-muted)]" />
+                        </div>
+                        <p className="text-sm font-semibold text-[var(--dashboard-text)] leading-tight line-clamp-2">{location.name}</p>
+                        <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">{count} varlik</p>
+                        <span className="absolute top-2.5 right-2.5 min-w-[22px] h-[22px] rounded-full bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)] text-[10px] font-bold flex items-center justify-center px-1.5 shadow-sm">
+                          {count}
+                        </span>
+                      </div>
+                    </Link>
+                  );
+                })}
+
+                {filteredLocations.length === 0 && !loading && (
+                  <div className="col-span-full text-center py-12 text-sm text-[var(--dashboard-muted)]">
+                    {searchQuery ? 'Aramayla eslesen konum bulunamadi.' : 'Konum bulunamadi.'}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Envanter Toplu İşlemleri</CardTitle>
-                </CardHeader>
-                <CardContent className="flex items-center gap-2">
-                    <Button onClick={() => assetFileInputRef.current?.click()} size="sm" variant="outline"><Upload className="mr-2 h-4 w-4"/>Envanter Yükle</Button>
-                    <Button onClick={handleDownloadAssetTemplate} size="sm" variant="outline"><Download className="mr-2 h-4 w-4"/>Envanter Şablonu</Button>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Kategori Toplu İşlemleri</CardTitle>
-                </CardHeader>
-                <CardContent className="flex items-center gap-2">
-                    <Button onClick={() => categoryFileInputRef.current?.click()} size="sm" variant="outline"><Upload className="mr-2 h-4 w-4"/>Kategori Yükle</Button>
-                    <Button onClick={handleDownloadCategoryTemplate} size="sm" variant="outline"><Download className="mr-2 h-4 w-4"/>Kategori Şablonu</Button>
-                </CardContent>
-            </Card>
-        </div>
-
-        <Tabs defaultValue="category">
-            <TabsList className="mb-4">
-                <TabsTrigger value="category">Kategori Görünümü</TabsTrigger>
-                <TabsTrigger value="location">Konum Görünümü</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="category">
-                <Card className="shadow-lg">
-                  <CardHeader>
-                    <CardTitle className="text-2xl font-headline">Kategoriye Göre Envanter</CardTitle>
-                    <CardDescription>
-                      Şirkete ait demirbaş malların (bilgisayar, dolap vb.) kategorilerini yönetin.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {loading ? (
-                        <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>
-                    ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {/* Araçlar - Özel Kategori */}
-                        <Card className="group relative bg-gradient-to-br from-blue-500/10 to-cyan-500/10 hover:from-blue-500/20 hover:to-cyan-500/20 border-blue-500/20 hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1">
-                          <Link href="/yonetim/envanter-yonetimi/araclar" className="block cursor-pointer">
-                            <CardContent className="flex flex-col items-center justify-center p-6 text-center">
-                              <Car className="h-10 w-10 mb-3 text-blue-500" />
-                              <CardTitle className="text-base font-semibold">Araçlar</CardTitle>
-                            </CardContent>
-                          </Link>
-                          <Badge variant="default" className="absolute top-2 right-2 bg-blue-500">{vehicleCount}</Badge>
-                        </Card>
-
-                        {categories.map((category) => {
-                          const Icon = getIconForCategory(category.name);
-                          const count = assetCountsByCategory[category.name] || 0;
-                          return (
-                            <Card
-                              key={category.id}
-                              className="group relative bg-card/60 hover:bg-accent/10 hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1"
-                            >
-                              <Link href={`/yonetim/envanter-yonetimi/${encodeURIComponent(category.name)}`} className="block cursor-pointer">
-                                  <CardContent className="flex flex-col items-center justify-center p-6 text-center">
-                                  <Icon className="h-10 w-10 mb-3 text-primary" />
-                                  <CardTitle className="text-base font-semibold">{category.name}</CardTitle>
-                                  </CardContent>
-                              </Link>
-                              <Badge variant="secondary" className="absolute top-2 right-2">{count}</Badge>
-                              <div className="absolute top-2 left-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleOpenModal(category); }}>
-                                  <Edit3 className="h-4 w-4" />
-                                </Button>
-                                <AlertDialog>
-                                  <AlertDialogTrigger asChild>
-                                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
-                                        <Trash2 className="h-4 w-4 text-destructive" />
-                                     </Button>
-                                  </AlertDialogTrigger>
-                                  <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                      <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
-                                      <AlertDialogDescription>
-                                        "{category.name}" kategorisini silmek, ilişkili tüm envanter kalemlerini silmez, sadece kategoriyi kaldırır. Devam etmek istiyor musunuz?
-                                      </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                      <AlertDialogCancel>İptal</AlertDialogCancel>
-                                      <AlertDialogAction onClick={() => handleDeleteCategory(category.id)} className="bg-destructive hover:bg-destructive/90">
-                                        Evet, Sil
-                                      </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                  </AlertDialogContent>
-                                </AlertDialog>
-                              </div>
-                            </Card>
-                          );
-                        })}
-                        {categories.length === 0 && !loading && (
-                            <p className="col-span-full text-center text-muted-foreground">Henüz kategori oluşturulmadı.</p>
-                        )}
-                        </div>
-                    )}
-                  </CardContent>
-                </Card>
-            </TabsContent>
-            
-            <TabsContent value="location">
-                 <Card className="shadow-lg">
-                  <CardHeader>
-                    <CardTitle className="text-2xl font-headline">Konuma Göre Envanter</CardTitle>
-                    <CardDescription>
-                        Varlıkların fiziksel konumlarına göre gruplanmış hali.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {loading ? (
-                        <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>
-                    ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {locations.map((location) => {
-                          const Icon = getIconForCategory(location.name);
-                          const count = assetCountsByLocation[location.name] || 0;
-                          return (
-                            <Card
-                              key={location.id}
-                              className="group relative bg-card/60 hover:bg-accent/10 hover:shadow-xl transition-all duration-200 ease-in-out transform hover:-translate-y-1"
-                            >
-                              <Link href={`/yonetim/envanter-yonetimi/konum/${encodeURIComponent(location.name)}`} className="block cursor-pointer">
-                                  <CardContent className="flex flex-col items-center justify-center p-6 text-center">
-                                  <Icon className="h-10 w-10 mb-3 text-primary" />
-                                  <CardTitle className="text-base font-semibold">{location.name}</CardTitle>
-                                  </CardContent>
-                              </Link>
-                              <Badge variant="secondary" className="absolute top-2 right-2">{count}</Badge>
-                            </Card>
-                          );
-                        })}
-                        {locations.length === 0 && !loading && (
-                            <p className="col-span-full text-center text-muted-foreground">Konum bulunamadı.</p>
-                        )}
-                        </div>
-                    )}
-                  </CardContent>
-                </Card>
-            </TabsContent>
-        </Tabs>
       </div>
 
+      {/* ===== CATEGORY MODAL ===== */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editingCategory.id ? 'Kategoriyi Düzenle' : 'Yeni Kategori'}</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <Input
-              placeholder="Kategori adı"
+        <DialogContent className="max-w-md cihaz-card-strong !rounded-3xl !p-0 !gap-0 border-0">
+          <div className="px-6 pt-6 pb-4 border-b border-[var(--dashboard-stroke)]">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold text-[var(--dashboard-text)]">
+                {editingCategory.id ? 'Kategoriyi Duzenle' : 'Yeni Kategori'}
+              </DialogTitle>
+            </DialogHeader>
+          </div>
+          <div className="px-6 py-5">
+            <input
+              type="text"
+              placeholder="Kategori adi"
               value={editingCategory.name || ''}
               onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+              className="w-full h-10 px-4 rounded-xl text-sm bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] outline-none focus:ring-2 focus:ring-[var(--dashboard-accent)]/30"
             />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>İptal</Button>
-            <Button onClick={handleSaveCategory} disabled={loading}>{loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Kaydet</Button>
-          </DialogFooter>
+          <div className="px-6 py-4 border-t border-[var(--dashboard-stroke)] flex items-center justify-end gap-2">
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+            >
+              Iptal
+            </button>
+            <button
+              onClick={handleSaveCategory}
+              disabled={loading}
+              className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Kaydet
+            </button>
+          </div>
         </DialogContent>
       </Dialog>
-      
+
       <LabelPrinter
         open={isLabelModalOpen}
         onOpenChange={setIsLabelModalOpen}
