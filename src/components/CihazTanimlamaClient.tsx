@@ -782,6 +782,22 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const [deletingDefinitionId, setDeletingDefinitionId] = useState<string | null>(null);
+
+  const deleteModelDefinition = async (defId: string) => {
+    try {
+      setDeletingDefinitionId(defId);
+      await deleteDoc(doc(db, 'deviceModelDefinitions', defId));
+      await fetchModelDefinitions();
+      toast({ title: 'Başarılı', description: 'Marka/model tanımı silindi.' });
+    } catch (error) {
+      console.error('Model tanımı silinemedi:', error);
+      toast({ title: 'Hata', description: 'Model tanımı silinemedi.', variant: 'destructive' });
+    } finally {
+      setDeletingDefinitionId(null);
+    }
+  };
+
   const handleDefinitionExcelImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1339,7 +1355,22 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   {modelDefinitions.map(def => (
                     <div key={def.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
                       <span className="font-medium">{def.brand}</span>
-                      <span className="text-sm text-[var(--dashboard-muted)]">{def.model}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-[var(--dashboard-muted)]">{def.model}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          disabled={deletingDefinitionId === def.id}
+                          onClick={() => deleteModelDefinition(def.id)}
+                        >
+                          {deletingDefinitionId === def.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
