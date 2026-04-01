@@ -27,7 +27,7 @@ import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, Chevron
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn, exportDevicesToPdf, exportToExcel } from '@/lib/utils';
+import { cn, exportDevicesToPdf, exportDataToExcel } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
@@ -832,7 +832,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       { Marka: 'X Marka', Model: 'Z Model' },
       { Marka: 'X Marka', Model: 'C Model' },
     ];
-    exportToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
+    exportDataToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
     toast({ title: 'Şablon İndirildi', description: 'Şablonu doldurup Excel ile Yükle alanından içe aktarabilirsiniz.' });
   };
 

@@ -14,7 +14,7 @@ import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, serverTimestamp
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { cn, readExcelData, exportToExcel } from '@/lib/utils';
+import { cn, readExcelData, exportDataToExcel } from '@/lib/utils';
 
 // ============================================================================
 // TYPES
@@ -218,7 +218,7 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
       { Marka: 'Roche', Model: 'Cobas c 311', Gorsel: '' },
       { Marka: 'Roche', Model: 'Cobas pure', Gorsel: '' },
     ];
-    exportToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
+    exportDataToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
     toast({ title: 'Şablon İndirildi', description: 'Excel şablonunu doldurup içe aktarabilirsiniz.' });
   };
 
@@ -228,7 +228,7 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
       Model: i.model,
       Gorsel: i.imageUrl || '',
     }));
-    exportToExcel(data, 'Cihaz_Marka_Model', 'Marka/Model', toast);
+    exportDataToExcel(data, 'Cihaz_Marka_Model', 'Marka/Model', toast);
   };
 
   // ============================================================================
