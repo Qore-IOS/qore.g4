@@ -23,11 +23,11 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn, exportDevicesToPdf } from '@/lib/utils';
+import { cn, exportDevicesToPdf, exportToExcel } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
@@ -826,6 +826,16 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const handleDefinitionTemplateDownload = () => {
+    const templateRows = [
+      { Marka: 'X Marka', Model: 'A Model' },
+      { Marka: 'X Marka', Model: 'Z Model' },
+      { Marka: 'X Marka', Model: 'C Model' },
+    ];
+    exportToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
+    toast({ title: 'Şablon İndirildi', description: 'Şablonu doldurup Excel ile Yükle alanından içe aktarabilirsiniz.' });
+  };
+
   const brands = Array.from(new Set(modelDefinitions.map(row => row.brand))).sort((a, b) => a.localeCompare(b, 'tr'));
   const availableModels = Array.from(
     new Set(
@@ -1159,6 +1169,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                 <Button onClick={saveModelDefinition} disabled={isSavingDefinition}>
                   {isSavingDefinition ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
                   Tanım Ekle
+                </Button>
+                <Button variant="outline" onClick={handleDefinitionTemplateDownload}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Şablon İndir
                 </Button>
                 <Button asChild variant="outline">
                   <label className="cursor-pointer">
