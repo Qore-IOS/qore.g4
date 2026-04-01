@@ -22,6 +22,7 @@ import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { differenceInDays, isValid, parse } from 'date-fns';
 
 const SortableHeader: React.FC<{
   label: string;
@@ -51,6 +52,20 @@ type GroupedStockItem = {
     quantity: number;
     firstId: string;
 };
+
+type MiadSeverity = 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
+
+function getMiadInfoFromString(miadStr: string): { days: number; severity: MiadSeverity } {
+  if (!miadStr) return { days: Infinity, severity: 'normal' };
+  const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+  if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' };
+  const days = differenceInDays(miadDate, new Date());
+  if (days < 0) return { days, severity: 'expired' };
+  if (days <= 30) return { days, severity: 'critical' };
+  if (days < 45) return { days, severity: 'caution' };
+  if (days < 60) return { days, severity: 'notice' };
+  return { days, severity: 'normal' };
+}
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
@@ -357,9 +372,16 @@ export default function LaboratuvarYonetimiPanel() {
               <CardHeader>
                 <div className="flex justify-between items-center">
                     <CardTitle>{selectedLabName} - Özet Stok Durumu</CardTitle>
-                    <Button onClick={handleExport} variant="outline" size="sm">
-                        <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
-                    </Button>
+                    <div className="flex items-center gap-4">
+                      <div className="hidden md:flex items-center gap-3 text-[11px] text-muted-foreground">
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> &lt;30 gün</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> &lt;45 gün</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400" /> &lt;60 gün</span>
+                      </div>
+                      <Button onClick={handleExport} variant="outline" size="sm">
+                          <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
+                      </Button>
+                    </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -369,10 +391,11 @@ export default function LaboratuvarYonetimiPanel() {
                   </div>
                 ) : (
                   <>
-                    <ScrollArea className="h-[400px] border rounded-md">
+                    <ScrollArea className="h-[520px] border rounded-md">
                       <Table>
-                        <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
+                        <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm z-10">
                           <TableRow>
+                            <TableHead className="w-1.5 p-0" />
                             <SortableHeader label="Stok Kodu" field="stokKodu" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Stok Adı" field="stokAdi" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Lot" field="lot" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
@@ -382,11 +405,31 @@ export default function LaboratuvarYonetimiPanel() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {paginated.map(row => (
+                          {paginated.map(row => {
+                            const miadInfo = getMiadInfoFromString(row.miad);
+                            const stripeColor =
+                              miadInfo.severity === 'expired' || miadInfo.severity === 'critical'
+                                ? 'bg-red-500'
+                                : miadInfo.severity === 'caution'
+                                  ? 'bg-amber-500'
+                                  : miadInfo.severity === 'notice'
+                                    ? 'bg-yellow-400'
+                                    : 'bg-slate-300';
+
+                            return (
                             <TableRow
                               key={row.groupKey}
-                              className="hover:bg-muted"
+                              className={`hover:bg-muted/50 ${
+                                miadInfo.severity === 'expired' || miadInfo.severity === 'critical'
+                                  ? 'bg-red-500/[0.04]'
+                                  : miadInfo.severity === 'caution'
+                                    ? 'bg-amber-500/[0.04]'
+                                    : ''
+                              }`}
                             >
+                              <TableCell className="w-1.5 p-0">
+                                <div className={`w-1 h-full min-h-[56px] rounded-r ${stripeColor}`} />
+                              </TableCell>
                               <TableCell
                                 onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
                                 className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
@@ -409,7 +452,24 @@ export default function LaboratuvarYonetimiPanel() {
                                 onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
                                 className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
                               >
-                                {row.miad}
+                                <div className="flex flex-col gap-0.5">
+                                  <span>{row.miad}</span>
+                                  {miadInfo.days !== Infinity && (
+                                    <span
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold w-fit ${
+                                        miadInfo.severity === 'expired' || miadInfo.severity === 'critical'
+                                          ? 'bg-red-100 text-red-700'
+                                          : miadInfo.severity === 'caution'
+                                            ? 'bg-amber-100 text-amber-700'
+                                            : miadInfo.severity === 'notice'
+                                              ? 'bg-yellow-100 text-yellow-700'
+                                              : 'bg-slate-100 text-slate-700'
+                                      }`}
+                                    >
+                                      {miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}
+                                    </span>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell
                                 onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
@@ -448,10 +508,10 @@ export default function LaboratuvarYonetimiPanel() {
                                 </DropdownMenu>
                               </TableCell>
                             </TableRow>
-                          ))}
+                          )})}
                           {paginated.length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
+                              <TableCell colSpan={7} className="text-center py-4 text-muted-foreground">
                                 Kayıt bulunamadı.
                               </TableCell>
                             </TableRow>
