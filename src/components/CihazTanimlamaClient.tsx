@@ -30,6 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn, exportDevicesToPdf, exportDataToExcel } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/auth-context';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -226,7 +227,11 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       cihazAdi: current.cihazAdi,
       seriNumarasi: current.seriNumarasi,
       hospitalId: current.hospitalId,
-      order: current.order
+      order: current.order,
+      mulkiyet: current.mulkiyet || '',
+      kurulumTarihi: current.kurulumTarihi || '',
+      kurulumPersonelleri: current.kurulumPersonelleri || '',
+      aciklama: current.aciklama || ''
     }, currentUserProfile?.companyId), { merge: true });
 
     toast({ title: 'Kaydedildi', description: 'Cihaz tanımı kaydedildi.' });
@@ -1083,6 +1088,38 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Label>Seri Numarası</Label>
                   <Input placeholder="Örn: 13A1-20" value={current.seriNumarasi || ''} onChange={e => setCurrent({ ...current, seriNumarasi: e.target.value })} />
                 </div>
+                <div className="space-y-1">
+                  <Label>Mülkiyet</Label>
+                  <Select value={String(current.mulkiyet || '')} onValueChange={val => setCurrent({ ...current, mulkiyet: val })}>
+                    <SelectTrigger><SelectValue placeholder="Mülkiyet seçin" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="kurum">Kurum</SelectItem>
+                      <SelectItem value="kiralik">Kiralık</SelectItem>
+                      <SelectItem value="demirbas">Demirbaş</SelectItem>
+                      <SelectItem value="diger">Diğer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Kurulum Tarihi</Label>
+                  <Input type="date" value={String(current.kurulumTarihi || '')} onChange={e => setCurrent({ ...current, kurulumTarihi: e.target.value })} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Kuran Personel(ler)</Label>
+                <Textarea
+                  placeholder="Birden fazla isim için virgül kullanın"
+                  value={String(current.kurulumPersonelleri || '')}
+                  onChange={e => setCurrent({ ...current, kurulumPersonelleri: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Açıklama</Label>
+                <Textarea
+                  placeholder="Cihaza özel notlar..."
+                  value={String(current.aciklama || '')}
+                  onChange={e => setCurrent({ ...current, aciklama: e.target.value })}
+                />
               </div>
             </div>
             <div className="cihaz-card p-4 space-y-3">
