@@ -23,7 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download, Image as ImageIcon } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -136,6 +136,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [newDefinitionModel, setNewDefinitionModel] = useState('');
   const [newDefinitionImageUrl, setNewDefinitionImageUrl] = useState('');
   const [newDefinitionCustomImagePath, setNewDefinitionCustomImagePath] = useState('');
+  const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(null);
   const [isSavingDefinition, setIsSavingDefinition] = useState(false);
 
   // Toplu Bakım Planı State'leri
@@ -830,11 +831,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       return;
     }
     const selectedDefinitionImageUrl = newDefinitionImageUrl || newDefinitionCustomImagePath.trim();
-    const duplicate = modelDefinitions.find(
-      row =>
-        row.brand.trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
-        row.model.trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
-    );
+    const duplicate = editingDefinitionId
+      ? modelDefinitions.find(row => row.id === editingDefinitionId)
+      : modelDefinitions.find(
+        row =>
+          row.brand.trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
+          row.model.trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
+      );
     setIsSavingDefinition(true);
     try {
       if (duplicate) {
@@ -871,6 +874,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       setNewDefinitionModel('');
       setNewDefinitionImageUrl('');
       setNewDefinitionCustomImagePath('');
+      setEditingDefinitionId(null);
       await fetchModelDefinitions();
       await fetchDevices();
       toast({
@@ -1451,8 +1455,18 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="cihaz-card p-4 space-y-3">
               <p className="cihaz-section-label">Yeni Tanım</p>
-              <Input value={newDefinitionBrand} onChange={e => setNewDefinitionBrand(e.target.value)} placeholder="Marka" />
-              <Input value={newDefinitionModel} onChange={e => setNewDefinitionModel(e.target.value)} placeholder="Model" />
+              <Input
+                value={newDefinitionBrand}
+                onChange={e => setNewDefinitionBrand(e.target.value)}
+                placeholder="Marka"
+                disabled={!!editingDefinitionId}
+              />
+              <Input
+                value={newDefinitionModel}
+                onChange={e => setNewDefinitionModel(e.target.value)}
+                placeholder="Model"
+                disabled={!!editingDefinitionId}
+              />
               <Select
                 value={newDefinitionImageUrl || 'none'}
                 onValueChange={val => {
@@ -1477,8 +1491,22 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
               <div className="flex gap-2">
                 <Button onClick={saveModelDefinition} disabled={isSavingDefinition}>
                   {isSavingDefinition ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                  Tanım Ekle
+                  {editingDefinitionId ? 'Güncelle' : 'Tanım Ekle'}
                 </Button>
+                {editingDefinitionId && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingDefinitionId(null);
+                      setNewDefinitionBrand('');
+                      setNewDefinitionModel('');
+                      setNewDefinitionImageUrl('');
+                      setNewDefinitionCustomImagePath('');
+                    }}
+                  >
+                    Vazgeç
+                  </Button>
+                )}
                 <Button variant="outline" onClick={handleDefinitionTemplateDownload}>
                   <Download className="h-4 w-4 mr-2" />
                   Şablon İndir
@@ -1501,6 +1529,26 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                       <span className="font-medium">{def.brand}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-[var(--dashboard-muted)]">{def.model}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => {
+                            setEditingDefinitionId(def.id);
+                            setNewDefinitionBrand(def.brand);
+                            setNewDefinitionModel(def.model);
+                            if (def.imageUrl) {
+                              const hasPresetImage = images.includes(def.imageUrl);
+                              setNewDefinitionImageUrl(hasPresetImage ? def.imageUrl : '');
+                              setNewDefinitionCustomImagePath(hasPresetImage ? '' : def.imageUrl);
+                            } else {
+                              setNewDefinitionImageUrl('');
+                              setNewDefinitionCustomImagePath('');
+                            }
+                          }}
+                        >
+                          {def.imageUrl ? <ImageIcon className="h-3.5 w-3.5 text-emerald-600" /> : <Pencil className="h-3.5 w-3.5" />}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
