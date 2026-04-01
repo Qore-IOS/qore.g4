@@ -18,6 +18,30 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, ProductCode } from '@/lib/types';
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History } from 'lucide-react';
 import { formatMiad } from '@/lib/date';
+import { differenceInDays, parse, isValid } from 'date-fns';
+import { cn } from '@/lib/utils';
+
+type MiadSeverity = 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
+
+function getMiadInfoFromString(miadStr: string): { days: number; severity: MiadSeverity } {
+  if (!miadStr) return { days: Infinity, severity: 'normal' };
+  const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+  if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' };
+  const days = differenceInDays(miadDate, new Date());
+  if (days < 0) return { days, severity: 'expired' };
+  if (days <= 3) return { days, severity: 'critical' };
+  if (days <= 10) return { days, severity: 'warning' };
+  if (days < 45) return { days, severity: 'caution' };
+  if (days < 60) return { days, severity: 'notice' };
+  return { days, severity: 'normal' };
+}
+
+function getRowStripeColor(miadSeverity: MiadSeverity): string {
+  if (miadSeverity === 'expired' || miadSeverity === 'critical') return 'bg-red-500';
+  if (miadSeverity === 'warning' || miadSeverity === 'caution') return 'bg-amber-500';
+  if (miadSeverity === 'notice') return 'bg-yellow-400';
+  return 'bg-transparent';
+}
 
 const SortableHeader: React.FC<{
   label: string;
@@ -248,6 +272,7 @@ export default function LaboratuvarYonetimiPanel() {
                       <Table>
                         <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
                           <TableRow>
+                            <TableHead className="w-1.5 p-0" />
                             <SortableHeader label="Stok Kodu" field="stokKodu" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Stok Adı" field="stokAdi" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Lot" field="lot" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
@@ -256,22 +281,50 @@ export default function LaboratuvarYonetimiPanel() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {paginated.map(row => (
+                          {paginated.map(row => {
+                            const miadInfo = getMiadInfoFromString(row.miad);
+                            const stripeColor = getRowStripeColor(miadInfo.severity);
+                            return (
                             <TableRow
                               key={row.groupKey}
                               onClick={() => goToDetail(row.firstId)}
-                              className="cursor-pointer hover:bg-muted"
+                              className={cn(
+                                "cursor-pointer hover:bg-muted",
+                                (miadInfo.severity === 'critical' || miadInfo.severity === 'expired') && 'bg-red-500/[0.04]',
+                                miadInfo.severity === 'caution' && 'bg-amber-500/[0.04]',
+                              )}
                             >
+                              {/* Color strip */}
+                              <TableCell className="w-1.5 p-0">
+                                <div className={cn("w-1 h-full min-h-[40px] rounded-r", stripeColor)} />
+                              </TableCell>
                               <TableCell>{row.stokKodu}</TableCell>
                               <TableCell>{row.stokAdi}</TableCell>
                               <TableCell>{row.lot}</TableCell>
-                              <TableCell>{row.miad}</TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-xs">{row.miad}</span>
+                                  {miadInfo.severity !== 'normal' && miadInfo.days !== Infinity && (
+                                    <span className={cn(
+                                      "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold w-fit",
+                                      miadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
+                                      miadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
+                                      miadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
+                                      miadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
+                                      miadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
+                                    )}>
+                                      {miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
                               <TableCell className="text-right font-semibold">{row.quantity}</TableCell>
                             </TableRow>
-                          ))}
+                            );
+                          })}
                           {paginated.length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                              <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
                                 Kayıt bulunamadı.
                               </TableCell>
                             </TableRow>
