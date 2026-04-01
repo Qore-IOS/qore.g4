@@ -81,7 +81,7 @@ export default function LaboratuvarPanel() {
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setAddressDefinitions(filterByCompanyScope(addrSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
       setLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)), currentCompanyId, isSuperAdmin));
-      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
 
     } catch (e) {
@@ -159,7 +159,7 @@ export default function LaboratuvarPanel() {
       };
 
       if (currentHospital.id && isEditingHospital) {
-        await setDoc(doc(db, 'hospitals', currentHospital.id), dataToSave, { merge: true });
+        await setDoc(doc(db, 'hospitals', currentHospital.id), withCompanyScope(dataToSave, currentUserProfile?.companyId), { merge: true });
         toast({ title: 'Başarılı', description: 'Laboratuvar güncellendi.' });
       } else {
         const newRef = doc(collection(db, 'hospitals'));
