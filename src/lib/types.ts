@@ -297,6 +297,10 @@ export interface Device {
   brand: string;
   model: string;
   imageUrl: string;
+  mulkiyet?: string;
+  kurulumTarihi?: string;
+  kurulumPersonelleri?: string;
+  aciklama?: string;
   arizaDurumu?: 'yok' | 'teknik_servis' | 'aplikasyon';
   sonArizaTarihi?: TimestampLike;
   arizaAciklamasi?: string;
