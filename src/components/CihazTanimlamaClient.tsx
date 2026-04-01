@@ -125,6 +125,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [showPeriodicPartSection, setShowPeriodicPartSection] = useState(false);
   const [exportPdfLoading, setExportPdfLoading] = useState(false);
+  const [exportExcelLoading, setExportExcelLoading] = useState(false);
   const [plannedDeviceIds, setPlannedDeviceIds] = useState<Set<string>>(new Set());
 
   // Marka/Model tanım state'leri
@@ -749,6 +750,74 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const handleExportDevicesExcel = async () => {
+    if (devices.length === 0) {
+      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak cihaz verisi yok.', variant: 'default' });
+      return;
+    }
+    setExportExcelLoading(true);
+    try {
+      const [allPlansSnap, allPartsSnap] = await Promise.all([
+        getDocs(collection(db, 'maintenancePlans')),
+        getDocs(collection(db, 'periodicPartChanges')),
+      ]);
+      const allPlans = filterByCompanyScope(
+        allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
+        currentCompanyId,
+        isSuperAdmin
+      );
+      const allParts = filterByCompanyScope(
+        allPartsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange),
+        currentCompanyId,
+        isSuperAdmin
+      );
+
+      const cihazlarRows = devices.map(dev => {
+        const hospitalName = hospitals.find(h => h.id === dev.hospitalId)?.name || '';
+        return {
+          'Marka': dev.brand || '',
+          'Model': dev.model || '',
+          'Cihaz Adı': dev.cihazAdi || '',
+          'Seri Numarası': dev.seriNumarasi || '',
+          'Laboratuvar': hospitalName,
+          'Dizilim Sırası': dev.order || '',
+        };
+      });
+
+      const bakimPlanlariRows = devices.flatMap(dev => {
+        const devicePlans = allPlans.filter(p => p.deviceId === dev.id);
+        return devicePlans.map(p => ({
+          'Cihaz': `${dev.brand} ${dev.model}${dev.cihazAdi ? ` - ${dev.cihazAdi}` : ''}`,
+          'İş Adı': p.taskName,
+          'Periyot': `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
+          'Tip': p.type === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon',
+        }));
+      });
+
+      const parcaDegisimRows = devices.flatMap(dev => {
+        const deviceParts = allParts.filter(p => p.deviceId === dev.id);
+        return deviceParts.map(p => ({
+          'Cihaz': `${dev.brand} ${dev.model}${dev.cihazAdi ? ` - ${dev.cihazAdi}` : ''}`,
+          'Parça Adı': p.stokAdi,
+          'Stok Kodu': p.stokKodu,
+          'Periyot': p.periodDays ? `${p.periodDays} gün` : (p.nextDueDate?.toDate ? new Date(p.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`),
+          'Sorumluluk': RESPONSIBILITY_LABELS[p.responsibilityType],
+        }));
+      });
+
+      const sheets: Record<string, any[]> = { 'Cihazlar': cihazlarRows };
+      if (bakimPlanlariRows.length > 0) sheets['Bakım Planları'] = bakimPlanlariRows;
+      if (parcaDegisimRows.length > 0) sheets['Periyodik Parça Değişim'] = parcaDegisimRows;
+
+      exportDataToExcel(sheets, 'Cihaz_Tanimlamalari', toast);
+    } catch (err) {
+      console.error('Excel export error:', err);
+      toast({ title: 'Hata', description: 'Excel oluşturulurken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setExportExcelLoading(false);
+    }
+  };
+
   const saveModelDefinition = async () => {
     if (!newDefinitionBrand.trim() || !newDefinitionModel.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Marka ve model zorunludur.', variant: 'destructive' });
@@ -1102,6 +1171,19 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
               <FileDown className="h-4 w-4 mr-2" />
             )}
             PDF Döküm
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleExportDevicesExcel}
+            disabled={exportExcelLoading || devices.length === 0}
+            className="bg-[var(--dashboard-surface-2)]"
+          >
+            {exportExcelLoading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            Excel Döküm
           </Button>
           <Button variant="outline" onClick={() => setDefinitionModalOpen(true)} className="bg-[var(--dashboard-surface-2)]">
             <Boxes className="h-4 w-4 mr-2" />
