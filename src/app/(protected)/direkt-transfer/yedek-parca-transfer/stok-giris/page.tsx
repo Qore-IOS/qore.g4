@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -56,7 +57,7 @@ type MissingProductCardItem = {
 
 export default function YedekParcaStokGirisPage() {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -504,7 +505,7 @@ export default function YedekParcaStokGirisPage() {
       for (const row of rows) {
         const isTracked = !!row.serialNumber || !!row.hucreNumarasi;
         const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
-        batch.set(stockRef, {
+        batch.set(stockRef, withCompanyScope({
           productCodeId: row.productCodeId,
           stokKodu: row.stokKodu,
           stokAdi: row.stokAdi,
@@ -517,7 +518,7 @@ export default function YedekParcaStokGirisPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       await batch.commit();
@@ -535,7 +536,7 @@ export default function YedekParcaStokGirisPage() {
           notes = `${row.quantity} ${row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'} stok girişi`;
         }
 
-        await addDoc(collection(db, 'yedekParcaDepoLog'), {
+        await addDoc(collection(db, 'yedekParcaDepoLog'), withCompanyScope({
           action: 'stok_giris',
           productCodeId: row.productCodeId,
           stokKodu: row.stokKodu,
@@ -550,7 +551,7 @@ export default function YedekParcaStokGirisPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       toast({
