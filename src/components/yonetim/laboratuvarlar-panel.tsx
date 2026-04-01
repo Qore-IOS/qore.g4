@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail, Upload, Download, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -19,7 +19,8 @@ import dynamic from 'next/dynamic';
 import SharedLabPoolModal from '@/components/SharedLabPoolModal';
 import EfficiencyPoolModal from '@/components/EfficiencyPoolModal';
 import ProductOrderModal from '@/components/ProductOrderModal';
-import { exportDataToExcel } from '@/lib/utils';
+import { exportDataToExcel, readExcelData } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
@@ -64,6 +65,14 @@ export default function LaboratuvarPanel() {
   // Özel Sıralama Modal State
   const [isProductOrderModalOpen, setIsProductOrderModalOpen] = useState(false);
   const [productOrderTarget, setProductOrderTarget] = useState<Hospital | null>(null);
+
+  // Excel İçe Aktarma State
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
+  const [excelImportData, setExcelImportData] = useState<any[]>([]);
+  const [excelImportSelected, setExcelImportSelected] = useState<Set<number>>(new Set());
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
+  const excelFileInputRef = React.useRef<HTMLInputElement>(null);
 
 
   const fetchHospitalsAndProducts = useCallback(async () => {
@@ -320,6 +329,159 @@ export default function LaboratuvarPanel() {
     exportDataToExcel(dataToExport, `Havuz_Stok_Raporu_${pool.name}`, "HavuzStok", toast);
   };
 
+  const handleExcelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    try {
+      const data = await readExcelData(file, toast);
+      if (!data || data.length === 0) {
+        toast({ title: 'Boş Dosya', description: 'Excel dosyasında veri bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      const mapped = data.map((row: any) => ({
+        name: (row['Laboratuvar Adı'] || row['Ad'] || row['name'] || '').toString().trim(),
+        kod: (row['Kod'] || row['kod'] || row['Laboratuvar Kodu'] || '').toString().trim().toUpperCase(),
+        address: (row['Adres'] || row['address'] || '').toString().trim(),
+        sorumluEmail: (row['E-posta'] || row['Email'] || row['sorumluEmail'] || '').toString().trim(),
+        consumptionTrackingEnabled: parseExcelBoolean(row['Tüketim Takibi'] ?? row['consumptionTrackingEnabled'], true),
+        fefoEnabled: parseExcelBoolean(row['FEFO'] ?? row['fefoEnabled'], true),
+        manualDeductionEnabled: parseExcelBoolean(row['Manuel Düşüm'] ?? row['manualDeductionEnabled'], false),
+        isConsumablesHospital: parseExcelBoolean(row['Hastane Sarf'] ?? row['isConsumablesHospital'], false),
+        autoTutanak: parseExcelBoolean(row['Otomatik Tutanak'] ?? row['autoTutanak'], false),
+      }));
+
+      const validRows = mapped.filter((r: any) => r.name);
+      if (validRows.length === 0) {
+        toast({ title: 'Geçersiz Veri', description: "Excel'de 'Laboratuvar Adı' veya 'Ad' sütunu bulunamadı veya tüm satırlar boş.", variant: 'destructive' });
+        return;
+      }
+
+      setExcelImportData(validRows);
+      setExcelImportSelected(new Set(validRows.map((_: any, i: number) => i)));
+      setImportResult(null);
+      setIsExcelImportModalOpen(true);
+    } catch (err) {
+      console.error('Excel parse error:', err);
+    }
+  };
+
+  const parseExcelBoolean = (value: any, defaultVal: boolean): boolean => {
+    if (value === undefined || value === null || value === '') return defaultVal;
+    const str = value.toString().toLowerCase().trim();
+    if (['evet', 'yes', 'true', '1', 'aktif', 'açık'].includes(str)) return true;
+    if (['hayır', 'hayir', 'no', 'false', '0', 'pasif', 'kapalı', 'kapali'].includes(str)) return false;
+    return defaultVal;
+  };
+
+  const handleExcelImport = async () => {
+    const selectedRows = excelImportData.filter((_, i) => excelImportSelected.has(i));
+    if (selectedRows.length === 0) {
+      toast({ title: 'Seçim Yok', description: 'Lütfen en az bir laboratuvar seçin.', variant: 'destructive' });
+      return;
+    }
+
+    setIsImporting(true);
+    const errors: string[] = [];
+    let success = 0;
+    let skipped = 0;
+
+    const existingNames = new Set(hospitals.map(h => h.name.toLowerCase().trim()));
+    const existingKods = new Set(hospitals.filter(h => h.kod).map(h => h.kod!.toLowerCase().trim()));
+
+    for (const row of selectedRows) {
+      try {
+        if (existingNames.has(row.name.toLowerCase())) {
+          skipped++;
+          errors.push(`"${row.name}" - zaten mevcut (ad eşleşmesi)`);
+          continue;
+        }
+        if (row.kod && existingKods.has(row.kod.toLowerCase())) {
+          skipped++;
+          errors.push(`"${row.name}" (${row.kod}) - bu kod zaten kullanılıyor`);
+          continue;
+        }
+
+        const dataToSave: Partial<Hospital> = {
+          name: row.name,
+          kod: row.kod || '',
+          address: row.address || '',
+          sorumluEmail: row.sorumluEmail || '',
+          consumptionTrackingEnabled: row.consumptionTrackingEnabled,
+          fefoEnabled: row.fefoEnabled,
+          manualDeductionEnabled: row.manualDeductionEnabled,
+          isConsumablesHospital: row.isConsumablesHospital,
+          autoTutanak: row.autoTutanak,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const newRef = doc(collection(db, 'hospitals'));
+        await setDoc(newRef, withCompanyScope(dataToSave, currentUserProfile?.companyId));
+        success++;
+        existingNames.add(row.name.toLowerCase());
+        if (row.kod) existingKods.add(row.kod.toLowerCase());
+      } catch (err: any) {
+        errors.push(`"${row.name}" - kayıt hatası: ${err.message}`);
+      }
+    }
+
+    setImportResult({ success, skipped, errors });
+    setIsImporting(false);
+
+    if (success > 0) {
+      toast({ title: 'İçe Aktarma Tamamlandı', description: `${success} laboratuvar başarıyla eklendi.` });
+      fetchHospitalsAndProducts();
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    const templateData = [
+      {
+        'Laboratuvar Adı': 'Örnek Laboratuvar 1',
+        'Kod': 'OL1',
+        'Adres': 'Örnek Mah. 123. Sk.',
+        'E-posta': 'ornek@lab.com',
+        'Tüketim Takibi': 'Evet',
+        'FEFO': 'Evet',
+        'Manuel Düşüm': 'Hayır',
+        'Hastane Sarf': 'Hayır',
+        'Otomatik Tutanak': 'Hayır',
+      },
+      {
+        'Laboratuvar Adı': 'Örnek Laboratuvar 2',
+        'Kod': 'OL2',
+        'Adres': '',
+        'E-posta': '',
+        'Tüketim Takibi': 'Evet',
+        'FEFO': 'Evet',
+        'Manuel Düşüm': 'Hayır',
+        'Hastane Sarf': 'Hayır',
+        'Otomatik Tutanak': 'Hayır',
+      },
+    ];
+    exportDataToExcel(templateData, 'Laboratuvar_Sablonu', 'Laboratuvarlar', toast);
+  };
+
+  const toggleExcelSelectAll = () => {
+    if (excelImportSelected.size === excelImportData.length) {
+      setExcelImportSelected(new Set());
+    } else {
+      setExcelImportSelected(new Set(excelImportData.map((_, i) => i)));
+    }
+  };
+
+  const toggleExcelSelect = (idx: number) => {
+    setExcelImportSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
   return (
     <>
       <div className="p-4 space-y-4">
@@ -348,6 +510,21 @@ export default function LaboratuvarPanel() {
               <Button onClick={() => setIsPoolModalOpen(true)} size="sm" disabled={isLoading}>
                 Ortak Laboratuvar Oluştur
               </Button>
+              <Button variant="outline" onClick={handleDownloadTemplate} size="sm" disabled={isLoading}>
+                <Download className="mr-2 h-4 w-4" />
+                Şablon İndir
+              </Button>
+              <Button variant="outline" onClick={() => excelFileInputRef.current?.click()} size="sm" disabled={isLoading}>
+                <Upload className="mr-2 h-4 w-4" />
+                Excel ile İçe Aktar
+              </Button>
+              <input
+                ref={excelFileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={handleExcelFileSelect}
+              />
               <Button onClick={() => openModal()} size="sm" disabled={isLoading}>
                 <PlusCircle className="mr-2 h-4 w-4" />
                 Yeni Laboratuvar
@@ -692,6 +869,122 @@ export default function LaboratuvarPanel() {
           onSaved={fetchHospitalsAndProducts}
         />
       )}
+
+      {/* Excel İçe Aktarma Modal */}
+      <Dialog open={isExcelImportModalOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsExcelImportModalOpen(false);
+          setExcelImportData([]);
+          setExcelImportSelected(new Set());
+          setImportResult(null);
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-green-500" />
+              Excel ile Laboratuvar İçe Aktarma
+            </DialogTitle>
+          </DialogHeader>
+
+          {importResult ? (
+            <div className="py-6 space-y-4">
+              <div className="flex items-center gap-3 p-4 rounded-lg bg-muted">
+                <CheckCircle2 className="h-8 w-8 text-green-500" />
+                <div>
+                  <p className="font-semibold text-lg">{importResult.success} laboratuvar başarıyla eklendi</p>
+                  {importResult.skipped > 0 && (
+                    <p className="text-sm text-muted-foreground">{importResult.skipped} kayıt atlandı (zaten mevcut)</p>
+                  )}
+                </div>
+              </div>
+              {importResult.errors.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium flex items-center gap-1">
+                    <AlertCircle className="h-4 w-4 text-amber-500" />
+                    Detaylar
+                  </p>
+                  <ScrollArea className="h-40 border rounded-md p-3">
+                    {importResult.errors.map((err, i) => (
+                      <p key={i} className="text-xs text-muted-foreground py-0.5">{err}</p>
+                    ))}
+                  </ScrollArea>
+                </div>
+              )}
+              <DialogFooter>
+                <Button onClick={() => {
+                  setIsExcelImportModalOpen(false);
+                  setExcelImportData([]);
+                  setExcelImportSelected(new Set());
+                  setImportResult(null);
+                }}>Kapat</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <>
+              <div className="text-sm text-muted-foreground mb-2">
+                Toplam {excelImportData.length} satır bulundu. Eklemek istediğiniz laboratuvarları seçin.
+              </div>
+              <ScrollArea className="flex-1 border rounded-md min-h-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={excelImportSelected.size === excelImportData.length && excelImportData.length > 0}
+                          onCheckedChange={toggleExcelSelectAll}
+                        />
+                      </TableHead>
+                      <TableHead>Laboratuvar Adı</TableHead>
+                      <TableHead>Kod</TableHead>
+                      <TableHead>Adres</TableHead>
+                      <TableHead>E-posta</TableHead>
+                      <TableHead className="text-center">FEFO</TableHead>
+                      <TableHead className="text-center">Tüketim</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {excelImportData.map((row, idx) => {
+                      const isDuplicate = hospitals.some(h => h.name.toLowerCase().trim() === row.name.toLowerCase());
+                      return (
+                        <TableRow key={idx} className={isDuplicate ? 'opacity-50' : ''}>
+                          <TableCell>
+                            <Checkbox
+                              checked={excelImportSelected.has(idx)}
+                              onCheckedChange={() => toggleExcelSelect(idx)}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {row.name}
+                            {isDuplicate && (
+                              <span className="ml-2 text-xs text-amber-500">(mevcut)</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{row.kod}</TableCell>
+                          <TableCell className="text-xs">{row.address}</TableCell>
+                          <TableCell className="text-xs">{row.sorumluEmail}</TableCell>
+                          <TableCell className="text-center text-xs">{row.fefoEnabled ? 'Evet' : 'Hayır'}</TableCell>
+                          <TableCell className="text-center text-xs">{row.consumptionTrackingEnabled ? 'Evet' : 'Hayır'}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+              <DialogFooter className="mt-4">
+                <div className="flex items-center gap-2 mr-auto text-sm text-muted-foreground">
+                  {excelImportSelected.size} / {excelImportData.length} seçili
+                </div>
+                <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
+                <Button onClick={handleExcelImport} disabled={isImporting || excelImportSelected.size === 0}>
+                  {isImporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                  {isImporting ? 'İçe Aktarılıyor...' : `${excelImportSelected.size} Laboratuvar Ekle`}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
