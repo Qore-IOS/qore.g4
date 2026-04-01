@@ -260,6 +260,7 @@ export default function YedekParcaTransferPage() {
   const isAuthorized = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const isAdmin = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin';
   const isTeknikLojistik = currentUserProfile?.role === 'teknik_lojistik';
+  const canApproveDepotReturns = isAdmin || isTeknikLojistik;
   const isFieldPersonnel = currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const canAccessTransferPanel = !isFieldPersonnel;
 
@@ -1696,6 +1697,10 @@ export default function YedekParcaTransferPage() {
 
   // Confirm pending return
   const confirmPendingReturn = async (pendingReturn: PendingReturn) => {
+    if (!canApproveDepotReturns) {
+      toast({ title: 'Yetki Hatası', description: 'İade onayını yalnızca teknik lojistik veya admin kullanıcıları yapabilir.', variant: 'destructive' });
+      return;
+    }
     try {
       const now = new Date();
 
@@ -1724,6 +1729,8 @@ export default function YedekParcaTransferPage() {
           serialNumber: pendingReturn.serialNumber || '',
           address: '',
           quantity: 1,
+          partCondition: pendingReturn.returnCondition || 'iyi',
+          partConditionNote: pendingReturn.returnConditionNote || null,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -1742,7 +1749,7 @@ export default function YedekParcaTransferPage() {
           quantity: 1,
           relatedPersonnelUid: pendingReturn.ownerUid,
           relatedPersonnelName: pendingReturn.ownerName,
-          notes: `İade teslim alındı: ${pendingReturn.ownerName} -> Depo`,
+          notes: `İade teslim alındı: ${pendingReturn.ownerName} -> Depo (Durum: ${pendingReturn.returnCondition || 'iyi'}${pendingReturn.returnConditionNote ? `, Açıklama: ${pendingReturn.returnConditionNote}` : ''})`,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -1759,6 +1766,7 @@ export default function YedekParcaTransferPage() {
         serialNumber: pendingReturn.serialNumber,
         fromUid: pendingReturn.ownerUid,
         fromName: pendingReturn.ownerName,
+        notes: `İade durumu: ${pendingReturn.returnCondition || 'iyi'}${pendingReturn.returnConditionNote ? ` (${pendingReturn.returnConditionNote})` : ''}`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -1766,7 +1774,7 @@ export default function YedekParcaTransferPage() {
 
       toast({
         title: 'Teslim Alındı',
-        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber || 'Seri No Yok'}) depoya teslim alındı.`,
+        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber || 'Seri No Yok'}) depoya teslim alındı (${pendingReturn.returnCondition || 'iyi'}).`,
       });
 
       setPendingReturns(prev => prev.filter(p => p.id !== pendingReturn.id));
@@ -2145,7 +2153,7 @@ export default function YedekParcaTransferPage() {
         {([
           { key: 'transfer' as const, label: 'Transfer', icon: <Send className="w-3 h-3" /> },
           { key: 'borrowed' as const, label: `Borç (${borrowedParts.length})`, icon: <HandCoins className="w-3 h-3" /> },
-          { key: 'pending' as const, label: `İade (${pendingReturns.length})`, icon: <Clock className="w-3 h-3" /> },
+          { key: 'pending' as const, label: `Depoda İade Bekleyenler (${pendingReturns.length})`, icon: <Clock className="w-3 h-3" /> },
           { key: 'history' as const, label: 'Geçmiş', icon: <History className="w-3 h-3" /> },
         ]).map(tab => {
           const isActive = transferTab === tab.key;
@@ -2389,10 +2397,16 @@ export default function YedekParcaTransferPage() {
                   </span>
                   <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
                 </div>
+                <p className="text-[10px] mt-1" style={{ color: 'var(--dashboard-muted)' }}>
+                  Durum: <span className="font-semibold">{item.returnCondition || 'iyi'}</span>
+                  {item.returnConditionNote ? ` · ${item.returnConditionNote}` : ''}
+                </p>
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
                 {item.imageUrl && <button onClick={() => setPreviewImage(item.imageUrl!)} className="cihaz-tool-item p-1.5"><ImageIcon className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} /></button>}
-                <button onClick={() => confirmPendingReturn(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Teslim Al</button>
+                {canApproveDepotReturns && (
+                  <button onClick={() => confirmPendingReturn(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Teslim Al</button>
+                )}
               </div>
             </article>
           ))}

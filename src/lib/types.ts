@@ -780,6 +780,8 @@ export interface PendingReturn {
   confirmedByUid?: string;
   confirmedByName?: string;
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
+  returnCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
+  returnConditionNote?: string;
 }
 
 // Transfer row for spare part transfer panel
@@ -808,6 +810,8 @@ export interface YedekParcaDepoStokItem {
   serialNumber?: string;         // Opsiyonel seri numarası
   hucreNumarasi?: string;        // Hücre numarası (1 harf + 4 rakam) - tekil takip
   quantity: number;              // Seri numarasız ürünler için adet
+  partCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
+  partConditionNote?: string;
   cihazGrubu?: string;          // Cihaz ana grubu (kutu, adet, şişe vs.)
   createdAt: Date;
   createdByUid: string;
