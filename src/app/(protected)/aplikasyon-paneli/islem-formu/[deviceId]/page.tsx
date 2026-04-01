@@ -27,6 +27,7 @@ import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -137,7 +138,7 @@ export default function AplikasyonIslemFormuPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [device, setDevice] = useState<Device | null>(null);
@@ -349,12 +350,12 @@ export default function AplikasyonIslemFormuPage() {
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
           } as YedekParcaDepoStokItem;
         });
-        setDepotStockItems(items);
+        setDepotStockItems(filterByCompanyScope(items, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error('Error fetching depot stock:', err);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Fetch pool warehouse stock for lab groups connected to this device's hospital
   useEffect(() => {
@@ -369,20 +370,28 @@ export default function AplikasyonIslemFormuPage() {
 
         const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
         const matchingPoolIds: string[] = [];
-        poolsSnap.docs.forEach(d => {
-          const pool = d.data() as DeviceLabPool;
+        const companyScopedPools = filterByCompanyScope(
+          poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as DeviceLabPool),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        companyScopedPools.forEach((pool) => {
           if (pool.memberIds?.includes(hospitalId)) {
-            matchingPoolIds.push(d.id);
+            matchingPoolIds.push(pool.id);
           }
         });
         if (matchingPoolIds.length === 0) return;
 
         const depotsSnap = await getDocs(collection(db, 'depots'));
         const poolWarehouseIds: string[] = [];
-        depotsSnap.docs.forEach(d => {
-          const depot = d.data() as Depot;
+        const companyScopedDepots = filterByCompanyScope(
+          depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Depot),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        companyScopedDepots.forEach((depot) => {
           if (depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some(id => matchingPoolIds.includes(id))) {
-            poolWarehouseIds.push(d.id);
+            poolWarehouseIds.push(depot.id);
           }
         });
         if (poolWarehouseIds.length === 0) return;
@@ -404,26 +413,30 @@ export default function AplikasyonIslemFormuPage() {
             } as PoolWarehouseStockItem);
           });
         }
-        setPoolStockItems(allPoolStock);
+        setPoolStockItems(filterByCompanyScope(allPoolStock, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error("Error fetching pool stock:", err);
       }
     })();
-  }, [deviceId]);
+  }, [deviceId, currentCompanyId, isSuperAdmin]);
 
   // Fetch users for accompanying personnel
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDocs(collection(db, 'users'));
-        const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
+        const users = filterByCompanyScope(
+          snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User),
+          currentCompanyId,
+          isSuperAdmin
+        );
         // Aplikasyon formu için sadece aplikasyon personelini göster
         setAllUsers(users.filter(u => u.role === 'aplikasyon'));
       } catch (err) {
         console.error("Error fetching users:", err);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Fetch maintenance plans and logs for this device (aplikasyon type)
   useEffect(() => {

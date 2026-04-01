@@ -69,6 +69,11 @@ export default function TeknikServisDetayPage() {
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
   const [personalStockLoading, setPersonalStockLoading] = useState(false);
   const [processingItemId, setProcessingItemId] = useState<string | null>(null);
+  const [returnConditionDialogOpen, setReturnConditionDialogOpen] = useState(false);
+  const [pendingReturnItem, setPendingReturnItem] = useState<PersonalStockItem | null>(null);
+  const [pendingReturnType, setPendingReturnType] = useState<'return_to_depot' | 'submit_to_depot'>('return_to_depot');
+  const [returnCondition, setReturnCondition] = useState<'iyi' | 'arizali' | 'miadi_gecmis' | 'diger'>('iyi');
+  const [returnConditionNote, setReturnConditionNote] = useState('');
 
   // Diğer Firma Arıza modal state
   const [isDigerFirmaModalOpen, setIsDigerFirmaModalOpen] = useState(false);
@@ -414,8 +419,16 @@ export default function TeknikServisDetayPage() {
     loadPersonalStock();
   };
 
+  const requestReturnToDepot = (item: PersonalStockItem, type: 'return_to_depot' | 'submit_to_depot') => {
+    setPendingReturnItem(item);
+    setPendingReturnType(type);
+    setReturnCondition('iyi');
+    setReturnConditionNote('');
+    setReturnConditionDialogOpen(true);
+  };
+
   // Handle return to depot (for depot-sourced items)
-  const handleReturnToDepot = async (item: PersonalStockItem) => {
+  const handleReturnToDepot = async (item: PersonalStockItem, condition: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger', conditionNote: string) => {
     if (!currentUser || !currentUserProfile) return;
     setProcessingItemId(item.id);
     try {
@@ -426,7 +439,7 @@ export default function TeknikServisDetayPage() {
       });
 
       // Create pending return record
-      await addDoc(collection(db, 'pendingReturns'), {
+      await addDoc(collection(db, 'pendingReturns'), withCompanyScope({
         personalStockId: item.id,
         ownerUid: item.ownerUid,
         ownerName: item.ownerName,
@@ -440,7 +453,9 @@ export default function TeknikServisDetayPage() {
         requestedAt: serverTimestamp(),
         requestedByUid: currentUser.uid,
         requestedByName: currentUserProfile.displayName || currentUser.email || '',
-      });
+        returnCondition: condition,
+        returnConditionNote: conditionNote || null,
+      }, currentCompanyId));
 
       // Create log entry
       await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
@@ -467,7 +482,7 @@ export default function TeknikServisDetayPage() {
   };
 
   // Handle submit to depot (for device-sourced items - removed parts)
-  const handleSubmitToDepot = async (item: PersonalStockItem) => {
+  const handleSubmitToDepot = async (item: PersonalStockItem, condition: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger', conditionNote: string) => {
     if (!currentUser || !currentUserProfile) return;
     setProcessingItemId(item.id);
     try {
@@ -478,7 +493,7 @@ export default function TeknikServisDetayPage() {
       });
 
       // Create pending return record
-      await addDoc(collection(db, 'pendingReturns'), {
+      await addDoc(collection(db, 'pendingReturns'), withCompanyScope({
         personalStockId: item.id,
         ownerUid: item.ownerUid,
         ownerName: item.ownerName,
@@ -494,7 +509,9 @@ export default function TeknikServisDetayPage() {
         requestedAt: serverTimestamp(),
         requestedByUid: currentUser.uid,
         requestedByName: currentUserProfile.displayName || currentUser.email || '',
-      });
+        returnCondition: condition,
+        returnConditionNote: conditionNote || null,
+      }, currentCompanyId));
 
       // Create log entry
       await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
@@ -518,6 +535,22 @@ export default function TeknikServisDetayPage() {
     } finally {
       setProcessingItemId(null);
     }
+  };
+
+  const submitReturnRequest = async () => {
+    if (!pendingReturnItem) return;
+    if (returnCondition === 'diger' && !returnConditionNote.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Diğer durumu için açıklama zorunludur.', variant: 'destructive' });
+      return;
+    }
+    const note = returnConditionNote.trim();
+    if (pendingReturnType === 'return_to_depot') {
+      await handleReturnToDepot(pendingReturnItem, returnCondition, note);
+    } else {
+      await handleSubmitToDepot(pendingReturnItem, returnCondition, note);
+    }
+    setReturnConditionDialogOpen(false);
+    setPendingReturnItem(null);
   };
 
   // Handle Diğer Firma Arıza form submission
@@ -966,7 +999,7 @@ export default function TeknikServisDetayPage() {
                       <div className="flex-shrink-0">
                         {item.source === 'depot' ? (
                           <button
-                            onClick={() => handleReturnToDepot(item)}
+                            onClick={() => requestReturnToDepot(item, 'return_to_depot')}
                             disabled={processingItemId === item.id}
                             className="cihaz-tool-item px-3 py-2 text-sm font-medium whitespace-nowrap flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
@@ -981,7 +1014,7 @@ export default function TeknikServisDetayPage() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => handleSubmitToDepot(item)}
+                            onClick={() => requestReturnToDepot(item, 'submit_to_depot')}
                             disabled={processingItemId === item.id}
                             className="cihaz-tool-item px-3 py-2 text-sm font-medium whitespace-nowrap flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
@@ -1009,6 +1042,44 @@ export default function TeknikServisDetayPage() {
             >
               Kapat
             </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={returnConditionDialogOpen} onOpenChange={setReturnConditionDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>İade Durumu Seçimi</DialogTitle>
+            <DialogDescription>
+              {pendingReturnItem?.stokAdi || 'Parça'} için iade durumunu seçin.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label>Parça Durumu</Label>
+            <select
+              value={returnCondition}
+              onChange={(e) => setReturnCondition(e.target.value as any)}
+              className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+            >
+              <option value="iyi">İyi</option>
+              <option value="arizali">Arızalı</option>
+              <option value="miadi_gecmis">Miadı Geçik</option>
+              <option value="diger">Diğer</option>
+            </select>
+            {returnCondition === 'diger' && (
+              <div className="space-y-1">
+                <Label>Açıklama</Label>
+                <Textarea
+                  value={returnConditionNote}
+                  onChange={(e) => setReturnConditionNote(e.target.value)}
+                  placeholder="Durumu açıklayın"
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <button onClick={() => setReturnConditionDialogOpen(false)} className="cihaz-tool-item px-4 py-2 text-sm font-medium">Vazgeç</button>
+            <button onClick={submitReturnRequest} className="cihaz-tool-item px-4 py-2 text-sm font-medium">Talep Oluştur</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
