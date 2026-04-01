@@ -428,6 +428,10 @@ declare module "@/lib/types" {
     imageUrl?: string;
     cihazAdi?: string;
     seriNumarasi?: string;
+    mulkiyet?: string;
+    kurulumTarihi?: string;
+    kurulumPersonelleri?: string;
+    aciklama?: string;
     kod?: string;
     hospitalId?: ID;
     aktif?: boolean;

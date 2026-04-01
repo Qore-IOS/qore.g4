@@ -23,13 +23,14 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn, exportDevicesToPdf } from '@/lib/utils';
+import { cn, exportDevicesToPdf, exportDataToExcel } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/auth-context';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -226,7 +227,11 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       cihazAdi: current.cihazAdi,
       seriNumarasi: current.seriNumarasi,
       hospitalId: current.hospitalId,
-      order: current.order
+      order: current.order,
+      mulkiyet: current.mulkiyet || '',
+      kurulumTarihi: current.kurulumTarihi || '',
+      kurulumPersonelleri: current.kurulumPersonelleri || '',
+      aciklama: current.aciklama || ''
     }, currentUserProfile?.companyId), { merge: true });
 
     toast({ title: 'Kaydedildi', description: 'Cihaz tanımı kaydedildi.' });
@@ -797,8 +802,11 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         return;
       }
 
+      const seenInFile = new Set<string>();
       let added = 0;
       for (const row of normalized) {
+        const fileKey = `${row.brand.toLocaleLowerCase('tr')}::${row.model.toLocaleLowerCase('tr')}`;
+        if (seenInFile.has(fileKey)) continue;
         const exists = modelDefinitions.some(
           item =>
             item.brand.toLowerCase() === row.brand.toLowerCase() &&
@@ -810,6 +818,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           model: row.model,
           createdAt: serverTimestamp(),
         }, currentUserProfile?.companyId));
+        seenInFile.add(fileKey);
         added++;
       }
       await fetchModelDefinitions();
@@ -822,10 +831,24 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const handleDefinitionTemplateDownload = () => {
+    const templateRows = [
+      { Marka: 'X Marka', Model: 'A Model' },
+      { Marka: 'X Marka', Model: 'Z Model' },
+      { Marka: 'X Marka', Model: 'C Model' },
+    ];
+    exportDataToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
+    toast({ title: 'Şablon İndirildi', description: 'Şablonu doldurup Excel ile Yükle alanından içe aktarabilirsiniz.' });
+  };
+
   const brands = Array.from(new Set(modelDefinitions.map(row => row.brand))).sort((a, b) => a.localeCompare(b, 'tr'));
-  const availableModels = modelDefinitions
-    .filter(row => row.brand === (current.brand || ''))
-    .map(row => row.model);
+  const availableModels = Array.from(
+    new Set(
+      modelDefinitions
+        .filter(row => row.brand === (current.brand || ''))
+        .map(row => row.model)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'tr'));
 
   const filteredDevices = devices
     .filter(device => {
@@ -1065,6 +1088,38 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Label>Seri Numarası</Label>
                   <Input placeholder="Örn: 13A1-20" value={current.seriNumarasi || ''} onChange={e => setCurrent({ ...current, seriNumarasi: e.target.value })} />
                 </div>
+                <div className="space-y-1">
+                  <Label>Mülkiyet</Label>
+                  <Select value={String(current.mulkiyet || '')} onValueChange={val => setCurrent({ ...current, mulkiyet: val })}>
+                    <SelectTrigger><SelectValue placeholder="Mülkiyet seçin" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="kurum">Kurum</SelectItem>
+                      <SelectItem value="kiralik">Kiralık</SelectItem>
+                      <SelectItem value="demirbas">Demirbaş</SelectItem>
+                      <SelectItem value="diger">Diğer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Kurulum Tarihi</Label>
+                  <Input type="date" value={String(current.kurulumTarihi || '')} onChange={e => setCurrent({ ...current, kurulumTarihi: e.target.value })} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Kuran Personel(ler)</Label>
+                <Textarea
+                  placeholder="Birden fazla isim için virgül kullanın"
+                  value={String(current.kurulumPersonelleri || '')}
+                  onChange={e => setCurrent({ ...current, kurulumPersonelleri: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Açıklama</Label>
+                <Textarea
+                  placeholder="Cihaza özel notlar..."
+                  value={String(current.aciklama || '')}
+                  onChange={e => setCurrent({ ...current, aciklama: e.target.value })}
+                />
               </div>
             </div>
             <div className="cihaz-card p-4 space-y-3">
@@ -1151,6 +1206,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                 <Button onClick={saveModelDefinition} disabled={isSavingDefinition}>
                   {isSavingDefinition ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
                   Tanım Ekle
+                </Button>
+                <Button variant="outline" onClick={handleDefinitionTemplateDownload}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Şablon İndir
                 </Button>
                 <Button asChild variant="outline">
                   <label className="cursor-pointer">
