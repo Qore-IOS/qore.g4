@@ -260,6 +260,7 @@ export default function YedekParcaTransferPage() {
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [returnModalItem, setReturnModalItem] = useState<PersonalStockItem | null>(null);
   const [returnCondition, setReturnCondition] = useState<'iyi' | 'miad_gecmis' | 'arizali'>('iyi');
+  const [returnNote, setReturnNote] = useState('');
   const [isReturning, setIsReturning] = useState(false);
 
   // Check authorization
@@ -1796,6 +1797,19 @@ export default function YedekParcaTransferPage() {
   // Initiate return to depot (by field personnel)
   const initiateReturn = async () => {
     if (!returnModalItem) return;
+
+    // Arızalı veya miadı geçmiş ise açıklama zorunlu
+    if ((returnCondition === 'arizali' || returnCondition === 'miad_gecmis') && !returnNote.trim()) {
+      toast({
+        title: 'Açıklama Gerekli',
+        description: returnCondition === 'arizali'
+          ? 'Arızalı parça için arıza açıklaması zorunludur.'
+          : 'Miadı geçmiş parça için açıklama zorunludur.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsReturning(true);
     try {
       const now = new Date();
@@ -1811,6 +1825,7 @@ export default function YedekParcaTransferPage() {
         source: returnModalItem.source,
         returnType: 'return_to_depot' as const,
         returnCondition,
+        ...(returnNote.trim() ? { returnNote: returnNote.trim() } : {}),
         status: 'pending' as const,
         requestedAt: Timestamp.fromDate(now),
         requestedByUid: currentUserProfile?.uid || '',
@@ -1828,6 +1843,7 @@ export default function YedekParcaTransferPage() {
       setReturnModalOpen(false);
       setReturnModalItem(null);
       setReturnCondition('iyi');
+      setReturnNote('');
       toast({
         title: 'İade Talebi Gönderildi',
         description: `${returnModalItem.stokAdi} için iade talebi lojistik sorumlusuna iletildi.`,
@@ -2456,6 +2472,9 @@ export default function YedekParcaTransferPage() {
                     }}>
                       {item.returnCondition === 'iyi' ? 'İyi' : item.returnCondition === 'miad_gecmis' ? 'Miadı Geçmiş' : 'Arızalı'}
                     </span>
+                  )}
+                  {(item as any).returnNote && (
+                    <span className="text-[10px] italic" style={{ color: 'var(--dashboard-muted)' }}>— {(item as any).returnNote}</span>
                   )}
                   <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
                 </div>
@@ -3822,7 +3841,7 @@ export default function YedekParcaTransferPage() {
       </Dialog>
 
       {/* İade Et Dialog */}
-      <Dialog open={returnModalOpen} onOpenChange={(open) => { if (!isReturning) { setReturnModalOpen(open); if (!open) setReturnModalItem(null); } }}>
+      <Dialog open={returnModalOpen} onOpenChange={(open) => { if (!isReturning) { setReturnModalOpen(open); if (!open) { setReturnModalItem(null); setReturnNote(''); } } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -3848,7 +3867,7 @@ export default function YedekParcaTransferPage() {
                   ] as const).map(opt => (
                     <button
                       key={opt.value}
-                      onClick={() => setReturnCondition(opt.value)}
+                      onClick={() => { setReturnCondition(opt.value); setReturnNote(''); }}
                       className="px-2 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 border-2"
                       style={{
                         background: returnCondition === opt.value ? opt.bg : 'transparent',
@@ -3860,6 +3879,35 @@ export default function YedekParcaTransferPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase flex items-center gap-1" style={{ color: 'var(--dashboard-muted)' }}>
+                  {returnCondition === 'arizali' ? 'Arıza Açıklaması' : returnCondition === 'miad_gecmis' ? 'Açıklama' : 'Açıklama (Opsiyonel)'}
+                  {(returnCondition === 'arizali' || returnCondition === 'miad_gecmis') && (
+                    <span className="text-[10px] font-bold" style={{ color: '#B91C1C' }}>*</span>
+                  )}
+                </label>
+                <textarea
+                  value={returnNote}
+                  onChange={(e) => setReturnNote(e.target.value)}
+                  placeholder={
+                    returnCondition === 'arizali'
+                      ? 'Arızanın detayını açıklayın...'
+                      : returnCondition === 'miad_gecmis'
+                      ? 'Miadı geçme durumunu açıklayın...'
+                      : 'Varsa açıklama ekleyebilirsiniz...'
+                  }
+                  rows={3}
+                  className="w-full text-sm resize-none rounded-xl px-3 py-2 !border-0 !ring-0 outline-none"
+                  style={{
+                    background: 'var(--dashboard-pressed)',
+                    color: 'var(--dashboard-text)',
+                    borderColor: (returnCondition === 'arizali' || returnCondition === 'miad_gecmis') && !returnNote.trim()
+                      ? 'rgba(185,28,28,.4)'
+                      : 'var(--dashboard-stroke)',
+                    border: '1.5px solid',
+                  }}
+                />
               </div>
             </div>
           )}

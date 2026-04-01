@@ -773,6 +773,7 @@ export interface PendingReturn {
   sourceDeviceName?: string;
   returnType: 'return_to_depot' | 'submit_to_depot'; // return_to_depot = iade (yeni parça), submit_to_depot = teslim (cihazdan çıkan)
   returnCondition?: 'iyi' | 'miad_gecmis' | 'arizali'; // Parçanın iade durumu
+  returnNote?: string;           // Açıklama (arızalı/miadı geçmiş için zorunlu, iyi için opsiyonel)
   status: 'pending' | 'confirmed';
   requestedAt: Date;
   requestedByUid?: string;
