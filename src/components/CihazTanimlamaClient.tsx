@@ -797,8 +797,11 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         return;
       }
 
+      const seenInFile = new Set<string>();
       let added = 0;
       for (const row of normalized) {
+        const fileKey = `${row.brand.toLocaleLowerCase('tr')}::${row.model.toLocaleLowerCase('tr')}`;
+        if (seenInFile.has(fileKey)) continue;
         const exists = modelDefinitions.some(
           item =>
             item.brand.toLowerCase() === row.brand.toLowerCase() &&
@@ -810,6 +813,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           model: row.model,
           createdAt: serverTimestamp(),
         }, currentUserProfile?.companyId));
+        seenInFile.add(fileKey);
         added++;
       }
       await fetchModelDefinitions();
@@ -823,9 +827,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   };
 
   const brands = Array.from(new Set(modelDefinitions.map(row => row.brand))).sort((a, b) => a.localeCompare(b, 'tr'));
-  const availableModels = modelDefinitions
-    .filter(row => row.brand === (current.brand || ''))
-    .map(row => row.model);
+  const availableModels = Array.from(
+    new Set(
+      modelDefinitions
+        .filter(row => row.brand === (current.brand || ''))
+        .map(row => row.model)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'tr'));
 
   const filteredDevices = devices
     .filter(device => {

@@ -1,46 +1,25 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
 } from '@/components/ui/card';
-import {
-  Table, TableHeader, TableHead, TableBody, TableRow, TableCell
-} from '@/components/ui/table';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, writeBatch, getDocFromServer } from 'firebase/firestore';
-import type { DepoStokItem, Laboratory } from '@/lib/types';
-import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, FileSpreadsheet, MoreVertical, Trash2, Eye, AlertCircle } from 'lucide-react';
+import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer } from 'firebase/firestore';
+import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
+import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-
-const SortableHeader: React.FC<{
-  label: string;
-  field: keyof GroupedStockItem;
-  sortField: keyof GroupedStockItem;
-  sortAsc: boolean;
-  onClick: (field: keyof GroupedStockItem) => void;
-}> = ({ label, field, sortField, sortAsc, onClick }) => {
-  const isActive = sortField === field;
-  return (
-    <TableHead onClick={() => onClick(field)} className="cursor-pointer hover:bg-muted/50">
-      <div className="flex items-center">
-        {label}
-        {isActive && (sortAsc ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />)}
-      </div>
-    </TableHead>
-  );
-};
-
+import { differenceInDays, isValid, parse } from 'date-fns';
+import { resolveDefaultTrackingMode } from '@/lib/tracking';
 
 type GroupedStockItem = {
     groupKey: string;
@@ -49,8 +28,50 @@ type GroupedStockItem = {
     lot: string;
     miad: string;
     quantity: number;
+    anaBirim: string;
     firstId: string;
 };
+
+type MiadSeverity = 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
+
+function getMiadInfoFromString(miadStr: string): { days: number; severity: MiadSeverity } {
+  if (!miadStr) return { days: Infinity, severity: 'normal' };
+  const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+  if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' };
+  const days = differenceInDays(miadDate, new Date());
+  if (days < 0) return { days, severity: 'expired' };
+  if (days <= 30) return { days, severity: 'critical' };
+  if (days < 45) return { days, severity: 'caution' };
+  if (days < 60) return { days, severity: 'notice' };
+  return { days, severity: 'normal' };
+}
+
+function getCoverageInfoForRow(
+  row: GroupedStockItem,
+  minMaxRules: Record<string, MinMaxRule>,
+  lotTrackedStockCodes: Set<string>,
+  sourceRows: GroupedStockItem[]
+): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } {
+  const rule = minMaxRules[row.stokKodu];
+  if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  const stockForCoverage = lotTrackedStockCodes.has(row.stokKodu)
+    ? row.quantity
+    : sourceRows.reduce((acc, r) => r.stokKodu === row.stokKodu ? acc + r.quantity : acc, 0);
+  const periodDays = Math.floor(rule.maxGun);
+  if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  const dailyNeed = rule.max / periodDays;
+  if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  const coverageDays = Math.floor(stockForCoverage / dailyNeed);
+  if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical', coverageDays, dailyNeed };
+  if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning', coverageDays, dailyNeed };
+  return { label: `${coverageDays} gün yeter`, severity: 'good', coverageDays, dailyNeed };
+}
+
+function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: string; coverageDays: number; dailyNeed: number }) {
+  if (coverageInfo.severity === 'unknown' || miadInfo.days === Infinity || miadInfo.days <= 0 || coverageInfo.coverageDays <= miadInfo.days) return 0;
+  const riskyDays = coverageInfo.coverageDays - miadInfo.days;
+  return Math.max(0, Math.ceil(riskyDays * coverageInfo.dailyNeed));
+}
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
@@ -66,6 +87,8 @@ export default function LaboratuvarYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [productMeta, setProductMeta] = useState<Record<string, { anaBirim?: string; takipSekli?: string }>>({});
+  const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isDeletingGroup, setIsDeletingGroup] = useState<string | null>(null);
 
   useEffect(() => {
@@ -80,16 +103,42 @@ export default function LaboratuvarYonetimiPanel() {
       setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       
       const names: Record<string, string> = {};
+      const meta: Record<string, { anaBirim?: string; takipSekli?: string }> = {};
       productsSnap.docs.forEach(d => {
         const p = d.data();
-        if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
+        if (p.stokKodu) {
+          names[p.stokKodu] = p.stokAdi || p.stokKodu;
+          meta[p.stokKodu] = { anaBirim: p.anaBirim, takipSekli: p.takipSekli };
+        }
       });
       setProductNames(names);
+      setProductMeta(meta);
 
       setIsLoading(false);
     }
     fetchData();
   }, [currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
+    if (!selectedLabId) {
+      setMinMaxRules({});
+      return;
+    }
+    (async () => {
+      try {
+        const rulesRef = collection(db, 'hospitals', selectedLabId, 'minMaxRules');
+        const snapshot = await getDocs(rulesRef);
+        const rules: Record<string, MinMaxRule> = {};
+        snapshot.forEach(d => {
+          const rule = d.data() as MinMaxRule;
+          if (rule.stokKodu) rules[rule.stokKodu] = rule;
+        });
+        setMinMaxRules(rules);
+      } catch (e) {
+        console.error('Error fetching lab min-max rules:', e);
+      }
+    })();
+  }, [selectedLabId]);
 
   const selectedLabName = useMemo(() => {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
@@ -133,11 +182,21 @@ export default function LaboratuvarYonetimiPanel() {
         lot: grp.lot,
         miad: grp.miad,
         quantity: grp.items.length,
+        anaBirim: productMeta[grp.stokKodu]?.anaBirim || 'Kutu',
         firstId: firstValidId
       };
     }),
-    [groupedMap]
+    [groupedMap, productMeta]
   );
+
+  const lotTrackedStockCodes = useMemo(() => {
+    const set = new Set<string>();
+    Object.entries(productMeta).forEach(([stokKodu, meta]) => {
+      const takipSekli = resolveDefaultTrackingMode(meta as any);
+      if (takipSekli === 'lot') set.add(stokKodu);
+    });
+    return set;
+  }, [productMeta]);
 
   const filtered = useMemo(() => {
     if (!searchQuery) return summaryList;
@@ -173,11 +232,6 @@ export default function LaboratuvarYonetimiPanel() {
     return sorted.slice(start, start + rowsPerPage);
   }, [sorted, currentPage, rowsPerPage]);
 
-  const onHeaderClick = (field: keyof GroupedStockItem) => {
-    if (sortField === field) setSortAsc(!sortAsc);
-    else { setSortField(field); setSortAsc(true); }
-    setCurrentPage(1);
-  };
   const goToDetail = (id: string) => router.push(`/laboratuvar-yonetimi/${id}`);
 
   // Delete all items in a group directly (for incorrectly entered items)
@@ -353,74 +407,129 @@ export default function LaboratuvarYonetimiPanel() {
           </div>
 
           {selectedLabId && (
-            <Card className="shadow mt-4">
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                    <CardTitle>{selectedLabName} - Özet Stok Durumu</CardTitle>
-                    <Button onClick={handleExport} variant="outline" size="sm">
-                        <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
-                    </Button>
+            <div className="cihaz-card-strong overflow-hidden mt-4">
+              <div className="sticky top-0 z-20 bg-[var(--dashboard-surface)] border-b border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 text-xs text-[var(--dashboard-muted)]">
+                  <span className="font-medium">{selectedLabName} • Toplam: <span className="text-[var(--dashboard-text)] font-bold">{sorted.length}</span> kayıt</span>
+                  {pageCount > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span>/{pageCount}</span>}
                 </div>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="flex justify-center items-center h-64">
-                    <Loader2 className="h-8 w-8 animate-spin" />
+                <div className="flex items-center gap-3">
+                  <div className="hidden sm:flex items-center gap-3 text-[10px] text-[var(--dashboard-muted)]">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> &lt;30 gün</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> &lt;45 gün</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400" /> &lt;60 gün</span>
                   </div>
-                ) : (
-                  <>
-                    <ScrollArea className="h-[400px] border rounded-md">
-                      <Table>
-                        <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
-                          <TableRow>
-                            <SortableHeader label="Stok Kodu" field="stokKodu" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
-                            <SortableHeader label="Stok Adı" field="stokAdi" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
-                            <SortableHeader label="Lot" field="lot" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
-                            <SortableHeader label="Miad" field="miad" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
-                            <SortableHeader label="Adet" field="quantity" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
-                            <TableHead className="w-12">İşlem</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {paginated.map(row => (
-                            <TableRow
+                  <Button onClick={handleExport} variant="outline" size="sm" className="h-8 text-xs">
+                    <FileSpreadsheet className="mr-2 h-3.5 w-3.5" /> Excel
+                  </Button>
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 text-[var(--dashboard-muted)]">
+                  <Loader2 className="h-8 w-8 animate-spin mb-3 text-orange-400" />
+                  <p className="text-sm">Veriler yükleniyor...</p>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="z-10">
+                        <tr className="bg-[var(--dashboard-surface-2)]">
+                          <th className="w-1.5" />
+                          <th className="text-left px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Stok Kodu</th>
+                          <th className="text-left px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Stok Adı</th>
+                          <th className="text-left px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Lot</th>
+                          <th className="text-left px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Miad</th>
+                          <th className="text-center px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Adet</th>
+                          <th className="text-left px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Yeterlilik</th>
+                          <th className="text-right px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">İşlem</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginated.map(row => {
+                          const miadInfo = getMiadInfoFromString(row.miad);
+                          const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, summaryList);
+                          const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
+                          const stripeColor =
+                            miadInfo.severity === 'expired' || miadInfo.severity === 'critical'
+                              ? 'bg-red-500'
+                              : miadInfo.severity === 'caution'
+                                ? 'bg-amber-500'
+                                : miadInfo.severity === 'notice'
+                                  ? 'bg-yellow-400'
+                                  : 'bg-slate-300';
+
+                          return (
+                            <tr
                               key={row.groupKey}
-                              className="hover:bg-muted"
+                              className={`border-b border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]/50 transition-colors ${
+                                miadInfo.severity === 'expired' || miadInfo.severity === 'critical'
+                                  ? 'bg-red-500/[0.04]'
+                                  : miadInfo.severity === 'caution'
+                                    ? 'bg-amber-500/[0.04]'
+                                    : ''
+                              }`}
                             >
-                              <TableCell
-                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
-                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
-                              >
-                                {row.stokKodu}
-                              </TableCell>
-                              <TableCell
-                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
-                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
-                              >
+                              <td className="w-1.5 p-0">
+                                <div className={`w-1 h-full min-h-[56px] rounded-r ${stripeColor}`} />
+                              </td>
+                              <td onClick={() => { if (row.firstId) goToDetail(row.firstId); }} className={`px-3 py-3 cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}>
+                                <span className="text-[10px] text-[var(--dashboard-muted)] font-mono">{row.stokKodu}</span>
+                              </td>
+                              <td onClick={() => { if (row.firstId) goToDetail(row.firstId); }} className={`px-3 py-3 cursor-pointer font-medium text-[var(--dashboard-text)] ${row.firstId ? '' : 'opacity-60'}`}>
                                 {row.stokAdi}
-                              </TableCell>
-                              <TableCell
-                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
-                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
-                              >
+                              </td>
+                              <td onClick={() => { if (row.firstId) goToDetail(row.firstId); }} className={`px-3 py-3 cursor-pointer text-xs text-[var(--dashboard-muted)] ${row.firstId ? '' : 'opacity-60'}`}>
                                 {row.lot}
-                              </TableCell>
-                              <TableCell
-                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
-                                className={`cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}
-                              >
-                                {row.miad}
-                              </TableCell>
-                              <TableCell
-                                onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
-                                className={`cursor-pointer text-right font-semibold ${row.firstId ? '' : 'opacity-60'}`}
-                              >
-                                {row.quantity}
-                              </TableCell>
-                              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                              </td>
+                              <td onClick={() => { if (row.firstId) goToDetail(row.firstId); }} className={`px-3 py-3 cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-xs text-[var(--dashboard-text)]">{row.miad}</span>
+                                  {miadInfo.days !== Infinity && (
+                                    <span
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold w-fit ${
+                                        miadInfo.severity === 'expired' || miadInfo.severity === 'critical'
+                                          ? 'bg-red-100 text-red-700'
+                                          : miadInfo.severity === 'caution'
+                                            ? 'bg-amber-100 text-amber-700'
+                                            : miadInfo.severity === 'notice'
+                                              ? 'bg-yellow-100 text-yellow-700'
+                                              : 'bg-slate-100 text-slate-700'
+                                      }`}
+                                    >
+                                      {miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td onClick={() => { if (row.firstId) goToDetail(row.firstId); }} className={`px-3 py-3 text-center cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}>
+                                <span className="inline-flex items-center justify-center min-w-[48px] px-2 py-1 rounded-lg bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] shadow-sm text-xs font-bold text-[var(--dashboard-text)]">
+                                  {row.quantity} {row.anaBirim}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                    coverageInfo.severity === 'good' ? 'bg-emerald-100 text-emerald-700' :
+                                      coverageInfo.severity === 'warning' ? 'bg-orange-100 text-orange-700' :
+                                        coverageInfo.severity === 'critical' ? 'bg-red-100 text-red-700' :
+                                          'bg-slate-100 text-slate-500'
+                                  }`}>
+                                    {coverageInfo.label}
+                                  </span>
+                                  {riskyBoxes > 0 && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      {riskyBoxes} kutu riskli
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isDeletingGroup === row.groupKey}>
+                                    <Button variant="ghost" size="icon" className="cihaz-tool-item h-8 w-8" disabled={isDeletingGroup === row.groupKey}>
                                       {isDeletingGroup === row.groupKey ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                       ) : (
@@ -429,10 +538,7 @@ export default function LaboratuvarYonetimiPanel() {
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
-                                    <DropdownMenuItem
-                                      onClick={() => { if (row.firstId) goToDetail(row.firstId); }}
-                                      disabled={!row.firstId}
-                                    >
+                                    <DropdownMenuItem onClick={() => { if (row.firstId) goToDetail(row.firstId); }} disabled={!row.firstId}>
                                       <Eye className="mr-2 h-4 w-4" />
                                       Detayları Görüntüle
                                     </DropdownMenuItem>
@@ -446,57 +552,48 @@ export default function LaboratuvarYonetimiPanel() {
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
-                              </TableCell>
-                            </TableRow>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {paginated.length === 0 && (
+                          <tr>
+                            <td colSpan={8} className="text-center py-16 text-[var(--dashboard-muted)]">
+                              Kayıt bulunamadı.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="sticky bottom-0 bg-[var(--dashboard-surface)] border-t border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs text-[var(--dashboard-muted)]">
+                      <span>Sayfa başına:</span>
+                      <Select value={String(rowsPerPage)} onValueChange={val => { setRowsPerPage(Number(val)); setCurrentPage(1); }}>
+                        <SelectTrigger className="w-16 h-7 text-xs bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[20, 50, 100].map(n => (
+                            <SelectItem key={n} value={String(n)}>{n}</SelectItem>
                           ))}
-                          {paginated.length === 0 && (
-                            <TableRow>
-                              <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
-                                Kayıt bulunamadı.
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
-                    </ScrollArea>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex items-center space-x-2 text-sm">
-                        <span>Satır / sayfa:</span>
-                        <Select value={String(rowsPerPage)} onValueChange={val => { setRowsPerPage(Number(val)); setCurrentPage(1); }}>
-                          <SelectTrigger className="w-20">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {[20, 50, 100].map(n => (
-                              <SelectItem key={n} value={String(n)}>{n}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={currentPage === 1}
-                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        >
-                          Önceki
-                        </Button>
-                        <span className="text-sm">{currentPage} / {pageCount}</span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={currentPage === pageCount}
-                          onClick={() => setCurrentPage(p => Math.min(pageCount, p + 1))}
-                        >
-                          Sonraki
-                        </Button>
-                      </div>
+                        </SelectContent>
+                      </Select>
                     </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+                    <div className="flex items-center gap-1">
+                      <Button size="icon" variant="ghost" className="h-7 w-7" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}>
+                        Ön
+                      </Button>
+                      <span className="text-xs text-[var(--dashboard-muted)] px-2">{currentPage}/{pageCount}</span>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" disabled={currentPage === pageCount} onClick={() => setCurrentPage(p => Math.min(pageCount, p + 1))}>
+                        Son
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
