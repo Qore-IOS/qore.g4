@@ -2,7 +2,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp
+  collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Device, Hospital, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
@@ -23,7 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download, Image as ImageIcon } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -89,6 +89,7 @@ type DeviceModelDefinition = {
   id: string;
   brand: string;
   model: string;
+  imageUrl?: string | null;
 };
 
 export default function CihazTanimlamaClient({ images, hospitals }: Props) {
@@ -133,6 +134,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [definitionModalOpen, setDefinitionModalOpen] = useState(false);
   const [newDefinitionBrand, setNewDefinitionBrand] = useState('');
   const [newDefinitionModel, setNewDefinitionModel] = useState('');
+  const [newDefinitionImageUrl, setNewDefinitionImageUrl] = useState('');
+  const [newDefinitionCustomImagePath, setNewDefinitionCustomImagePath] = useState('');
+  const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(null);
   const [isSavingDefinition, setIsSavingDefinition] = useState(false);
 
   // Toplu Bakım Planı State'leri
@@ -210,7 +214,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   }, []);
 
   const save = async () => {
-    const imageUrl = current.imageUrl || customPath.trim();
+    const selectedModelImage = modelDefinitions.find(
+      row => row.brand === current.brand && row.model === current.model
+    )?.imageUrl || '';
+    const imageUrl = current.imageUrl || customPath.trim() || selectedModelImage;
     if (!current.brand || !current.model || !imageUrl || !current.seriNumarasi || !current.hospitalId || !current.order) {
       toast({
         title: 'Eksik bilgi',
@@ -823,26 +830,59 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       toast({ title: 'Eksik Bilgi', description: 'Marka ve model zorunludur.', variant: 'destructive' });
       return;
     }
-    const duplicate = modelDefinitions.some(
-      row =>
-        row.brand.trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
-        row.model.trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
-    );
-    if (duplicate) {
-      toast({ title: 'Mevcut Tanım', description: 'Bu marka/model zaten tanımlı.', variant: 'destructive' });
-      return;
-    }
+    const selectedDefinitionImageUrl = newDefinitionImageUrl || newDefinitionCustomImagePath.trim();
+    const duplicate = editingDefinitionId
+      ? modelDefinitions.find(row => row.id === editingDefinitionId)
+      : modelDefinitions.find(
+        row =>
+          row.brand.trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
+          row.model.trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
+      );
     setIsSavingDefinition(true);
     try {
-      await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
-        brand: newDefinitionBrand.trim(),
-        model: newDefinitionModel.trim(),
-        createdAt: serverTimestamp(),
-      }, currentUserProfile?.companyId));
+      if (duplicate) {
+        await updateDoc(doc(db, 'deviceModelDefinitions', duplicate.id), {
+          imageUrl: selectedDefinitionImageUrl || null,
+        });
+      } else {
+        await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
+          brand: newDefinitionBrand.trim(),
+          model: newDefinitionModel.trim(),
+          imageUrl: selectedDefinitionImageUrl || null,
+          createdAt: serverTimestamp(),
+        }, currentUserProfile?.companyId));
+      }
+      if (selectedDefinitionImageUrl) {
+        const deviceSnap = await getDocs(collection(db, 'devices'));
+        const scopedDevices = filterByCompanyScope(
+          deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        const matchedDevices = scopedDevices.filter(
+          device =>
+            (device.brand || '').trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
+            (device.model || '').trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
+        );
+        await Promise.all(
+          matchedDevices.map(device =>
+            updateDoc(doc(db, 'devices', device.id), { imageUrl: selectedDefinitionImageUrl })
+          )
+        );
+      }
       setNewDefinitionBrand('');
       setNewDefinitionModel('');
+      setNewDefinitionImageUrl('');
+      setNewDefinitionCustomImagePath('');
+      setEditingDefinitionId(null);
       await fetchModelDefinitions();
-      toast({ title: 'Başarılı', description: 'Marka/model tanımı eklendi.' });
+      await fetchDevices();
+      toast({
+        title: 'Başarılı',
+        description: duplicate
+          ? 'Marka/model görseli güncellendi ve ilgili cihazlara uygulandı.'
+          : 'Marka/model tanımı eklendi ve görsel ilgili cihazlara uygulandı.'
+      });
     } catch (error) {
       console.error('Model tanımı kaydedilemedi:', error);
       toast({ title: 'Hata', description: 'Model tanımı kaydedilemedi.', variant: 'destructive' });
@@ -880,6 +920,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         .map(row => ({
           brand: (row.Marka || row.marka || '').trim(),
           model: (row.Model || row.model || '').trim(),
+          imageUrl: (row.Gorsel || row.gorsel || row.ImageUrl || row.imageUrl || '').trim(),
         }))
         .filter(row => row.brand && row.model);
 
@@ -902,6 +943,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
           brand: row.brand,
           model: row.model,
+          imageUrl: row.imageUrl || null,
           createdAt: serverTimestamp(),
         }, currentUserProfile?.companyId));
         seenInFile.add(fileKey);
@@ -1007,9 +1049,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
   const handleDefinitionTemplateDownload = () => {
     const templateRows = [
-      { Marka: 'X Marka', Model: 'A Model' },
-      { Marka: 'X Marka', Model: 'Z Model' },
-      { Marka: 'X Marka', Model: 'C Model' },
+      { Marka: 'X Marka', Model: 'A Model', Gorsel: 'devices/ornek-a-model.png' },
+      { Marka: 'X Marka', Model: 'Z Model', Gorsel: '' },
+      { Marka: 'X Marka', Model: 'C Model', Gorsel: '' },
     ];
     exportDataToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
     toast({ title: 'Şablon İndirildi', description: 'Şablonu doldurup Excel ile Yükle alanından içe aktarabilirsiniz.' });
@@ -1283,7 +1325,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Label>Model</Label>
                   <Select
                     value={current.model || ''}
-                    onValueChange={val => setCurrent({ ...current, model: val })}
+                    onValueChange={val => {
+                      const modelImage = modelDefinitions.find(row => row.brand === current.brand && row.model === val)?.imageUrl || '';
+                      setCurrent({ ...current, model: val, imageUrl: current.imageUrl || modelImage || undefined });
+                    }}
                     disabled={!current.brand}
                   >
                     <SelectTrigger><SelectValue placeholder={current.brand ? 'Model seçin' : 'Önce marka seçin'} /></SelectTrigger>
@@ -1410,13 +1455,58 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="cihaz-card p-4 space-y-3">
               <p className="cihaz-section-label">Yeni Tanım</p>
-              <Input value={newDefinitionBrand} onChange={e => setNewDefinitionBrand(e.target.value)} placeholder="Marka" />
-              <Input value={newDefinitionModel} onChange={e => setNewDefinitionModel(e.target.value)} placeholder="Model" />
+              <Input
+                value={newDefinitionBrand}
+                onChange={e => setNewDefinitionBrand(e.target.value)}
+                placeholder="Marka"
+                disabled={!!editingDefinitionId}
+              />
+              <Input
+                value={newDefinitionModel}
+                onChange={e => setNewDefinitionModel(e.target.value)}
+                placeholder="Model"
+                disabled={!!editingDefinitionId}
+              />
+              <Select
+                value={newDefinitionImageUrl || 'none'}
+                onValueChange={val => {
+                  setNewDefinitionImageUrl(val === 'none' ? '' : val);
+                  if (val !== 'none') setNewDefinitionCustomImagePath('');
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Model görseli (opsiyonel)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Görsel seçme</SelectItem>
+                  {images.map(img => <SelectItem key={img} value={img}>{img}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input
+                value={newDefinitionCustomImagePath}
+                onChange={e => {
+                  setNewDefinitionCustomImagePath(e.target.value);
+                  if (e.target.value.trim()) setNewDefinitionImageUrl('');
+                }}
+                placeholder="Özel model görsel yolu (opsiyonel)"
+              />
               <div className="flex gap-2">
                 <Button onClick={saveModelDefinition} disabled={isSavingDefinition}>
                   {isSavingDefinition ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                  Tanım Ekle
+                  {editingDefinitionId ? 'Güncelle' : 'Tanım Ekle'}
                 </Button>
+                {editingDefinitionId && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingDefinitionId(null);
+                      setNewDefinitionBrand('');
+                      setNewDefinitionModel('');
+                      setNewDefinitionImageUrl('');
+                      setNewDefinitionCustomImagePath('');
+                    }}
+                  >
+                    Vazgeç
+                  </Button>
+                )}
                 <Button variant="outline" onClick={handleDefinitionTemplateDownload}>
                   <Download className="h-4 w-4 mr-2" />
                   Şablon İndir
@@ -1439,6 +1529,26 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                       <span className="font-medium">{def.brand}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-[var(--dashboard-muted)]">{def.model}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => {
+                            setEditingDefinitionId(def.id);
+                            setNewDefinitionBrand(def.brand);
+                            setNewDefinitionModel(def.model);
+                            if (def.imageUrl) {
+                              const hasPresetImage = images.includes(def.imageUrl);
+                              setNewDefinitionImageUrl(hasPresetImage ? def.imageUrl : '');
+                              setNewDefinitionCustomImagePath(hasPresetImage ? '' : def.imageUrl);
+                            } else {
+                              setNewDefinitionImageUrl('');
+                              setNewDefinitionCustomImagePath('');
+                            }
+                          }}
+                        >
+                          {def.imageUrl ? <ImageIcon className="h-3.5 w-3.5 text-emerald-600" /> : <Pencil className="h-3.5 w-3.5" />}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
