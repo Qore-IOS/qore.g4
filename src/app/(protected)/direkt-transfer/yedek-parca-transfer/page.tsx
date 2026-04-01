@@ -256,6 +256,12 @@ export default function YedekParcaTransferPage() {
   const [poolStockFilter, setPoolStockFilter] = useState<'all' | 'used' | 'unused'>('all');
   const [poolStockPage, setPoolStockPage] = useState(0);
 
+  // Return to depot modal state
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnModalItem, setReturnModalItem] = useState<PersonalStockItem | null>(null);
+  const [returnCondition, setReturnCondition] = useState<'iyi' | 'miad_gecmis' | 'arizali'>('iyi');
+  const [isReturning, setIsReturning] = useState(false);
+
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const isAdmin = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin';
@@ -1779,6 +1785,54 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  // Initiate return to depot (by field personnel)
+  const initiateReturn = async () => {
+    if (!returnModalItem) return;
+    setIsReturning(true);
+    try {
+      const now = new Date();
+      await addDoc(collection(db, 'pendingReturns'), withCompanyScope({
+        personalStockId: returnModalItem.id,
+        ownerUid: returnModalItem.ownerUid,
+        ownerName: returnModalItem.ownerName,
+        productCodeId: returnModalItem.productCodeId,
+        stokKodu: returnModalItem.stokKodu,
+        stokAdi: returnModalItem.stokAdi,
+        anaBirim: returnModalItem.anaBirim || 'Adet',
+        serialNumber: returnModalItem.serialNumber || '',
+        source: returnModalItem.source,
+        returnType: 'return_to_depot' as const,
+        returnCondition,
+        status: 'pending' as const,
+        requestedAt: Timestamp.fromDate(now),
+        requestedByUid: currentUserProfile?.uid || '',
+        requestedByName: currentUserProfile?.name || '',
+      }, currentCompanyId));
+
+      await updateDoc(doc(db, 'personalStock', returnModalItem.id), {
+        status: 'pending_return',
+      });
+
+      setPersonnelStock(prev =>
+        prev.map(s => s.id === returnModalItem.id ? { ...s, status: 'pending_return' as const } : s)
+      );
+
+      setReturnModalOpen(false);
+      setReturnModalItem(null);
+      setReturnCondition('iyi');
+      toast({
+        title: 'İade Talebi Gönderildi',
+        description: `${returnModalItem.stokAdi} için iade talebi lojistik sorumlusuna iletildi.`,
+      });
+      await loadRecentTransferLogs();
+    } catch (err) {
+      console.error('Error initiating return:', err);
+      toast({ title: 'Hata', description: 'İade talebi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsReturning(false);
+    }
+  };
+
   // Approve borrowed part
   const approveBorrowedPart = async (borrowed: any) => {
     if (!isTeknikLojistik) {
@@ -2387,6 +2441,14 @@ export default function YedekParcaTransferPage() {
                   <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: item.returnType === 'return_to_depot' ? 'rgba(22,163,74,.10)' : 'rgba(107,114,128,.10)', color: item.returnType === 'return_to_depot' ? '#16A34A' : 'var(--dashboard-muted)' }}>
                     {item.returnType === 'return_to_depot' ? 'İade (Yeni)' : 'Teslim (Çıkma)'}
                   </span>
+                  {item.returnCondition && (
+                    <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{
+                      background: item.returnCondition === 'iyi' ? 'rgba(22,163,74,.1)' : item.returnCondition === 'miad_gecmis' ? 'rgba(217,119,6,.1)' : 'rgba(185,28,28,.1)',
+                      color: item.returnCondition === 'iyi' ? '#16A34A' : item.returnCondition === 'miad_gecmis' ? '#D97706' : '#B91C1C',
+                    }}>
+                      {item.returnCondition === 'iyi' ? 'İyi' : item.returnCondition === 'miad_gecmis' ? 'Miadı Geçmiş' : 'Arızalı'}
+                    </span>
+                  )}
                   <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
                 </div>
               </div>
@@ -2833,6 +2895,15 @@ export default function YedekParcaTransferPage() {
                               {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
                               Üzerime Al
                             </button>
+                          ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
+                            <button
+                              onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnModalOpen(true); }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
+                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                            >
+                              <Upload className="h-3.5 w-3.5" />
+                              İade Et
+                            </button>
                           ) : isUsed ? (
                             <span className="text-[11px] text-left inline-block max-w-[220px]" style={{ color: 'var(--dashboard-muted)' }}>
                               {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
@@ -2928,6 +2999,15 @@ export default function YedekParcaTransferPage() {
                         >
                           {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
                           Üzerime Al
+                        </button>
+                      ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
+                        <button
+                          onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnModalOpen(true); }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95"
+                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                        >
+                          <Upload className="h-3 w-3" />
+                          İade Et
                         </button>
                       ) : isUsed ? (
                         <span className="text-[10px] text-right max-w-[52%]" style={{ color: 'var(--dashboard-muted)' }}>
@@ -3724,6 +3804,70 @@ export default function YedekParcaTransferPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* İade Et Dialog */}
+      <Dialog open={returnModalOpen} onOpenChange={(open) => { if (!isReturning) { setReturnModalOpen(open); if (!open) setReturnModalItem(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" style={{ color: 'var(--dashboard-accent)' }} />
+              Depoya İade
+            </DialogTitle>
+          </DialogHeader>
+          {returnModalItem && (
+            <div className="space-y-4">
+              <div className="cihaz-pressed p-3 rounded-xl">
+                <p className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>{returnModalItem.stokAdi}</p>
+                <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                  {returnModalItem.stokKodu}{returnModalItem.serialNumber ? ` • SN: ${returnModalItem.serialNumber}` : ''}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Parça Durumu</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { value: 'iyi', label: 'İyi', color: '#16A34A', bg: 'rgba(22,163,74,.1)' },
+                    { value: 'miad_gecmis', label: 'Miadı Geçmiş', color: '#D97706', bg: 'rgba(217,119,6,.1)' },
+                    { value: 'arizali', label: 'Arızalı', color: '#B91C1C', bg: 'rgba(185,28,28,.1)' },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setReturnCondition(opt.value)}
+                      className="px-2 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 border-2"
+                      style={{
+                        background: returnCondition === opt.value ? opt.bg : 'transparent',
+                        color: opt.color,
+                        borderColor: returnCondition === opt.value ? opt.color : 'var(--dashboard-stroke)',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <button
+              onClick={() => setReturnModalOpen(false)}
+              disabled={isReturning}
+              className="cihaz-tool-item px-4 py-2 text-sm"
+              style={{ color: 'var(--dashboard-muted)' }}
+            >
+              Vazgeç
+            </button>
+            <button
+              onClick={initiateReturn}
+              disabled={isReturning}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all active:scale-95"
+              style={{ background: 'var(--dashboard-accent)' }}
+            >
+              {isReturning && <Loader2 className="w-4 h-4 animate-spin" />}
+              İade Talebini Gönder
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
