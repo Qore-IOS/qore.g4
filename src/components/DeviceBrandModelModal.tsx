@@ -177,19 +177,18 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
       }
 
       let imported = 0;
+      const existingKeys = new Set(
+        items.map(i => `${i.brand.trim().toLocaleLowerCase('tr')}::${i.model.trim().toLocaleLowerCase('tr')}`)
+      );
+      const seenInFile = new Set<string>();
       for (const row of rows) {
         const brand = (row['Marka'] || row['marka'] || row['Brand'] || row['brand'] || '').toString().trim();
         const model = (row['Model'] || row['model'] || '').toString().trim();
         const imageUrl = (row['Gorsel'] || row['gorsel'] || row['ImageUrl'] || row['imageUrl'] || '').toString().trim();
 
         if (!brand || !model) continue;
-
-        // Skip duplicates
-        const exists = items.some(i =>
-          i.brand.toLowerCase() === brand.toLowerCase() &&
-          i.model.toLowerCase() === model.toLowerCase()
-        );
-        if (exists) continue;
+        const key = `${brand.toLocaleLowerCase('tr')}::${model.toLocaleLowerCase('tr')}`;
+        if (existingKeys.has(key) || seenInFile.has(key)) continue;
 
         await addDoc(collection(db, 'deviceBrandModels'), {
           brand,
@@ -199,6 +198,7 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
         });
+        seenInFile.add(key);
         imported++;
       }
 
@@ -210,6 +210,16 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
 
     // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleTemplateDownload = () => {
+    const templateRows = [
+      { Marka: 'Roche', Model: 'Cobas e 411', Gorsel: '' },
+      { Marka: 'Roche', Model: 'Cobas c 311', Gorsel: '' },
+      { Marka: 'Roche', Model: 'Cobas pure', Gorsel: '' },
+    ];
+    exportToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
+    toast({ title: 'Şablon İndirildi', description: 'Excel şablonunu doldurup içe aktarabilirsiniz.' });
   };
 
   const handleExcelExport = () => {
@@ -254,6 +264,15 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
                     className="pl-9 h-9 text-sm"
                   />
                 </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleTemplateDownload}
+                  className="h-9 text-xs shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1" />
+                  Şablon
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
