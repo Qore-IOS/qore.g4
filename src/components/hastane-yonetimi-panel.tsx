@@ -20,6 +20,8 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad } from '@/lib/date';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 const SortableHeader: React.FC<{
   label: string;
@@ -53,6 +55,7 @@ type GroupedStockItem = {
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
@@ -73,8 +76,8 @@ export default function LaboratuvarYonetimiPanel() {
         getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
         getDocs(collection(db, 'productCodes'))
       ]);
-      setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
-      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setLaboratories(filterByCompanyScope(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)), currentCompanyId, isSuperAdmin));
+      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       
       const names: Record<string, string> = {};
       productsSnap.docs.forEach(d => {
@@ -86,7 +89,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsLoading(false);
     }
     fetchData();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const selectedLabName = useMemo(() => {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';

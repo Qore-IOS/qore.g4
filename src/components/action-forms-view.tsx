@@ -24,6 +24,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -104,7 +105,7 @@ function getTitle(moduleType: ModuleType) {
 
 export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [forms, setForms] = useState<ActionRecord[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -115,7 +116,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
     const fetchForms = async () => {
       setLoading(true);
       const snap = await getDocs(collection(db, getCollectionName(moduleType)));
-      setForms(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ActionRecord));
+      setForms(filterByCompanyScope(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ActionRecord), currentCompanyId, isSuperAdmin));
       setLoading(false);
     };
 
@@ -123,7 +124,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       console.error('Form list fetch error', error);
       setLoading(false);
     });
-  }, [moduleType]);
+  }, [moduleType, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     setCurrentPage(1);
