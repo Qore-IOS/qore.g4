@@ -15,55 +15,79 @@ interface ExtractedProduct {
   seriNo: string;
   gtin: string;
   barkodVerisi: string;
+  adet: number;
   confidence: 'high' | 'medium' | 'low';
 }
 
-const SYSTEM_PROMPT = `Sen bir medikal ürün etiket ve barkod analiz uzmanısın. Görevin, fotoğraflardaki medikal/laboratuvar ürünlerinin etiketlerini ve 2D Data Matrix / QR barkodlarını analiz edip yapısal veri çıkarmak.
+const SYSTEM_PROMPT = `Sen bir medikal/laboratuvar ürün etiket ve barkod analiz uzmanısın. Roche Diagnostics, Elecsys, cobas gibi medikal kit etiketlerini mükemmel şekilde okursun.
 
-## Görev
-Gönderilen fotoğraf(lar)daki TÜM ürün etiketlerini tespit et ve her birinden aşağıdaki bilgileri çıkar:
+## KRİTİK GÖREV
+Fotoğraftaki TÜM ürünleri say ve her birinin etiket bilgilerini çıkar. HİÇBİR ÜRÜNÜ ATLAMA.
 
-1. **Ürün Adı** (urunAdi): Etiket üzerindeki ürün ismi (örn: "MG2, 200T, cobas c701/702", "ALB2 750T cobas c")
-2. **Katalog No** (katalogNo): Ürün katalog/referans numarası (örn: "06407358190", "05168861190")
-3. **Lot No** (lotNo): Lot/parti numarası (örn: "91695001", "90854301")
-4. **SKT / Miad** (skt): Son kullanma tarihi, DD.MM.YYYY formatında normalize et (örn: "31.07.2027", "30.11.2026")
-5. **Seri No / LSN** (seriNo): LSN (Lisans Seri Numarası) veya seri numarası (örn: "000130796088", "0200480001184")
-6. **GTIN** (gtin): GTIN numarası varsa (örn: "04015630930821")
-7. **Barkod Verisi** (barkodVerisi): 2D Data Matrix veya QR koddan okunan ham veri (decode edilebilirse)
+## SAYIM KURALLARI - ÇOK ÖNEMLİ
+1. Önce fotoğraftaki TOPLAM fiziksel ürün sayısını belirle (kutu, şişe, kaset vb.)
+2. Her ürünün etiketini oku. Etiket okunamıyorsa bile ürünü say.
+3. Aynı üründen (aynı katalog no + aynı lot no) birden fazla varsa VE seri numaraları farklıysa -> her birini AYRI satır olarak listele
+4. Aynı üründen birden fazla varsa AMA seri numaraları okunamıyorsa -> TEK satır olarak listele, "adet" alanına toplam sayıyı yaz
+5. Uzaktan çekilmiş fotoğraflarda etiketler net okunamayabilir ama ürün SAYISI belirlenebilir. Sayıyı doğru ver, okunamayan bilgileri boş bırak.
 
-## Kurallar
-- Fotoğrafta birden fazla ürün varsa HER BİRİ için ayrı bir obje döndür.
-- Türkçe etiketlerde: "Son Kullanma Tarihi" veya "SKT" = skt, "Lot no" = lotNo, "Katalog No" = katalogNo, "LSN" = seriNo
-- Tarih formatlarını her zaman DD.MM.YYYY'ye dönüştür (YYMMDD, MMYY vb. formatları normalize et)
-- GTIN genellikle "01" AI (Application Identifier) ile başlar, 14 haneli sayıdır
-- Eğer bir alan etiket üzerinde okunamıyor veya yoksa boş string ("") döndür
-- confidence alanı: "high" = net okunabiliyor, "medium" = kısmen okunabiliyor, "low" = tahmin
-- Uzaktan çekilmiş fotoğraflarda birçok ürün olabilir, her birini ayrı ayrı tespit et
-- Yakından çekilmiş fotoğraflarda etiket detaylarını tam oku
-- Bulanık veya kısmen görünen etiketlerde en iyi tahmini yap ve confidence'ı "low" olarak işaretle
-- Aynı üründen birden fazla varsa (aynı lot, aynı skt) bile her birini ayrı listele VEYA toplu olarak belirt
+## ETİKET BİLGİLERİ
+Her üründen çıkarılacak alanlar:
+- **urunAdi**: Ürün ismi (örn: "MG2, 200T, cobas c701/702", "ALB2 750T cobas c", "Elecsys TSH")
+- **katalogNo**: Katalog/referans numarası (örn: "06407358190")
+- **lotNo**: Lot/parti numarası (örn: "91695001")
+- **skt**: Son kullanma tarihi -> MUTLAKA DD.MM.YYYY formatına çevir
+- **seriNo**: LSN / seri numarası (örn: "000130796088"). HER ÜRÜNDEKİ FARKLI SERİ NUMARASINI OKU.
+- **gtin**: GTIN numarası (14 haneli)
+- **barkodVerisi**: 2D Data Matrix'ten okunan ham veri
+- **adet**: Bu satırdaki ürün adedi. Seri numarası biliniyorsa 1, bilinmiyorsa sayılan toplam adet.
 
-## Çıktı Formatı
-Yanıtını SADECE aşağıdaki JSON formatında ver, başka hiçbir açıklama ekleme:
+## TÜRKÇE ETİKET OKUMA
+- "Son Kullanma Tarihi" veya "SKT" = skt
+- "Lot no" veya "Lot No" = lotNo
+- "Katalog No" = katalogNo
+- "LSN" = seriNo (Lisans Seri Numarası)
+- "Ürün adı" = urunAdi
+- "GTIN" = gtin
 
-\`\`\`json
+## ÖZEL DURUMLAR
+- Roche cobas kasetleri: Üstte uzun etiket, altta Data Matrix barkod bulunur
+- Elecsys kutuları: Yan tarafta QR ve etiket bilgileri bulunur
+- Kutu içinde sıralı dizilmiş ürünler: HER BİRİNİ ayrı say
+- Etiket kısmen görünüyorsa: Görünen kısmı oku, confidence="low" yap
+- Ürün sayılabilir ama etiket okunamıyorsa: Ürünü yine de listele, bilgileri boş bırak, adet'i doğru gir
+
+## ÇIKTI FORMATI
+SADECE JSON döndür:
+
 {
+  "totalPhysicalCount": 48,
   "products": [
     {
-      "urunAdi": "...",
-      "katalogNo": "...",
-      "lotNo": "...",
-      "skt": "...",
-      "seriNo": "...",
-      "gtin": "...",
-      "barkodVerisi": "...",
-      "confidence": "high|medium|low"
+      "urunAdi": "MG2, 200T, cobas c701/702",
+      "katalogNo": "06407358190",
+      "lotNo": "91695001",
+      "skt": "31.07.2027",
+      "seriNo": "000130796088",
+      "gtin": "04015630930821",
+      "barkodVerisi": "",
+      "adet": 1,
+      "confidence": "high"
+    },
+    {
+      "urunAdi": "MG2, 200T, cobas c701/702",
+      "katalogNo": "06407358190",
+      "lotNo": "91695001",
+      "skt": "31.07.2027",
+      "seriNo": "",
+      "gtin": "",
+      "barkodVerisi": "",
+      "adet": 15,
+      "confidence": "low"
     }
   ],
-  "totalDetected": 5,
-  "notes": "Ek notlar (opsiyonel)"
-}
-\`\`\``;
+  "notes": "48 ürün sayıldı. 5 tanesinin etiketi net okundu, 15 tanesinin etiketi kısmen okundu, 28 tanesinin sadece ürün tipi belirlenebildi."
+}`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -101,10 +125,25 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    // Build the request with vision capabilities
+    // Build the user prompt - direct and action-oriented for speed
     const userPrompt = enhanceResolution
-      ? 'Bu fotoğraf(lar)daki tüm medikal ürün etiketlerini ve barkodlarını analiz et. Bulanık veya uzak etiketler için süper çözünürlük tekniği uygulayarak en iyi sonucu elde etmeye çalış. Her ürün için yapısal veri çıkar.'
-      : 'Bu fotoğraf(lar)daki tüm medikal ürün etiketlerini ve barkodlarını analiz et. Her ürün için yapısal veri çıkar.';
+      ? `GÖREV: Bu fotoğraf(lar)daki TÜM medikal ürünleri say ve etiket bilgilerini çıkar.
+
+ADIMLAR:
+1. Fotoğraftaki toplam fiziksel ürün sayısını belirle
+2. Okunabilen her etiketin bilgilerini çıkar (özellikle seri numaralarını)
+3. Okunamayan ürünleri de sayıya dahil et, ürün tipini belirleyebildiğin kadarıyla grupla
+4. Bulanık/uzak etiketleri zoom yaparak okumaya çalış, süper çözünürlük uygula
+
+HER SERİ NUMARASINI TEK TEK OKU - aynı üründen 50 tane varsa 50 farklı seri numarasını oku.`
+      : `GÖREV: Bu fotoğraf(lar)daki TÜM medikal ürünleri say ve etiket bilgilerini çıkar.
+
+ADIMLAR:
+1. Fotoğraftaki toplam fiziksel ürün sayısını belirle
+2. Okunabilen her etiketin bilgilerini çıkar (özellikle seri numaralarını)
+3. Okunamayan ürünleri de sayıya dahil et, ürün tipini belirleyebildiğin kadarıyla grupla
+
+HER SERİ NUMARASINI TEK TEK OKU - aynı üründen 50 tane varsa 50 farklı seri numarasını oku.`;
 
     const contents = [
       {
@@ -116,7 +155,7 @@ export async function POST(request: NextRequest) {
       },
     ];
 
-    // Use gemini-2.0-flash for vision - it has excellent multimodal capabilities
+    // Use gemini-2.0-flash for vision - fast and excellent multimodal
     const models = ['gemini-2.0-flash', 'gemini-2.0-flash-001', 'gemini-1.5-flash-latest'];
     let lastError = '';
 
@@ -131,8 +170,8 @@ export async function POST(request: NextRequest) {
               contents,
               systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
               generationConfig: {
-                temperature: 0.1,
-                maxOutputTokens: 8192,
+                temperature: 0.05,
+                maxOutputTokens: 65536,
                 responseMimeType: 'application/json',
               },
             }),
@@ -161,15 +200,12 @@ export async function POST(request: NextRequest) {
         // Parse the JSON response
         let parsed;
         try {
-          // Try direct JSON parse first
           parsed = JSON.parse(text);
         } catch {
-          // Try extracting JSON from markdown code block
           const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
           if (jsonMatch) {
             parsed = JSON.parse(jsonMatch[1].trim());
           } else {
-            // Try finding JSON object in the text
             const braceMatch = text.match(/\{[\s\S]*\}/);
             if (braceMatch) {
               parsed = JSON.parse(braceMatch[0]);
@@ -187,13 +223,18 @@ export async function POST(request: NextRequest) {
           seriNo: (p.seriNo || p.seri_no || p.lsn || p.LSN || '').trim(),
           gtin: (p.gtin || p.GTIN || '').trim(),
           barkodVerisi: (p.barkodVerisi || p.barkod_verisi || '').trim(),
+          adet: Math.max(1, parseInt(p.adet || p.quantity || '1') || 1),
           confidence: (['high', 'medium', 'low'].includes(p.confidence) ? p.confidence : 'medium') as 'high' | 'medium' | 'low',
         }));
+
+        // Calculate reported total
+        const reportedTotal = products.reduce((sum, p) => sum + p.adet, 0);
 
         return NextResponse.json({
           success: true,
           products,
-          totalDetected: parsed.totalDetected || products.length,
+          totalPhysicalCount: parsed.totalPhysicalCount || reportedTotal,
+          totalDetected: reportedTotal,
           notes: parsed.notes || '',
           model,
         });
@@ -223,28 +264,22 @@ function normalizeDateToTurkish(raw: string): string {
   const s = (raw || '').trim();
   if (!s) return '';
 
-  // Already in DD.MM.YYYY format
   if (/^\d{2}\.\d{2}\.\d{4}$/.test(s)) return s;
 
-  // DD/MM/YYYY or DD-MM-YYYY
   const slashMatch = s.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
   if (slashMatch) return `${slashMatch[1]}.${slashMatch[2]}.${slashMatch[3]}`;
 
-  // YYYY-MM-DD
   const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoMatch) return `${isoMatch[3]}.${isoMatch[2]}.${isoMatch[1]}`;
 
-  // YYYYMMDD
   if (/^\d{8}$/.test(s)) return `${s.slice(6, 8)}.${s.slice(4, 6)}.${s.slice(0, 4)}`;
 
-  // YYMMDD
   if (/^\d{6}$/.test(s)) {
     const yy = parseInt(s.slice(0, 2));
     const century = yy >= 70 ? '19' : '20';
     return `${s.slice(4, 6)}.${s.slice(2, 4)}.${century}${s.slice(0, 2)}`;
   }
 
-  // MMYY
   if (/^\d{4}$/.test(s)) return `01.${s.slice(0, 2)}.20${s.slice(2, 4)}`;
 
   return s;

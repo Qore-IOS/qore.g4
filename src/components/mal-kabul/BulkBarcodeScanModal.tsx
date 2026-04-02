@@ -22,6 +22,7 @@ export interface BulkScanResultItem {
   seriNo: string;
   gtin: string;
   barkodVerisi: string;
+  adet: number;
   confidence: 'high' | 'medium' | 'low';
   /** Resolved product from product database (matched after AI extraction) */
   matchedProduct?: ProductCode;
@@ -276,9 +277,11 @@ export default function BulkBarcodeScanModal({
       setAiNotes(data.notes || '');
 
       const matchedCount = matched.filter((m) => m.matchedProduct).length;
+      const totalAdet = matched.reduce((sum, m) => sum + (m.adet || 1), 0);
+      const physicalCount = data.totalPhysicalCount || totalAdet;
       toast({
-        title: `${matched.length} urun tespit edildi`,
-        description: `${matchedCount} urun veritabaninda eslesti, ${matched.length - matchedCount} eslesme bulunamadi.`,
+        title: `${physicalCount} urun sayildi, ${matched.length} satir tespit edildi`,
+        description: `${matchedCount} urun veritabaninda eslesti. Toplam ${totalAdet} adet.`,
       });
     } catch (err: any) {
       console.error('Bulk barcode scan error:', err);
@@ -307,7 +310,13 @@ export default function BulkBarcodeScanModal({
 
   const updateResultField = useCallback((index: number, field: string, value: string) => {
     setResults((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        if (field === 'adet') {
+          return { ...item, adet: Math.max(1, parseInt(value) || 1) };
+        }
+        return { ...item, [field]: value };
+      })
     );
   }, []);
 
@@ -334,7 +343,9 @@ export default function BulkBarcodeScanModal({
     onClose();
   }, [onClose, stopCamera]);
 
-  const selectedCount = results.filter((r) => r.selected).length;
+  const selectedItems = results.filter((r) => r.selected);
+  const selectedCount = selectedItems.length;
+  const selectedTotalAdet = selectedItems.reduce((sum, r) => sum + (r.adet || 1), 0);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -567,7 +578,9 @@ export default function BulkBarcodeScanModal({
                 <div>
                   <span className="text-xs font-semibold text-[var(--dashboard-text)]">
                     Tespit Edilen Urunler
-                    <span className="ml-1.5 text-[var(--dashboard-muted)]">({results.length})</span>
+                    <span className="ml-1.5 text-[var(--dashboard-muted)]">
+                      ({results.length} satir, {results.reduce((s, r) => s + (r.adet || 1), 0)} adet)
+                    </span>
                   </span>
                   {aiNotes && (
                     <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">{aiNotes}</p>
@@ -594,12 +607,13 @@ export default function BulkBarcodeScanModal({
               </div>
 
               {/* Table header - desktop */}
-              <div className="hidden sm:grid grid-cols-[32px_2fr_1fr_1fr_1fr_1fr_32px] gap-2 px-4 py-1.5 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)]">
+              <div className="hidden sm:grid grid-cols-[32px_2fr_1fr_1fr_1fr_70px_70px_32px] gap-2 px-4 py-1.5 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)]">
                 <span></span>
                 <span>Urun</span>
                 <span>Lot No</span>
                 <span>SKT</span>
                 <span>Seri No / LSN</span>
+                <span className="text-center">Adet</span>
                 <span>Guven</span>
                 <span></span>
               </div>
@@ -609,7 +623,7 @@ export default function BulkBarcodeScanModal({
                   {results.map((item, idx) => (
                     <div key={idx} className="relative group">
                       {/* Desktop row */}
-                      <div className="hidden sm:grid grid-cols-[32px_2fr_1fr_1fr_1fr_1fr_32px] gap-2 items-center px-4 py-2.5 hover:bg-[var(--dashboard-surface-2)]/60">
+                      <div className="hidden sm:grid grid-cols-[32px_2fr_1fr_1fr_1fr_70px_70px_32px] gap-2 items-center px-4 py-2.5 hover:bg-[var(--dashboard-surface-2)]/60">
                         <div>
                           <input
                             type="checkbox"
@@ -664,6 +678,15 @@ export default function BulkBarcodeScanModal({
                           />
                         </div>
                         <div>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={item.adet || 1}
+                            onChange={(e) => updateResultField(idx, 'adet', e.target.value)}
+                            className="h-7 w-16 text-xs text-center font-bold bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
+                          />
+                        </div>
+                        <div>
                           <span
                             className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
                               item.confidence === 'high'
@@ -710,9 +733,18 @@ export default function BulkBarcodeScanModal({
                               </p>
                             </div>
                           </div>
-                          <button onClick={() => removeResult(idx)} className="p-1">
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Input
+                              type="number"
+                              min={1}
+                              value={item.adet || 1}
+                              onChange={(e) => updateResultField(idx, 'adet', e.target.value)}
+                              className="h-7 w-14 text-center font-bold text-xs bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
+                            />
+                            <button onClick={() => removeResult(idx)} className="p-1">
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </button>
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2 mt-2 ml-6 text-[10px] text-[var(--dashboard-muted)]">
                           {item.lotNo && <span>Lot: <strong>{item.lotNo}</strong></span>}
@@ -774,7 +806,7 @@ export default function BulkBarcodeScanModal({
               }
             >
               <CheckCircle className="h-4 w-4" />
-              Mal Kabule Aktar ({selectedCount})
+              Mal Kabule Aktar ({selectedTotalAdet} adet)
             </button>
           )}
         </div>

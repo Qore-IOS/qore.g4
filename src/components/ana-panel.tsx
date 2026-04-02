@@ -645,6 +645,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const handleBulkBarcodeResults = (items: BulkScanResultItem[]) => {
     let addedSerial = 0;
     let addedLot = 0;
+    let addedAdet = 0;
     let skipped = 0;
 
     items.forEach((item) => {
@@ -662,6 +663,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const lotNumarasi = item.lotNo || '';
       const miad = item.skt || '';
       const seriNumarasi = item.seriNo || '';
+      const adet = item.adet || 1;
 
       // If serial number exists, add as individual serial-tracked item
       if (seriNumarasi) {
@@ -698,24 +700,25 @@ export default function AnaPanel(props: AnaPanelProps) {
         scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
         setScannedItems((prev) => [newItem, ...prev]);
         addedSerial++;
+        addedAdet++;
       } else {
-        // No serial - add as lot/quantity grouped item
+        // No serial - add as lot/quantity grouped item with the detected quantity
         upsertGroupedRow(
           setScannedItems,
           { stokKodu, stokAdi, lot: lotNumarasi, miad, barkod: item.barkodVerisi || 'AI_BULK_SCAN' },
           (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === lotNumarasi && r.miad === miad),
-          1
+          adet
         );
         addedLot++;
+        addedAdet += adet;
       }
     });
 
-    const total = addedSerial + addedLot;
-    if (total > 0) {
+    if (addedAdet > 0) {
       playFeedback();
       flashScanFeedback(
         'success',
-        `AI Toplu Tarama: ${total} urun eklendi${skipped > 0 ? `, ${skipped} atlandı` : ''}.`
+        `AI Toplu Tarama: ${addedAdet} adet urun eklendi (${addedSerial} seri + ${addedLot} grup)${skipped > 0 ? `, ${skipped} atlandı` : ''}.`
       );
     } else {
       flashScanFeedback('error', 'Hicbir urun eslenemedi.');
