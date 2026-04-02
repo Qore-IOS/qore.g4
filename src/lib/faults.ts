@@ -124,9 +124,12 @@ export async function closeDeviceFaultReport(
     closedByName: string;
     closeDescription?: string;
     supportPersonnel?: { uid: string; name: string } | null;
+    supportPersonnels?: { uid: string; name: string }[];
   }
 ) {
   const { closedByUid, closedByName, closeDescription, supportPersonnel } = params;
+  const supportPersonnels = params.supportPersonnels ?? (supportPersonnel ? [supportPersonnel] : []);
+  const primarySupportPersonnel = supportPersonnels[0] || null;
   const reportRef = doc(db, 'deviceFaultReports', reportId);
 
   const reportSnap = await getDoc(reportRef);
@@ -157,10 +160,12 @@ export async function closeDeviceFaultReport(
   };
 
   // Destek personeli bilgisi
-  if (supportPersonnel) {
-    updateData.supportPersonnelUid = supportPersonnel.uid;
-    updateData.supportPersonnelName = supportPersonnel.name;
+  if (primarySupportPersonnel) {
+    updateData.supportPersonnelUid = primarySupportPersonnel.uid;
+    updateData.supportPersonnelName = primarySupportPersonnel.name;
   }
+  updateData.supportPersonnelUids = supportPersonnels.map((p) => p.uid);
+  updateData.supportPersonnelNames = supportPersonnels.map((p) => p.name);
 
   batch.update(reportRef, updateData);
 
@@ -203,11 +208,13 @@ export async function closeDeviceFaultReport(
     timestamp: serverTimestamp(),
   };
 
-  if (supportPersonnel) {
-    historyData.supportPersonnelUid = supportPersonnel.uid;
-    historyData.supportPersonnelName = supportPersonnel.name;
-    historyData.description = `${closeDescription ?? 'Arıza giderildi.'} (Destek: ${supportPersonnel.name})`;
+  if (primarySupportPersonnel) {
+    historyData.supportPersonnelUid = primarySupportPersonnel.uid;
+    historyData.supportPersonnelName = primarySupportPersonnel.name;
+    historyData.description = `${closeDescription ?? 'Arıza giderildi.'} (Destek: ${supportPersonnels.map((p) => p.name).join(', ')})`;
   }
+  historyData.supportPersonnelUids = supportPersonnels.map((p) => p.uid);
+  historyData.supportPersonnelNames = supportPersonnels.map((p) => p.name);
 
   batch.set(historyRef, historyData);
 
