@@ -70,6 +70,7 @@ type ActionRecord = {
     usedPartImageUrl?: string;
   }>;
   selectedMaintenanceTasks?: Array<{ id?: string; taskName?: string }>;
+  moduleType?: ModuleType;
 };
 
 const ISLEM_TURU_LABELS: Record<string, string> = {
@@ -109,14 +110,25 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
   const [loading, setLoading] = useState(true);
   const [forms, setForms] = useState<ActionRecord[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [filterModuleType, setFilterModuleType] = useState<'all' | ModuleType>('all');
+  const [filterLab, setFilterLab] = useState('all');
+  const [filterPersonnel, setFilterPersonnel] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const FORMS_PER_PAGE = 20;
 
   useEffect(() => {
     const fetchForms = async () => {
       setLoading(true);
-      const snap = await getDocs(collection(db, getCollectionName(moduleType)));
-      setForms(filterByCompanyScope(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ActionRecord), currentCompanyId, isSuperAdmin));
+      const [teknikSnap, aplikasyonSnap] = await Promise.all([
+        getDocs(collection(db, getCollectionName('teknik-servis'))),
+        getDocs(collection(db, getCollectionName('aplikasyon-paneli'))),
+      ]);
+      const merged = [
+        ...teknikSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis' } as ActionRecord)),
+        ...aplikasyonSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'aplikasyon-paneli' } as ActionRecord)),
+      ];
+      setForms(filterByCompanyScope(merged, currentCompanyId, isSuperAdmin));
       setLoading(false);
     };
 
@@ -130,25 +142,34 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
     setCurrentPage(1);
   }, [moduleType, currentUserProfile?.uid]);
 
-  const ownForms = useMemo(() => {
-    const uid = currentUserProfile?.uid;
-    if (!uid) return [];
-
+  const filteredForms = useMemo(() => {
     return forms
-      .filter((form) => form.createdByUid === uid)
+      .filter((form) => filterModuleType === 'all' || form.moduleType === filterModuleType)
+      .filter((form) => filterLab === 'all' || (form.labName || '-') === filterLab)
+      .filter((form) => filterPersonnel === 'all' || (form.createdByName || '-') === filterPersonnel)
+      .filter((form) => {
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase();
+        return (form.cihazAdi || '').toLowerCase().includes(q)
+          || (form.seriNumarasi || '').toLowerCase().includes(q)
+          || (form.labName || '').toLowerCase().includes(q)
+          || (form.createdByName || '').toLowerCase().includes(q);
+      })
       .sort((a, b) => {
         const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
         const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
         return bTime - aTime;
       });
-  }, [forms, currentUserProfile?.uid]);
+  }, [forms, filterModuleType, filterLab, filterPersonnel, searchQuery]);
 
-  const totalPages = Math.max(1, Math.ceil(ownForms.length / FORMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(filteredForms.length / FORMS_PER_PAGE));
   const clampedPage = Math.min(currentPage, totalPages);
   const pagedForms = useMemo(() => {
     const start = (clampedPage - 1) * FORMS_PER_PAGE;
-    return ownForms.slice(start, start + FORMS_PER_PAGE);
-  }, [clampedPage, ownForms]);
+    return filteredForms.slice(start, start + FORMS_PER_PAGE);
+  }, [clampedPage, filteredForms]);
+  const availableLabs = useMemo(() => Array.from(new Set(forms.map(f => f.labName || '-'))).sort((a, b) => a.localeCompare(b, 'tr')), [forms]);
+  const availablePersonnel = useMemo(() => Array.from(new Set(forms.map(f => f.createdByName || '-'))).sort((a, b) => a.localeCompare(b, 'tr')), [forms]);
 
   return (
     <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
@@ -161,18 +182,34 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
             </span>
             <div>
               <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)]">{getTitle(moduleType)}</h1>
-              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Sadece sizin oluşturduğunuz işlem formları</p>
+              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Firma kapsamındaki tüm teknik servis ve aplikasyon işlem formları</p>
             </div>
           </div>
         </div>
 
         <div className="cihaz-card-strong p-2 sm:p-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 p-2">
+            <Input placeholder="Cihaz, seri, lab, personel ara..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterModuleType} onChange={(e) => setFilterModuleType(e.target.value as any)}>
+              <option value="all">Tüm Modüller</option>
+              <option value="teknik-servis">Teknik Servis</option>
+              <option value="aplikasyon-paneli">Aplikasyon</option>
+            </select>
+            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterLab} onChange={(e) => setFilterLab(e.target.value)}>
+              <option value="all">Tüm Lablar</option>
+              {availableLabs.map(lab => <option key={lab} value={lab}>{lab}</option>)}
+            </select>
+            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterPersonnel} onChange={(e) => setFilterPersonnel(e.target.value)}>
+              <option value="all">Tüm Personeller</option>
+              {availablePersonnel.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </div>
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-[var(--dashboard-muted)]">
               <Loader2 className="h-5 w-5 animate-spin" /> Yükleniyor...
             </div>
-          ) : ownForms.length === 0 ? (
-            <div className="text-center py-16 text-[var(--dashboard-muted)]">Size ait işlem formu bulunmuyor.</div>
+          ) : filteredForms.length === 0 ? (
+            <div className="text-center py-16 text-[var(--dashboard-muted)]">Filtrelere uygun işlem formu bulunmuyor.</div>
           ) : (
             <div className="space-y-3">
               <ScrollArea className="h-[62vh]">
@@ -180,9 +217,10 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                   <TableHeader>
                     <TableRow className="border-[var(--dashboard-stroke)]">
                       <TableHead className="text-[var(--dashboard-muted)]">Tarih</TableHead>
+                      <TableHead className="text-[var(--dashboard-muted)]">Modül</TableHead>
                       <TableHead className="text-[var(--dashboard-muted)]">Cihaz</TableHead>
                       <TableHead className="text-[var(--dashboard-muted)]">Laboratuvar</TableHead>
-                      <TableHead className="text-[var(--dashboard-muted)]">İşlem Türü</TableHead>
+                      <TableHead className="text-[var(--dashboard-muted)]">İşlem Saati</TableHead>
                       <TableHead className="text-[var(--dashboard-muted)]">Oluşturan</TableHead>
                       <TableHead className="w-10" />
                     </TableRow>
@@ -192,7 +230,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                       <TableRow
                         key={form.id}
                         className="cursor-pointer border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]/50"
-                        onClick={() => router.push(`/${moduleType}/tum-formlar/${form.id}`)}
+                        onClick={() => router.push(`/${form.moduleType || moduleType}/tum-formlar/${form.id}`)}
                       >
                         <TableCell>
                           <div className="flex items-center gap-1.5">
@@ -202,14 +240,17 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                           <span className="text-xs text-[var(--dashboard-muted)] ml-[18px]">{form.createdAt?.toDate ? format(form.createdAt.toDate(), 'HH:mm', { locale: tr }) : ''}</span>
                         </TableCell>
                         <TableCell>
+                          <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium', form.moduleType === 'teknik-servis' ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-purple-50 text-purple-700 border border-purple-200/60')}>
+                            {form.moduleType === 'teknik-servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                          </span>
+                        </TableCell>
+                        <TableCell>
                           <div className="text-sm font-medium text-[var(--dashboard-text)]">{form.cihazAdi || '-'}</div>
                           <div className="text-xs text-[var(--dashboard-muted)] font-mono">{form.seriNumarasi || '-'}</div>
                         </TableCell>
                         <TableCell className="text-sm">{form.labName || '-'}</TableCell>
-                        <TableCell>
-                          <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium', form.islemTuru === 'ariza' ? 'bg-red-50 text-red-700 border border-red-200/60' : form.islemTuru === 'periyodik_bakim' ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]')}>
-                            {ISLEM_TURU_LABELS[form.islemTuru || ''] || '-'}
-                          </span>
+                        <TableCell className="text-sm font-mono">
+                          {(form.baslangicSaati || '-')}{form.bitisSaati ? ` - ${form.bitisSaati}` : ''}
                         </TableCell>
                         <TableCell className="text-sm">{form.createdByName || '-'}</TableCell>
                         <TableCell><ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)]" /></TableCell>
@@ -221,7 +262,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
 
               <div className="flex items-center justify-between gap-3 px-2">
                 <p className="text-xs text-[var(--dashboard-muted)]">
-                  Toplam {ownForms.length} kayıt &middot; Sayfa {clampedPage}/{totalPages}
+                  Toplam {filteredForms.length} kayıt &middot; Sayfa {clampedPage}/{totalPages}
                 </p>
                 <div className="flex items-center gap-2">
                   <button
