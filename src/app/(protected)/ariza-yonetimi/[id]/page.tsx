@@ -179,7 +179,7 @@ export default function FaultDetailPage() {
   // Çözülmüş arıza düzenleme state'leri
   const [isEditResolvedOpen, setIsEditResolvedOpen] = useState(false);
   const [editCloseDescription, setEditCloseDescription] = useState('');
-  const [editSupportPersonnelUid, setEditSupportPersonnelUid] = useState('');
+  const [editSupportPersonnelUids, setEditSupportPersonnelUids] = useState<string[]>([]);
   const [editPersonnelSearchQuery, setEditPersonnelSearchQuery] = useState('');
   const [isSavingResolved, setIsSavingResolved] = useState(false);
 
@@ -204,7 +204,7 @@ export default function FaultDetailPage() {
 
   // Destek personeli seçimi (arıza kapatılırken)
   const [allPersonnel, setAllPersonnel] = useState<User[]>([]);
-  const [selectedSupportPersonnelUid, setSelectedSupportPersonnelUid] = useState<string>('');
+  const [selectedSupportPersonnelUids, setSelectedSupportPersonnelUids] = useState<string[]>([]);
   const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
 
   // Yedek parça değişim state'leri
@@ -740,25 +740,25 @@ export default function FaultDetailPage() {
       return;
     }
     try {
-      const supportPerson = selectedSupportPersonnelUid
-        ? allPersonnel.find(p => p.uid === selectedSupportPersonnelUid)
-        : null;
+      const supportPersonnels = allPersonnel
+        .filter((p) => selectedSupportPersonnelUids.includes(p.uid))
+        .map((p) => ({ uid: p.uid, name: p.name || '' }));
 
       await closeDeviceFaultReport(fault.id, {
         closedByUid: currentUser?.uid || '',
         closedByName: currentUserProfile?.name || '',
         closeDescription,
-        supportPersonnel: supportPerson ? { uid: supportPerson.uid, name: supportPerson.name || '' } : null,
+        supportPersonnels,
       });
       setIsCloseDialogOpen(false);
       setCloseDescription('');
-      setSelectedSupportPersonnelUid('');
+      setSelectedSupportPersonnelUids([]);
       toast({ title: 'Arıza Kapatıldı', description: `#${fault.id} kapatıldı.` });
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Arıza kapatılamadı.', variant: 'destructive' });
     }
-  }, [fault, closeDescription, currentUser, currentUserProfile, toast, selectedSupportPersonnelUid, allPersonnel, isLockedByOther]);
+  }, [fault, closeDescription, currentUser, currentUserProfile, toast, selectedSupportPersonnelUids, allPersonnel, isLockedByOther]);
 
   const handleKitResolution = async (resolution: 'imha' | 'tekrar_kullanim') => {
     if (!fault) return;
@@ -1517,7 +1517,7 @@ export default function FaultDetailPage() {
       [txt('Cihaz:'), txt(`${fault.model} (SN: ${fault.serial})`)],
       [txt('Arıza Tipi:'), txt(faultTypeLabel)],
       ['Durum:', txt(statusLabel)],
-      [txt('Açan:'), txt(`${fault.openedByName}${fault.supportPersonnelName ? ` (Eşlik Eden: ${fault.supportPersonnelName})` : ''}`)],
+      [txt('Açan:'), txt(`${fault.openedByName}${((fault as any).supportPersonnelNames?.length ? ` (Eşlik Eden: ${(fault as any).supportPersonnelNames.join(', ')})` : fault.supportPersonnelName ? ` (Eşlik Eden: ${fault.supportPersonnelName})` : '')}`)],
       ['Tarih / Saat:', fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'],
     ];
 
@@ -1756,7 +1756,7 @@ export default function FaultDetailPage() {
   const openEditResolved = () => {
     if (!fault) return;
     setEditCloseDescription(fault.closeDescription || '');
-    setEditSupportPersonnelUid(fault.supportPersonnelUid || 'none');
+    setEditSupportPersonnelUids((fault as any).supportPersonnelUids || (fault.supportPersonnelUid ? [fault.supportPersonnelUid] : []));
     setEditPersonnelSearchQuery('');
     setIsEditResolvedOpen(true);
   };
@@ -1791,15 +1791,17 @@ export default function FaultDetailPage() {
       }
 
       // Check support personnel change
-      const newSupportUid = editSupportPersonnelUid === 'none' ? '' : editSupportPersonnelUid;
-      const oldSupportUid = fault.supportPersonnelUid || '';
-      if (newSupportUid !== oldSupportUid) {
-        const newPerson = allPersonnel.find(p => p.uid === newSupportUid);
-        const oldName = fault.supportPersonnelName || 'Seçim yok';
-        const newName = newPerson?.name || 'Seçim yok';
-        changes.push(`Destek personeli: "${oldName}" → "${newName}"`);
-        updateData.supportPersonnelUid = newSupportUid || null;
-        updateData.supportPersonnelName = newPerson?.name || null;
+      const newSupportUids = [...editSupportPersonnelUids].sort();
+      const oldSupportUids = ([...(((fault as any).supportPersonnelUids || (fault.supportPersonnelUid ? [fault.supportPersonnelUid] : [])))] as string[]).sort();
+      if (newSupportUids.join('|') !== oldSupportUids.join('|')) {
+        const newPeople = allPersonnel.filter(p => newSupportUids.includes(p.uid));
+        const oldNames = ((fault as any).supportPersonnelNames || (fault.supportPersonnelName ? [fault.supportPersonnelName] : ['Seçim yok'])) as string[];
+        const newNames = newPeople.map(p => p.name || p.email || p.uid);
+        changes.push(`Destek personeli: "${oldNames.join(', ') || 'Seçim yok'}" → "${newNames.join(', ') || 'Seçim yok'}"`);
+        updateData.supportPersonnelUids = newSupportUids;
+        updateData.supportPersonnelNames = newNames;
+        updateData.supportPersonnelUid = newPeople[0]?.uid || null;
+        updateData.supportPersonnelName = newPeople[0]?.name || null;
       }
 
       if (changes.length === 0) {
@@ -2225,7 +2227,7 @@ export default function FaultDetailPage() {
                       </div>
                       <div>
                         <p className="font-medium text-muted-foreground">Destek Personeli</p>
-                        <p className="mt-1">{fault.supportPersonnelName || 'Belirtilmedi'}</p>
+                        <p className="mt-1">{((fault as any).supportPersonnelNames?.join(', ')) || fault.supportPersonnelName || 'Belirtilmedi'}</p>
                       </div>
                     </div>
                     {fault.toplamCozumSuresi && (
@@ -2440,7 +2442,7 @@ export default function FaultDetailPage() {
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => {
         setIsCloseDialogOpen(open);
         if (!open) {
-          setSelectedSupportPersonnelUid('');
+          setSelectedSupportPersonnelUids([]);
           setPersonnelSearchQuery('');
         }
       }}>
@@ -2456,43 +2458,35 @@ export default function FaultDetailPage() {
               <p className="text-xs text-muted-foreground">
                 Arıza çözümünde destek veren personeli seçebilirsiniz. Seçilen personele destek puanı verilecektir.
               </p>
-              <Select value={selectedSupportPersonnelUid} onValueChange={setSelectedSupportPersonnelUid}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Destek personeli seçin..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <div className="p-2">
-                    <Input
-                      placeholder="Personel ara..."
-                      value={personnelSearchQuery}
-                      onChange={(e) => setPersonnelSearchQuery(e.target.value)}
-                      className="mb-2"
-                    />
-                  </div>
-                  <SelectItem value="none">Seçim Yok</SelectItem>
-                  {allPersonnel
-                    .filter(p => p.uid !== currentUser?.uid) // Kendisini gösterme
-                    .filter(p => {
-                      // Arıza tipine göre personel filtrele
-                      if (fault?.faultType === 'teknik_servis') {
-                        return p.role === 'teknik_servis';
-                      } else if (fault?.faultType === 'aplikasyon') {
-                        return p.role === 'aplikasyon';
-                      }
-                      return true;
-                    })
-                    .filter(p => {
-                      if (!personnelSearchQuery) return true;
-                      const q = personnelSearchQuery.toLowerCase();
-                      return (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q);
-                    })
-                    .map(p => (
-                      <SelectItem key={p.uid} value={p.uid}>
-                        {p.name || p.email} ({p.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'})
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <Input
+                placeholder="Personel ara..."
+                value={personnelSearchQuery}
+                onChange={(e) => setPersonnelSearchQuery(e.target.value)}
+              />
+              <div className="max-h-52 overflow-y-auto border rounded-md">
+                {allPersonnel
+                  .filter(p => p.uid !== currentUser?.uid)
+                  .filter(p => p.role === 'teknik_servis' || p.role === 'aplikasyon')
+                  .filter(p => {
+                    if (!personnelSearchQuery) return true;
+                    const q = personnelSearchQuery.toLowerCase();
+                    return (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q);
+                  })
+                  .map(p => {
+                    const checked = selectedSupportPersonnelUids.includes(p.uid);
+                    return (
+                      <label key={p.uid} className="flex items-center gap-2 px-3 py-2 border-b last:border-b-0 cursor-pointer">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) => {
+                            setSelectedSupportPersonnelUids(prev => v ? [...prev, p.uid] : prev.filter(uid => uid !== p.uid));
+                          }}
+                        />
+                        <span className="text-sm">{p.name || p.email} ({p.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'})</span>
+                      </label>
+                    );
+                  })}
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -2546,38 +2540,34 @@ export default function FaultDetailPage() {
               <p className="text-xs text-muted-foreground">
                 Arıza çözümünde destek veren personeli değiştirebilirsiniz.
               </p>
-              <Select value={editSupportPersonnelUid} onValueChange={setEditSupportPersonnelUid}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Destek personeli seçin..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <div className="p-2">
-                    <Input
-                      placeholder="Personel ara..."
-                      value={editPersonnelSearchQuery}
-                      onChange={(e) => setEditPersonnelSearchQuery(e.target.value)}
-                      className="mb-2"
-                    />
-                  </div>
-                  <SelectItem value="none">Seçim Yok</SelectItem>
-                  {allPersonnel
-                    .filter(p => {
-                      if (fault?.faultType === 'teknik_servis') return p.role === 'teknik_servis';
-                      if (fault?.faultType === 'aplikasyon') return p.role === 'aplikasyon';
-                      return true;
-                    })
-                    .filter(p => {
-                      if (!editPersonnelSearchQuery) return true;
-                      const q = editPersonnelSearchQuery.toLowerCase();
-                      return (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q);
-                    })
-                    .map(p => (
-                      <SelectItem key={p.uid} value={p.uid}>
-                        {p.name || p.email} ({p.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'})
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <Input
+                placeholder="Personel ara..."
+                value={editPersonnelSearchQuery}
+                onChange={(e) => setEditPersonnelSearchQuery(e.target.value)}
+              />
+              <div className="max-h-52 overflow-y-auto border rounded-md">
+                {allPersonnel
+                  .filter(p => p.role === 'teknik_servis' || p.role === 'aplikasyon')
+                  .filter(p => {
+                    if (!editPersonnelSearchQuery) return true;
+                    const q = editPersonnelSearchQuery.toLowerCase();
+                    return (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q);
+                  })
+                  .map(p => {
+                    const checked = editSupportPersonnelUids.includes(p.uid);
+                    return (
+                      <label key={p.uid} className="flex items-center gap-2 px-3 py-2 border-b last:border-b-0 cursor-pointer">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) => {
+                            setEditSupportPersonnelUids(prev => v ? [...prev, p.uid] : prev.filter(uid => uid !== p.uid));
+                          }}
+                        />
+                        <span className="text-sm">{p.name || p.email} ({p.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'})</span>
+                      </label>
+                    );
+                  })}
+              </div>
             </div>
           </div>
           <DialogFooter>

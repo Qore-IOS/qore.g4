@@ -508,8 +508,8 @@ export default function IslemFormuPage() {
           currentCompanyId,
           isSuperAdmin
         );
-        // Teknik servis formu için sadece teknik servis personelini göster
-        setAllUsers(users.filter(u => u.role === 'teknik_servis'));
+        // Teknik/Aplikasyon personellerinin tamamını göster
+        setAllUsers(users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
       } catch (err) {
         console.error("Error fetching users:", err);
       }
