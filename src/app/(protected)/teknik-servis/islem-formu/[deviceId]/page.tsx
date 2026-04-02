@@ -66,6 +66,7 @@ type ActionItem = {
   serialNumber?: string;
   hucreNumarasi?: string;           // Hücre numarası (takılan)
   removedHucreNumarasi?: string;    // Çıkan hücre numarası
+  channelSelections?: ('CH1' | 'CH2')[];
   // Removed/replaced part info (from device)
   removedPartStokKodu?: string;
   removedPartStokAdi?: string;
@@ -221,6 +222,8 @@ export default function IslemFormuPage() {
   const [hucreStockSourceTab, setHucreStockSourceTab] = useState<'personal' | 'depot'>('personal');
   const [showHucreDegisimiInIslemTuru, setShowHucreDegisimiInIslemTuru] = useState(false);
   const [hucreDegisimiRemovedHucre, setHucreDegisimiRemovedHucre] = useState('');
+  const [hucreDegisimiRemovedSerialNumber, setHucreDegisimiRemovedSerialNumber] = useState('');
+  const [hucreDegisimiSelectedChannels, setHucreDegisimiSelectedChannels] = useState<('CH1' | 'CH2')[]>([]);
   const [hucreDegisimiDescription, setHucreDegisimiDescription] = useState('');
   const [hucreDegisimiSearchQuery, setHucreDegisimiSearchQuery] = useState('');
 
@@ -2824,13 +2827,18 @@ export default function IslemFormuPage() {
         });
 
         const validateHucreFormat = (v: string) => !v || /^[A-Za-z]\d{4}$/.test(v);
+        const selectedHucreItem = hucreStockSourceTab === 'depot' ? hucreDegisimiSelectedDepotItem : hucreDegisimiSelectedItem;
 
         const addHucreDegisimi = () => {
-          const selectedHucreItem = hucreStockSourceTab === 'depot' ? hucreDegisimiSelectedDepotItem : hucreDegisimiSelectedItem;
           if (!selectedHucreItem) return;
           const removedHn = hucreDegisimiRemovedHucre.trim().toUpperCase();
+          const removedSn = hucreDegisimiRemovedSerialNumber.trim();
           if (removedHn && !validateHucreFormat(removedHn)) {
             toast({ title: 'Geçersiz Format', description: 'Çıkan hücre numarası 1 harf + 4 rakamdan oluşmalıdır.', variant: 'destructive' });
+            return;
+          }
+          if (!removedSn) {
+            toast({ title: 'Eksik Bilgi', description: 'Çıkan hücre için seri numarası zorunludur.', variant: 'destructive' });
             return;
           }
           const item = selectedHucreItem;
@@ -2848,6 +2856,10 @@ export default function IslemFormuPage() {
             serialNumber: item.serialNumber,
             hucreNumarasi: item.hucreNumarasi || '',
             removedHucreNumarasi: removedHn || '',
+            channelSelections: hucreDegisimiSelectedChannels,
+            removedPartStokKodu: item.stokKodu,
+            removedPartStokAdi: item.stokAdi,
+            removedPartSerialNumber: removedSn,
             description: hucreDegisimiDescription.trim() || '',
           };
           setActions(prev => [...prev, newAction]);
@@ -2855,6 +2867,8 @@ export default function IslemFormuPage() {
           setHucreDegisimiSelectedDepotItem(null);
           setHucreStockSourceTab('personal');
           setHucreDegisimiRemovedHucre('');
+          setHucreDegisimiRemovedSerialNumber('');
+          setHucreDegisimiSelectedChannels([]);
           setHucreDegisimiDescription('');
           setHucreDegisimiSearchQuery('');
           toast({ title: 'Hücre Değişimi Eklendi', description: `${item.stokAdi} - H:${item.hucreNumarasi}` });
@@ -2871,6 +2885,8 @@ export default function IslemFormuPage() {
                       <div className="wizard-action-item-label">{item.stokAdi}</div>
                       <div className="wizard-action-item-sub">
                         Takılan: H:{item.hucreNumarasi} {item.removedHucreNumarasi ? `· Çıkan: H:${item.removedHucreNumarasi}` : ''}
+                        {item.channelSelections?.length ? ` · Kanal: ${item.channelSelections.join(', ')}` : ''}
+                        {item.removedPartSerialNumber ? ` · Çıkan SN:${item.removedPartSerialNumber}` : ''}
                         {item.description ? ` · ${item.description}` : ''}
                       </div>
                     </div>
@@ -2927,6 +2943,8 @@ export default function IslemFormuPage() {
                         setHucreDegisimiSelectedDepotItem(item as DepotSelectableStockItem);
                         setHucreDegisimiSelectedItem(null);
                       }
+                      setHucreDegisimiRemovedSerialNumber('');
+                      setHucreDegisimiSelectedChannels([]);
                     }}
                     style={{
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -2948,7 +2966,7 @@ export default function IslemFormuPage() {
             </div>
 
             {/* Çıkan hücre numarası */}
-            {hucreDegisimiSelectedItem && (
+            {selectedHucreItem && (
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '8px' }}>
                   2. Çıkan Hücre Numarası
@@ -2967,11 +2985,52 @@ export default function IslemFormuPage() {
               </div>
             )}
 
-            {/* Açıklama */}
-            {hucreDegisimiSelectedItem && (
+            {selectedHucreItem && (
+              <div style={{ marginBottom: '16px', display: 'grid', gap: '10px' }}>
+                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)' }}>
+                  3. Çıkan Hücre Bilgisi
+                </label>
+                <input type="text" value={selectedHucreItem.stokKodu || ''} readOnly style={{ opacity: 0.7, cursor: 'default' }} />
+                <input type="text" value={selectedHucreItem.stokAdi || ''} readOnly style={{ opacity: 0.7, cursor: 'default' }} />
+                <input
+                  type="text"
+                  placeholder="Çıkan hücre seri no (zorunlu)"
+                  value={hucreDegisimiRemovedSerialNumber}
+                  onChange={(e) => setHucreDegisimiRemovedSerialNumber(e.target.value)}
+                  style={{ background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px', fontSize: '15px', width: '100%', outline: 'none' }}
+                />
+              </div>
+            )}
+
+            {selectedHucreItem && (
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '8px' }}>
-                  3. Açıklama (Opsiyonel)
+                  4. Kanal Seçimi (Opsiyonel)
+                </label>
+                <div style={{ display: 'flex', gap: '16px' }}>
+                  {(['CH1', 'CH2'] as const).map(channel => (
+                    <label key={channel} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={hucreDegisimiSelectedChannels.includes(channel)}
+                        onChange={(e) => {
+                          setHucreDegisimiSelectedChannels(prev =>
+                            e.target.checked ? [...prev, channel] : prev.filter(c => c !== channel)
+                          );
+                        }}
+                      />
+                      <span>{channel}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Açıklama */}
+            {selectedHucreItem && (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '8px' }}>
+                  5. Açıklama (Opsiyonel)
                 </label>
                 <textarea
                   placeholder="Hücre değişimi hakkında açıklama..."
