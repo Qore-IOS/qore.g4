@@ -2855,11 +2855,21 @@ export default function IslemFormuPage() {
 
         const saveHucreDegisimiRows = () => {
           if (hucreDegisimiRows.length === 0) return;
+          const activeRows = hucreDegisimiRows.filter((row) => (
+            !!getSelectedItem(row)
+            || !!row.removedHucreNumarasi.trim()
+            || !!row.description.trim()
+            || !!row.selectedChannel
+          ));
+          if (activeRows.length === 0) {
+            toast({ title: 'Eksik Bilgi', description: 'Kaydedilecek en az bir hücre değişimi satırı doldurun.', variant: 'destructive' });
+            return;
+          }
           const newActions: ActionItem[] = [];
           const seenPersonalIds = new Set<string>();
           const seenDepotIds = new Set<string>();
-          for (let i = 0; i < hucreDegisimiRows.length; i++) {
-            const row = hucreDegisimiRows[i];
+          for (let i = 0; i < activeRows.length; i++) {
+            const row = activeRows[i];
             const selectedItem = getSelectedItem(row);
             if (!selectedItem) {
               toast({ title: 'Eksik Bilgi', description: `${i + 1}. satır için takılacak hücre seçin.`, variant: 'destructive' });
