@@ -156,11 +156,27 @@ HER SERİ NUMARASINI TEK TEK OKU - aynı üründen 50 tane varsa 50 farklı seri
     ];
 
     // Use gemini-2.0-flash for vision - fast and excellent multimodal
-    const models = ['gemini-2.0-flash', 'gemini-2.0-flash-001', 'gemini-1.5-flash-latest'];
+    // Also include gemini-2.5-flash and gemini-1.5-flash as fallbacks
+    const models = [
+      'gemini-2.5-flash-preview-05-20',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-001',
+      'gemini-1.5-flash',
+    ];
     let lastError = '';
 
     for (const model of models) {
       try {
+        // gemini-1.5 doesn't support responseMimeType for JSON mode
+        const supportsJsonMode = model.startsWith('gemini-2');
+        const generationConfig: Record<string, unknown> = {
+          temperature: 0.05,
+          maxOutputTokens: supportsJsonMode ? 65536 : 8192,
+        };
+        if (supportsJsonMode) {
+          generationConfig.responseMimeType = 'application/json';
+        }
+
         const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
           {
@@ -169,11 +185,7 @@ HER SERİ NUMARASINI TEK TEK OKU - aynı üründen 50 tane varsa 50 farklı seri
             body: JSON.stringify({
               contents,
               systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-              generationConfig: {
-                temperature: 0.05,
-                maxOutputTokens: 65536,
-                responseMimeType: 'application/json',
-              },
+              generationConfig,
             }),
           }
         );
@@ -181,7 +193,8 @@ HER SERİ NUMARASINI TEK TEK OKU - aynı üründen 50 tane varsa 50 farklı seri
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
           lastError = `${model}: HTTP ${res.status} - ${errText.slice(0, 200)}`;
-          if (res.status === 400 || res.status === 404) continue;
+          console.warn(`[bulk-barcode-scan] Model ${model} failed:`, lastError);
+          if (res.status === 400 || res.status === 404 || res.status === 429) continue;
           throw new Error(lastError);
         }
 
