@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail, Upload, Download, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
@@ -41,6 +42,7 @@ export default function LaboratuvarPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentHospital, setCurrentHospital] = useState<Partial<Hospital>>({});
+  const [responsibleEmailsInput, setResponsibleEmailsInput] = useState('');
   const [isMinMaxPanelOpen, setIsMinMaxPanelOpen] = useState(false);
   const [minMaxTarget, setMinMaxTarget] = useState<Hospital | null>(null);
 
@@ -73,6 +75,31 @@ export default function LaboratuvarPanel() {
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
   const excelFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const parseResponsibleEmails = (value: unknown): string[] => {
+    const rawList = Array.isArray(value)
+      ? value
+      : typeof value === 'string'
+        ? value.split(/\r?\n/)
+        : [];
+
+    const seen = new Set<string>();
+    return rawList
+      .map((mail) => String(mail || '').trim())
+      .filter((mail) => {
+        if (!mail) return false;
+        const normalized = mail.toLowerCase();
+        if (seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      });
+  };
+
+  const getResponsibleEmails = (hospitalLike: Partial<Hospital>): string[] => {
+    const multi = parseResponsibleEmails((hospitalLike as any).sorumluEmails);
+    if (multi.length > 0) return multi;
+    return parseResponsibleEmails((hospitalLike as any).sorumluEmail);
+  };
 
 
   const fetchHospitalsAndProducts = useCallback(async () => {
@@ -107,6 +134,7 @@ export default function LaboratuvarPanel() {
   const openModal = (hospital?: Hospital) => {
     if (hospital && hospital.id) {
         setCurrentHospital(hospital);
+        setResponsibleEmailsInput(getResponsibleEmails(hospital).join('\n'));
         setIsEditingHospital(true);
         setIsModalOpen(true);
         
@@ -126,6 +154,7 @@ export default function LaboratuvarPanel() {
 
     } else {
         setCurrentHospital({ consumptionTrackingEnabled: true, isConsumablesHospital: false, manualDeductionEnabled: false, fefoEnabled: true, kod: '' }); // Default FEFO to ON for new labs
+        setResponsibleEmailsInput('');
         setIsEditingHospital(false);
         setIsModalOpen(true);
         setHospitalSubPoints([]);
@@ -152,6 +181,7 @@ export default function LaboratuvarPanel() {
     
     setIsLoading(true);
     try {
+      const responsibleEmails = parseResponsibleEmails(responsibleEmailsInput);
       const dataToSave: Partial<Hospital> = {
         name: currentHospital.name.trim(),
         kod: (currentHospital.kod || '').trim().toUpperCase(),
@@ -163,7 +193,8 @@ export default function LaboratuvarPanel() {
         manualDeductionEnabled: currentHospital.manualDeductionEnabled ?? false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
-        sorumluEmail: ((currentHospital as any).sorumluEmail || '').trim(),
+        sorumluEmails: responsibleEmails,
+        sorumluEmail: responsibleEmails[0] || '',
         updatedAt: new Date(),
       };
 
@@ -193,6 +224,7 @@ export default function LaboratuvarPanel() {
       fetchHospitalsAndProducts();
       setIsModalOpen(false);
       setCurrentHospital({});
+      setResponsibleEmailsInput('');
       setHospitalSubPoints([]);
 
     } catch (error) {
@@ -345,7 +377,7 @@ export default function LaboratuvarPanel() {
         name: (row['Laboratuvar Adı'] || row['Ad'] || row['name'] || '').toString().trim(),
         kod: (row['Kod'] || row['kod'] || row['Laboratuvar Kodu'] || '').toString().trim().toUpperCase(),
         address: (row['Adres'] || row['address'] || '').toString().trim(),
-        sorumluEmail: (row['E-posta'] || row['Email'] || row['sorumluEmail'] || '').toString().trim(),
+        sorumluEmails: parseResponsibleEmails(row['E-posta'] || row['Email'] || row['sorumluEmails'] || row['sorumluEmail'] || ''),
         consumptionTrackingEnabled: parseExcelBoolean(row['Tüketim Takibi'] ?? row['consumptionTrackingEnabled'], true),
         fefoEnabled: parseExcelBoolean(row['FEFO'] ?? row['fefoEnabled'], true),
         manualDeductionEnabled: parseExcelBoolean(row['Manuel Düşüm'] ?? row['manualDeductionEnabled'], false),
@@ -408,7 +440,8 @@ export default function LaboratuvarPanel() {
           name: row.name,
           kod: row.kod || '',
           address: row.address || '',
-          sorumluEmail: row.sorumluEmail || '',
+          sorumluEmails: row.sorumluEmails || [],
+          sorumluEmail: row.sorumluEmails?.[0] || '',
           consumptionTrackingEnabled: row.consumptionTrackingEnabled,
           fefoEnabled: row.fefoEnabled,
           manualDeductionEnabled: row.manualDeductionEnabled,
@@ -443,7 +476,7 @@ export default function LaboratuvarPanel() {
         'Laboratuvar Adı': 'Örnek Laboratuvar 1',
         'Kod': 'OL1',
         'Adres': 'Örnek Mah. 123. Sk.',
-        'E-posta': 'ornek@lab.com',
+        'E-posta': 'sorumlu1@lab.com\nsorumlu2@lab.com',
         'Tüketim Takibi': 'Evet',
         'FEFO': 'Evet',
         'Manuel Düşüm': 'Hayır',
@@ -570,12 +603,12 @@ export default function LaboratuvarPanel() {
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="email"
-                  placeholder="Sorumlu İletişim E-postası"
-                  value={(currentHospital as any).sorumluEmail || ''}
-                  onChange={(e) => setCurrentHospital({ ...currentHospital, sorumluEmail: e.target.value })}
-                  className="pl-9"
+                <Textarea
+                  rows={4}
+                  placeholder={'Her satıra bir e-posta yazın\nornek1@lab.com\nornek2@lab.com'}
+                  value={responsibleEmailsInput}
+                  onChange={(e) => setResponsibleEmailsInput(e.target.value)}
+                  className="pl-9 min-h-[96px]"
                 />
               </div>
 
@@ -962,7 +995,7 @@ export default function LaboratuvarPanel() {
                           </TableCell>
                           <TableCell className="font-mono text-xs">{row.kod}</TableCell>
                           <TableCell className="text-xs">{row.address}</TableCell>
-                          <TableCell className="text-xs">{row.sorumluEmail}</TableCell>
+                          <TableCell className="text-xs">{(row.sorumluEmails || []).join(', ')}</TableCell>
                           <TableCell className="text-center text-xs">{row.fefoEnabled ? 'Evet' : 'Hayır'}</TableCell>
                           <TableCell className="text-center text-xs">{row.consumptionTrackingEnabled ? 'Evet' : 'Hayır'}</TableCell>
                         </TableRow>
