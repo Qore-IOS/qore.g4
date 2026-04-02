@@ -71,7 +71,7 @@ type CihazDurumu = 'calisiyor' | 'arizali' | 'denemede' | 'diger' | '';
 
 type ActionItem = {
   id: string;
-  type: 'part_change' | 'operation';
+  type: 'part_change' | 'operation' | 'hucre_degisimi';
   action: string;
   stokKodu?: string;
   stokAdi?: string;
@@ -79,6 +79,10 @@ type ActionItem = {
   quantity: number;
   description?: string;
   isManualEntry?: boolean;
+  hucreNumarasi?: string;
+  removedHucreNumarasi?: string;
+  channelSelections?: ('CH1' | 'CH2')[];
+  removedPartSerialNumber?: string;
 };
 
 type ActionFormRecord = {
@@ -455,6 +459,32 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
               txt(act.anaBirim ? act.anaBirim.toLocaleLowerCase('tr-TR') : 'adet', useTurkish)
             ];
           }),
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 10 },
+          headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
+
+      const hucreChanges = actionRecord.actions.filter(a => a.type === 'hucre_degisimi');
+      if (hucreChanges.length > 0) {
+        doc.setFont(FONT, 'bold');
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.line(padX, currentY, pageW - padX, currentY);
+        doc.text(txt('Hücre Değişimleri', useTurkish), padX, currentY + 12);
+        currentY += 18;
+
+        autoTable(doc, {
+          head: [[txt('Parça', useTurkish), txt('Kod', useTurkish), txt('Takılan/Çıkan', useTurkish), txt('Kanal', useTurkish)]],
+          body: hucreChanges.map(act => [
+            txt(act.stokAdi || '-', useTurkish),
+            txt(act.stokKodu || '-', useTurkish),
+            txt(`H:${act.hucreNumarasi || '-'} / H:${act.removedHucreNumarasi || '-'}`, useTurkish),
+            txt(act.channelSelections?.join(', ') || '-', useTurkish),
+          ]),
           startY: currentY,
           theme: 'grid',
           styles: { font: FONT, fontSize: 10 },
