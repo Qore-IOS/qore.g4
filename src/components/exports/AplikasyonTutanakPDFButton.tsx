@@ -478,12 +478,12 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
         currentY += 18;
 
         autoTable(doc, {
-          head: [[txt('Parça', useTurkish), txt('Takılan/Çıkan', useTurkish), txt('Kanal', useTurkish), txt('Çıkan SN', useTurkish)]],
+          head: [[txt('Parça', useTurkish), txt('Kod', useTurkish), txt('Takılan/Çıkan', useTurkish), txt('Kanal', useTurkish)]],
           body: hucreChanges.map(act => [
             txt(act.stokAdi || '-', useTurkish),
+            txt(act.stokKodu || '-', useTurkish),
             txt(`H:${act.hucreNumarasi || '-'} / H:${act.removedHucreNumarasi || '-'}`, useTurkish),
             txt(act.channelSelections?.join(', ') || '-', useTurkish),
-            txt(act.removedPartSerialNumber || '-', useTurkish),
           ]),
           startY: currentY,
           theme: 'grid',
