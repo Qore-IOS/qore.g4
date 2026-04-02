@@ -40,7 +40,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Label } from '@/components/ui/label';
 
 // Icons
-import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download } from 'lucide-react';
+import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
 
 // Firebase
 import { db } from '@/lib/firebase';
@@ -62,6 +62,7 @@ import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
 import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
+import BulkBarcodeScanModal, { type BulkScanResultItem } from '@/components/mal-kabul/BulkBarcodeScanModal';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // =============================================================================
@@ -345,6 +346,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
   const [showManualInline, setShowManualInline] = useState(false);
@@ -638,6 +640,86 @@ export default function AnaPanel(props: AnaPanelProps) {
             res.quantity
         );
     });
+  };
+
+  const handleBulkBarcodeResults = (items: BulkScanResultItem[]) => {
+    let addedSerial = 0;
+    let addedLot = 0;
+    let skipped = 0;
+
+    items.forEach((item) => {
+      // Use matched product or try to find by katalogNo
+      const product = item.matchedProduct || productCodes.find(
+        (p) => p.stokKodu === item.katalogNo || (p as any).barcodeNumber === item.katalogNo
+      );
+      if (!product) {
+        skipped++;
+        return;
+      }
+
+      const stokKodu = product.stokKodu;
+      const stokAdi = product.stokAdi || item.urunAdi || '';
+      const lotNumarasi = item.lotNo || '';
+      const miad = item.skt || '';
+      const seriNumarasi = item.seriNo || '';
+
+      // If serial number exists, add as individual serial-tracked item
+      if (seriNumarasi) {
+        // Duplicate check
+        const sessionSerials = scannedSerialsRef.current.get(stokKodu);
+        const depotSerials = existingDepotSerials.get(stokKodu);
+        if (sessionSerials?.has(seriNumarasi) || depotSerials?.has(seriNumarasi)) {
+          skipped++;
+          return;
+        }
+
+        const newItem: ScanRow = {
+          id: generateId(),
+          barkod: item.barkodVerisi || item.katalogNo || 'AI_BULK_SCAN',
+          stokKodu,
+          stokAdi,
+          lotNumarasi,
+          miad,
+          seriNumarasi,
+          rafAdresi: '',
+          irsaliyeNumarasi: '',
+          isSelected: false,
+          timestamp: new Date(),
+          isProcessed: false,
+          adet: 1,
+          isGroup: false,
+          key: `${stokKodu}-${lotNumarasi}-${miad}`,
+          bulkQrAssigned: false,
+        };
+
+        if (!scannedSerialsRef.current.has(stokKodu)) {
+          scannedSerialsRef.current.set(stokKodu, new Set());
+        }
+        scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
+        setScannedItems((prev) => [newItem, ...prev]);
+        addedSerial++;
+      } else {
+        // No serial - add as lot/quantity grouped item
+        upsertGroupedRow(
+          setScannedItems,
+          { stokKodu, stokAdi, lot: lotNumarasi, miad, barkod: item.barkodVerisi || 'AI_BULK_SCAN' },
+          (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === lotNumarasi && r.miad === miad),
+          1
+        );
+        addedLot++;
+      }
+    });
+
+    const total = addedSerial + addedLot;
+    if (total > 0) {
+      playFeedback();
+      flashScanFeedback(
+        'success',
+        `AI Toplu Tarama: ${total} urun eklendi${skipped > 0 ? `, ${skipped} atlandı` : ''}.`
+      );
+    } else {
+      flashScanFeedback('error', 'Hicbir urun eslenemedi.');
+    }
   };
 
   const lotCount = useMemo(() => {
@@ -1490,6 +1572,16 @@ export default function AnaPanel(props: AnaPanelProps) {
                 <span className="sm:hidden">Toplu</span>
               </button>
               <button
+                onClick={() => setIsBulkBarcodeScanOpen(true)}
+                disabled={malKabulIsLoading}
+                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                title="AI ile toplu barkod tarama (fotoğraf çek veya yükle)"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">AI Toplu Tara</span>
+                <span className="sm:hidden">AI</span>
+              </button>
+              <button
                 onClick={clearAllScannedItems}
                 disabled={malKabulIsLoading || scannedItems.length === 0}
                 className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1540,6 +1632,13 @@ export default function AnaPanel(props: AnaPanelProps) {
                 >
                   <ScanLine className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
                   PDF İrsaliye Yükle
+                </button>
+                <button
+                  onClick={() => setIsBulkBarcodeScanOpen(true)}
+                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
+                  AI Toplu Barkod Tara
                 </button>
               </div>
             </div>
@@ -1812,6 +1911,16 @@ export default function AnaPanel(props: AnaPanelProps) {
           onClose={() => setIsOcrModalOpen(false)}
           productCodes={productCodes}
           onResults={handleOcrResults}
+        />
+      )}
+
+      {/* AI Bulk Barcode Scan Modal */}
+      {isBulkBarcodeScanOpen && (
+        <BulkBarcodeScanModal
+          isOpen={isBulkBarcodeScanOpen}
+          onClose={() => setIsBulkBarcodeScanOpen(false)}
+          productCodes={productCodes}
+          onResults={handleBulkBarcodeResults}
         />
       )}
     </div>
