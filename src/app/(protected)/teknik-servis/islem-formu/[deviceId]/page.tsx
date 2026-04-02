@@ -2856,12 +2856,27 @@ export default function IslemFormuPage() {
         const saveHucreDegisimiRows = () => {
           if (hucreDegisimiRows.length === 0) return;
           const newActions: ActionItem[] = [];
+          const seenPersonalIds = new Set<string>();
+          const seenDepotIds = new Set<string>();
           for (let i = 0; i < hucreDegisimiRows.length; i++) {
             const row = hucreDegisimiRows[i];
             const selectedItem = getSelectedItem(row);
             if (!selectedItem) {
               toast({ title: 'Eksik Bilgi', description: `${i + 1}. satır için takılacak hücre seçin.`, variant: 'destructive' });
               return;
+            }
+            if (row.stockSourceTab === 'personal') {
+              if (seenPersonalIds.has(selectedItem.id)) {
+                toast({ title: 'Mükerrer Seçim', description: `${i + 1}. satırda aynı şahsi stok hücresi tekrar seçilemez.`, variant: 'destructive' });
+                return;
+              }
+              seenPersonalIds.add(selectedItem.id);
+            } else if (row.stockSourceTab === 'depot') {
+              if (seenDepotIds.has(selectedItem.id)) {
+                toast({ title: 'Mükerrer Seçim', description: `${i + 1}. satırda aynı depo stok hücresi tekrar seçilemez.`, variant: 'destructive' });
+                return;
+              }
+              seenDepotIds.add(selectedItem.id);
             }
             const removedHn = row.removedHucreNumarasi.trim().toUpperCase();
             if (!validateHucreFormat(removedHn)) {
@@ -2930,14 +2945,28 @@ export default function IslemFormuPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {hucreDegisimiRows.map((row, rowIndex) => {
+                const selectedPersonalIdsInOtherRows = new Set(
+                  hucreDegisimiRows
+                    .filter(r => r.id !== row.id)
+                    .map(r => r.selectedPersonalItem?.id)
+                    .filter(Boolean) as string[]
+                );
+                const selectedDepotIdsInOtherRows = new Set(
+                  hucreDegisimiRows
+                    .filter(r => r.id !== row.id)
+                    .map(r => r.selectedDepotItem?.id)
+                    .filter(Boolean) as string[]
+                );
                 const personalCandidates = personalStock
                   .filter(p => !usedPersonalStockIds.has(p.id) && (p as any).hucreNumarasi && p.status === 'in_stock')
+                  .filter(p => !selectedPersonalIdsInOtherRows.has(p.id) || row.selectedPersonalItem?.id === p.id)
                   .filter(p => {
                     if (!row.searchQuery.trim()) return true;
                     const q = row.searchQuery.trim().toLowerCase();
                     return p.stokKodu.toLowerCase().includes(q) || p.stokAdi.toLowerCase().includes(q) || ((p as any).hucreNumarasi || '').toLowerCase().includes(q);
                   });
                 const depotCandidates = selectableDepotHucreStock.filter(item => {
+                  if (selectedDepotIdsInOtherRows.has(item.id) && row.selectedDepotItem?.id !== item.id) return false;
                   if (!row.searchQuery.trim()) return true;
                   const q = row.searchQuery.trim().toLowerCase();
                   return item.stokKodu.toLowerCase().includes(q) || item.stokAdi.toLowerCase().includes(q) || (item.hucreNumarasi || '').toLowerCase().includes(q);
