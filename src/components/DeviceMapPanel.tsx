@@ -12,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Turkey-wide bounds (no region restriction)
 const TURKEY_CENTER: [number, number] = [39.0, 35.0];
@@ -130,6 +132,11 @@ export default function DeviceMapPanel({
   const mapRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
   const router = useRouter();
+  const { currentUserProfile, isAdmin, isSuperAdmin, currentCompanyId } = useAuth();
+
+  // User's assigned laboratories (for non-admin filtering)
+  const userAssignedLabs = currentUserProfile?.assignedLaboratories || [];
+  const userRole = currentUserProfile?.role || '';
 
   // Real-time devices from 'devices' collection
   const [allDevices, setAllDevices] = useState<Device[]>([]);
@@ -212,27 +219,41 @@ export default function DeviceMapPanel({
     return () => unsub();
   }, []);
 
+  // Filter hospitals by company scope, then by assigned labs for non-admin users
+  const filteredHospitals = useMemo(() => {
+    // 1. Company filter
+    let filtered = filterByCompanyScope(hospitals, currentCompanyId, isSuperAdmin);
+    // 2. Role-based lab filter: admin sees all, teknik/aplikasyon sees only assigned labs
+    if (!isAdmin && userAssignedLabs.length > 0) {
+      filtered = filtered.filter((h) => userAssignedLabs.includes(h.id));
+    }
+    return filtered;
+  }, [hospitals, currentCompanyId, isSuperAdmin, isAdmin, userAssignedLabs]);
+
   // Build hospital location map (only hospitals with coordinates)
   const hospitalMap = useMemo(() => {
     const map = new Map<string, Hospital>();
-    hospitals.forEach((h) => {
+    filteredHospitals.forEach((h) => {
       if (h.lat && h.lng) map.set(h.id, h);
     });
     return map;
-  }, [hospitals]);
+  }, [filteredHospitals]);
 
-  // Group devices by hospitalId
+  // Filter devices by company scope, then group by hospitalId
   const devicesByHospital = useMemo(() => {
+    const companyFiltered = filterByCompanyScope(allDevices, currentCompanyId, isSuperAdmin);
     const map = new Map<string, Device[]>();
-    allDevices.forEach((device) => {
+    companyFiltered.forEach((device) => {
       const hId = (device as any).hospitalId as string | undefined;
       if (!hId) return;
+      // Only include devices belonging to visible hospitals
+      if (!hospitalMap.has(hId)) return;
       const arr = map.get(hId) || [];
       arr.push(device);
       map.set(hId, arr);
     });
     return map;
-  }, [allDevices]);
+  }, [allDevices, currentCompanyId, isSuperAdmin, hospitalMap]);
 
   // Build set of device IDs with approaching maintenance
   const maintenanceSoonDeviceIds = useMemo(() => {
