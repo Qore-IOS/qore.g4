@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail, Upload, Download, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
@@ -79,7 +80,7 @@ export default function LaboratuvarPanel() {
     const rawList = Array.isArray(value)
       ? value
       : typeof value === 'string'
-        ? value.split(/[,\n;]+/)
+        ? value.split(/\r?\n/)
         : [];
 
     const seen = new Set<string>();
@@ -133,7 +134,7 @@ export default function LaboratuvarPanel() {
   const openModal = (hospital?: Hospital) => {
     if (hospital && hospital.id) {
         setCurrentHospital(hospital);
-        setResponsibleEmailsInput(getResponsibleEmails(hospital).join(', '));
+        setResponsibleEmailsInput(getResponsibleEmails(hospital).join('\n'));
         setIsEditingHospital(true);
         setIsModalOpen(true);
         
@@ -475,7 +476,7 @@ export default function LaboratuvarPanel() {
         'Laboratuvar Adı': 'Örnek Laboratuvar 1',
         'Kod': 'OL1',
         'Adres': 'Örnek Mah. 123. Sk.',
-        'E-posta': 'sorumlu1@lab.com, sorumlu2@lab.com',
+        'E-posta': 'sorumlu1@lab.com\nsorumlu2@lab.com',
         'Tüketim Takibi': 'Evet',
         'FEFO': 'Evet',
         'Manuel Düşüm': 'Hayır',
@@ -602,12 +603,12 @@ export default function LaboratuvarPanel() {
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Sorumlu E-postaları (virgül ile)"
+                <Textarea
+                  rows={4}
+                  placeholder={'Her satıra bir e-posta yazın\nornek1@lab.com\nornek2@lab.com'}
                   value={responsibleEmailsInput}
                   onChange={(e) => setResponsibleEmailsInput(e.target.value)}
-                  className="pl-9"
+                  className="pl-9 min-h-[96px]"
                 />
               </div>
 
