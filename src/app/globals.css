@@ -1635,11 +1635,20 @@
   border-top-color: var(--dashboard-surface) !important;
 }
 
-/* Dot marker reset */
-.device-map-dot,
+/* Marker reset */
 .device-map-hospital {
   background: transparent !important;
   border: none !important;
+}
+
+/* Warning dot pulsing animation for maintenance approaching */
+.device-map-stat-dot-warning {
+  animation: pulse-warning 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* Responsive */
