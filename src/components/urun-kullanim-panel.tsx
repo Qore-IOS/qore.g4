@@ -23,6 +23,7 @@ import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
+import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
@@ -1107,6 +1108,7 @@ export default function UrunKullanimPanel() {
       stokKodu: string;
       stokAdi: string;
       lotNumarasi: string;
+      miad: string;
       count: number;
       anaBirim: string;
       laboratuvarGrubu: string;
@@ -1116,13 +1118,15 @@ export default function UrunKullanimPanel() {
       const product = products.find((p) => p.stokKodu === item.stokKodu);
       const anaBirim = String(product?.anaBirim || 'Adet');
       const lotNumarasi = item.lotNumarasi || 'Lotsuz';
-      const key = `${item.stokKodu}__${lotNumarasi}`;
+      const miadStr = formatMiad(item.miad);
+      const key = `${item.stokKodu}__${lotNumarasi}__${miadStr}`;
       const labGrubu = product?.laboratuvarGrubu || 'Diğer';
 
       const existing = grouped.get(key) || {
         stokKodu: item.stokKodu,
         stokAdi: product?.stokAdi || item.stokAdi || item.stokKodu,
         lotNumarasi,
+        miad: miadStr,
         count: 0,
         anaBirim,
         laboratuvarGrubu: labGrubu,
@@ -1157,8 +1161,13 @@ export default function UrunKullanimPanel() {
     return items;
   }, [listDeductionItems, selectedLabGroup, visualSearchQuery]);
 
-  const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string) => {
-    const item = labStock.find((stockItem) => stockItem.stokKodu === stokKodu && (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi);
+  const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string, miad?: string) => {
+    const item = labStock.find((stockItem) => {
+      const matchCode = stockItem.stokKodu === stokKodu;
+      const matchLot = (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi;
+      if (!miad) return matchCode && matchLot;
+      return matchCode && matchLot && formatMiad(stockItem.miad) === miad;
+    });
     if (!item) {
       toast({ title: 'Stok Bulunamadı', description: 'Bu lot için düşülecek stok kalmamış.', variant: 'destructive' });
       return;
@@ -1438,6 +1447,7 @@ export default function UrunKullanimPanel() {
                           <div className="flex items-center gap-3 text-xs text-foreground/60 mt-0.5">
                             <span>{item.stokKodu}</span>
                             <span>Lot: {item.lotNumarasi}</span>
+                            {item.miad && item.miad !== '-' && <span>Miad: {item.miad}</span>}
                             <span className="font-bold text-foreground/90">{item.count} {item.anaBirim}</span>
                           </div>
                         </div>
@@ -1445,7 +1455,7 @@ export default function UrunKullanimPanel() {
                           size="sm"
                           variant="secondary"
                           className="shrink-0 h-8 px-3 text-xs font-semibold"
-                          onClick={() => handleVisualDeduction(item.stokKodu, item.lotNumarasi)}
+                          onClick={() => handleVisualDeduction(item.stokKodu, item.lotNumarasi, item.miad)}
                         >
                           <PackageMinus className="h-3.5 w-3.5 mr-1.5" />
                           Stoktan Düş
