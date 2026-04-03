@@ -16,7 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/types';
-import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History } from 'lucide-react';
+import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX } from 'lucide-react';
 import { useMinMaxRules } from '@/hooks/useFirebaseQueries';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
@@ -85,6 +85,7 @@ export default function LaboratuvarYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
   const { data: minMaxRulesData } = useMinMaxRules(selectedLabId || null);
 
   const minMaxMap = useMemo(() => {
@@ -168,19 +169,40 @@ export default function LaboratuvarYonetimiPanel() {
     [groupedMap]
   );
 
+  const outOfStockItems = useMemo(() => {
+    if (!showOutOfStock || !minMaxRulesData) return [];
+    const inStockCodes = new Set(summaryList.map(r => r.stokKodu));
+    return minMaxRulesData
+      .filter(rule => !inStockCodes.has(rule.stokKodu))
+      .map(rule => ({
+        groupKey: `__oos__${rule.stokKodu}`,
+        stokKodu: rule.stokKodu,
+        stokAdi: productNames[rule.stokKodu] || rule.stokKodu,
+        lot: '',
+        miad: '',
+        quantity: 0,
+        firstId: '',
+      }));
+  }, [showOutOfStock, minMaxRulesData, summaryList, productNames]);
+
+  const combinedList = useMemo(
+    () => [...summaryList, ...outOfStockItems],
+    [summaryList, outOfStockItems]
+  );
+
   const filtered = useMemo(() => {
-    if (!searchQuery) return summaryList;
+    if (!searchQuery) return combinedList;
     const q = searchQuery.toLowerCase();
-    return summaryList.filter(row =>
+    return combinedList.filter(row =>
       row.stokKodu.toLowerCase().includes(q) ||
       row.stokAdi.toLowerCase().includes(q) ||
       row.lot.toLowerCase().includes(q) ||
       row.miad.toLowerCase().includes(q) ||
-      groupedMap[row.groupKey].items.some(item =>
+      (groupedMap[row.groupKey]?.items.some(item =>
         item.seriNumarasi?.toLowerCase().includes(q)
-      )
+      ) ?? false)
     );
-  }, [searchQuery, summaryList, groupedMap]);
+  }, [searchQuery, combinedList, groupedMap]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -270,8 +292,16 @@ export default function LaboratuvarYonetimiPanel() {
 
           {selectedLabId && (
             <Card className="shadow mt-4">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>{selectedLabName} - Özet Stok Durumu</CardTitle>
+                <Button
+                  variant={showOutOfStock ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => { setShowOutOfStock(v => !v); setCurrentPage(1); }}
+                >
+                  <PackageX className="mr-2 h-4 w-4" />
+                  {showOutOfStock ? 'Stokta Olmayanları Gizle' : 'Stokta Olmayanları Göster'}
+                </Button>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
@@ -297,16 +327,18 @@ export default function LaboratuvarYonetimiPanel() {
                         </TableHeader>
                         <TableBody>
                           {paginated.map(row => {
+                            const isOutOfStock = row.groupKey.startsWith('__oos__');
                             const miadInfo = getMiadInfoFromString(row.miad);
-                            const stripeColor = getRowStripeColor(miadInfo.severity);
+                            const stripeColor = isOutOfStock ? 'bg-slate-400' : getRowStripeColor(miadInfo.severity);
                             return (
                             <TableRow
                               key={row.groupKey}
-                              onClick={() => goToDetail(row.firstId)}
+                              onClick={isOutOfStock ? undefined : () => goToDetail(row.firstId)}
                               className={cn(
-                                "cursor-pointer hover:bg-muted",
-                                (miadInfo.severity === 'critical' || miadInfo.severity === 'expired') && 'bg-red-500/[0.04]',
-                                miadInfo.severity === 'caution' && 'bg-amber-500/[0.04]',
+                                !isOutOfStock && "cursor-pointer hover:bg-muted",
+                                isOutOfStock && 'bg-slate-50 dark:bg-slate-900/30 text-muted-foreground',
+                                !isOutOfStock && (miadInfo.severity === 'critical' || miadInfo.severity === 'expired') && 'bg-red-500/[0.04]',
+                                !isOutOfStock && miadInfo.severity === 'caution' && 'bg-amber-500/[0.04]',
                               )}
                             >
                               {/* Color strip */}
@@ -333,7 +365,11 @@ export default function LaboratuvarYonetimiPanel() {
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell className="text-right font-semibold">{row.quantity}</TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {isOutOfStock
+                                  ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">Stokta Yok</span>
+                                  : row.quantity}
+                              </TableCell>
                               <TableCell className="text-center">{minMaxMap[row.stokKodu]?.min ?? '-'}</TableCell>
                               <TableCell className="text-center">{minMaxMap[row.stokKodu]?.max ?? '-'}</TableCell>
                               <TableCell className="text-center">
