@@ -310,6 +310,7 @@ export default function UrunKullanimPanel() {
   const [manualQuantity, setManualQuantity] = useState(1);
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [mainUnitModels, setMainUnitModels] = useState<Record<string, string>>({});
+  const [visualSearchQuery, setVisualSearchQuery] = useState('');
 
   // Trash bin modal states
   const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
@@ -1101,10 +1102,14 @@ export default function UrunKullanimPanel() {
 
   const visualDeductionItems = useMemo(() => {
     if (!selectedLab?.visualDeductionEnabled) return [];
+    const allowedTrackingModes = new Set<TrackingMode>(['lot_barcode', 'lot_manual', 'quantity_only']);
     const grouped = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; count: number; anaBirim: string; modelSvg: string | null }>();
 
     labStock.forEach((item) => {
       const product = products.find((p) => p.stokKodu === item.stokKodu);
+      const trackingMode = productTracking[item.stokKodu] ?? (product?.trackingMode as TrackingMode | undefined);
+      if (!trackingMode || !allowedTrackingModes.has(trackingMode)) return;
+
       const anaBirim = String(product?.anaBirim || 'Adet');
       const lotNumarasi = item.lotNumarasi || 'Lotsuz';
       const key = `${item.stokKodu}__${lotNumarasi}`;
@@ -1123,8 +1128,13 @@ export default function UrunKullanimPanel() {
       grouped.set(key, existing);
     });
 
-    return Array.from(grouped.values()).sort((a, b) => b.count - a.count || (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr'));
-  }, [labStock, mainUnitModels, products, selectedLab?.visualDeductionEnabled]);
+    const allItems = Array.from(grouped.values()).sort((a, b) => b.count - a.count || (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr'));
+    const q = visualSearchQuery.trim().toLocaleLowerCase('tr');
+    if (!q) return allItems;
+    return allItems.filter((item) =>
+      `${item.stokAdi} ${item.stokKodu} ${item.lotNumarasi}`.toLocaleLowerCase('tr').includes(q)
+    );
+  }, [labStock, mainUnitModels, products, productTracking, selectedLab?.visualDeductionEnabled, visualSearchQuery]);
 
   const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string) => {
     const item = labStock.find((stockItem) => stockItem.stokKodu === stokKodu && (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi);
@@ -1351,6 +1361,14 @@ export default function UrunKullanimPanel() {
               <div className="h-full frosted-glass-card p-4 overflow-hidden">
                 <div className="frosted-header mb-3">
                   <span className="font-semibold text-base">Görsel Düşüm Kartları</span>
+                </div>
+                <div className="mb-3">
+                  <Input
+                    value={visualSearchQuery}
+                    onChange={(e) => setVisualSearchQuery(e.target.value)}
+                    placeholder="Ürün ara (ad, kod, lot)..."
+                    className="bg-white/20 border-white/20 placeholder:text-foreground/60"
+                  />
                 </div>
                 <ScrollArea className="h-[calc(100vh-170px)] pr-2">
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
