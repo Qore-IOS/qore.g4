@@ -15,8 +15,9 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import type { DepoStokItem, Laboratory, ProductCode } from '@/lib/types';
+import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History } from 'lucide-react';
+import { useMinMaxRules } from '@/hooks/useFirebaseQueries';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -84,6 +85,17 @@ export default function LaboratuvarYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const { data: minMaxRulesData } = useMinMaxRules(selectedLabId || null);
+
+  const minMaxMap = useMemo(() => {
+    const map: Record<string, MinMaxRule> = {};
+    if (minMaxRulesData) {
+      minMaxRulesData.forEach(rule => {
+        map[rule.stokKodu] = rule;
+      });
+    }
+    return map;
+  }, [minMaxRulesData]);
 
   useEffect(() => {
     async function fetchData() {
@@ -278,6 +290,9 @@ export default function LaboratuvarYonetimiPanel() {
                             <SortableHeader label="Lot" field="lot" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Miad" field="miad" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Adet" field="quantity" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
+                            <TableHead className="text-center">Min</TableHead>
+                            <TableHead className="text-center">Max</TableHead>
+                            <TableHead className="text-center">Ort. Tüketim Süresi</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -319,12 +334,19 @@ export default function LaboratuvarYonetimiPanel() {
                                 </div>
                               </TableCell>
                               <TableCell className="text-right font-semibold">{row.quantity}</TableCell>
+                              <TableCell className="text-center">{minMaxMap[row.stokKodu]?.min ?? '-'}</TableCell>
+                              <TableCell className="text-center">{minMaxMap[row.stokKodu]?.max ?? '-'}</TableCell>
+                              <TableCell className="text-center">
+                                {minMaxMap[row.stokKodu]?.ortalamaTuketimSuresi != null
+                                  ? `${minMaxMap[row.stokKodu].ortalamaTuketimSuresi} ${minMaxMap[row.stokKodu].tuketimSuresiBirimi === 'saat' ? 'saat' : 'gün'}`
+                                  : '-'}
+                              </TableCell>
                             </TableRow>
                             );
                           })}
                           {paginated.length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
+                              <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
                                 Kayıt bulunamadı.
                               </TableCell>
                             </TableRow>
