@@ -1102,14 +1102,10 @@ export default function UrunKullanimPanel() {
 
   const visualDeductionItems = useMemo(() => {
     if (!selectedLab?.visualDeductionEnabled) return [];
-    const allowedTrackingModes = new Set<TrackingMode>(['lot_barcode', 'lot_manual', 'quantity_only']);
     const grouped = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; count: number; anaBirim: string; modelSvg: string | null }>();
 
     labStock.forEach((item) => {
       const product = products.find((p) => p.stokKodu === item.stokKodu);
-      const trackingMode = productTracking[item.stokKodu] ?? (product?.trackingMode as TrackingMode | undefined);
-      if (!trackingMode || !allowedTrackingModes.has(trackingMode)) return;
-
       const anaBirim = String(product?.anaBirim || 'Adet');
       const lotNumarasi = item.lotNumarasi || 'Lotsuz';
       const key = `${item.stokKodu}__${lotNumarasi}`;
@@ -1134,7 +1130,7 @@ export default function UrunKullanimPanel() {
     return allItems.filter((item) =>
       `${item.stokAdi} ${item.stokKodu} ${item.lotNumarasi}`.toLocaleLowerCase('tr').includes(q)
     );
-  }, [labStock, mainUnitModels, products, productTracking, selectedLab?.visualDeductionEnabled, visualSearchQuery]);
+  }, [labStock, mainUnitModels, products, selectedLab?.visualDeductionEnabled, visualSearchQuery]);
 
   const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string) => {
     const item = labStock.find((stockItem) => stockItem.stokKodu === stokKodu && (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi);
