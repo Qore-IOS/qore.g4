@@ -13,15 +13,14 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
-import type { DepoStokItem, Laboratory, MinMaxRule, ProductCode } from '@/lib/types';
+import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle } from 'lucide-react';
-import { touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
 import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
 
@@ -104,18 +103,13 @@ function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: str
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
-  const [allLaboratories, setAllLaboratories] = useState<Laboratory[]>([]);
+  const { isSuperAdmin, currentUserProfile } = useAuth();
   const [selectedLabId, setSelectedLabId] = useState<string>('');
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<keyof GroupedStockItem>('stokAdi');
   const [sortAsc, setSortAsc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
-  const [productNames, setProductNames] = useState<Record<string, string>>({});
-  const [productMeta, setProductMeta] = useState<Record<string, { anaBirim?: string; takipSekli?: string }>>({});
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isDeletingGroup, setIsDeletingGroup] = useState<string | null>(null);
 
@@ -127,33 +121,30 @@ export default function LaboratuvarYonetimiPanel() {
   const [importProgress, setImportProgress] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    async function fetchData() {
-      setIsLoading(true);
-      const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
-        getDocs(collection(db, 'productCodes'))
-      ]);
-      setAllLaboratories(filterByCompanyScope(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)), currentCompanyId, isSuperAdmin));
-      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
-      
-      const names: Record<string, string> = {};
-      const meta: Record<string, { anaBirim?: string; takipSekli?: string }> = {};
-      productsSnap.docs.forEach(d => {
-        const p = d.data();
-        if (p.stokKodu) {
-          names[p.stokKodu] = p.stokAdi || p.stokKodu;
-          meta[p.stokKodu] = { anaBirim: p.anaBirim, takipSekli: p.takipSekli };
-        }
-      });
-      setProductNames(names);
-      setProductMeta(meta);
+  // Use TanStack Query hooks for data fetching
+  const { data: allLaboratories = [], isLoading: labsLoading } = useHospitals();
+  const { data: products = [], isLoading: productsLoading } = useProductCodes();
+  const { data: labPools = [], isLoading: labPoolsLoading } = useLabPools();
+  const { invalidateDepoStok } = useInvalidateQueries();
 
-      setIsLoading(false);
-    }
-    fetchData();
-  }, [currentCompanyId, isSuperAdmin]);
+  const isLoading = labsLoading || productsLoading;
+
+  // Derive product lookup maps from products query data
+  const productNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    products.forEach(p => {
+      if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
+    });
+    return names;
+  }, [products]);
+
+  const productMeta = useMemo(() => {
+    const meta: Record<string, { anaBirim?: string; takipSekli?: string }> = {};
+    products.forEach(p => {
+      if (p.stokKodu) meta[p.stokKodu] = { anaBirim: p.anaBirim, takipSekli: p.takipSekli };
+    });
+    return meta;
+  }, [products]);
 
   // Filter labs by user's assignedLaboratories - role-independent
   const laboratories = useMemo(() => {
@@ -171,6 +162,19 @@ export default function LaboratuvarYonetimiPanel() {
       setSelectedLabId(laboratories[0].id);
     }
   }, [laboratories, selectedLabId, isLoading]);
+
+  // Compute pool member IDs and names for lab stock query
+  const { poolMemberIds, poolMemberNames } = useMemo(() => {
+    const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
+    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    const names = ids.map(id => allLaboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
+    return { poolMemberIds: ids, poolMemberNames: names };
+  }, [labPools, selectedLabId, allLaboratories]);
+
+  // Use targeted lab stock query instead of broad depoStok fetch
+  const { data: labStocks = [] } = useLabStock(poolMemberIds, poolMemberNames, {
+    enabled: !labPoolsLoading && poolMemberIds.length > 0
+  });
 
   useEffect(() => {
     if (!selectedLabId) {
@@ -196,15 +200,6 @@ export default function LaboratuvarYonetimiPanel() {
   const selectedLabName = useMemo(() => {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
   }, [laboratories, selectedLabId]);
-
-  // CRITICAL FIX: Filter by both hedefKurumId and hedefKurum (name) to include legacy records
-  const labStocks = useMemo(() => {
-    const labName = laboratories.find(l => l.id === selectedLabId)?.name || '';
-    return depoStok.filter(item =>
-      item.hedefKurumId === selectedLabId ||
-      (!item.hedefKurumId && item.hedefKurum === labName)
-    );
-  }, [depoStok, selectedLabId, laboratories]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
@@ -351,10 +346,7 @@ export default function LaboratuvarYonetimiPanel() {
         });
       } else if (failCount > 0) {
         // Partial success
-        const deletedIds = new Set(
-          itemsToDelete.filter(item => !failedIds.includes(item.id!)).map(item => item.id)
-        );
-        setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+        await invalidateDepoStok();
         toast({
           title: 'Kısmi Başarı',
           description: `${successCount} kayıt silindi, ${failCount} kayıt silinemedi. Firebase Security Rules kontrol edin.`,
@@ -362,8 +354,7 @@ export default function LaboratuvarYonetimiPanel() {
         });
       } else {
         // All successful
-        const deletedIds = new Set(itemsToDelete.map(item => item.id));
-        setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+        await invalidateDepoStok();
         toast({
           title: 'Silindi',
           description: `${successCount} kayıt kalıcı olarak silindi.`
@@ -530,9 +521,8 @@ export default function LaboratuvarYonetimiPanel() {
 
       await touchStockMetadata();
 
-      // Refresh local state by re-fetching stock
-      const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
-      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
+      // Invalidate cache so useLabStock refetches
+      await invalidateDepoStok();
 
       toast({
         title: 'Stok Ekleme Başarılı',
@@ -547,7 +537,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsImporting(false);
       setImportProgress('');
     }
-  }, [validRows, selectedLabId, selectedLabName, toast, currentCompanyId, isSuperAdmin]);
+  }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
 
   return (
     <div className="space-y-6">
