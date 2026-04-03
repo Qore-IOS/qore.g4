@@ -59,6 +59,11 @@ export default function useHidScanner({
   const buf = useRef<string>('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedAt = useRef<number>(0);
+  const onScanRef = useRef(onScan);
+
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -86,7 +91,7 @@ export default function useHidScanner({
       }
 
       reset();
-      onScan({ raw });
+      onScanRef.current({ raw });
     };
 
     const schedule = () => {
@@ -120,5 +125,5 @@ export default function useHidScanner({
       window.removeEventListener('keydown', onKeyDown);
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [enabled, minLength, idleMs, maxScanMs, terminators, allowDuringInputs, onScan]);
+  }, [enabled, minLength, idleMs, maxScanMs, terminators, allowDuringInputs]);
 }
