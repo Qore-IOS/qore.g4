@@ -309,6 +309,8 @@ export default function UrunKullanimPanel() {
   const [manualLotKey, setManualLotKey] = useState('');
   const [manualQuantity, setManualQuantity] = useState(1);
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [mainUnitModels, setMainUnitModels] = useState<Record<string, string>>({});
+  const [visualSearchQuery, setVisualSearchQuery] = useState('');
 
   // Trash bin modal states
   const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
@@ -335,6 +337,25 @@ export default function UrunKullanimPanel() {
     return () => {
       window.removeEventListener('openDeviceFaultModal', handleOpenFaultModal as EventListener);
     };
+  }, []);
+
+  useEffect(() => {
+    const fetchMainUnitModels = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'def_mainUnits'));
+        const modelMap: Record<string, string> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() as any;
+          if (data?.name && data?.modelSvg) {
+            modelMap[String(data.name).trim().toLocaleLowerCase('tr')] = data.modelSvg;
+          }
+        });
+        setMainUnitModels(modelMap);
+      } catch (error) {
+        urunKullanimLogger.warn('Ana birim 3D modelleri yüklenemedi', { error: (error as any)?.message });
+      }
+    };
+    fetchMainUnitModels();
   }, []);
 
 
@@ -1079,6 +1100,51 @@ export default function UrunKullanimPanel() {
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
   }, [labStock, manualProductCode]);
 
+  const visualDeductionItems = useMemo(() => {
+    if (!selectedLab?.visualDeductionEnabled) return [];
+    const grouped = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; count: number; anaBirim: string; modelSvg: string | null }>();
+
+    labStock.forEach((item) => {
+      const product = products.find((p) => p.stokKodu === item.stokKodu);
+      const anaBirim = String(product?.anaBirim || 'Adet');
+      const lotNumarasi = item.lotNumarasi || 'Lotsuz';
+      const key = `${item.stokKodu}__${lotNumarasi}`;
+      const unitKey = anaBirim.trim().toLocaleLowerCase('tr');
+      const modelSvg = mainUnitModels[unitKey] || null;
+
+      const existing = grouped.get(key) || {
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        lotNumarasi,
+        count: 0,
+        anaBirim,
+        modelSvg,
+      };
+      existing.count += 1;
+      grouped.set(key, existing);
+    });
+
+    const allItems = Array.from(grouped.values()).sort((a, b) => b.count - a.count || (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr'));
+    const q = visualSearchQuery.trim().toLocaleLowerCase('tr');
+    if (!q) return allItems;
+    return allItems.filter((item) =>
+      `${item.stokAdi} ${item.stokKodu} ${item.lotNumarasi}`.toLocaleLowerCase('tr').includes(q)
+    );
+  }, [labStock, mainUnitModels, products, selectedLab?.visualDeductionEnabled, visualSearchQuery]);
+
+  const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string) => {
+    const item = labStock.find((stockItem) => stockItem.stokKodu === stokKodu && (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi);
+    if (!item) {
+      toast({ title: 'Stok Bulunamadı', description: 'Bu lot için düşülecek stok kalmamış.', variant: 'destructive' });
+      return;
+    }
+    try {
+      await recordConsumption(item);
+    } catch {
+      // recordConsumption kendi toast/log yönetimini yapıyor
+    }
+  }, [labStock, recordConsumption, toast]);
+
   const handleTrashBinSubmit = useCallback(async () => {
     if (!selectedTrashDevice || trashItems.length === 0 || !selectedLab) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen cihaz seçin ve en az bir ürün ekleyin.', variant: 'destructive' });
@@ -1285,8 +1351,57 @@ export default function UrunKullanimPanel() {
 
         {/* Content area - Right 45% aligned */}
         <div className="flex-1 flex">
-          {/* Left spacer - 55% for background object visibility */}
-          <div className="hidden lg:block lg:w-[55%]" />
+          {/* Left spacer/visual deduction panel */}
+          <div className="hidden lg:block lg:w-[55%] p-4">
+            {selectedLab?.visualDeductionEnabled && (
+              <div className="h-full frosted-glass-card p-4 overflow-hidden">
+                <div className="frosted-header mb-3">
+                  <span className="font-semibold text-base">Görsel Düşüm Kartları</span>
+                </div>
+                <div className="mb-3">
+                  <Input
+                    value={visualSearchQuery}
+                    onChange={(e) => setVisualSearchQuery(e.target.value)}
+                    placeholder="Ürün ara (ad, kod, lot)..."
+                    className="bg-white/20 border-white/20 placeholder:text-foreground/60"
+                  />
+                </div>
+                <ScrollArea className="h-[calc(100vh-170px)] pr-2">
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    {visualDeductionItems.map((item) => (
+                      <button
+                        key={`${item.stokKodu}-${item.lotNumarasi}`}
+                        type="button"
+                        onClick={() => handleVisualDeduction(item.stokKodu, item.lotNumarasi)}
+                        className="rounded-xl border border-white/20 bg-white/10 hover:bg-white/15 transition-all p-4 text-left"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="h-24 w-24 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
+                            {item.modelSvg ? (
+                              <div
+                                className="h-20 w-20 [&>svg]:h-full [&>svg]:w-full"
+                                dangerouslySetInnerHTML={{ __html: item.modelSvg }}
+                              />
+                            ) : (
+                              <PackageMinus className="h-10 w-10 opacity-60" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-2xl font-bold leading-tight truncate">{item.stokAdi}</p>
+                            <p className="text-lg font-semibold opacity-90">{item.lotNumarasi} lotu</p>
+                            <p className="text-3xl font-extrabold mt-2">{item.count} {item.anaBirim}</p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                    {visualDeductionItems.length === 0 && (
+                      <p className="text-sm text-foreground/70">Seçili laboratuvarda görsel düşüm için stok bulunmuyor.</p>
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+          </div>
 
           {/* Right content area - 45% with cards */}
           <div className="w-full lg:w-[45%] p-4 flex flex-col gap-3">
