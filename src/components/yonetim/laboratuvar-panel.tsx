@@ -94,7 +94,7 @@ export default function LaboratuvarPanel() {
         })();
 
     } else {
-        setCurrentHospital({ consumptionTrackingEnabled: true, isConsumablesHospital: false, manualDeductionEnabled: false, fefoEnabled: true, kod: '' }); // Default FEFO to ON for new labs
+        setCurrentHospital({ consumptionTrackingEnabled: true, isConsumablesHospital: false, manualDeductionEnabled: false, visualDeductionEnabled: false, fefoEnabled: true, kod: '' }); // Default FEFO to ON for new labs
         setIsEditingHospital(false);
         setIsModalOpen(true);
         setHospitalSubPoints([]);
@@ -130,6 +130,7 @@ export default function LaboratuvarPanel() {
         consumptionTrackingEnabled: currentHospital.consumptionTrackingEnabled ?? true,
         isConsumablesHospital: currentHospital.isConsumablesHospital ?? false,
         manualDeductionEnabled: currentHospital.manualDeductionEnabled ?? false,
+        visualDeductionEnabled: (currentHospital.manualDeductionEnabled ?? false) ? (currentHospital.visualDeductionEnabled ?? false) : false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
         sorumluEmail: ((currentHospital as any).sorumluEmail || '').trim(),
@@ -350,12 +351,26 @@ export default function LaboratuvarPanel() {
                     <Switch
                         id="manual-deduction-switch"
                         checked={currentHospital.manualDeductionEnabled ?? false}
-                        onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, manualDeductionEnabled: checked })}
+                        onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, manualDeductionEnabled: checked, visualDeductionEnabled: checked ? (currentHospital.visualDeductionEnabled ?? false) : false })}
                     />
                     <Label htmlFor="manual-deduction-switch">
                         Manuel Düşüme İzin Ver
                         <p className="text-xs text-muted-foreground">
                             Aktifse, Ürün Kullanım panelinde manuel düşüm butonu görünür.
+                        </p>
+                    </Label>
+                </div>
+                <div className="flex items-center space-x-2 rounded-md border p-3">
+                    <Switch
+                        id="visual-deduction-switch"
+                        checked={currentHospital.visualDeductionEnabled ?? false}
+                        disabled={!(currentHospital.manualDeductionEnabled ?? false)}
+                        onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, visualDeductionEnabled: checked })}
+                    />
+                    <Label htmlFor="visual-deduction-switch">
+                        Görsel Düşüm
+                        <p className="text-xs text-muted-foreground">
+                            Manuel düşüm aktifken, ürün kullanım ekranında ana birim 3D modelleriyle büyük kartlar gösterilir.
                         </p>
                     </Label>
                 </div>

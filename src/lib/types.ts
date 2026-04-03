@@ -64,6 +64,7 @@ export interface Hospital {
   consumptionTrackingEnabled?: boolean; // NEW
   isConsumablesHospital?: boolean; // NEW: For "Hastane Sarf"
   manualDeductionEnabled?: boolean; // NEW: For "Manuel Düşüm"
+  visualDeductionEnabled?: boolean; // NEW: For 3D görsel düşüm
   fefoEnabled?: boolean;
   customProductOrder?: string[]; // Özel ürün sıralama - sipariş toplama ekranında kullanılır
   [k: string]: any;
