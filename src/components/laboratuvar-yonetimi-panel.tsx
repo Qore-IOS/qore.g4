@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
@@ -13,11 +13,15 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
-import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX } from 'lucide-react';
-import { useMinMaxRules, useLabStock, useLabPools } from '@/hooks/useFirebaseQueries';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { db } from '@/lib/firebase';
+import { collection, doc, writeBatch, Timestamp } from 'firebase/firestore';
+import type { DepoStokItem, Laboratory, MinMaxRule, ProductCode } from '@/lib/types';
+import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, Upload, FileSpreadsheet, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useMinMaxRules, useLabStock, useLabPools, useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/hooks/use-toast';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -43,6 +47,30 @@ function getRowStripeColor(miadSeverity: MiadSeverity): string {
   if (miadSeverity === 'notice') return 'bg-yellow-400';
   return 'bg-transparent';
 }
+
+function normalizeKey(key: string): string {
+  return key
+    .replace(/\s+/g, '')
+    .replace(/İ/g, 'i').replace(/I/g, 'i')
+    .replace(/Ş/g, 's').replace(/ş/g, 's')
+    .replace(/Ç/g, 'c').replace(/ç/g, 'c')
+    .replace(/Ğ/g, 'g').replace(/ğ/g, 'g')
+    .replace(/Ü/g, 'u').replace(/ü/g, 'u')
+    .replace(/Ö/g, 'o').replace(/ö/g, 'o')
+    .replace(/ı/g, 'i')
+    .toLowerCase();
+}
+
+type ParsedExcelRow = {
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  miad: string;
+  seriNumarasi: string;
+  adet: number;
+  valid: boolean;
+  error?: string;
+};
 
 const SortableHeader: React.FC<{
   label: string;
@@ -76,6 +104,7 @@ type GroupedStockItem = {
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
   const { currentUserProfile } = useAuth();
+  const { toast } = useToast();
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<keyof GroupedStockItem>('stokAdi');
@@ -84,6 +113,14 @@ export default function LaboratuvarYonetimiPanel() {
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [showOutOfStock, setShowOutOfStock] = useState(false);
 
+  // Excel import states
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [parsedRows, setParsedRows] = useState<ParsedExcelRow[]>([]);
+  const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const {
     hospitals: allLaboratories,
     productCodes: products,
@@ -91,6 +128,7 @@ export default function LaboratuvarYonetimiPanel() {
   } = useLightDashboardData();
 
   const { data: labPools = [], isLoading: labPoolsLoading } = useLabPools();
+  const { invalidateDepoStok } = useInvalidateQueries();
 
   // Filter laboratories by user's assignedLaboratories
   const laboratories = useMemo(() => {
@@ -245,6 +283,165 @@ export default function LaboratuvarYonetimiPanel() {
 
   const stockIsLoading = isLoading || labPoolsLoading || labStockLoading;
 
+  // --- Excel Import Logic ---
+
+  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsParsingExcel(true);
+    setParsedRows([]);
+
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { raw: false, dateNF: 'dd.mm.yyyy' });
+
+      // Build product lookup
+      const productMap = new Map<string, ProductCode>();
+      products.forEach(p => {
+        if (p.stokKodu) productMap.set(p.stokKodu.trim().toUpperCase(), p);
+      });
+
+      const rows: ParsedExcelRow[] = [];
+
+      for (const rawRow of jsonData) {
+        // Normalize keys for Turkish character handling
+        const row: Record<string, any> = {};
+        for (const key of Object.keys(rawRow)) {
+          row[normalizeKey(key)] = rawRow[key];
+        }
+
+        const stokKodu = String(row['stokkodu'] || '').trim();
+        if (!stokKodu) continue;
+
+        const product = productMap.get(stokKodu.toUpperCase());
+        const stokAdi = String(row['stokadi'] || row['stokadı'] || product?.stokAdi || stokKodu).trim();
+        const lotNumarasi = String(row['lotnumarasi'] || row['lotno'] || row['lot'] || '').trim();
+        const miadRaw = String(row['miad'] || row['sonkullanmatarihi'] || row['skt'] || '').trim();
+        const seriNumarasi = String(row['serinumarasi'] || row['serino'] || row['seri'] || '').trim();
+        const adetRaw = row['adet'] || row['miktar'] || row['quantity'] || '1';
+        const adet = Math.max(1, Math.floor(Number(adetRaw) || 1));
+
+        // Validate stokKodu exists in productCodes
+        let valid = true;
+        let error: string | undefined;
+        if (!product) {
+          valid = false;
+          error = `"${stokKodu}" stok kodu tanımlı değil`;
+        }
+
+        // If serial number provided, quantity must be 1
+        if (seriNumarasi && adet > 1) {
+          valid = false;
+          error = 'Seri numarası girildiğinde adet 1 olmalıdır';
+        }
+
+        rows.push({
+          stokKodu: product?.stokKodu || stokKodu,
+          stokAdi: product?.stokAdi || stokAdi,
+          lotNumarasi,
+          miad: miadRaw,
+          seriNumarasi,
+          adet: seriNumarasi ? 1 : adet,
+          valid,
+          error,
+        });
+      }
+
+      setParsedRows(rows);
+      setIsImportModalOpen(true);
+    } catch (error) {
+      toast({ title: 'Excel Okuma Hatası', description: 'Dosya işlenirken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsParsingExcel(false);
+      if (event.target) event.target.value = '';
+    }
+  }, [products, toast]);
+
+  const validRows = useMemo(() => parsedRows.filter(r => r.valid), [parsedRows]);
+  const invalidRows = useMemo(() => parsedRows.filter(r => !r.valid), [parsedRows]);
+
+  const handleImportConfirm = useCallback(async () => {
+    if (validRows.length === 0 || !selectedLabId) return;
+
+    setIsImporting(true);
+    setImportProgress('Stok ekleniyor...');
+
+    try {
+      const BATCH_SIZE = 450;
+      let written = 0;
+      const totalDocs = validRows.reduce((sum, r) => sum + r.adet, 0);
+
+      // Flatten rows: for each row, create `adet` number of depoStok documents
+      const docsToWrite: Array<{
+        stokKodu: string;
+        stokAdi: string;
+        lotNumarasi: string;
+        miad: string;
+        seriNumarasi: string;
+      }> = [];
+
+      for (const row of validRows) {
+        for (let i = 0; i < row.adet; i++) {
+          docsToWrite.push({
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            lotNumarasi: row.lotNumarasi,
+            miad: row.miad,
+            seriNumarasi: row.seriNumarasi,
+          });
+        }
+      }
+
+      for (let i = 0; i < docsToWrite.length; i += BATCH_SIZE) {
+        const chunk = docsToWrite.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        for (const item of chunk) {
+          const docRef = doc(collection(db, 'depoStok'));
+          batch.set(docRef, {
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            lotNumarasi: item.lotNumarasi || null,
+            miad: item.miad || null,
+            seriNumarasi: item.seriNumarasi || null,
+            isShipped: true,
+            hedefKurumId: selectedLabId,
+            hedefKurum: selectedLabName,
+            eklenmeTarihi: Timestamp.now(),
+            sevkTarihi: Timestamp.now(),
+            kaynak: 'excel_import',
+          });
+        }
+
+        await batch.commit();
+        written += chunk.length;
+        setImportProgress(`Stok ekleniyor... (${written}/${totalDocs})`);
+      }
+
+      // Invalidate cache and touch metadata
+      await touchStockMetadata();
+      invalidateDepoStok();
+
+      toast({
+        title: 'Stok Ekleme Başarılı',
+        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi.`,
+      });
+
+      setIsImportModalOpen(false);
+      setParsedRows([]);
+    } catch (error) {
+      toast({ title: 'Stok Ekleme Hatası', description: 'Kayıt sırasında bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsImporting(false);
+      setImportProgress('');
+    }
+  }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -284,6 +481,22 @@ export default function LaboratuvarYonetimiPanel() {
                         >
                         <History className="mr-2 h-5 w-5" /> Sayım Geçmişi
                     </Button>
+                    <Button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={!selectedLabId || isParsingExcel}
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                        >
+                        {isParsingExcel ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Upload className="mr-2 h-5 w-5" />}
+                        Excel ile Stok Ekle
+                    </Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
                 </div>
             )}
             <div className="flex-grow">
@@ -441,6 +654,95 @@ export default function LaboratuvarYonetimiPanel() {
           )}
         </CardContent>
       </Card>
+
+      {/* Excel Import Preview Modal */}
+      <Dialog open={isImportModalOpen} onOpenChange={(open) => { if (!isImporting) setIsImportModalOpen(open); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-primary" />
+              Excel ile Stok Ekleme - Önizleme
+            </DialogTitle>
+            <DialogDescription>
+              {selectedLabName} laboratuvarına eklenecek stok verilerini kontrol edin.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                <span className="font-medium">{validRows.length} geçerli satır</span>
+                <span className="text-muted-foreground">({validRows.reduce((s, r) => s + r.adet, 0)} adet ürün)</span>
+              </div>
+              {invalidRows.length > 0 && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="font-medium">{invalidRows.length} hatalı satır (atlanacak)</span>
+                </div>
+              )}
+            </div>
+
+            {/* Expected format hint */}
+            <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+              Beklenen sütunlar: <strong>Stok Kodu</strong> (zorunlu), Stok Adı, Lot Numarası, Miad, Seri Numarası, Adet
+            </div>
+
+            {/* Preview table */}
+            <ScrollArea className="h-[350px] border rounded-md">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
+                  <TableRow>
+                    <TableHead className="w-8">#</TableHead>
+                    <TableHead>Stok Kodu</TableHead>
+                    <TableHead>Stok Adı</TableHead>
+                    <TableHead>Lot</TableHead>
+                    <TableHead>Miad</TableHead>
+                    <TableHead>Seri No</TableHead>
+                    <TableHead className="text-right">Adet</TableHead>
+                    <TableHead>Durum</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {parsedRows.map((row, idx) => (
+                    <TableRow key={idx} className={cn(!row.valid && 'bg-destructive/5')}>
+                      <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
+                      <TableCell className="text-sm">{row.stokAdi}</TableCell>
+                      <TableCell className="text-xs">{row.lotNumarasi || '-'}</TableCell>
+                      <TableCell className="text-xs">{row.miad || '-'}</TableCell>
+                      <TableCell className="text-xs">{row.seriNumarasi || '-'}</TableCell>
+                      <TableCell className="text-right font-semibold">{row.adet}</TableCell>
+                      <TableCell>
+                        {row.valid ? (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <span className="text-xs text-destructive">{row.error}</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </div>
+
+          <DialogFooter className="gap-2">
+            {importProgress && <span className="text-sm text-muted-foreground mr-auto">{importProgress}</span>}
+            <Button variant="outline" onClick={() => setIsImportModalOpen(false)} disabled={isImporting}>
+              İptal
+            </Button>
+            <Button onClick={handleImportConfirm} disabled={isImporting || validRows.length === 0}>
+              {isImporting ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Ekleniyor...</>
+              ) : (
+                <><Upload className="mr-2 h-4 w-4" /> {validRows.reduce((s, r) => s + r.adet, 0)} Adet Stok Ekle</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
