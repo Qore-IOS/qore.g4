@@ -1102,7 +1102,15 @@ export default function UrunKullanimPanel() {
 
   const visualDeductionItems = useMemo(() => {
     if (!selectedLab?.visualDeductionEnabled) return [];
-    const grouped = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; count: number; anaBirim: string; modelSvg: string | null }>();
+    const grouped = new Map<string, {
+      stokKodu: string;
+      stokAdi: string;
+      lotNumarasi: string;
+      count: number;
+      anaBirim: string;
+      modelSvg: string | null;
+      deviceGroupImageUrl: string | null;
+    }>();
 
     labStock.forEach((item) => {
       const product = products.find((p) => p.stokKodu === item.stokKodu);
@@ -1111,6 +1119,9 @@ export default function UrunKullanimPanel() {
       const key = `${item.stokKodu}__${lotNumarasi}`;
       const unitKey = anaBirim.trim().toLocaleLowerCase('tr');
       const modelSvg = mainUnitModels[unitKey] || null;
+      const deviceGroupImageUrl = product?.cihazGrubu
+        ? deviceGroups.find((dg) => dg.name === product.cihazGrubu)?.imageUrl || null
+        : null;
 
       const existing = grouped.get(key) || {
         stokKodu: item.stokKodu,
@@ -1119,6 +1130,7 @@ export default function UrunKullanimPanel() {
         count: 0,
         anaBirim,
         modelSvg,
+        deviceGroupImageUrl,
       };
       existing.count += 1;
       grouped.set(key, existing);
@@ -1130,7 +1142,7 @@ export default function UrunKullanimPanel() {
     return allItems.filter((item) =>
       `${item.stokAdi} ${item.stokKodu} ${item.lotNumarasi}`.toLocaleLowerCase('tr').includes(q)
     );
-  }, [labStock, mainUnitModels, products, selectedLab?.visualDeductionEnabled, visualSearchQuery]);
+  }, [deviceGroups, labStock, mainUnitModels, products, selectedLab?.visualDeductionEnabled, visualSearchQuery]);
 
   const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string) => {
     const item = labStock.find((stockItem) => stockItem.stokKodu === stokKodu && (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi);
@@ -1377,7 +1389,15 @@ export default function UrunKullanimPanel() {
                       >
                         <div className="flex items-center gap-4">
                           <div className="h-24 w-24 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
-                            {item.modelSvg ? (
+                            {item.deviceGroupImageUrl ? (
+                              <Image
+                                src={resolveImageSrc(item.deviceGroupImageUrl)}
+                                alt={`${item.stokAdi} cihaz grubu`}
+                                width={88}
+                                height={88}
+                                className="h-20 w-20 object-contain"
+                              />
+                            ) : item.modelSvg ? (
                               <div
                                 className="h-20 w-20 [&>svg]:h-full [&>svg]:w-full"
                                 dangerouslySetInnerHTML={{ __html: item.modelSvg }}
