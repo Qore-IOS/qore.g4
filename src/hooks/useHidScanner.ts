@@ -11,6 +11,33 @@ type UseHidScannerOptions = {
   onScan: (payload: { raw: string }) => void;
 };
 
+
+
+function toPrintableChar(e: KeyboardEvent): string | null {
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+
+  if (e.key && e.key.length === 1) return e.key;
+
+  switch (e.code) {
+    case 'Numpad0': return '0';
+    case 'Numpad1': return '1';
+    case 'Numpad2': return '2';
+    case 'Numpad3': return '3';
+    case 'Numpad4': return '4';
+    case 'Numpad5': return '5';
+    case 'Numpad6': return '6';
+    case 'Numpad7': return '7';
+    case 'Numpad8': return '8';
+    case 'Numpad9': return '9';
+    case 'NumpadDecimal': return '.';
+    case 'NumpadDivide': return '/';
+    case 'NumpadMultiply': return '*';
+    case 'NumpadSubtract': return '-';
+    case 'NumpadAdd': return '+';
+    default: return null;
+  }
+}
+
 function isEditable(el: Element | null): boolean {
   if (!el) return false;
   const tag = (el as HTMLElement).tagName;
@@ -78,13 +105,12 @@ export default function useHidScanner({
         return;
       }
 
-      if (!e.key) return;
-
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const nextChar = toPrintableChar(e);
+      if (nextChar) {
         if (buf.current.length === 0) {
           startedAt.current = Date.now();
         }
-        buf.current += e.key;
+        buf.current += nextChar;
         schedule();
       }
     };
