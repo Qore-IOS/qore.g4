@@ -13,11 +13,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/types';
+import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX } from 'lucide-react';
-import { useMinMaxRules } from '@/hooks/useFirebaseQueries';
+import { useMinMaxRules, useLabStock, useLabPools } from '@/hooks/useFirebaseQueries';
+import { useLightDashboardData } from './dashboard/useDashboardData';
+import { useAuth } from '@/contexts/auth-context';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -75,17 +75,63 @@ type GroupedStockItem = {
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
-  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
+  const { currentUserProfile } = useAuth();
   const [selectedLabId, setSelectedLabId] = useState<string>('');
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<keyof GroupedStockItem>('stokAdi');
   const [sortAsc, setSortAsc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
-  const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [showOutOfStock, setShowOutOfStock] = useState(false);
+
+  const {
+    hospitals: allLaboratories,
+    productCodes: products,
+    isLoading,
+  } = useLightDashboardData();
+
+  const { data: labPools = [], isLoading: labPoolsLoading } = useLabPools();
+
+  // Filter laboratories by user's assignedLaboratories
+  const laboratories = useMemo(() => {
+    const allLabs = allLaboratories.filter(l => !l.isConsumablesHospital);
+    if (currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin_developer') return allLabs;
+    if (currentUserProfile?.assignedLaboratories && currentUserProfile.assignedLaboratories.length > 0) {
+      return allLabs.filter(h => currentUserProfile?.assignedLaboratories?.includes(h.id));
+    }
+    return allLabs;
+  }, [currentUserProfile, allLaboratories]);
+
+  // Auto-select lab if user has only one assigned
+  useEffect(() => {
+    if (selectedLabId) return;
+    if (laboratories.length === 1) {
+      setSelectedLabId(laboratories[0].id);
+    }
+  }, [laboratories, selectedLabId]);
+
+  // Product names lookup
+  const productNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    products.forEach(p => {
+      if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
+    });
+    return names;
+  }, [products]);
+
+  // Compute pool member IDs and names for lab stock query
+  const { poolMemberIds, poolMemberNames } = useMemo(() => {
+    const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
+    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    const names = ids.map(id => allLaboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
+    return { poolMemberIds: ids, poolMemberNames: names };
+  }, [labPools, selectedLabId, allLaboratories]);
+
+  // Use useLabStock hook instead of fetching ALL shipped stock
+  const { data: labStocks = [], isLoading: labStockLoading } = useLabStock(poolMemberIds, poolMemberNames, {
+    enabled: !labPoolsLoading && poolMemberIds.length > 0
+  });
+
   const { data: minMaxRulesData } = useMinMaxRules(selectedLabId || null);
 
   const minMaxMap = useMemo(() => {
@@ -97,44 +143,6 @@ export default function LaboratuvarYonetimiPanel() {
     }
     return map;
   }, [minMaxRulesData]);
-
-  useEffect(() => {
-    async function fetchData() {
-      setIsLoading(true);
-      const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
-        getDocs(collection(db, 'productCodes'))
-      ]);
-      setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
-      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
-      
-      const names: Record<string, string> = {};
-      productsSnap.docs.forEach(d => {
-        const p = d.data() as ProductCode;
-        if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
-      });
-      setProductNames(names);
-
-      setIsLoading(false);
-    }
-    fetchData();
-  }, []);
-
-  const labStocks = useMemo(() => {
-    if (!selectedLabId) return [];
-    const selectedLab = laboratories.find(l => l.id === selectedLabId);
-    const selectedLabName = selectedLab?.name || '';
-
-    // Filter by hedefKurumId OR by hedefKurum (name) for legacy records
-    // that may have hedefKurum set but hedefKurumId is null/undefined
-    // CRITICAL: Also check isShipped to ensure only transferred items are shown
-    return depoStok.filter(item =>
-      item.isShipped === true &&
-      (item.hedefKurumId === selectedLabId ||
-      (!item.hedefKurumId && item.hedefKurum === selectedLabName))
-    );
-  }, [depoStok, selectedLabId, laboratories]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
@@ -230,10 +238,12 @@ export default function LaboratuvarYonetimiPanel() {
     setCurrentPage(1);
   };
   const goToDetail = (id: string) => router.push(`/laboratuvar-yonetimi/${id}`);
-  
+
   const selectedLabName = useMemo(() => {
-    return laboratories.find(l => l.id === selectedLabId)?.name || '';
-  }, [laboratories, selectedLabId]);
+    return allLaboratories.find(l => l.id === selectedLabId)?.name || '';
+  }, [allLaboratories, selectedLabId]);
+
+  const stockIsLoading = isLoading || labPoolsLoading || labStockLoading;
 
   return (
     <div className="space-y-6">
@@ -304,7 +314,7 @@ export default function LaboratuvarYonetimiPanel() {
                 </Button>
               </CardHeader>
               <CardContent>
-                {isLoading ? (
+                {stockIsLoading ? (
                   <div className="flex justify-center items-center h-64">
                     <Loader2 className="h-8 w-8 animate-spin" />
                   </div>

@@ -311,6 +311,7 @@ export default function UrunKullanimPanel() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [mainUnitModels, setMainUnitModels] = useState<Record<string, string>>({});
   const [visualSearchQuery, setVisualSearchQuery] = useState('');
+  const [selectedLabGroup, setSelectedLabGroup] = useState<string | null>(null);
 
   // Trash bin modal states
   const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
@@ -1100,7 +1101,7 @@ export default function UrunKullanimPanel() {
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
   }, [labStock, manualProductCode]);
 
-  const visualDeductionItems = useMemo(() => {
+  const listDeductionItems = useMemo(() => {
     if (!selectedLab?.visualDeductionEnabled) return [];
     const grouped = new Map<string, {
       stokKodu: string;
@@ -1108,8 +1109,7 @@ export default function UrunKullanimPanel() {
       lotNumarasi: string;
       count: number;
       anaBirim: string;
-      modelSvg: string | null;
-      deviceGroupImageUrl: string | null;
+      laboratuvarGrubu: string;
     }>();
 
     labStock.forEach((item) => {
@@ -1117,32 +1117,45 @@ export default function UrunKullanimPanel() {
       const anaBirim = String(product?.anaBirim || 'Adet');
       const lotNumarasi = item.lotNumarasi || 'Lotsuz';
       const key = `${item.stokKodu}__${lotNumarasi}`;
-      const unitKey = anaBirim.trim().toLocaleLowerCase('tr');
-      const modelSvg = mainUnitModels[unitKey] || null;
-      const deviceGroupImageUrl = product?.cihazGrubu
-        ? deviceGroups.find((dg) => dg.name === product.cihazGrubu)?.imageUrl || null
-        : null;
+      const labGrubu = product?.laboratuvarGrubu || 'Diğer';
 
       const existing = grouped.get(key) || {
         stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
+        stokAdi: product?.stokAdi || item.stokAdi || item.stokKodu,
         lotNumarasi,
         count: 0,
         anaBirim,
-        modelSvg,
-        deviceGroupImageUrl,
+        laboratuvarGrubu: labGrubu,
       };
       existing.count += 1;
       grouped.set(key, existing);
     });
 
-    const allItems = Array.from(grouped.values()).sort((a, b) => b.count - a.count || (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr'));
+    return Array.from(grouped.values()).sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
+  }, [labStock, products, selectedLab?.visualDeductionEnabled]);
+
+  const labGroupCategories = useMemo(() => {
+    const cats = new Set(listDeductionItems.map(i => i.laboratuvarGrubu));
+    return Array.from(cats).sort((a, b) => {
+      if (a === 'Diğer') return 1;
+      if (b === 'Diğer') return -1;
+      return a.localeCompare(b, 'tr');
+    });
+  }, [listDeductionItems]);
+
+  const filteredListDeductionItems = useMemo(() => {
+    let items = listDeductionItems;
+    if (selectedLabGroup) {
+      items = items.filter(i => i.laboratuvarGrubu === selectedLabGroup);
+    }
     const q = visualSearchQuery.trim().toLocaleLowerCase('tr');
-    if (!q) return allItems;
-    return allItems.filter((item) =>
-      `${item.stokAdi} ${item.stokKodu} ${item.lotNumarasi}`.toLocaleLowerCase('tr').includes(q)
-    );
-  }, [deviceGroups, labStock, mainUnitModels, products, selectedLab?.visualDeductionEnabled, visualSearchQuery]);
+    if (q) {
+      items = items.filter((item) =>
+        `${item.stokAdi} ${item.stokKodu} ${item.lotNumarasi}`.toLocaleLowerCase('tr').includes(q)
+      );
+    }
+    return items;
+  }, [listDeductionItems, selectedLabGroup, visualSearchQuery]);
 
   const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string) => {
     const item = labStock.find((stockItem) => stockItem.stokKodu === stokKodu && (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi);
@@ -1363,13 +1376,48 @@ export default function UrunKullanimPanel() {
 
         {/* Content area - Right 45% aligned */}
         <div className="flex-1 flex">
-          {/* Left spacer/visual deduction panel */}
+          {/* Left spacer/list deduction panel */}
           <div className="hidden lg:block lg:w-[55%] p-4">
             {selectedLab?.visualDeductionEnabled && (
-              <div className="h-full frosted-glass-card p-4 overflow-hidden">
+              <div className="h-full frosted-glass-card p-4 overflow-hidden flex flex-col">
                 <div className="frosted-header mb-3">
-                  <span className="font-semibold text-base">Görsel Düşüm Kartları</span>
+                  <span className="font-semibold text-base">Listeli Düşüm</span>
                 </div>
+                {/* Category filter buttons */}
+                {labGroupCategories.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLabGroup(null)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg text-sm font-semibold transition-all border",
+                        !selectedLabGroup
+                          ? "bg-primary text-primary-foreground border-primary shadow-md"
+                          : "bg-white/10 border-white/20 hover:bg-white/20 text-foreground/80"
+                      )}
+                    >
+                      Tümü ({listDeductionItems.length})
+                    </button>
+                    {labGroupCategories.map((cat) => {
+                      const catCount = listDeductionItems.filter(i => i.laboratuvarGrubu === cat).length;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setSelectedLabGroup(prev => prev === cat ? null : cat)}
+                          className={cn(
+                            "px-4 py-2 rounded-lg text-sm font-semibold transition-all border",
+                            selectedLabGroup === cat
+                              ? "bg-primary text-primary-foreground border-primary shadow-md"
+                              : "bg-white/10 border-white/20 hover:bg-white/20 text-foreground/80"
+                          )}
+                        >
+                          {cat} ({catCount})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="mb-3">
                   <Input
                     value={visualSearchQuery}
@@ -1378,44 +1426,36 @@ export default function UrunKullanimPanel() {
                     className="bg-white/20 border-white/20 placeholder:text-foreground/60"
                   />
                 </div>
-                <ScrollArea className="h-[calc(100vh-170px)] pr-2">
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                    {visualDeductionItems.map((item) => (
-                      <button
+                <ScrollArea className="flex-1 min-h-0 pr-2">
+                  <div className="space-y-1">
+                    {filteredListDeductionItems.map((item) => (
+                      <div
                         key={`${item.stokKodu}-${item.lotNumarasi}`}
-                        type="button"
-                        onClick={() => handleVisualDeduction(item.stokKodu, item.lotNumarasi)}
-                        className="rounded-xl border border-white/20 bg-white/10 hover:bg-white/15 transition-all p-4 text-left"
+                        className="flex items-center gap-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition-all px-3 py-2"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className="h-24 w-24 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
-                            {item.deviceGroupImageUrl ? (
-                              <Image
-                                src={resolveImageSrc(item.deviceGroupImageUrl)}
-                                alt={`${item.stokAdi} cihaz grubu`}
-                                width={88}
-                                height={88}
-                                className="h-20 w-20 object-contain"
-                              />
-                            ) : item.modelSvg ? (
-                              <div
-                                className="h-20 w-20 [&>svg]:h-full [&>svg]:w-full"
-                                dangerouslySetInnerHTML={{ __html: item.modelSvg }}
-                              />
-                            ) : (
-                              <PackageMinus className="h-10 w-10 opacity-60" />
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-2xl font-bold leading-tight truncate">{item.stokAdi}</p>
-                            <p className="text-lg font-semibold opacity-90">{item.lotNumarasi} lotu</p>
-                            <p className="text-3xl font-extrabold mt-2">{item.count} {item.anaBirim}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{item.stokAdi}</p>
+                          <div className="flex items-center gap-3 text-xs text-foreground/60 mt-0.5">
+                            <span>{item.stokKodu}</span>
+                            <span>Lot: {item.lotNumarasi}</span>
+                            <span className="font-bold text-foreground/90">{item.count} {item.anaBirim}</span>
                           </div>
                         </div>
-                      </button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0 h-8 px-3 text-xs font-semibold"
+                          onClick={() => handleVisualDeduction(item.stokKodu, item.lotNumarasi)}
+                        >
+                          <PackageMinus className="h-3.5 w-3.5 mr-1.5" />
+                          Stoktan Düş
+                        </Button>
+                      </div>
                     ))}
-                    {visualDeductionItems.length === 0 && (
-                      <p className="text-sm text-foreground/70">Seçili laboratuvarda görsel düşüm için stok bulunmuyor.</p>
+                    {filteredListDeductionItems.length === 0 && (
+                      <p className="text-sm text-foreground/70 text-center py-4">
+                        {visualSearchQuery || selectedLabGroup ? 'Filtreye uygun ürün bulunamadı.' : 'Seçili laboratuvarda stok bulunmuyor.'}
+                      </p>
                     )}
                   </div>
                 </ScrollArea>
