@@ -104,8 +104,8 @@ function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: str
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
-  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const [allLaboratories, setAllLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -135,7 +135,7 @@ export default function LaboratuvarYonetimiPanel() {
         getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
         getDocs(collection(db, 'productCodes'))
       ]);
-      setLaboratories(filterByCompanyScope(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)), currentCompanyId, isSuperAdmin));
+      setAllLaboratories(filterByCompanyScope(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)), currentCompanyId, isSuperAdmin));
       setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       
       const names: Record<string, string> = {};
@@ -154,6 +154,23 @@ export default function LaboratuvarYonetimiPanel() {
     }
     fetchData();
   }, [currentCompanyId, isSuperAdmin]);
+
+  // Filter labs by user's assignedLaboratories - role-independent
+  const laboratories = useMemo(() => {
+    if (isSuperAdmin || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'admin_developer') return allLaboratories;
+    if (currentUserProfile?.assignedLaboratories && currentUserProfile.assignedLaboratories.length > 0) {
+      return allLaboratories.filter(h => currentUserProfile.assignedLaboratories!.includes(h.id));
+    }
+    return allLaboratories;
+  }, [allLaboratories, currentUserProfile, isSuperAdmin]);
+
+  // Auto-select lab if user has only one assigned
+  useEffect(() => {
+    if (selectedLabId || isLoading) return;
+    if (laboratories.length === 1) {
+      setSelectedLabId(laboratories[0].id);
+    }
+  }, [laboratories, selectedLabId, isLoading]);
 
   useEffect(() => {
     if (!selectedLabId) {
