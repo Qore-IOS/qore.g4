@@ -1,11 +1,11 @@
-
 'use client';
 import { useEffect, useRef } from 'react';
 
 type UseHidScannerOptions = {
   enabled?: boolean;
-  minLength?: number;            // e.g. 61 for Roche
+  minLength?: number;            // minimum payload length for idle commit
   idleMs?: number;               // commit after idle
+  maxScanMs?: number;            // force commit after this duration even if under minLength
   terminators?: string[];        // e.g. ['Enter', 'Tab']
   allowDuringInputs?: boolean;   // allow scan even if an input is focused
   onScan: (payload: { raw: string }) => void;
@@ -24,52 +24,66 @@ export default function useHidScanner({
   enabled = true,
   minLength = 10,
   idleMs = 250,
+  maxScanMs = 10000,
   terminators = ['Enter', 'Tab'],
   allowDuringInputs = true,
   onScan,
 }: UseHidScannerOptions) {
   const buf = useRef<string>('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedAt = useRef<number>(0);
 
   useEffect(() => {
     if (!enabled) return;
 
     const reset = () => {
       buf.current = '';
+      startedAt.current = 0;
       if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     };
 
-    const commit = () => {
+    const commit = (reason: 'idle' | 'terminator') => {
       const raw = buf.current.replace(/[\x00-\x1F\x7F]/g, ''); // strip control chars
-      reset();
-      if (!raw) return;
-      
-      if (raw.length > 0) {
-        onScan({ raw });
+      if (!raw) {
+        reset();
+        return;
       }
+
+      if (reason === 'idle' && raw.length < minLength) {
+        const elapsed = startedAt.current ? (Date.now() - startedAt.current) : 0;
+        if (elapsed < maxScanMs) {
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => commit('idle'), idleMs);
+          return;
+        }
+      }
+
+      reset();
+      onScan({ raw });
     };
 
     const schedule = () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(commit, idleMs);
+      timer.current = setTimeout(() => commit('idle'), idleMs);
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (!allowDuringInputs && isEditable(document.activeElement)) return;
 
       if (terminators.includes(e.key)) {
-        if(buf.current.length > 0) {
+        if (buf.current.length > 0) {
           if (e.key === 'Tab') e.preventDefault();
-          commit();
+          commit('terminator');
         }
         return;
       }
-      
-      if (!e.key) {
-        return;
-      }
+
+      if (!e.key) return;
 
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (buf.current.length === 0) {
+          startedAt.current = Date.now();
+        }
         buf.current += e.key;
         schedule();
       }
@@ -80,5 +94,5 @@ export default function useHidScanner({
       window.removeEventListener('keydown', onKeyDown);
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [enabled, idleMs, terminators, allowDuringInputs, onScan]);
+  }, [enabled, minLength, idleMs, maxScanMs, terminators, allowDuringInputs, onScan]);
 }
