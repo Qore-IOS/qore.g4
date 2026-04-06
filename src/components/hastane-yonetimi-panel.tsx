@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
@@ -8,18 +8,45 @@ import {
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
-import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle } from 'lucide-react';
+import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
 import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
+
+function normalizeKey(key: string): string {
+  return key
+    .replace(/\s+/g, '')
+    .replace(/İ/g, 'i').replace(/I/g, 'i')
+    .replace(/Ş/g, 's').replace(/ş/g, 's')
+    .replace(/Ç/g, 'c').replace(/ç/g, 'c')
+    .replace(/Ğ/g, 'g').replace(/ğ/g, 'g')
+    .replace(/Ü/g, 'u').replace(/ü/g, 'u')
+    .replace(/Ö/g, 'o').replace(/ö/g, 'o')
+    .replace(/ı/g, 'i')
+    .toLowerCase();
+}
+
+type ParsedExcelRow = {
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  miad: string;
+  seriNumarasi: string;
+  adet: number;
+  valid: boolean;
+  error?: string;
+};
 
 type GroupedStockItem = {
     groupKey: string;
@@ -76,48 +103,78 @@ function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: str
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
-  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
+  const { isSuperAdmin, currentUserProfile } = useAuth();
   const [selectedLabId, setSelectedLabId] = useState<string>('');
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<keyof GroupedStockItem>('stokAdi');
   const [sortAsc, setSortAsc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
-  const [productNames, setProductNames] = useState<Record<string, string>>({});
-  const [productMeta, setProductMeta] = useState<Record<string, { anaBirim?: string; takipSekli?: string }>>({});
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isDeletingGroup, setIsDeletingGroup] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchData() {
-      setIsLoading(true);
-      const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
-        getDocs(collection(db, 'productCodes'))
-      ]);
-      setLaboratories(filterByCompanyScope(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)), currentCompanyId, isSuperAdmin));
-      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
-      
-      const names: Record<string, string> = {};
-      const meta: Record<string, { anaBirim?: string; takipSekli?: string }> = {};
-      productsSnap.docs.forEach(d => {
-        const p = d.data();
-        if (p.stokKodu) {
-          names[p.stokKodu] = p.stokAdi || p.stokKodu;
-          meta[p.stokKodu] = { anaBirim: p.anaBirim, takipSekli: p.takipSekli };
-        }
-      });
-      setProductNames(names);
-      setProductMeta(meta);
+  // Excel import states
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [parsedRows, setParsedRows] = useState<ParsedExcelRow[]>([]);
+  const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-      setIsLoading(false);
+  // Use TanStack Query hooks for data fetching
+  const { data: allLaboratories = [], isLoading: labsLoading } = useHospitals();
+  const { data: products = [], isLoading: productsLoading } = useProductCodes();
+  const { data: labPools = [], isLoading: labPoolsLoading } = useLabPools();
+  const { invalidateDepoStok } = useInvalidateQueries();
+
+  const isLoading = labsLoading || productsLoading;
+
+  // Derive product lookup maps from products query data
+  const productNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    products.forEach(p => {
+      if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
+    });
+    return names;
+  }, [products]);
+
+  const productMeta = useMemo(() => {
+    const meta: Record<string, { anaBirim?: string; takipSekli?: string }> = {};
+    products.forEach(p => {
+      if (p.stokKodu) meta[p.stokKodu] = { anaBirim: p.anaBirim, takipSekli: p.takipSekli };
+    });
+    return meta;
+  }, [products]);
+
+  // Filter labs by user's assignedLaboratories - role-independent
+  const laboratories = useMemo(() => {
+    if (isSuperAdmin || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'admin_developer') return allLaboratories;
+    if (currentUserProfile?.assignedLaboratories && currentUserProfile.assignedLaboratories.length > 0) {
+      return allLaboratories.filter(h => currentUserProfile.assignedLaboratories!.includes(h.id));
     }
-    fetchData();
-  }, [currentCompanyId, isSuperAdmin]);
+    return allLaboratories;
+  }, [allLaboratories, currentUserProfile, isSuperAdmin]);
+
+  // Auto-select lab if user has only one assigned
+  useEffect(() => {
+    if (selectedLabId || isLoading) return;
+    if (laboratories.length === 1) {
+      setSelectedLabId(laboratories[0].id);
+    }
+  }, [laboratories, selectedLabId, isLoading]);
+
+  // Compute pool member IDs and names for lab stock query
+  const { poolMemberIds, poolMemberNames } = useMemo(() => {
+    const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
+    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    const names = ids.map(id => allLaboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
+    return { poolMemberIds: ids, poolMemberNames: names };
+  }, [labPools, selectedLabId, allLaboratories]);
+
+  // Use targeted lab stock query instead of broad depoStok fetch
+  const { data: labStocks = [] } = useLabStock(poolMemberIds, poolMemberNames, {
+    enabled: !labPoolsLoading && poolMemberIds.length > 0
+  });
 
   useEffect(() => {
     if (!selectedLabId) {
@@ -143,15 +200,6 @@ export default function LaboratuvarYonetimiPanel() {
   const selectedLabName = useMemo(() => {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
   }, [laboratories, selectedLabId]);
-
-  // CRITICAL FIX: Filter by both hedefKurumId and hedefKurum (name) to include legacy records
-  const labStocks = useMemo(() => {
-    const labName = laboratories.find(l => l.id === selectedLabId)?.name || '';
-    return depoStok.filter(item =>
-      item.hedefKurumId === selectedLabId ||
-      (!item.hedefKurumId && item.hedefKurum === labName)
-    );
-  }, [depoStok, selectedLabId, laboratories]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
@@ -298,10 +346,7 @@ export default function LaboratuvarYonetimiPanel() {
         });
       } else if (failCount > 0) {
         // Partial success
-        const deletedIds = new Set(
-          itemsToDelete.filter(item => !failedIds.includes(item.id!)).map(item => item.id)
-        );
-        setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+        await invalidateDepoStok();
         toast({
           title: 'Kısmi Başarı',
           description: `${successCount} kayıt silindi, ${failCount} kayıt silinemedi. Firebase Security Rules kontrol edin.`,
@@ -309,8 +354,7 @@ export default function LaboratuvarYonetimiPanel() {
         });
       } else {
         // All successful
-        const deletedIds = new Set(itemsToDelete.map(item => item.id));
-        setDepoStok(prev => prev.filter(item => !deletedIds.has(item.id)));
+        await invalidateDepoStok();
         toast({
           title: 'Silindi',
           description: `${successCount} kayıt kalıcı olarak silindi.`
@@ -348,6 +392,152 @@ export default function LaboratuvarYonetimiPanel() {
     exportDataToExcel(dataToExport, `${selectedLabName}_Stok_Ozeti`, "Stok Özeti", toast);
   };
 
+  // --- Excel Import Logic ---
+
+  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsParsingExcel(true);
+    setParsedRows([]);
+
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { raw: false, dateNF: 'dd.mm.yyyy' });
+
+      // Build product lookup
+      const productMap = new Map<string, { stokKodu: string; stokAdi: string }>();
+      Object.entries(productNames).forEach(([code, name]) => {
+        productMap.set(code.trim().toUpperCase(), { stokKodu: code, stokAdi: name });
+      });
+
+      const rows: ParsedExcelRow[] = [];
+
+      for (const rawRow of jsonData) {
+        const row: Record<string, any> = {};
+        for (const key of Object.keys(rawRow)) {
+          row[normalizeKey(key)] = rawRow[key];
+        }
+
+        const stokKodu = String(row['stokkodu'] || '').trim();
+        if (!stokKodu) continue;
+
+        const product = productMap.get(stokKodu.toUpperCase());
+        const stokAdi = String(row['stokadi'] || row['stokadı'] || product?.stokAdi || stokKodu).trim();
+        const lotNumarasi = String(row['lotnumarasi'] || row['lotno'] || row['lot'] || '').trim();
+        const miadRaw = String(row['miad'] || row['sonkullanmatarihi'] || row['skt'] || '').trim();
+        const seriNumarasi = String(row['serinumarasi'] || row['serino'] || row['seri'] || '').trim();
+        const adetRaw = row['adet'] || row['miktar'] || row['quantity'] || '1';
+        const adet = Math.max(1, Math.floor(Number(adetRaw) || 1));
+
+        let valid = true;
+        let error: string | undefined;
+        if (!product) {
+          valid = false;
+          error = `"${stokKodu}" stok kodu tanımlı değil`;
+        }
+        if (seriNumarasi && adet > 1) {
+          valid = false;
+          error = 'Seri numarası girildiğinde adet 1 olmalıdır';
+        }
+
+        rows.push({
+          stokKodu: product?.stokKodu || stokKodu,
+          stokAdi: product?.stokAdi || stokAdi,
+          lotNumarasi,
+          miad: miadRaw,
+          seriNumarasi,
+          adet: seriNumarasi ? 1 : adet,
+          valid,
+          error,
+        });
+      }
+
+      setParsedRows(rows);
+      setIsImportModalOpen(true);
+    } catch {
+      toast({ title: 'Excel Okuma Hatası', description: 'Dosya işlenirken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsParsingExcel(false);
+      if (event.target) event.target.value = '';
+    }
+  }, [productNames, toast]);
+
+  const validRows = useMemo(() => parsedRows.filter(r => r.valid), [parsedRows]);
+  const invalidRows = useMemo(() => parsedRows.filter(r => !r.valid), [parsedRows]);
+
+  const handleImportConfirm = useCallback(async () => {
+    if (validRows.length === 0 || !selectedLabId) return;
+
+    setIsImporting(true);
+    setImportProgress('Stok ekleniyor...');
+
+    try {
+      const BATCH_SIZE = 450;
+      let written = 0;
+
+      // Flatten rows: each row produces `adet` documents
+      const docsToWrite: Array<{
+        stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string; seriNumarasi: string;
+      }> = [];
+      for (const row of validRows) {
+        for (let i = 0; i < row.adet; i++) {
+          docsToWrite.push({
+            stokKodu: row.stokKodu, stokAdi: row.stokAdi,
+            lotNumarasi: row.lotNumarasi, miad: row.miad, seriNumarasi: row.seriNumarasi,
+          });
+        }
+      }
+
+      for (let i = 0; i < docsToWrite.length; i += BATCH_SIZE) {
+        const chunk = docsToWrite.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        for (const item of chunk) {
+          const docRef = doc(collection(db, 'depoStok'));
+          batch.set(docRef, {
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            lotNumarasi: item.lotNumarasi || null,
+            miad: item.miad || null,
+            seriNumarasi: item.seriNumarasi || null,
+            isShipped: true,
+            hedefKurumId: selectedLabId,
+            hedefKurum: selectedLabName,
+            eklenmeTarihi: Timestamp.now(),
+            sevkTarihi: Timestamp.now(),
+            kaynak: 'excel_import',
+          });
+        }
+
+        await batch.commit();
+        written += chunk.length;
+        setImportProgress(`Stok ekleniyor... (${written}/${docsToWrite.length})`);
+      }
+
+      await touchStockMetadata();
+
+      // Invalidate cache so useLabStock refetches
+      await invalidateDepoStok();
+
+      toast({
+        title: 'Stok Ekleme Başarılı',
+        description: `${docsToWrite.length} adet ürün laboratuvar stoğuna eklendi.`,
+      });
+
+      setIsImportModalOpen(false);
+      setParsedRows([]);
+    } catch {
+      toast({ title: 'Stok Ekleme Hatası', description: 'Kayıt sırasında bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsImporting(false);
+      setImportProgress('');
+    }
+  }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
 
   return (
     <div className="space-y-6">
@@ -390,6 +580,22 @@ export default function LaboratuvarYonetimiPanel() {
                         >
                         <History className="mr-2 h-5 w-5" /> Sayım Geçmişi
                     </Button>
+                    <Button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={!selectedLabId || isParsingExcel}
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                        >
+                        {isParsingExcel ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Upload className="mr-2 h-5 w-5" />}
+                        Excel ile Stok Ekle
+                    </Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
                 </div>
             )}
             <div className="flex-grow">
@@ -597,6 +803,92 @@ export default function LaboratuvarYonetimiPanel() {
           )}
         </CardContent>
       </Card>
+
+      {/* Excel Import Preview Modal */}
+      <Dialog open={isImportModalOpen} onOpenChange={(open) => { if (!isImporting) setIsImportModalOpen(open); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-primary" />
+              Excel ile Stok Ekleme - Önizleme
+            </DialogTitle>
+            <DialogDescription>
+              {selectedLabName} laboratuvarına eklenecek stok verilerini kontrol edin.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                <span className="font-medium">{validRows.length} geçerli satır</span>
+                <span className="text-muted-foreground">({validRows.reduce((s, r) => s + r.adet, 0)} adet ürün)</span>
+              </div>
+              {invalidRows.length > 0 && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="font-medium">{invalidRows.length} hatalı satır (atlanacak)</span>
+                </div>
+              )}
+            </div>
+
+            <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+              Beklenen sütunlar: <strong>Stok Kodu</strong> (zorunlu), Stok Adı, Lot Numarası, Miad, Seri Numarası, Adet
+            </div>
+
+            <ScrollArea className="h-[350px] border rounded-md">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
+                  <TableRow>
+                    <TableHead className="w-8">#</TableHead>
+                    <TableHead>Stok Kodu</TableHead>
+                    <TableHead>Stok Adı</TableHead>
+                    <TableHead>Lot</TableHead>
+                    <TableHead>Miad</TableHead>
+                    <TableHead>Seri No</TableHead>
+                    <TableHead className="text-right">Adet</TableHead>
+                    <TableHead>Durum</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {parsedRows.map((row, idx) => (
+                    <TableRow key={idx} className={!row.valid ? 'bg-destructive/5' : ''}>
+                      <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
+                      <TableCell className="text-sm">{row.stokAdi}</TableCell>
+                      <TableCell className="text-xs">{row.lotNumarasi || '-'}</TableCell>
+                      <TableCell className="text-xs">{row.miad || '-'}</TableCell>
+                      <TableCell className="text-xs">{row.seriNumarasi || '-'}</TableCell>
+                      <TableCell className="text-right font-semibold">{row.adet}</TableCell>
+                      <TableCell>
+                        {row.valid ? (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <span className="text-xs text-destructive">{row.error}</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </div>
+
+          <DialogFooter className="gap-2">
+            {importProgress && <span className="text-sm text-muted-foreground mr-auto">{importProgress}</span>}
+            <Button variant="outline" onClick={() => setIsImportModalOpen(false)} disabled={isImporting}>
+              İptal
+            </Button>
+            <Button onClick={handleImportConfirm} disabled={isImporting || validRows.length === 0}>
+              {isImporting ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Ekleniyor...</>
+              ) : (
+                <><Upload className="mr-2 h-4 w-4" /> {validRows.reduce((s, r) => s + r.adet, 0)} Adet Stok Ekle</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
