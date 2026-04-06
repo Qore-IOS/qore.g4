@@ -242,6 +242,90 @@ function upsertGroupedRow(
   });
 }
 
+const turkishFold = (value: string) =>
+  (value || '')
+    .toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I')
+    .replace(/Ş/g, 'S')
+    .replace(/Ğ/g, 'G')
+    .replace(/Ü/g, 'U')
+    .replace(/Ö/g, 'O')
+    .replace(/Ç/g, 'C');
+
+const parseDateLike = (raw: string | undefined): string => {
+  if (!raw) return '';
+  const normalized = raw.replace(/[^\d./-]/g, '');
+  const compact = normalized.replace(/[./-]/g, '');
+  if (/^\d{8}$/.test(compact)) {
+    const day = compact.slice(0, 2);
+    const month = compact.slice(2, 4);
+    const year = compact.slice(4, 8);
+    return normalizeMiad(`${day}.${month}.${year}`);
+  }
+  return normalizeMiad(normalized);
+};
+
+function parseLabelText(
+  text: string,
+  productCodes: ProductCode[]
+): { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string } | null {
+  const normalizedText = turkishFold(text);
+  const textByLines = normalizedText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const byCode = productCodes.find((p) => {
+    const code = turkishFold((p.stokKodu || '').trim());
+    if (!code) return false;
+    const escapedCode = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escapedCode}\\b`).test(normalizedText);
+  });
+
+  const byName = !byCode
+    ? productCodes
+        .map((p) => ({
+          product: p,
+          foldedName: turkishFold((p.stokAdi || '').trim()).replace(/[^A-Z0-9 ]/g, ' '),
+        }))
+        .filter(({ foldedName }) => foldedName.length >= 4)
+        .find(({ foldedName }) => normalizedText.includes(foldedName))?.product
+    : null;
+
+  const product = byCode || byName;
+  if (!product?.stokKodu) return null;
+
+  let lotNumarasi = '';
+  const lotKeywordMatch = normalizedText.match(/(?:^|\s)LOT(?:\s*NO|\s*NUMARASI)?\s*[:\-]?\s*([A-Z0-9\-/.]{3,})/i);
+  if (lotKeywordMatch?.[1]) {
+    lotNumarasi = lotKeywordMatch[1].replace(/[^A-Z0-9\-/.]/g, '');
+  } else {
+    const lineWithLot = textByLines.find((line) => line.includes('LOT'));
+    if (lineWithLot) {
+      const fallback = lineWithLot.match(/([A-Z0-9\-/.]{4,})/g)?.pop();
+      if (fallback) lotNumarasi = fallback;
+    }
+  }
+
+  let miad = '';
+  const miadKeywordMatch = normalizedText.match(/(?:MIAD|SKT|STT|SON\s*TUKETIM(?:\s*TARIHI)?)\s*[:\-]?\s*([0-9./-]{6,12})/i);
+  if (miadKeywordMatch?.[1]) {
+    miad = parseDateLike(miadKeywordMatch[1]);
+  } else {
+    const anyDate = normalizedText.match(/\b([0-3]?\d[./-][01]?\d[./-](?:\d{2}|\d{4}))\b/);
+    if (anyDate?.[1]) {
+      miad = parseDateLike(anyDate[1]);
+    }
+  }
+
+  return {
+    stokKodu: product.stokKodu,
+    stokAdi: product.stokAdi || '',
+    lotNumarasi: lotNumarasi || '',
+    miad: miad || '',
+  };
+}
+
 
 interface AnaPanelProps {}
 
@@ -627,6 +711,47 @@ export default function AnaPanel(props: AnaPanelProps) {
       setIsCameraScannerOpen(false);
     }
   };
+
+  const handleCameraOcrLabelScan = useCallback((ocrText: string) => {
+    const parsed = parseLabelText(ocrText, productCodes);
+    if (!parsed) {
+      flashScanFeedback('error', 'Etiketten ürün kodu/adı tespit edilemedi.');
+      playFeedback(true);
+      return;
+    }
+
+    upsertGroupedRow(
+      setScannedItems,
+      {
+        stokKodu: parsed.stokKodu,
+        stokAdi: parsed.stokAdi,
+        lot: parsed.lotNumarasi,
+        miad: parsed.miad,
+        barkod: `OCR_LABEL:${parsed.stokKodu}:${Date.now()}`,
+      },
+      (r) =>
+        !!(
+          r.isGroup &&
+          r.stokKodu === parsed.stokKodu &&
+          r.lotNumarasi === parsed.lotNumarasi &&
+          r.miad === parsed.miad
+        ),
+      1
+    );
+
+    setLastScannedProduct({
+      stokKodu: parsed.stokKodu,
+      stokAdi: parsed.stokAdi,
+      lotNumarasi: parsed.lotNumarasi,
+      miad: parsed.miad,
+      seriNumarasi: '',
+    } as ScanRow);
+    playFeedback();
+    flashScanFeedback('success', `${parsed.stokAdi || parsed.stokKodu} etiketten listeye eklendi.`);
+    if (!isBatchScanning) {
+      setIsCameraScannerOpen(false);
+    }
+  }, [flashScanFeedback, productCodes, isBatchScanning]);
   
   const handleOcrResults = (results: IrsaliyeParseResult[]) => {
     results.forEach(res => {
@@ -1850,6 +1975,8 @@ export default function AnaPanel(props: AnaPanelProps) {
           }>
             <DynamicCameraBarcodeScanner
               onScanSuccess={handleCameraScanSuccess}
+              enableOcrLabelScan
+              onOcrLabelScan={handleCameraOcrLabelScan}
               onClose={() => isBatchScanning ? setIsBatchScanning(false) : setIsCameraScannerOpen(false)}
             />
           </Suspense>
@@ -1914,6 +2041,8 @@ export default function AnaPanel(props: AnaPanelProps) {
           onClose={() => setIsOcrModalOpen(false)}
           productCodes={productCodes}
           onResults={handleOcrResults}
+          locationType="depot"
+          locationId={selectedDepotId}
         />
       )}
 
