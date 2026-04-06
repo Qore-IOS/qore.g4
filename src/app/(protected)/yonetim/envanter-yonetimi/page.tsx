@@ -94,19 +94,31 @@ export default function EnvanterYonetimiPage() {
         getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'vehicles')),
       ]);
-      setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name } as AssetCategory)));
-      setAssets(assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-      setVehicleCount(vehiclesSnap.size);
+      setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name, iconSvg: doc.data().iconSvg } as AssetCategory)));
+      setAssets(filterByCompanyScope(
+        assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)),
+        currentCompanyId, isSuperAdmin
+      ));
+      setVehicleCount(filterByCompanyScope(
+        vehiclesSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        currentCompanyId, isSuperAdmin
+      ).length);
 
-      const hospitalLocations = hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string }));
-      const depotLocations = depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string }));
+      const hospitalLocations = filterByCompanyScope(
+        hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string, companyId: (doc.data() as any).companyId })),
+        currentCompanyId, isSuperAdmin
+      ).map(({ id, name }) => ({ id, name }));
+      const depotLocations = filterByCompanyScope(
+        depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string, companyId: (doc.data() as any).companyId })),
+        currentCompanyId, isSuperAdmin
+      ).map(({ id, name }) => ({ id, name }));
       setLocations([...hospitalLocations, ...depotLocations].sort((a, b) => a.name.localeCompare(b.name)));
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [toast, currentCompanyId]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -145,7 +157,7 @@ export default function EnvanterYonetimiPage() {
       return;
     }
     const categoryName = editingCategory.name.trim();
-    const data: Record<string, unknown> = withCompanyScope({ name: categoryName }, currentCompanyId);
+    const data: Record<string, unknown> = { name: categoryName };
     try {
       if (editingCategory.id) {
         await setDoc(doc(db, 'assetCategories', editingCategory.id), data, { merge: true });
@@ -159,7 +171,7 @@ export default function EnvanterYonetimiPage() {
           const iconData = await iconRes.json();
           data.iconSvg = iconData.iconSvg;
         }
-        await addDoc(collection(db, 'assetCategories'), withCompanyScope(data, currentCompanyId));
+        await addDoc(collection(db, 'assetCategories'), data);
       }
       toast({ title: 'Basarili', description: 'Kategori kaydedildi.' });
       setIsModalOpen(false);
@@ -346,7 +358,7 @@ export default function EnvanterYonetimiPage() {
         const existingAsset = assets.find(a => a.demirbasNo === demirbasNo);
 
         if (existingAsset) {
-          batch.set(doc(db, 'assets', existingAsset.id), assetData, { merge: true });
+          batch.set(doc(db, 'assets', existingAsset.id), withCompanyScope(assetData as Record<string, any>, currentCompanyId), { merge: true });
           updatedCount++;
         } else {
           batch.set(doc(collection(db, 'assets')), withCompanyScope(assetData, currentCompanyId));
