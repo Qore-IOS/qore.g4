@@ -14,10 +14,14 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, writeBatch, Timestamp, deleteDoc } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/types';
-import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX } from 'lucide-react';
-import { useMinMaxRules } from '@/hooks/useFirebaseQueries';
+import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, FileText } from 'lucide-react';
+import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/hooks/use-toast';
+import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
+import { normalizeMiad } from '@/lib/date';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -75,6 +79,8 @@ type GroupedStockItem = {
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
+  const { currentUser, currentUserProfile } = useAuth();
+  const { toast } = useToast();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
@@ -85,7 +91,10 @@ export default function LaboratuvarYonetimiPanel() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const { data: minMaxRulesData } = useMinMaxRules(selectedLabId || null);
 
   const minMaxMap = useMemo(() => {
@@ -110,11 +119,14 @@ export default function LaboratuvarYonetimiPanel() {
       setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
       
       const names: Record<string, string> = {};
+      const codes: ProductCode[] = [];
       productsSnap.docs.forEach(d => {
-        const p = d.data() as ProductCode;
+        const p = { id: d.id, ...d.data() } as ProductCode;
+        codes.push(p);
         if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
       });
       setProductNames(names);
+      setProductCodes(codes);
 
       setIsLoading(false);
     }
@@ -235,6 +247,78 @@ export default function LaboratuvarYonetimiPanel() {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
   }, [laboratories, selectedLabId]);
 
+  const handleOcrResults = useCallback(async (
+    results: LabOcrResult[],
+    file: { id: string; storagePath: string; fileName: string }
+  ) => {
+    if (!selectedLabId) return;
+    setIsOcrProcessing(true);
+
+    try {
+      const selectedLab = laboratories.find(l => l.id === selectedLabId);
+      const labName = selectedLab?.name || '';
+      const batch = writeBatch(db);
+      let totalDocs = 0;
+
+      for (const item of results) {
+        const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+        if (!product) continue;
+
+        const qty = Math.max(1, item.quantity || 1);
+        for (let i = 0; i < qty; i++) {
+          const ref = doc(collection(db, 'depoStok'));
+          batch.set(ref, {
+            depotId: '',
+            depotName: '',
+            stokKodu: item.stokKodu,
+            stokAdi: product.stokAdi || '',
+            lotNumarasi: item.lot || '',
+            miad: item.miad ? normalizeMiad(item.miad) : '',
+            seriNumarasi: '',
+            rafAdresi: '',
+            irsaliyeNumarasi: '',
+            eklenmeTarihi: Timestamp.now(),
+            isShipped: true,
+            hedefKurumId: selectedLabId,
+            hedefKurum: labName,
+            createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+            createdByUid: currentUser?.uid || null,
+          });
+          totalDocs++;
+        }
+      }
+
+      await batch.commit();
+      await touchStockMetadata();
+
+      // Delete the file from Firestore and storage
+      await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
+      await fetch('/api/storage/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: file.storagePath }),
+      });
+
+      // Refresh local stock data
+      const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
+      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+
+      toast({
+        title: 'Stok girişi tamamlandı',
+        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi. İrsaliye dosyası (${file.fileName}) silindi.`,
+      });
+    } catch (error: any) {
+      console.error('Lab OCR stock entry error:', error);
+      toast({
+        title: 'Hata',
+        description: error?.message || 'Stok girişi sırasında bir hata oluştu.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  }, [selectedLabId, laboratories, productCodes, currentUser, currentUserProfile, toast]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -273,6 +357,18 @@ export default function LaboratuvarYonetimiPanel() {
                         className="w-full sm:w-auto"
                         >
                         <History className="mr-2 h-5 w-5" /> Sayım Geçmişi
+                    </Button>
+                    <Button
+                        onClick={() => setIsOcrModalOpen(true)}
+                        disabled={!selectedLabId || isOcrProcessing}
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                        >
+                        {isOcrProcessing
+                          ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                          : <FileText className="mr-2 h-5 w-5" />
+                        }
+                        İrsaliye ile Giriş
                     </Button>
                 </div>
             )}
@@ -431,6 +527,12 @@ export default function LaboratuvarYonetimiPanel() {
           )}
         </CardContent>
       </Card>
+      <LabIrsaliyeOcrModal
+        isOpen={isOcrModalOpen}
+        onClose={() => setIsOcrModalOpen(false)}
+        productCodes={productCodes}
+        onResults={handleOcrResults}
+      />
     </div>
   );
 }
