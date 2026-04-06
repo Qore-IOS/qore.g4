@@ -10,6 +10,8 @@ import type { ProductCode } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface SavedIrsaliyeFile {
   id: string;
@@ -21,6 +23,10 @@ interface SavedIrsaliyeFile {
   uploadedByName: string;
   uploadedAt: Timestamp;
   expiresAt: Timestamp;
+  companyId?: string;
+  locationType?: 'hospital' | 'depot';
+  locationId?: string;
+  locationName?: string;
 }
 
 export interface LabOcrResult extends IrsaliyeParseResult {
@@ -33,6 +39,8 @@ interface LabIrsaliyeOcrModalProps {
   onClose: () => void;
   productCodes: ProductCode[];
   onResults: (results: LabOcrResult[], file: SavedIrsaliyeFile) => void;
+  locationType?: 'hospital' | 'depot';
+  locationId?: string;
 }
 
 export default function LabIrsaliyeOcrModal({
@@ -40,7 +48,10 @@ export default function LabIrsaliyeOcrModal({
   onClose,
   productCodes,
   onResults,
+  locationType,
+  locationId,
 }: LabIrsaliyeOcrModalProps) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const [processing, setProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<any[]>([]);
@@ -59,8 +70,13 @@ export default function LabIrsaliyeOcrModal({
       const files: SavedIrsaliyeFile[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.expiresAt && data.expiresAt.toMillis() > Date.now()) {
-          files.push({ id: docSnap.id, ...data } as SavedIrsaliyeFile);
+        const file = { id: docSnap.id, ...data } as SavedIrsaliyeFile;
+        const inScope = matchesCompanyScope(file, currentCompanyId, isSuperAdmin);
+        const locationMatch = locationType && locationId
+          ? file.locationType === locationType && file.locationId === locationId
+          : true;
+        if (data.expiresAt && data.expiresAt.toMillis() > Date.now() && inScope && locationMatch) {
+          files.push(file);
         }
       });
       setSavedFiles(files);
@@ -69,25 +85,48 @@ export default function LabIrsaliyeOcrModal({
       setLoadingFiles(false);
     });
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, currentCompanyId, isSuperAdmin, locationType, locationId]);
 
   const processExtractedText = (text: string) => {
-    const rawItems = parseIrsaliyeText(text, productCodes);
-    const processedItems = rawItems.map(item => {
-      const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-      return {
-        ...item,
-        productName: product?.stokAdi || 'Bilinmeyen Ürün',
-        quantity: item.quantity || 1,
-        confidence: product ? 'high' : 'low',
-      };
-    });
-    setDetectedItems(prev => [...prev, ...processedItems]);
-    if (processedItems.length === 0) {
-      toast({ title: 'PDF tarandı ancak ürün/miktar eşleşmesi bulunamadı.', variant: 'default' });
-    } else {
-      toast({ title: 'Başarılı', description: `${processedItems.length} ürün başarıyla ayrıştırıldı.` });
-    }
+    (async () => {
+      let rawItems: IrsaliyeParseResult[] = [];
+      try {
+        const aiRes = await fetch('/api/ai/irsaliye-parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            productCodes: productCodes.map((p) => ({ stokKodu: p.stokKodu, stokAdi: p.stokAdi })),
+          }),
+        });
+        const aiData = await aiRes.json().catch(() => ({}));
+        if (Array.isArray(aiData?.parsed) && aiData.parsed.length > 0) {
+          rawItems = aiData.parsed as IrsaliyeParseResult[];
+        }
+      } catch (error) {
+        console.warn('AI irsaliye parse unavailable, falling back local parser:', error);
+      }
+
+      if (rawItems.length === 0) {
+        rawItems = parseIrsaliyeText(text, productCodes);
+      }
+
+      const processedItems = rawItems.map(item => {
+        const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+        return {
+          ...item,
+          productName: product?.stokAdi || 'Bilinmeyen Ürün',
+          quantity: item.quantity || 1,
+          confidence: product ? 'high' : 'low',
+        };
+      });
+      setDetectedItems(prev => [...prev, ...processedItems]);
+      if (processedItems.length === 0) {
+        toast({ title: 'PDF tarandı ancak ürün/miktar eşleşmesi bulunamadı.', variant: 'default' });
+      } else {
+        toast({ title: 'Başarılı', description: `${processedItems.length} ürün başarıyla ayrıştırıldı.` });
+      }
+    })();
   };
 
   const handleSelectSavedFile = async (file: SavedIrsaliyeFile) => {
