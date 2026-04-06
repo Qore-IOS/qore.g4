@@ -685,7 +685,7 @@ const DockItem = ({
           <TooltipTrigger asChild>
             <motion.div
               ref={(el) => { if (onRefSet) onRefSet(el); (iconRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
-              animate={!isLiquidMode && isHovered ? { scale: 1.1 } : { scale: 1 }}
+              animate={!isLiquidMode && isHovered ? { scale: 2 } : { scale: 1 }}
               className={cn(
                 'dock-item-wrapper flex items-center justify-center cursor-pointer',
                 isActive && item.type === 'nav' && 'active',
@@ -695,7 +695,7 @@ const DockItem = ({
               onClick={(e) => handleNavigate(e, item.href)}
             >
               {customIcon ? (
-                <Image src={getIconSrc(customIcon)} alt={item.label} width={28} height={28} className="dock-item-icon object-contain" />
+                <Image src={getIconSrc(customIcon)} alt={item.label} width={31} height={31} className="dock-item-icon object-contain" />
               ) : (
                 <item.icon className="dock-item-icon" style={iconGradientStyle} />
               )}
@@ -728,7 +728,7 @@ const DockItem = ({
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={!isLiquidMode && isHovered ? { scale: 1.15, y: -4 } : { scale: 1, y: 0 }}
+        animate={!isLiquidMode && isHovered ? { scale: 2, y: -6 } : { scale: 1, y: 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
           isActive && item.type === 'nav' && 'active',
@@ -738,7 +738,7 @@ const DockItem = ({
         onClick={(e) => handleNavigate(e, item.href)}
       >
         {customIcon ? (
-          <Image src={getIconSrc(customIcon)} alt={item.label} width={28} height={28} className="dock-item-icon object-contain" />
+          <Image src={getIconSrc(customIcon)} alt={item.label} width={31} height={31} className="dock-item-icon object-contain" />
         ) : (
           <item.icon className="dock-item-icon" style={iconGradientStyle} />
         )}
