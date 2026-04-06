@@ -2041,6 +2041,8 @@ export default function AnaPanel(props: AnaPanelProps) {
           onClose={() => setIsOcrModalOpen(false)}
           productCodes={productCodes}
           onResults={handleOcrResults}
+          locationType="depot"
+          locationId={selectedDepotId}
         />
       )}
 
