@@ -2,24 +2,21 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Image from 'next/image';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Loader2, QrCode, Save, UserCheck, ShieldCheck, History, Printer, Download } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import NextImage from 'next/image';
+import { Loader2, QrCode, Save, UserCheck, ShieldCheck, History, Printer, Download, ChevronLeft } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { doc, getDoc, collection, getDocs, updateDoc, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import BackButton from '@/components/BackButton';
 import QRCode from 'qrcode';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/auth-context';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { generateId } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import Link from 'next/link';
 
 interface Asset {
   id: string;
@@ -51,19 +48,17 @@ interface Asset {
   checkInTarihi?: string;
   dijitalImza?: string;
   zimmetFisNo?: string;
+  seriNumarasi?: string;
 }
 
-interface Location {
-    id: string;
-    name: string;
-}
+interface Location { id: string; name: string; }
 
 interface AssetHistoryEntry {
-    id: string;
-    timestamp: any;
-    changedBy: string;
-    previousState: { konum: string; teslimEdilenPersonel: string };
-    newState: { konum: string; teslimEdilenPersonel: string };
+  id: string;
+  timestamp: any;
+  changedBy: string;
+  previousState: { konum: string; teslimEdilenPersonel: string };
+  newState: { konum: string; teslimEdilenPersonel: string };
 }
 
 interface CustodyEntry {
@@ -77,18 +72,29 @@ interface CustodyEntry {
   changedBy: string;
 }
 
+const inputClass = "w-full h-9 px-3 rounded-xl text-sm bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] outline-none focus:ring-2 focus:ring-[var(--dashboard-accent)]/30";
+
+function InfoRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-[var(--dashboard-stroke)]/50 last:border-0">
+      <span className="text-xs text-[var(--dashboard-muted)]">{label}</span>
+      <span className={cn("text-sm font-medium", accent ? "text-[var(--dashboard-accent)]" : "text-[var(--dashboard-text)]")}>{value}</span>
+    </div>
+  );
+}
+
 export default function AssetDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
   const { currentUserProfile, currentCompanyId } = useAuth();
   const assetId = Array.isArray(params.assetId) ? params.assetId[0] : params.assetId;
+  const categorySlug = Array.isArray(params.category) ? params.category[0] : params.category;
 
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
-
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [locations, setLocations] = useState<Location[]>([]);
   const [newLocation, setNewLocation] = useState('');
   const [newPersonel, setNewPersonel] = useState('');
@@ -99,124 +105,80 @@ export default function AssetDetailPage() {
   const [assignmentNote, setAssignmentNote] = useState('');
 
   useEffect(() => {
-    if (!assetId) {
-      toast({ title: 'Hata', description: 'Geçersiz ürün ID.', variant: 'destructive' });
-      router.back();
-      return;
-    }
-
-    const fetchAssetAndLocations = async () => {
+    if (!assetId) { router.back(); return; }
+    const load = async () => {
       setLoading(true);
       try {
-        const [assetDocSnap, labsSnap, depotsSnap] = await Promise.all([
+        const [snap, labsSnap, depotsSnap] = await Promise.all([
           getDoc(doc(db, 'assets', assetId)),
           getDocs(collection(db, 'hospitals')),
           getDocs(collection(db, 'depots')),
         ]);
-
-        if (assetDocSnap.exists()) {
-          const assetData = { id: assetDocSnap.id, ...assetDocSnap.data() } as Asset;
-          setAsset(assetData);
-          setNewLocation(assetData.konum);
-          setNewPersonel(assetData.teslimEdilenPersonel);
-          setAssignmentPerson(assetData.zimmetliKisi || assetData.teslimEdilenPersonel || '');
-          setAssignmentSignature(assetData.dijitalImza || '');
+        if (snap.exists()) {
+          const data = { id: snap.id, ...snap.data() } as Asset;
+          setAsset(data);
+          setNewLocation(data.konum);
+          setNewPersonel(data.teslimEdilenPersonel);
+          setAssignmentPerson(data.zimmetliKisi || data.teslimEdilenPersonel || '');
+          setAssignmentSignature(data.dijitalImza || '');
         } else {
-          toast({ title: 'Bulunamadı', description: 'Bu ID ile eşleşen ürün bulunamadı.', variant: 'destructive' });
+          toast({ title: 'Bulunamadı', variant: 'destructive' });
         }
-        
-        const labLocations = filterByCompanyScope(
+        const labs = filterByCompanyScope(
           labsSnap.docs.map(d => ({ id: d.id, name: d.data().name, companyId: (d.data() as any).companyId })),
-          currentUserProfile?.companyId,
-          currentUserProfile?.role === 'super_admin'
+          currentUserProfile?.companyId, currentUserProfile?.role === 'super_admin'
         ).map(({ id, name }) => ({ id, name }));
-        const depotLocations = filterByCompanyScope(
+        const depots = filterByCompanyScope(
           depotsSnap.docs.map(d => ({ id: d.id, name: d.data().name, companyId: (d.data() as any).companyId })),
-          currentUserProfile?.companyId,
-          currentUserProfile?.role === 'super_admin'
+          currentUserProfile?.companyId, currentUserProfile?.role === 'super_admin'
         ).map(({ id, name }) => ({ id, name }));
-        setLocations([...labLocations, ...depotLocations].sort((a,b) => a.name.localeCompare(b.name)));
+        setLocations([...labs, ...depots].sort((a, b) => a.name.localeCompare(b.name)));
 
-        // Fetch history
-        const historyQuery = query(collection(db, 'assets', assetId, 'assetHistory'), orderBy('timestamp', 'desc'));
-        const historySnap = await getDocs(historyQuery);
-        setHistory(filterByCompanyScope(
-          historySnap.docs.map(d => ({ id: d.id, ...d.data() } as AssetHistoryEntry)),
-          currentUserProfile?.companyId,
-          currentUserProfile?.role === 'super_admin'
-        ));
-
-        const custodyQuery = query(collection(db, 'assets', assetId, 'custodyHistory'), orderBy('timestamp', 'desc'));
-        const custodySnap = await getDocs(custodyQuery);
-        setCustodyHistory(filterByCompanyScope(
-          custodySnap.docs.map(d => ({ id: d.id, ...d.data() } as CustodyEntry)),
-          currentUserProfile?.companyId,
-          currentUserProfile?.role === 'super_admin'
-        ));
-
-      } catch (e) {
+        const [histSnap, custSnap] = await Promise.all([
+          getDocs(query(collection(db, 'assets', assetId, 'assetHistory'), orderBy('timestamp', 'desc'))),
+          getDocs(query(collection(db, 'assets', assetId, 'custodyHistory'), orderBy('timestamp', 'desc'))),
+        ]);
+        setHistory(histSnap.docs.map(d => ({ id: d.id, ...d.data() } as AssetHistoryEntry)));
+        setCustodyHistory(custSnap.docs.map(d => ({ id: d.id, ...d.data() } as CustodyEntry)));
+      } catch {
         toast({ title: 'Hata', description: 'Ürün bilgileri yüklenemedi.', variant: 'destructive' });
       } finally {
         setLoading(false);
       }
     };
+    load();
+  }, [assetId]);
 
-    fetchAssetAndLocations();
-  }, [assetId, router, toast]);
-  
   useEffect(() => {
     if (asset) {
-        const url = window.location.href;
-        QRCode.toDataURL(url, { width: 256, margin: 2 }, (err, dataUrl) => {
-            if (err) {
-                console.error('QR Code generation error:', err);
-                setQrCodeDataUrl('');
-            } else {
-                setQrCodeDataUrl(dataUrl);
-            }
-        });
+      QRCode.toDataURL(window.location.href, { width: 256, margin: 2 }, (err, url) => {
+        setQrCodeDataUrl(err ? '' : url);
+      });
     }
   }, [asset]);
 
   const handleSaveChanges = async () => {
     if (!asset) return;
-    const hasChanges = newLocation !== asset.konum || newPersonel !== asset.teslimEdilenPersonel;
-    if (!hasChanges) {
-        toast({title: "Değişiklik Yok", description: "Herhangi bir değişiklik yapılmadı.", variant: "default"});
-        return;
+    if (newLocation === asset.konum && newPersonel === asset.teslimEdilenPersonel) {
+      toast({ title: 'Değişiklik Yok' }); return;
     }
-    
     setIsSaving(true);
     try {
-      const historyEntry = {
+      const entry = {
         timestamp: serverTimestamp(),
-        changedBy: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-        previousState: {
-          konum: asset.konum,
-          teslimEdilenPersonel: asset.teslimEdilenPersonel,
-        },
-        newState: {
-          konum: newLocation,
-          teslimEdilenPersonel: newPersonel,
-        },
+        changedBy: currentUserProfile?.name || 'Bilinmeyen',
+        previousState: { konum: asset.konum, teslimEdilenPersonel: asset.teslimEdilenPersonel },
+        newState: { konum: newLocation, teslimEdilenPersonel: newPersonel },
       };
-
-      await addDoc(collection(db, 'assets', asset.id, 'assetHistory'), withCompanyScope(historyEntry, currentUserProfile?.companyId));
-      await updateDoc(doc(db, 'assets', asset.id), {
-        konum: newLocation,
-        teslimEdilenPersonel: newPersonel,
-      });
-
-      // Optimistically update local state
-      setAsset(prev => ({ ...prev!, konum: newLocation, teslimEdilenPersonel: newPersonel }));
-      setHistory(prev => [{...historyEntry, id: generateId(), timestamp: new Date() }, ...prev]);
-      
-      toast({title: 'Başarılı', description: 'Değişiklikler kaydedildi.'});
-
-    } catch (e) {
-        toast({title: 'Hata', description: 'Değişiklikler kaydedilemedi.', variant: 'destructive'});
+      await addDoc(collection(db, 'assets', asset.id, 'assetHistory'), withCompanyScope(entry, currentUserProfile?.companyId));
+      await updateDoc(doc(db, 'assets', asset.id), { konum: newLocation, teslimEdilenPersonel: newPersonel });
+      setAsset(prev => prev ? { ...prev, konum: newLocation, teslimEdilenPersonel: newPersonel } : prev);
+      setHistory(prev => [{ ...entry, id: generateId(), timestamp: new Date() }, ...prev]);
+      toast({ title: 'Kaydedildi' });
+    } catch {
+      toast({ title: 'Hata', variant: 'destructive' });
     } finally {
-        setIsSaving(false);
+      setIsSaving(false);
     }
   };
 
@@ -224,43 +186,25 @@ export default function AssetDetailPage() {
 
   const handleCheckOut = async () => {
     if (!asset || !assignmentPerson.trim()) {
-      toast({ title: 'Eksik Bilgi', description: 'Check-out için personel zorunludur.', variant: 'destructive' });
-      return;
+      toast({ title: 'Personel zorunlu', variant: 'destructive' }); return;
     }
     setIsSaving(true);
     try {
       const receiptNo = createReceiptNo();
       const nowIso = new Date().toISOString().slice(0, 10);
-      const entry = withCompanyScope({
-        action: 'check_out',
-        personel: assignmentPerson.trim(),
-        digitalSignature: assignmentSignature.trim(),
-        zimmetFisNo: receiptNo,
-        note: assignmentNote.trim(),
-        timestamp: serverTimestamp(),
-        changedBy: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-      }, currentCompanyId);
-      await addDoc(collection(db, 'assets', asset.id, 'custodyHistory'), entry);
+      await addDoc(collection(db, 'assets', asset.id, 'custodyHistory'), withCompanyScope({
+        action: 'check_out', personel: assignmentPerson.trim(), digitalSignature: assignmentSignature.trim(),
+        zimmetFisNo: receiptNo, note: assignmentNote.trim(), timestamp: serverTimestamp(),
+        changedBy: currentUserProfile?.name || 'Bilinmeyen',
+      }, currentCompanyId));
       await updateDoc(doc(db, 'assets', asset.id), {
-        zimmetliKisi: assignmentPerson.trim(),
-        teslimEdilenPersonel: assignmentPerson.trim(),
-        checkOutTarihi: nowIso,
-        checkInTarihi: '',
-        dijitalImza: assignmentSignature.trim(),
-        zimmetFisNo: receiptNo,
+        zimmetliKisi: assignmentPerson.trim(), teslimEdilenPersonel: assignmentPerson.trim(),
+        checkOutTarihi: nowIso, checkInTarihi: '', dijitalImza: assignmentSignature.trim(), zimmetFisNo: receiptNo,
       });
-      setAsset(prev => prev ? ({
-        ...prev,
-        zimmetliKisi: assignmentPerson.trim(),
-        teslimEdilenPersonel: assignmentPerson.trim(),
-        checkOutTarihi: nowIso,
-        checkInTarihi: '',
-        dijitalImza: assignmentSignature.trim(),
-        zimmetFisNo: receiptNo,
-      }) : prev);
-      toast({ title: 'Check-Out Tamamlandı', description: `Zimmet fişi oluşturuldu: ${receiptNo}` });
+      setAsset(prev => prev ? { ...prev, zimmetliKisi: assignmentPerson.trim(), checkOutTarihi: nowIso, checkInTarihi: '', zimmetFisNo: receiptNo } : prev);
+      toast({ title: 'Check-Out Tamamlandı', description: `Fiş: ${receiptNo}` });
     } catch {
-      toast({ title: 'Hata', description: 'Check-out kaydedilemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
@@ -271,24 +215,17 @@ export default function AssetDetailPage() {
     setIsSaving(true);
     try {
       const nowIso = new Date().toISOString().slice(0, 10);
-      const entry = withCompanyScope({
-        action: 'check_in',
-        personel: assignmentPerson.trim() || asset.zimmetliKisi || '',
-        digitalSignature: assignmentSignature.trim(),
-        zimmetFisNo: asset.zimmetFisNo || '',
-        note: assignmentNote.trim(),
-        timestamp: serverTimestamp(),
-        changedBy: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-      }, currentCompanyId);
-      await addDoc(collection(db, 'assets', asset.id, 'custodyHistory'), entry);
-      await updateDoc(doc(db, 'assets', asset.id), {
-        checkInTarihi: nowIso,
-        zimmetliKisi: '',
-      });
-      setAsset(prev => prev ? ({ ...prev, checkInTarihi: nowIso, zimmetliKisi: '' }) : prev);
-      toast({ title: 'Check-In Tamamlandı', description: 'Teslim alma kaydı oluşturuldu.' });
+      await addDoc(collection(db, 'assets', asset.id, 'custodyHistory'), withCompanyScope({
+        action: 'check_in', personel: assignmentPerson.trim() || asset.zimmetliKisi || '',
+        digitalSignature: assignmentSignature.trim(), zimmetFisNo: asset.zimmetFisNo || '',
+        note: assignmentNote.trim(), timestamp: serverTimestamp(),
+        changedBy: currentUserProfile?.name || 'Bilinmeyen',
+      }, currentCompanyId));
+      await updateDoc(doc(db, 'assets', asset.id), { checkInTarihi: nowIso, zimmetliKisi: '' });
+      setAsset(prev => prev ? { ...prev, checkInTarihi: nowIso, zimmetliKisi: '' } : prev);
+      toast({ title: 'Check-In Tamamlandı' });
     } catch {
-      toast({ title: 'Hata', description: 'Check-in kaydedilemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
@@ -298,162 +235,212 @@ export default function AssetDetailPage() {
     if (!asset?.alimFiyatiTl || !asset?.planliKullanimOmruYil || !asset?.amortismanBaslangicTarihi) return null;
     const start = new Date(asset.amortismanBaslangicTarihi);
     if (Number.isNaN(start.getTime())) return null;
-    const today = new Date();
-    const elapsedYears = Math.max(0, (today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
-    const usefulLife = asset.planliKullanimOmruYil;
-    const rate = 1 / usefulLife;
-
-    let netBookValue = asset.alimFiyatiTl;
-    if (asset.amortismanYontemi === 'azalan_bakiye') {
-      netBookValue = asset.alimFiyatiTl * Math.pow(1 - rate, elapsedYears);
-    } else {
-      netBookValue = asset.alimFiyatiTl * Math.max(0, 1 - (elapsedYears / usefulLife));
-    }
-    const kalanOmurYil = Math.max(0, usefulLife - elapsedYears);
-    return { netBookValue, kalanOmurYil };
+    const elapsed = Math.max(0, (Date.now() - start.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+    const life = asset.planliKullanimOmruYil;
+    const nbv = asset.amortismanYontemi === 'azalan_bakiye'
+      ? asset.alimFiyatiTl * Math.pow(1 - 1 / life, elapsed)
+      : asset.alimFiyatiTl * Math.max(0, 1 - elapsed / life);
+    return { nbv, remaining: Math.max(0, life - elapsed) };
   }, [asset]);
 
   if (loading) {
-    return <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+    return (
+      <div className="flex h-full w-full items-center justify-center min-h-screen cihaz-shell">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+      </div>
+    );
   }
 
   if (!asset) {
     return (
-      <div className="p-6">
-        <BackButton fallback={`/yonetim/envanter-yonetimi/${params.category}`} />
-        <p className="mt-4 text-center text-muted-foreground">Ürün bulunamadı.</p>
+      <div className="cihaz-shell min-h-screen flex flex-col items-center justify-center gap-4">
+        <p className="text-[var(--dashboard-muted)]">Ürün bulunamadı.</p>
+        <Link href={`/yonetim/envanter-yonetimi/${categorySlug}`} className="text-sm text-[var(--dashboard-accent)] hover:underline">Geri Dön</Link>
       </div>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 cihaz-shell">
-      <BackButton fallback={`/yonetim/envanter-yonetimi/${asset.category}`} />
-      <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.65fr] gap-6">
-        <Card className="cihaz-card-strong">
-          <CardHeader>
-            <div className="flex flex-wrap items-center gap-2">
-              <CardTitle className="text-2xl font-headline">{asset.urunAdi || `${asset.marka} ${asset.model}`}</CardTitle>
-              <Badge className="bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]">{asset.category}</Badge>
-              <Badge className={asset.zimmetliKisi ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'}>
+    <div className="cihaz-shell min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
+
+        {/* HEADER */}
+        <div className="flex items-center gap-3 mb-6">
+          <Link
+            href={`/yonetim/envanter-yonetimi/${categorySlug}`}
+            className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </Link>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] truncate">
+              {asset.urunAdi || `${asset.marka} ${asset.model}`}
+            </h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-[var(--dashboard-muted)]">DB: {asset.demirbasNo}</span>
+              {asset.seriNumarasi && <span className="text-xs text-[var(--dashboard-muted)]">· SN: {asset.seriNumarasi}</span>}
+              <span className={cn(
+                "text-[10px] font-medium px-2 py-0.5 rounded-lg",
+                asset.zimmetliKisi ? "bg-sky-500/10 text-sky-600" : "bg-emerald-500/10 text-emerald-600"
+              )}>
                 {asset.zimmetliKisi ? 'Zimmetli' : 'Boşta'}
-              </Badge>
+              </span>
             </div>
-            <CardDescription>Demirbaş No: {asset.demirbasNo} · Seri No: {asset.seriNumarasi || '-'} · Ürün Kodu: {asset.urunKodu || '-'}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid md:grid-cols-2 gap-4 text-sm">
-            <p><strong>Marka / Model:</strong> {asset.marka || '-'} / {asset.model || '-'}</p>
-            <p><strong>Konum:</strong> {asset.konum || '-'}</p>
-            <p><strong>Personel:</strong> {asset.teslimEdilenPersonel || '-'}</p>
-            <p><strong>Aktif Zimmet:</strong> {asset.zimmetliKisi || '-'}</p>
-            <p><strong>Alım Fiyatı:</strong> {(asset.alimFiyatiTl || 0).toLocaleString('tr-TR')} ₺</p>
-            <p><strong>Planlı Ömür:</strong> {asset.planliKullanimOmruYil || 0} yıl</p>
-            <p><strong>Garanti Bitişi:</strong> {asset.garantiBitisTarihi || '-'}</p>
-            <p><strong>Sonraki Bakım / Kalibrasyon:</strong> {asset.sonrakiBakimTarihi || '-'} / {asset.sonrakiKalibrasyonTarihi || '-'}</p>
+          </div>
+        </div>
+
+        {/* TOP GRID: Details + QR */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_0.6fr] gap-5 mb-5">
+          {/* Details Card */}
+          <div className="cihaz-card-strong p-5 sm:p-6">
+            <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-3">Ürün Bilgileri</p>
+            <InfoRow label="Marka / Model" value={`${asset.marka || '-'} / ${asset.model || '-'}`} />
+            <InfoRow label="Kategori" value={asset.category} />
+            <InfoRow label="Konum" value={asset.konum || '-'} />
+            <InfoRow label="Personel" value={asset.teslimEdilenPersonel || '-'} />
+            <InfoRow label="Aktif Zimmet" value={asset.zimmetliKisi || '-'} />
+            <InfoRow label="Alım Fiyatı" value={`${(asset.alimFiyatiTl || 0).toLocaleString('tr-TR')} ₺`} accent />
+            <InfoRow label="Planlı Ömür" value={`${asset.planliKullanimOmruYil || 0} yıl`} />
+            <InfoRow label="Garanti Bitişi" value={asset.garantiBitisTarihi || '-'} />
+            <InfoRow label="Sonraki Bakım" value={asset.sonrakiBakimTarihi || '-'} />
+            <InfoRow label="Sonraki Kalibrasyon" value={asset.sonrakiKalibrasyonTarihi || '-'} />
+
             {depreciationInfo && (
-              <div className="md:col-span-2 rounded-md border p-3 text-sm space-y-1 bg-[var(--dashboard-surface-2)]">
-                <p><strong>Net Defter Değeri:</strong> {depreciationInfo.netBookValue.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} ₺</p>
-                <p><strong>Kalan Kullanım Ömrü:</strong> {depreciationInfo.kalanOmurYil.toFixed(1)} yıl</p>
+              <div className="mt-4 cihaz-pressed p-4 space-y-1">
+                <p className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-2">Amortisman</p>
+                <InfoRow label="Net Defter Değeri" value={`${depreciationInfo.nbv.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} ₺`} accent />
+                <InfoRow label="Kalan Ömür" value={`${depreciationInfo.remaining.toFixed(1)} yıl`} />
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card className="cihaz-card-strong">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><QrCode className="h-5 w-5"/> QR & Etiket</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-3">
+          {/* QR Card */}
+          <div className="cihaz-card-strong p-5 sm:p-6 flex flex-col items-center">
+            <div className="flex items-center gap-2 mb-4 self-start">
+              <QrCode className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <p className="text-xs font-semibold text-[var(--dashboard-text)]">QR & Etiket</p>
+            </div>
             {qrCodeDataUrl ? (
-              <Image src={qrCodeDataUrl} alt="QR Code" width={240} height={240} />
+              <NextImage src={qrCodeDataUrl} alt="QR" width={200} height={200} className="rounded-xl" />
             ) : (
-              <div className="w-60 h-60 bg-muted flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin" />
+              <div className="w-[200px] h-[200px] rounded-xl bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-[var(--dashboard-muted)]" />
               </div>
             )}
-            <div className="w-full grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4 mr-2" />Etiket Yazdır</Button>
-              <Button variant="outline" onClick={() => qrCodeDataUrl && window.open(qrCodeDataUrl, '_blank')}><Download className="h-4 w-4 mr-2" />QR İndir</Button>
+            <div className="grid grid-cols-2 gap-2 mt-4 w-full">
+              <button onClick={() => window.print()} className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center justify-center gap-1.5">
+                <Printer className="w-3.5 h-3.5" /> Yazdır
+              </button>
+              <button onClick={() => qrCodeDataUrl && window.open(qrCodeDataUrl, '_blank')} className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center justify-center gap-1.5">
+                <Download className="w-3.5 h-3.5" /> İndir
+              </button>
             </div>
-            <p className="text-xs text-center text-muted-foreground">QR kod bu ürün sayfasına doğrudan erişim sağlar.</p>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="cihaz-card">
-          <CardHeader><CardTitle className="text-lg">Bilgi Güncelle</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
+        {/* MIDDLE GRID: Update + Custody */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+          {/* Info Update */}
+          <div className="cihaz-card p-5">
+            <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-3">Bilgi Güncelle</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Konum</label>
+                <Select value={newLocation} onValueChange={setNewLocation}>
+                  <SelectTrigger className="h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-0"><SelectValue /></SelectTrigger>
+                  <SelectContent>{locations.map(l => <SelectItem key={l.id} value={l.name}>{l.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Personel</label>
+                <input className={inputClass} value={newPersonel} onChange={e => setNewPersonel(e.target.value)} />
+              </div>
+              <button onClick={handleSaveChanges} disabled={isSaving} className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50">
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Kaydet
+              </button>
+            </div>
+          </div>
+
+          {/* Custody */}
+          <div className="cihaz-card p-5">
+            <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-3">Zimmet & Hareket</p>
+            <div className="space-y-3">
+              <input className={inputClass} placeholder="Personel" value={assignmentPerson} onChange={e => setAssignmentPerson(e.target.value)} />
+              <input className={inputClass} placeholder="Dijital İmza (Ad Soyad)" value={assignmentSignature} onChange={e => setAssignmentSignature(e.target.value)} />
+              <input className={inputClass} placeholder="Not" value={assignmentNote} onChange={e => setAssignmentNote(e.target.value)} />
+              <div className="flex gap-2">
+                <button onClick={handleCheckOut} disabled={isSaving} className="h-9 px-3 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50">
+                  <UserCheck className="w-3.5 h-3.5" /> Check-Out
+                </button>
+                <button onClick={handleCheckIn} disabled={isSaving} className="h-9 px-3 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors flex items-center gap-1.5 disabled:opacity-50">
+                  <ShieldCheck className="w-3.5 h-3.5" /> Check-In
+                </button>
+              </div>
+              <p className="text-[10px] text-[var(--dashboard-muted)]">
+                Check-Out: {asset.checkOutTarihi || '-'} · Check-In: {asset.checkInTarihi || '-'} · Fiş: {asset.zimmetFisNo || '-'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* HISTORY */}
+        <div className="cihaz-card-strong p-5 sm:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <History className="w-5 h-5 text-[var(--dashboard-accent)]" />
+            <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Geçmiş</h2>
+          </div>
+          <div className="grid lg:grid-cols-2 gap-4">
+            {/* Movement */}
             <div>
-              <label className="text-sm font-medium">Yeni Konum</label>
-              <Select value={newLocation} onValueChange={setNewLocation}>
-                <SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{locations.map(loc => <SelectItem key={loc.id} value={loc.name}>{loc.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <p className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-2">Hareket Geçmişi</p>
+              <ScrollArea className="h-56">
+                {history.length === 0 ? (
+                  <p className="text-center py-8 text-sm text-[var(--dashboard-muted)]">Kayıt yok.</p>
+                ) : (
+                  <div className="space-y-2 pr-2">
+                    {history.map(h => (
+                      <div key={h.id} className="px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50">
+                        <p className="text-xs font-medium text-[var(--dashboard-text)]">
+                          {h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
+                        </p>
+                        <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
+                          {h.previousState?.konum || '-'} → {h.newState?.konum || '-'} · {h.previousState?.teslimEdilenPersonel || '-'} → {h.newState?.teslimEdilenPersonel || '-'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
             </div>
+            {/* Custody */}
             <div>
-              <label className="text-sm font-medium">Yeni Personel</label>
-              <Input value={newPersonel} onChange={e => setNewPersonel(e.target.value)} />
+              <p className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-2">Zimmet Hareketi</p>
+              <ScrollArea className="h-56">
+                {custodyHistory.length === 0 ? (
+                  <p className="text-center py-8 text-sm text-[var(--dashboard-muted)]">Kayıt yok.</p>
+                ) : (
+                  <div className="space-y-2 pr-2">
+                    {custodyHistory.map(h => (
+                      <div key={h.id} className="px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50">
+                        <p className="text-xs font-medium text-[var(--dashboard-text)]">
+                          <span className={h.action === 'check_out' ? 'text-[var(--dashboard-accent)]' : 'text-emerald-500'}>
+                            {h.action === 'check_out' ? 'Check-Out' : 'Check-In'}
+                          </span>
+                          {' · '}{h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
+                        </p>
+                        <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
+                          {h.personel || '-'} · Fiş: {h.zimmetFisNo || '-'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
             </div>
-            <Button onClick={handleSaveChanges} disabled={isSaving}>
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Save className="h-4 w-4 mr-2"/>}
-              Değişiklikleri Kaydet
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="cihaz-card">
-          <CardHeader><CardTitle className="text-lg">Zimmet ve Hareket</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            <Input placeholder="Personel" value={assignmentPerson} onChange={e => setAssignmentPerson(e.target.value)} />
-            <Input placeholder="Dijital İmza (Ad Soyad)" value={assignmentSignature} onChange={e => setAssignmentSignature(e.target.value)} />
-            <Input placeholder="Not" value={assignmentNote} onChange={e => setAssignmentNote(e.target.value)} />
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={handleCheckOut} disabled={isSaving}><UserCheck className="h-4 w-4 mr-2" />Check-Out Yap</Button>
-              <Button variant="outline" onClick={handleCheckIn} disabled={isSaving}><ShieldCheck className="h-4 w-4 mr-2" />Check-In Yap</Button>
-            </div>
-            <p className="text-xs text-muted-foreground">Check-Out: {asset.checkOutTarihi || '-'} · Check-In: {asset.checkInTarihi || '-'} · Fiş: {asset.zimmetFisNo || '-'}</p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
-
-      <Card className="cihaz-card-strong">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><History className="h-5 w-5" /> Hareket Geçmişi</CardTitle>
-        </CardHeader>
-        <CardContent className="grid lg:grid-cols-2 gap-4">
-          <ScrollArea className="h-56 border rounded-md">
-            {history.length === 0 ? (
-              <p className="p-4 text-sm text-muted-foreground text-center">Değişiklik geçmişi yok.</p>
-            ) : (
-              <div className="space-y-2 p-3">
-                {history.map(h => (
-                  <div key={h.id} className="rounded-md border p-3 text-sm">
-                    <p className="font-medium">{h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', {locale: tr}) : '-'}</p>
-                    <p className="text-muted-foreground">
-                      Konum: {h.previousState?.konum || '-'} → {h.newState?.konum || '-'} · Personel: {h.previousState?.teslimEdilenPersonel || '-'} → {h.newState?.teslimEdilenPersonel || '-'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-          <ScrollArea className="h-56 border rounded-md">
-            {custodyHistory.length === 0 ? (
-              <p className="p-4 text-sm text-muted-foreground text-center">Zimmet hareketi yok.</p>
-            ) : (
-              <div className="space-y-2 p-3">
-                {custodyHistory.map(h => (
-                  <div key={h.id} className="rounded-md border p-3 text-sm">
-                    <p className="font-medium">{h.action === 'check_out' ? 'Check-Out' : 'Check-In'} · {h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}</p>
-                    <p className="text-muted-foreground">{h.personel || '-'} · Fiş: {h.zimmetFisNo || '-'}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </CardContent>
-      </Card>
     </div>
   );
 }
