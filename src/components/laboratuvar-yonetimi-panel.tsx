@@ -552,7 +552,7 @@ export default function LaboratuvarYonetimiPanel() {
                           ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                           : <FileText className="mr-2 h-5 w-5" />
                         }
-                        İrsaliye ile Giriş
+                        İrsaliye Seç
                     </Button>
                 </div>
             )}
@@ -716,6 +716,8 @@ export default function LaboratuvarYonetimiPanel() {
         onClose={() => setIsOcrModalOpen(false)}
         productCodes={productCodes}
         onResults={handleOcrResults}
+        locationType="hospital"
+        locationId={selectedLabId}
       />
     </div>
   );

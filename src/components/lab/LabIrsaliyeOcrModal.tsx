@@ -10,6 +10,8 @@ import type { ProductCode } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface SavedIrsaliyeFile {
   id: string;
@@ -21,6 +23,10 @@ interface SavedIrsaliyeFile {
   uploadedByName: string;
   uploadedAt: Timestamp;
   expiresAt: Timestamp;
+  companyId?: string;
+  locationType?: 'hospital' | 'depot';
+  locationId?: string;
+  locationName?: string;
 }
 
 export interface LabOcrResult extends IrsaliyeParseResult {
@@ -33,6 +39,8 @@ interface LabIrsaliyeOcrModalProps {
   onClose: () => void;
   productCodes: ProductCode[];
   onResults: (results: LabOcrResult[], file: SavedIrsaliyeFile) => void;
+  locationType?: 'hospital' | 'depot';
+  locationId?: string;
 }
 
 export default function LabIrsaliyeOcrModal({
@@ -40,7 +48,10 @@ export default function LabIrsaliyeOcrModal({
   onClose,
   productCodes,
   onResults,
+  locationType,
+  locationId,
 }: LabIrsaliyeOcrModalProps) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const [processing, setProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<any[]>([]);
@@ -59,8 +70,13 @@ export default function LabIrsaliyeOcrModal({
       const files: SavedIrsaliyeFile[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.expiresAt && data.expiresAt.toMillis() > Date.now()) {
-          files.push({ id: docSnap.id, ...data } as SavedIrsaliyeFile);
+        const file = { id: docSnap.id, ...data } as SavedIrsaliyeFile;
+        const inScope = matchesCompanyScope(file, currentCompanyId, isSuperAdmin);
+        const locationMatch = locationType && locationId
+          ? file.locationType === locationType && file.locationId === locationId
+          : true;
+        if (data.expiresAt && data.expiresAt.toMillis() > Date.now() && inScope && locationMatch) {
+          files.push(file);
         }
       });
       setSavedFiles(files);
@@ -69,7 +85,7 @@ export default function LabIrsaliyeOcrModal({
       setLoadingFiles(false);
     });
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, currentCompanyId, isSuperAdmin, locationType, locationId]);
 
   const processExtractedText = (text: string) => {
     const rawItems = parseIrsaliyeText(text, productCodes);
