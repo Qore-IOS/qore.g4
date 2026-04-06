@@ -91,6 +91,19 @@ export default function BrandObservationPage() {
     return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, cost]) => ({ monthKey: k, monthLabel: k, cost }));
   }, [rows]);
 
+  const pareto = useMemo(() => {
+    const sorted = [...latestRows].sort((a, b) => b.totalCost - a.totalCost);
+    const thresholdCount = Math.max(1, Math.ceil(sorted.length * 0.2));
+    const top = sorted.slice(0, thresholdCount).reduce((sum, r) => sum + r.totalCost, 0);
+    const share = total > 0 ? (top / total) * 100 : 0;
+    return { topCost: top, share, thresholdCount };
+  }, [latestRows, total]);
+
+  const unitCostAvg = useMemo(() => {
+    const totalUnits = latestRows.reduce((sum, r) => sum + r.stokAdedi + r.cihazUstuAdedi, 0);
+    return totalUnits > 0 ? total / totalUnits : 0;
+  }, [latestRows, total]);
+
   if (loading || productsQuery.isLoading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" /></div>;
   }
@@ -107,14 +120,29 @@ export default function BrandObservationPage() {
 
         <h1 className="text-2xl font-bold text-[var(--dashboard-text)]">{brand} — Marka Gözlem Paneli</h1>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div className="cihaz-card-strong p-5">
             <p className="text-sm text-[var(--dashboard-muted)]">Toplam Marka Maliyeti</p>
             <p className="text-3xl font-bold text-[var(--dashboard-accent)]">{sym}{total.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
             <p className="text-xs text-[var(--dashboard-muted)]">{latestRows.length} aktif ürün snapshot</p>
           </div>
-          <div className="lg:col-span-2"><TrendChart data={monthly} currency={currency} /></div>
+          <div className="cihaz-card-strong p-5">
+            <p className="text-sm text-[var(--dashboard-muted)]">Pareto (Top %20 Ürün)</p>
+            <p className="text-xl font-bold text-[var(--dashboard-accent)]">%{pareto.share.toFixed(1)}</p>
+            <p className="text-xs text-[var(--dashboard-muted)]">{pareto.thresholdCount} ürün · {sym}{pareto.topCost.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+          </div>
+          <div className="cihaz-card-strong p-5">
+            <p className="text-sm text-[var(--dashboard-muted)]">Birim Maliyet Ort.</p>
+            <p className="text-xl font-bold text-[var(--dashboard-accent)]">{sym}{unitCostAvg.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-[var(--dashboard-muted)]">test/adet başına</p>
+          </div>
+          <div className="cihaz-card-strong p-5">
+            <p className="text-sm text-[var(--dashboard-muted)]">Konum Sayısı</p>
+            <p className="text-xl font-bold text-[var(--dashboard-accent)]">{locationSummary.length}</p>
+          </div>
         </div>
+
+        <div className="lg:col-span-2"><TrendChart data={monthly} currency={currency} /></div>
 
         <div className="cihaz-card-strong p-5">
           <h3 className="text-sm font-semibold text-[var(--dashboard-text)] mb-3">Konum Bazlı Dağılım</h3>
@@ -132,7 +160,7 @@ export default function BrandObservationPage() {
               </tr>
             </thead>
             <tbody>
-              {latestRows.slice(0, 250).map((r) => (
+              {latestRows.slice(0, 500).map((r) => (
                 <tr key={`${r.sessionId}-${r.stokKodu}-${r.locationName}`} className="border-b border-[var(--dashboard-stroke)]/50">
                   <td className="py-2 pr-3">{r.stokAdi}<div className="text-xs text-[var(--dashboard-muted)]">{r.stokKodu}</div></td>
                   <td className="py-2 pr-3">{r.locationName}</td>

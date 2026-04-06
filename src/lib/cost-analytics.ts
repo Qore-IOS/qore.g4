@@ -1,4 +1,4 @@
-import { endOfMonth, isValid, startOfMonth, subMonths } from 'date-fns';
+import { addYears, endOfMonth, isValid, startOfMonth, subMonths } from 'date-fns';
 import type { Currency, ProductCode } from '@/lib/types';
 
 export type TimeRange = 'latest' | 'last-3m' | 'last-6m' | 'last-12m' | 'ytd' | 'all' | 'custom';
@@ -40,6 +40,30 @@ export interface MonthlyTrendPoint {
   monthKey: string;
   monthLabel: string;
   cost: number;
+}
+
+export interface DeltaMetrics {
+  current: number;
+  previous: number;
+  deltaPct: number;
+}
+
+export interface ComparisonDeltas {
+  mom: DeltaMetrics;
+  qoq: DeltaMetrics;
+  yoy: DeltaMetrics;
+}
+
+export interface ProductGroupCostData {
+  group: 'kit' | 'sarf' | 'yedek_parca' | 'diger';
+  value: number;
+}
+
+export interface TurnoverMetrics {
+  capitalTied: number;
+  estimatedQuarterConsumption: number;
+  turnoverRatio: number;
+  dio: number;
 }
 
 export function getSessionDate(session: SayimSession): Date | null {
@@ -123,6 +147,22 @@ export function getSessionCost(
   return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency), 0);
 }
 
+export function getConsolidatedCostForWindow(
+  sessions: SayimSession[],
+  productMap: Map<string, ProductCode>,
+  rates: Record<Currency, number>,
+  currency: Currency,
+  start: Date,
+  end: Date
+): number {
+  const rangeSessions = sessions.filter((s) => {
+    const d = getSessionDate(s);
+    return d && d >= start && d <= end;
+  });
+  const latestByLocation = getLatestByLocation(rangeSessions);
+  return Array.from(latestByLocation.values()).reduce((sum, s) => sum + getSessionCost(s, productMap, rates, currency), 0);
+}
+
 export function calculateTotalCostForRange(
   sessions: SayimSession[],
   productMap: Map<string, ProductCode>,
@@ -139,6 +179,43 @@ export function calculateTotalCostForRange(
 
   const latestByLocation = getLatestByLocation(ranged);
   return Array.from(latestByLocation.values()).reduce((sum, s) => sum + getSessionCost(s, productMap, rates, currency), 0);
+}
+
+function calculateDelta(current: number, previous: number): DeltaMetrics {
+  if (!previous) return { current, previous, deltaPct: current > 0 ? 100 : 0 };
+  return { current, previous, deltaPct: ((current - previous) / previous) * 100 };
+}
+
+export function getComparisonDeltas(
+  sessions: SayimSession[],
+  productMap: Map<string, ProductCode>,
+  rates: Record<Currency, number>,
+  currency: Currency,
+  anchorDate: Date = new Date()
+): ComparisonDeltas {
+  const thisMonthStart = startOfMonth(anchorDate);
+  const thisMonthEnd = endOfMonth(anchorDate);
+  const prevMonthStart = startOfMonth(subMonths(anchorDate, 1));
+  const prevMonthEnd = endOfMonth(subMonths(anchorDate, 1));
+
+  const currentMonth = getConsolidatedCostForWindow(sessions, productMap, rates, currency, thisMonthStart, thisMonthEnd);
+  const previousMonth = getConsolidatedCostForWindow(sessions, productMap, rates, currency, prevMonthStart, prevMonthEnd);
+
+  const thisQuarterStart = startOfMonth(subMonths(anchorDate, 2));
+  const prevQuarterStart = startOfMonth(subMonths(anchorDate, 5));
+  const thisQuarter = getConsolidatedCostForWindow(sessions, productMap, rates, currency, thisQuarterStart, thisMonthEnd);
+  const previousQuarter = getConsolidatedCostForWindow(sessions, productMap, rates, currency, prevQuarterStart, endOfMonth(subMonths(anchorDate, 3)));
+
+  const thisYearStart = startOfMonth(subMonths(anchorDate, 11));
+  const prevYearStart = addYears(thisYearStart, -1);
+  const thisYear = getConsolidatedCostForWindow(sessions, productMap, rates, currency, thisYearStart, thisMonthEnd);
+  const previousYear = getConsolidatedCostForWindow(sessions, productMap, rates, currency, prevYearStart, endOfMonth(addYears(thisMonthEnd, -1)));
+
+  return {
+    mom: calculateDelta(currentMonth, previousMonth),
+    qoq: calculateDelta(thisQuarter, previousQuarter),
+    yoy: calculateDelta(thisYear, previousYear),
+  };
 }
 
 export function getBrandCostBreakdown(
@@ -193,6 +270,56 @@ export function getLocationCostBreakdown(
       brands: Array.from(brandMap.entries()).map(([name, cost]) => ({ name, cost })).sort((a, b) => b.cost - a.cost).slice(0, 3),
     };
   }).sort((a, b) => b.totalCost - a.totalCost);
+}
+
+export function getProductGroupBreakdown(
+  sessions: SayimSession[],
+  productMap: Map<string, ProductCode>,
+  rates: Record<Currency, number>,
+  currency: Currency
+): ProductGroupCostData[] {
+  const totals = new Map<ProductGroupCostData['group'], number>([
+    ['kit', 0],
+    ['sarf', 0],
+    ['yedek_parca', 0],
+    ['diger', 0],
+  ]);
+  const latestByLocation = getLatestByLocation(sessions);
+
+  Array.from(latestByLocation.values()).forEach((session) => {
+    session.items.forEach((item) => {
+      const group = (productMap.get(item.stokKodu)?.urunGrubu || 'diger') as ProductGroupCostData['group'];
+      const normalizedGroup = ['kit', 'sarf', 'yedek_parca'].includes(group) ? group : 'diger';
+      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      totals.set(normalizedGroup, (totals.get(normalizedGroup) || 0) + cost);
+    });
+  });
+
+  return Array.from(totals.entries()).map(([group, value]) => ({ group, value })).sort((a, b) => b.value - a.value);
+}
+
+export function calculateTurnoverMetrics(
+  sessions: SayimSession[],
+  productMap: Map<string, ProductCode>,
+  rates: Record<Currency, number>,
+  currency: Currency
+): TurnoverMetrics {
+  const capitalTied = calculateTotalCostForRange(sessions, productMap, rates, currency, 'all');
+  const trend = getMonthlyTrend(sessions, productMap, rates, currency);
+  const recent = trend.slice(-4);
+
+  let consumption = 0;
+  for (let i = 1; i < recent.length; i++) {
+    const diff = recent[i - 1].cost - recent[i].cost;
+    if (diff > 0) consumption += diff;
+  }
+
+  const estimatedQuarterConsumption = Math.max(consumption, 1);
+  const turnoverRatio = capitalTied > 0 ? estimatedQuarterConsumption / capitalTied : 0;
+  const dailyConsumption = estimatedQuarterConsumption / 90;
+  const dio = dailyConsumption > 0 ? capitalTied / dailyConsumption : 0;
+
+  return { capitalTied, estimatedQuarterConsumption, turnoverRatio, dio };
 }
 
 export function getMonthlyTrend(
