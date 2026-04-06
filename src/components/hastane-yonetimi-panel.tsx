@@ -549,6 +549,37 @@ export default function LaboratuvarYonetimiPanel() {
     if (!selectedLabId || results.length === 0) return;
     setIsOcrProcessing(true);
     try {
+      const aiPayload = results.map((item) => {
+        const product = products.find(p => p.stokKodu === item.stokKodu);
+        return {
+          stokKodu: item.stokKodu,
+          stokAdi: product?.stokAdi || '',
+          parsedQuantity: Math.max(1, item.quantity || 1),
+          rawLine: item.rawLine || '',
+          anaBirim: product?.anaBirim || '',
+          ambalajDegeri: Number(product?.ambalajDegeri || 0),
+        };
+      });
+
+      let aiConvertedMap = new Map<string, number>();
+      try {
+        const aiRes = await fetch('/api/ai/irsaliye-unit-convert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: aiPayload }),
+        });
+        const aiData = await aiRes.json().catch(() => ({}));
+        const convertedList = Array.isArray(aiData?.converted) ? aiData.converted : [];
+        aiConvertedMap = new Map(
+          convertedList.map((item: any) => [
+            String(item?.stokKodu || ''),
+            Math.max(1, Number(item?.convertedQuantity || 1)),
+          ])
+        );
+      } catch (aiError) {
+        console.warn('AI quantity conversion skipped, using fallback:', aiError);
+      }
+
       const batch = writeBatch(db);
       let totalDocs = 0;
 
@@ -556,7 +587,19 @@ export default function LaboratuvarYonetimiPanel() {
         const product = products.find(p => p.stokKodu === item.stokKodu);
         if (!product) continue;
 
-        const qty = Math.max(1, item.quantity || 1);
+        const parsedQty = Math.max(1, item.quantity || 1);
+        const fallbackQty = (() => {
+          const ambalaj = Number(product.ambalajDegeri || 0);
+          const anaBirim = String(product.anaBirim || '').toLowerCase();
+          const raw = String(item.rawLine || '').toLowerCase();
+          const usesPackLikeUnit = anaBirim.includes('paket') || anaBirim.includes('kutu');
+          const invoiceLooksAdet = raw.includes(' adet') || raw.endsWith('adet');
+          if (usesPackLikeUnit && invoiceLooksAdet && ambalaj > 0) {
+            return Math.max(1, Math.round(parsedQty / ambalaj));
+          }
+          return parsedQty;
+        })();
+        const qty = aiConvertedMap.get(item.stokKodu) || fallbackQty;
         for (let i = 0; i < qty; i++) {
           const ref = doc(collection(db, 'depoStok'));
           batch.set(ref, {
@@ -592,7 +635,7 @@ export default function LaboratuvarYonetimiPanel() {
 
       toast({
         title: 'Stok girişi tamamlandı',
-        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi.`,
+        description: `${totalDocs} birim ürün laboratuvar stoğuna eklendi.`,
       });
     } catch (error: any) {
       console.error('Lab OCR stock entry error:', error);
