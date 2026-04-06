@@ -371,14 +371,14 @@ export default function AssetCategoryPage() {
 
       {/* ===== ADD/EDIT MODAL ===== */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto flex flex-col cihaz-card-strong !rounded-3xl !p-0 !gap-0 border-0">
-          <div className="px-6 pt-6 pb-4 border-b border-[var(--dashboard-stroke)]">
+        <DialogContent className="max-w-lg cihaz-card-strong !rounded-3xl !p-0 !gap-0 border-0">
+          <div className="px-6 pt-6 pb-4 border-b border-[var(--dashboard-stroke)] sticky top-0 z-10 bg-[var(--dashboard-surface)]" style={{ borderTopLeftRadius: '1.5rem', borderTopRightRadius: '1.5rem' }}>
             <DialogTitle className="text-base font-bold text-[var(--dashboard-text)]">
               {editingAsset.id ? 'Ürün Düzenle' : `Yeni ${categoryName} Ekle`}
             </DialogTitle>
           </div>
 
-          <ScrollArea className="flex-1 min-h-0">
+          <div>
             <div className="px-6 py-5 space-y-4">
               {/* === TEMEL BİLGİLER === */}
               <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider">Temel Bilgiler</p>
@@ -520,9 +520,9 @@ export default function AssetCategoryPage() {
                 />
               </FormField>
             </div>
-          </ScrollArea>
+          </div>
 
-          <div className="px-6 py-4 border-t border-[var(--dashboard-stroke)] flex items-center justify-end gap-2">
+          <div className="px-6 py-4 border-t border-[var(--dashboard-stroke)] flex items-center justify-end gap-2 sticky bottom-0 z-10 bg-[var(--dashboard-surface)]" style={{ borderBottomLeftRadius: '1.5rem', borderBottomRightRadius: '1.5rem' }}>
             <button onClick={() => setIsModalOpen(false)} className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors">
               İptal
             </button>
