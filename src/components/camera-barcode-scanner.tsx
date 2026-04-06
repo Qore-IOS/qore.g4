@@ -9,7 +9,7 @@ type CameraBarcodeScannerProps = {
   onScanSuccess: (barcode: string) => void;
   onClose: () => void;
   enableOcrLabelScan?: boolean;
-  onOcrLabelScan?: (text: string) => void;
+  onOcrLabelScan?: (payload: { imageBlob: Blob; ocrText: string }) => Promise<void> | void;
 };
 
 export default function CameraBarcodeScanner({
@@ -105,9 +105,7 @@ export default function CameraBarcodeScanner({
       if (!blob) return;
 
       const text = await ocrBlob(blob);
-      if (text?.trim()) {
-        onOcrLabelScan(text);
-      }
+      await onOcrLabelScan({ imageBlob: blob, ocrText: text || '' });
     } catch (error) {
       console.error('OCR label scan error:', error);
     } finally {
@@ -141,7 +139,7 @@ export default function CameraBarcodeScanner({
           disabled={isOcrRunningRef.current}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-white/90 text-gray-900 rounded-md text-sm font-medium hover:bg-white disabled:opacity-60 z-10"
         >
-          Etiket Tara (OCR)
+          Etiket Tara (AI + OCR)
         </button>
       )}
     </div>
