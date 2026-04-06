@@ -32,6 +32,7 @@ type NotificationTypeUI =
   | 'lab_count_completed'
   | 'fault_opened'
   | 'fault_closed'
+  | 'maliyet_sayim_davet'
   | 'user_request_created'
   | 'user_request_completed'
   | 'custom';
@@ -43,6 +44,7 @@ const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
     { key: 'order_created_from_request', label: 'Talepten Sipariş' },
     { key: 'transfer_to_lab', label: 'Laboratuvara Transfer' },
     { key: 'spare_part_transfer', label: 'Yedek Parça Transferi' },
+    { key: 'maliyet_sayim_davet', label: 'Maliyet Sayımına Davet' },
     { key: 'depot_count_completed', label: 'Depo Sayımı Tamamlandı' },
     { key: 'lab_count_completed', label: 'Laboratuvar Sayımı Tamamlandı' },
     { key: 'fault_opened', label: 'Arıza Kaydı Açıldı' },
