@@ -52,6 +52,7 @@ import {
   type MaliyetSayimOturum, type SessionParticipant, type PresenceData,
 } from '@/lib/maliyet-session';
 import { emitMaliyetSayimInvitation } from '@/lib/notifications';
+import { normalizeCompanyId } from '@/lib/company-scope';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -544,7 +545,7 @@ function ProductCountCard({
 export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: MaliyetSayimPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const canSeeCost = ['admin', 'admin_developer', 'super_admin', 'teknik_lojistik'].includes(currentUserProfile?.role ?? '');
 
   // Location selection - initialize from URL params
@@ -569,6 +570,9 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
 
   // Pending invitations
   const [pendingInvitations, setPendingInvitations] = useState<MaliyetSayimOturum[]>([]);
+
+  // Location search
+  const [locationSearch, setLocationSearch] = useState('');
 
   // Presence tracking
   const presenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -624,9 +628,9 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           setSelectedLocationId(target.locationId);
         }
       }
-    });
+    }, currentCompanyId, isSuperAdmin);
     return () => unsub();
-  }, [currentUserProfile?.uid, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUserProfile?.uid, activeSessionId, currentCompanyId, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to active session for real-time updates
   useEffect(() => {
@@ -942,6 +946,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           createdByName: activeSession.createdByName,
           totalBrands,
           participants: activeSession.participants,
+          companyId: currentCompanyId,
         });
       } else {
         // Solo mode: legacy save
@@ -963,6 +968,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           items,
           totalBrands,
           totalProducts: items.length,
+          companyId: normalizeCompanyId(currentCompanyId),
         });
       }
 
@@ -1370,6 +1376,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
         creatorUid: currentUserProfile.uid,
         creatorName: currentUserProfile.name || '',
         invitedUsers,
+        companyId: currentCompanyId,
       });
 
       // Send notifications to invited users
@@ -1609,7 +1616,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
               {/* Location type selection */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
                 <button
-                  onClick={() => setLocationType('lab')}
+                  onClick={() => { setLocationType('lab'); setLocationSearch(''); }}
                   className={cn(
                     'cihaz-action-tile cihaz-focus-ring flex flex-col items-center justify-center gap-3 p-6 sm:p-8 min-h-[160px]',
                     locationType === 'lab' && 'ring-2 ring-[var(--dashboard-accent)]'
@@ -1623,7 +1630,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                 </button>
 
                 <button
-                  onClick={() => setLocationType('depot')}
+                  onClick={() => { setLocationType('depot'); setLocationSearch(''); }}
                   className={cn(
                     'cihaz-action-tile cihaz-focus-ring flex flex-col items-center justify-center gap-3 p-6 sm:p-8 min-h-[160px]',
                     locationType === 'depot' && 'ring-2 ring-[var(--dashboard-accent)]'
@@ -1638,12 +1645,34 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
               </div>
 
               {/* Location list */}
-              {locationType && (
+              {locationType && (() => {
+                const allLocations = locationType === 'lab' ? hospitals : depots;
+                const filteredLocations = locationSearch.trim()
+                  ? allLocations.filter(loc => normalizeText(loc.name).includes(normalizeText(locationSearch)))
+                  : allLocations;
+                return (
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-[var(--dashboard-muted)] uppercase tracking-wider px-1 mb-3">
                     {locationType === 'lab' ? 'Laboratuvar Seçin' : 'Depo Seçin'}
                   </p>
-                  {(locationType === 'lab' ? hospitals : depots).map(loc => (
+                  {/* Search */}
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] mb-3">
+                    <Search className="w-4 h-4 text-[var(--dashboard-muted)] shrink-0" />
+                    <input
+                      value={locationSearch}
+                      onChange={e => setLocationSearch(e.target.value)}
+                      placeholder={`${locationType === 'lab' ? 'Laboratuvar' : 'Depo'} ara...`}
+                      className="flex-1 bg-transparent text-sm text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] outline-none"
+                    />
+                    {locationSearch && (
+                      <button onClick={() => setLocationSearch('')} className="text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]">
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  {filteredLocations.length === 0 ? (
+                    <p className="text-center py-6 text-sm text-[var(--dashboard-muted)]">Sonuç bulunamadı.</p>
+                  ) : filteredLocations.map(loc => (
                     <button
                       key={loc.id}
                       onClick={() => handleSelectLocation(locationType, loc.id)}
@@ -1661,7 +1690,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                     </button>
                   ))}
                 </div>
-              )}
+                );
+              })()}
             </>
           ) : (
             /* ---- Pending Invitations Tab ---- */

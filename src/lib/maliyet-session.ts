@@ -8,6 +8,7 @@ import {
   arrayUnion, arrayRemove, setDoc,
 } from 'firebase/firestore';
 import type { User } from '@/lib/types';
+import { normalizeCompanyId } from '@/lib/company-scope';
 
 // ============================================================================
 // TYPES
@@ -105,6 +106,7 @@ export async function createSession(params: {
   creatorUid: string;
   creatorName: string;
   invitedUsers: { uid: string; name: string }[];
+  companyId?: string | null;
 }): Promise<string> {
   const now = new Date().toISOString();
   const participants: SessionParticipant[] = [
@@ -133,6 +135,7 @@ export async function createSession(params: {
     participants,
     presence: {},
     countData: {},
+    companyId: normalizeCompanyId(params.companyId),
   });
 
   return docRef.id;
@@ -250,6 +253,7 @@ export async function completeSession(
     createdByName: string;
     totalBrands: number;
     participants: SessionParticipant[];
+    companyId?: string | null;
   }
 ): Promise<void> {
   const ref = doc(db, COLLECTION, sessionId);
@@ -278,6 +282,7 @@ export async function completeSession(
     sessionId, // reference back to the oturum
     totalBrands: sessionMeta.totalBrands,
     totalProducts: finalItems.length,
+    companyId: normalizeCompanyId(sessionMeta.companyId),
   });
 
   // Mark the oturum as completed
@@ -308,7 +313,9 @@ export function subscribeToSession(
 /** Get active sessions for a user (invited or joined) */
 export function subscribeToUserSessions(
   uid: string,
-  callback: (sessions: MaliyetSayimOturum[]) => void
+  callback: (sessions: MaliyetSayimOturum[]) => void,
+  companyId?: string | null,
+  isSuperAdmin?: boolean
 ): () => void {
   // Query only active sessions, sort client-side to avoid composite index requirement
   const q = query(
@@ -316,10 +323,19 @@ export function subscribeToUserSessions(
     where('status', '==', 'active')
   );
 
+  const activeCompanyId = normalizeCompanyId(companyId);
+
   return onSnapshot(q, (snap) => {
     const sessions = snap.docs
       .map(d => ({ id: d.id, ...d.data() } as MaliyetSayimOturum))
-      .filter(s => s.participants.some(p => p.uid === uid))
+      .filter(s => {
+        // Company scope filter
+        if (!isSuperAdmin) {
+          const sessionCompanyId = normalizeCompanyId((s as any).companyId);
+          if (sessionCompanyId !== activeCompanyId) return false;
+        }
+        return s.participants.some(p => p.uid === uid);
+      })
       .sort((a, b) => {
         const aTime = a.createdAt?.seconds || 0;
         const bTime = b.createdAt?.seconds || 0;

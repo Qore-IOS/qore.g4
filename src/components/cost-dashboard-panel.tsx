@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
 import { format, eachMonthOfInterval, endOfMonth, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // ============================================================================
 // TYPES
@@ -133,6 +135,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
   const [detailView, setDetailView] = useState<'closed' | 'brands' | 'products'>('closed');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // Fetch exchange rates and sayım sessions
   useEffect(() => {
@@ -144,7 +147,8 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
           getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
         ]);
         setRates(ratesData);
-        setSessions(sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession)));
+        const allSessions = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
+        setSessions(filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error('Error loading cost dashboard:', err);
         // Still try to get rates even if sessions fail
@@ -157,7 +161,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
       }
     };
     load();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const productMap = useMemo(() => {
     const map = new Map<string, ProductCode>();
