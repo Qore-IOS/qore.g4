@@ -239,38 +239,27 @@ export default function EnvanterYonetimiPage() {
   };
 
   const handleDownloadCurrentInventory = () => {
-    const data = assets.map((asset) => ({
-      Kategori: asset.category || '',
-      'Demirbaş No': asset.demirbasNo || '',
-      'Ürün Adı': asset.urunAdi || '',
-      'Seri Numarası': asset.seriNumarasi || '',
-      Durum: asset.durum || '',
-      Marka: asset.marka || '',
-      Model: asset.model || '',
-      Konum: asset.konum || '',
-      'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
-      'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
-      'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
-      'Garanti Bitiş Tarihi': asset.garantiBitisTarihi || '',
-      'Planlı Kullanım Ömrü (Yıl)': asset.planliKullanimOmruYil ?? '',
-      'Amortisman Yöntemi': asset.amortismanYontemi || '',
-      'Amortisman Başlangıç Tarihi': asset.amortismanBaslangicTarihi || '',
-      'Hurda Tarihi': asset.hurdaTarihi || '',
-      'İmha Tarihi': asset.imhaTarihi || '',
-      'Satış Tarihi': asset.satisTarihi || '',
-      'Son Bakım Tarihi': asset.sonBakimTarihi || '',
-      'Sonraki Bakım Tarihi': asset.sonrakiBakimTarihi || '',
-      'Son Kalibrasyon Tarihi': asset.sonKalibrasyonTarihi || '',
-      'Sonraki Kalibrasyon Tarihi': asset.sonrakiKalibrasyonTarihi || '',
-      'Bakım Maliyeti (TL)': asset.bakimMaliyetiTl ?? '',
-      'Zimmetli Kişi': asset.zimmetliKisi || '',
-      'Check-Out Tarihi': asset.checkOutTarihi || '',
-      'Check-In Tarihi': asset.checkInTarihi || '',
-      'Dijital İmza': asset.dijitalImza || '',
-      'Zimmet Fiş No': asset.zimmetFisNo || '',
-      Açıklama: asset.aciklama || '',
-    }));
-    exportDataToExcel(data, 'Mevcut_Envanter', 'Envanter', toast);
+    const allKeys = Array.from(
+      assets.reduce((set, asset) => {
+        Object.keys(asset).forEach((k) => set.add(k));
+        return set;
+      }, new Set<string>(['id']))
+    );
+
+    const data = assets.map((asset) => {
+      const row: Record<string, unknown> = {};
+      for (const key of allKeys) {
+        const value = (asset as Record<string, unknown>)[key];
+        row[key] = value == null
+          ? ''
+          : typeof value === 'object'
+            ? JSON.stringify(value)
+            : value;
+      }
+      return row;
+    });
+
+    exportDataToExcel(data, 'Tum_Envanter_Detaylari', 'TumEnvanter', toast);
   };
 
   const handleDownloadCategoryTemplate = () => {
@@ -469,6 +458,12 @@ export default function EnvanterYonetimiPage() {
                   className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
                 >
                   <Download className="w-3.5 h-3.5" /> Sablon
+                </button>
+                <button
+                  onClick={handleDownloadCurrentInventory}
+                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" /> Tumunu Excel'e Aktar
                 </button>
               </div>
             </div>
