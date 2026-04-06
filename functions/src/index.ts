@@ -189,6 +189,15 @@ export const onNotificationCreated = functions
         return;
       }
 
+      // Collect user-specific targets (user:uid) — these are direct messages that
+      // must be delivered regardless of the recipient's preference settings.
+      const directTargetUids = new Set<string>(
+        data.targets
+          .filter((t: string) => t.startsWith('user:'))
+          .map((t: string) => t.split(':')[1])
+          .filter(Boolean)
+      );
+
       // --- 2. Filter tokens by user notification preferences ---
       // Fetch user profiles for preference-based filtering
       const uniqueUids = new Set(tokens.map(t => t.uid).filter((uid): uid is string => !!uid));
@@ -219,6 +228,10 @@ export const onNotificationCreated = functions
         if (!prefs) return true; // No user doc found = allow
         // User explicitly disabled all notifications
         if (!prefs.enabled) return false;
+        // Direct user-specific notifications (user:uid target) bypass preference filtering.
+        // These are personal messages (e.g. spare_part_transfer, maliyet_sayim_davet) that
+        // should always reach the intended recipient as long as notifications are enabled.
+        if (directTargetUids.has(t.uid)) return true;
         // If user has specific preferences set, check if this type is included
         // Empty prefs array = no preferences configured yet = allow all (backwards compat)
         if (prefs.prefs.length > 0 && notificationType !== 'custom' && !prefs.prefs.includes(notificationType)) {

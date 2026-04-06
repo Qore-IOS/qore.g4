@@ -41,7 +41,6 @@ import {
   Warehouse,
   BarChart3,
   TrendingUp,
-  Calculator,
   PackagePlus,
   History,
   Activity,
@@ -59,6 +58,7 @@ import {
   Beaker,
   Pill,
   MapPin,
+  Calculator,
   Barcode,
   PlusCircle,
   Palette,
@@ -297,20 +297,6 @@ const subItemMap: Record<string, DockSubItem[]> = {
       href: "/direkt-transfer",
     },
   ],
-  "verimlilik-hesaplama": [
-    {
-      key: "verimlilik-hesaplama",
-      label: "Verimlilik Hesaplama",
-      icon: Calculator,
-      href: "/verimlilik-hesaplama",
-    },
-    {
-      key: "cost-dashboard",
-      label: "Maliyet Paneli",
-      icon: Wallet,
-      href: "/cost-dashboard",
-    },
-  ],
   "cihaz-yonetimi-ana": [
     {
       key: "teknik-servis",
@@ -342,7 +328,6 @@ export function useDock() {
   const pathname = usePathname();
   const router = useRouter();
   const isMobile = useIsMobile();
-  const [isVerimlilikSwitchOpen, setIsVerimlilikSwitchOpen] = useState(false);
   const [isPlannerPanelOpen, setIsPlannerPanelOpen] = useState(false);
 
   // Dock Visibility State
@@ -591,9 +576,7 @@ export function useDock() {
         return {
           ...view,
           onClick:
-            view.key === "verimlilik-hesaplama"
-              ? () => setIsVerimlilikSwitchOpen(true)
-              : view.key === "planner"
+            view.key === "planner"
               ? () => setIsPlannerPanelOpen(true)
               : view.href
               ? () => router.push(view.href!)
@@ -660,8 +643,6 @@ export function useDock() {
 
   return {
     dockItems,
-    isVerimlilikSwitchOpen,
-    setIsVerimlilikSwitchOpen,
     isPlannerPanelOpen,
     setIsPlannerPanelOpen,
     currentViewKey,

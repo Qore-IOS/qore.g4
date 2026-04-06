@@ -23,6 +23,7 @@ export type NotificationType =
   | "fault_opened"
   | "fault_transferred"
   | "fault_closed"
+  | "maliyet_sayim_davet"
   | "user_request_created"
   | "user_request_completed"
   | "custom";
@@ -497,25 +498,26 @@ export async function emitUserRequestCompleted(params: {
   });
 }
 
-export async function emitMaliyetSayimInvitation(params: {
+export async function emitMaliyetSayimDavet(params: {
   actor: Actor;
-  sessionId: string;
+  targetUid: string;
+  targetName: string;
   locationName: string;
-  invitedUserUids: string[];
+  sessionId?: string;
 }) {
-  const targets = params.invitedUserUids.map((uid) => `user:${uid}`);
-
   await createNotification({
-    type: "custom",
-    title: "Maliyet Sayım Daveti",
-    message: `${params.actor.name}, ${params.locationName} için maliyet sayımına sizi davet etti.`,
-    href: `/maliyet-sayim?session=${params.sessionId}`,
+    type: "maliyet_sayim_davet",
+    channel: "push",
+    title: "Maliyet Sayımına Davet Edildiniz",
+    message: `${params.actor.name} sizi "${params.locationName}" için maliyet sayımına davet etti.`,
+    href: "/maliyet-sayim",
     actor: params.actor,
-    targets,
+    targets: [`user:${params.targetUid}`],
     meta: {
-      sessionId: params.sessionId,
+      targetUid: params.targetUid,
+      targetName: params.targetName,
       locationName: params.locationName,
-      invitedBy: params.actor.name,
+      sessionId: params.sessionId,
     },
   });
 }

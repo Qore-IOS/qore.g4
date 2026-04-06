@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { Hospital, Device } from '@/lib/types';
+import type { Hospital, Device, MaintenancePlan, MaintenanceLog } from '@/lib/types';
 import {
   collection,
   onSnapshot,
@@ -11,39 +11,101 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
-// Anatolian side of Istanbul bounds & center
-const ANATOLIA_BOUNDS = L.latLngBounds([40.85, 28.80], [41.25, 29.70]);
-const ANATOLIA_CENTER: [number, number] = [41.00, 29.10];
+// Turkey-wide bounds (no region restriction)
+const TURKEY_CENTER: [number, number] = [39.0, 35.0];
+const TURKEY_BOUNDS = L.latLngBounds([36.0, 26.0], [42.5, 45.0]);
 
 // Light, muted tile layer for neumorphic feel
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>';
+
+// Days threshold for "maintenance approaching" warning
+const MAINTENANCE_WARNING_DAYS = 30;
 
 interface DeviceMapPanelProps {
   hospitals: Hospital[];
   panelType: 'teknik_servis' | 'aplikasyon';
 }
 
-function createCircleIcon(color: string, size: number = 14): L.DivIcon {
-  return L.divIcon({
-    className: 'device-map-dot',
-    html: `<div style="
-      width:${size}px;height:${size}px;
-      border-radius:50%;
-      background:${color};
-      border:2px solid rgba(255,255,255,0.9);
-      box-shadow:0 1px 4px rgba(0,0,0,0.18), 0 0 8px ${color}44;
-    "></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  });
+interface HospitalSummary {
+  hospital: Hospital;
+  healthy: number;
+  faulty: number;
+  maintenanceSoon: number;
+  total: number;
 }
 
-function createHospitalIcon(): L.DivIcon {
-  return L.divIcon({
-    className: 'device-map-hospital',
-    html: `<div style="
+interface DeviceListItem {
+  id: string;
+  name: string;
+  serial: string;
+  category: 'faulty' | 'maintenance' | 'healthy';
+  faultReportId?: string;
+}
+
+interface SelectedHospital {
+  hospitalId: string;
+  hospitalName: string;
+  devices: DeviceListItem[];
+}
+
+function createSummaryIcon(summary: HospitalSummary): L.DivIcon {
+  const { healthy, faulty, maintenanceSoon } = summary;
+  const badges: string[] = [];
+
+  if (healthy > 0) {
+    badges.push(`<span style="
+      display:inline-flex;align-items:center;justify-content:center;
+      min-width:28px;height:28px;padding:0 7px;
+      border-radius:14px;
+      background:#22c55e;color:#fff;
+      font-size:12px;font-weight:700;
+      box-shadow:0 2px 6px rgba(34,197,94,0.35);
+    ">${healthy}</span>`);
+  }
+
+  if (faulty > 0) {
+    badges.push(`<span style="
+      display:inline-flex;align-items:center;justify-content:center;
+      min-width:28px;height:28px;padding:0 7px;
+      border-radius:14px;
+      background:#ef4444;color:#fff;
+      font-size:12px;font-weight:700;
+      box-shadow:0 2px 6px rgba(239,68,68,0.35);
+    ">${faulty}</span>`);
+  }
+
+  if (maintenanceSoon > 0) {
+    badges.push(`<span style="
+      display:inline-flex;align-items:center;justify-content:center;
+      min-width:28px;height:28px;padding:0 7px;
+      border-radius:14px;
+      background:#f59e0b;color:#fff;
+      font-size:12px;font-weight:700;
+      box-shadow:0 2px 6px rgba(245,158,11,0.35);
+    ">⚠ ${maintenanceSoon}</span>`);
+  }
+
+  const badgesHtml = badges.join('');
+  const totalWidth = Math.max(40, badges.length * 36 + 8);
+
+  const html = `<div style="
+    display:flex;flex-direction:column;align-items:center;gap:4px;
+    pointer-events:auto;cursor:pointer;
+  ">
+    <div style="
+      display:flex;align-items:center;gap:4px;
+      padding:4px 6px;
+      border-radius:16px;
+      background:var(--dashboard-surface, #F3F2EF);
+      border:1.5px solid var(--dashboard-stroke, rgba(0,0,0,0.06));
+      box-shadow: -3px -3px 6px rgba(255,255,255,0.7), 3px 3px 6px rgba(120,120,120,0.14);
+    ">${badgesHtml}</div>
+    <div style="
       width:32px;height:32px;
       border-radius:10px;
       background:var(--dashboard-surface, #F3F2EF);
@@ -51,9 +113,14 @@ function createHospitalIcon(): L.DivIcon {
       box-shadow: -3px -3px 6px rgba(255,255,255,0.7), 3px 3px 6px rgba(120,120,120,0.14);
       display:flex;align-items:center;justify-content:center;
       font-size:16px;
-    ">🏥</div>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
+    ">🏥</div>
+  </div>`;
+
+  return L.divIcon({
+    className: 'device-map-hospital',
+    html,
+    iconSize: [totalWidth, 68],
+    iconAnchor: [totalWidth / 2, 68],
   });
 }
 
@@ -64,11 +131,23 @@ export default function DeviceMapPanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
+  const router = useRouter();
+  const { currentUserProfile, isAdmin, isSuperAdmin, currentCompanyId } = useAuth();
 
-  // Real-time devices from 'devices' collection (same source as teknik-servis/[id])
+  // User's assigned laboratories (for non-admin filtering)
+  const userAssignedLabs = currentUserProfile?.assignedLaboratories || [];
+  const userRole = currentUserProfile?.role || '';
+
+  // Real-time devices from 'devices' collection
   const [allDevices, setAllDevices] = useState<Device[]>([]);
-  // Real-time open fault reports: deviceId -> faultType
-  const [openFaultMap, setOpenFaultMap] = useState<Record<string, 'teknik_servis' | 'aplikasyon'>>({});
+  // Real-time open fault reports: deviceId -> { faultType, reportId }
+  const [openFaultMap, setOpenFaultMap] = useState<Record<string, { faultType: 'teknik_servis' | 'aplikasyon'; reportId: string }>>({});
+  // Maintenance plans
+  const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
+  // Maintenance logs
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
+  // Selected hospital for device list popup
+  const [selectedHospital, setSelectedHospital] = useState<SelectedHospital | null>(null);
 
   // Listen to all devices in real-time
   useEffect(() => {
@@ -89,17 +168,16 @@ export default function DeviceMapPanel({
         where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
       ),
       (snap) => {
-        const map: Record<string, 'teknik_servis' | 'aplikasyon'> = {};
+        const map: Record<string, { faultType: 'teknik_servis' | 'aplikasyon'; reportId: string }> = {};
         snap.docs.forEach((d) => {
           const data = d.data();
           if (data.deviceId && data.faultType) {
-            // Prefer the panel's own fault type for display priority
             if (panelType === 'teknik_servis') {
-              if (map[data.deviceId] === 'teknik_servis') return;
+              if (map[data.deviceId]?.faultType === 'teknik_servis') return;
             } else {
-              if (map[data.deviceId] === 'aplikasyon') return;
+              if (map[data.deviceId]?.faultType === 'aplikasyon') return;
             }
-            map[data.deviceId] = data.faultType;
+            map[data.deviceId] = { faultType: data.faultType, reportId: d.id };
           }
         });
         setOpenFaultMap(map);
@@ -108,70 +186,216 @@ export default function DeviceMapPanel({
     return () => unsub();
   }, [panelType]);
 
+  // Listen to maintenance plans for this panel type
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(
+        collection(db, 'maintenancePlans'),
+        where('type', '==', panelType)
+      ),
+      (snap) => {
+        setMaintenancePlans(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as MaintenancePlan));
+      }
+    );
+    return () => unsub();
+  }, [panelType]);
+
+  // Listen to maintenance logs
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'maintenanceLogs'),
+      (snap) => {
+        setMaintenanceLogs(snap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            completedAt: data.completedAt?.toDate?.() || data.completedAt,
+            nextDueDate: data.nextDueDate?.toDate?.() || data.nextDueDate,
+          } as MaintenanceLog;
+        }));
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  // Filter hospitals by company scope, then by assigned labs for non-admin users
+  const filteredHospitals = useMemo(() => {
+    // 1. Company filter
+    let filtered = filterByCompanyScope(hospitals, currentCompanyId, isSuperAdmin);
+    // 2. Role-based lab filter: admin sees all, teknik/aplikasyon sees only assigned labs
+    if (!isAdmin && userAssignedLabs.length > 0) {
+      filtered = filtered.filter((h) => userAssignedLabs.includes(h.id));
+    }
+    return filtered;
+  }, [hospitals, currentCompanyId, isSuperAdmin, isAdmin, userAssignedLabs]);
+
   // Build hospital location map (only hospitals with coordinates)
   const hospitalMap = useMemo(() => {
     const map = new Map<string, Hospital>();
-    hospitals.forEach((h) => {
+    filteredHospitals.forEach((h) => {
       if (h.lat && h.lng) map.set(h.id, h);
     });
     return map;
-  }, [hospitals]);
+  }, [filteredHospitals]);
 
-  // Group devices by hospitalId
+  // Filter devices by company scope, then group by hospitalId
   const devicesByHospital = useMemo(() => {
+    const companyFiltered = filterByCompanyScope(allDevices, currentCompanyId, isSuperAdmin);
     const map = new Map<string, Device[]>();
-    allDevices.forEach((device) => {
+    companyFiltered.forEach((device) => {
       const hId = (device as any).hospitalId as string | undefined;
       if (!hId) return;
+      // Only include devices belonging to visible hospitals
+      if (!hospitalMap.has(hId)) return;
       const arr = map.get(hId) || [];
       arr.push(device);
       map.set(hId, arr);
     });
     return map;
-  }, [allDevices]);
+  }, [allDevices, currentCompanyId, isSuperAdmin, hospitalMap]);
+
+  // Build set of device IDs with approaching maintenance
+  const maintenanceSoonDeviceIds = useMemo(() => {
+    const ids = new Set<string>();
+    const now = new Date();
+
+    maintenancePlans.forEach((plan) => {
+      const latestLog = maintenanceLogs
+        .filter((l) => l.planId === plan.id)
+        .sort((a, b) => {
+          const aTime = a.completedAt instanceof Date ? a.completedAt.getTime() : 0;
+          const bTime = b.completedAt instanceof Date ? b.completedAt.getTime() : 0;
+          return bTime - aTime;
+        })[0];
+
+      let nextDueDate: Date | null = null;
+
+      if (latestLog && latestLog.nextDueDate) {
+        nextDueDate = latestLog.nextDueDate instanceof Date
+          ? latestLog.nextDueDate
+          : new Date(latestLog.nextDueDate as any);
+      } else {
+        ids.add(plan.deviceId);
+        return;
+      }
+
+      if (nextDueDate) {
+        const diffMs = nextDueDate.getTime() - now.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        if (diffDays <= MAINTENANCE_WARNING_DAYS) {
+          ids.add(plan.deviceId);
+        }
+      }
+    });
+
+    return ids;
+  }, [maintenancePlans, maintenanceLogs]);
 
   // Determine effective fault status for a device
   const getDeviceFaultType = (device: Device): string | null => {
-    const fromReports = openFaultMap[device.id];
+    const fromReports = openFaultMap[device.id]?.faultType;
     const fromDevice = device.arizaDurumu && device.arizaDurumu !== 'yok' ? device.arizaDurumu : null;
     return fromReports || fromDevice || null;
   };
 
-  // Stats (only count devices that belong to hospitals with coordinates)
+  // Determine device category: 'faulty' | 'maintenance' | 'healthy'
+  const getDeviceCategory = (device: Device): 'faulty' | 'maintenance' | 'healthy' => {
+    const faultType = getDeviceFaultType(device);
+    if (faultType) return 'faulty';
+    if (maintenanceSoonDeviceIds.has(device.id)) return 'maintenance';
+    return 'healthy';
+  };
+
+  // Stats
   const stats = useMemo(() => {
     let healthy = 0;
-    let ownFault = 0;
-    let otherFault = 0;
+    let faulty = 0;
+    let maintenanceSoon = 0;
     let total = 0;
 
     hospitalMap.forEach((_, hospitalId) => {
       const devices = devicesByHospital.get(hospitalId) || [];
       devices.forEach((device) => {
         total++;
-        const faultType = getDeviceFaultType(device);
-        if (!faultType) {
-          healthy++;
-        } else if (faultType === panelType) {
-          ownFault++;
-        } else {
-          otherFault++;
-        }
+        const category = getDeviceCategory(device);
+        if (category === 'faulty') faulty++;
+        else if (category === 'maintenance') maintenanceSoon++;
+        else healthy++;
       });
     });
 
-    return { healthy, ownFault, otherFault, total };
-  }, [hospitalMap, devicesByHospital, openFaultMap, panelType]);
+    return { healthy, faulty, maintenanceSoon, total };
+  }, [hospitalMap, devicesByHospital, openFaultMap, maintenanceSoonDeviceIds, panelType]);
+
+  // Build hospital summaries for markers
+  const hospitalSummaries = useMemo(() => {
+    const summaries: HospitalSummary[] = [];
+    hospitalMap.forEach((hospital, hospitalId) => {
+      const devices = devicesByHospital.get(hospitalId) || [];
+      let healthy = 0;
+      let faulty = 0;
+      let maintenanceSoon = 0;
+
+      devices.forEach((device) => {
+        const category = getDeviceCategory(device);
+        if (category === 'faulty') faulty++;
+        else if (category === 'maintenance') maintenanceSoon++;
+        else healthy++;
+      });
+
+      summaries.push({ hospital, healthy, faulty, maintenanceSoon, total: devices.length });
+    });
+    return summaries;
+  }, [hospitalMap, devicesByHospital, openFaultMap, maintenanceSoonDeviceIds, panelType]);
+
+  // Handle hospital marker click -> show device list
+  const handleHospitalClick = useCallback((hospitalId: string) => {
+    const hospital = hospitalMap.get(hospitalId);
+    if (!hospital) return;
+
+    const devices = devicesByHospital.get(hospitalId) || [];
+    const deviceItems: DeviceListItem[] = devices.map((device) => ({
+      id: device.id,
+      name: device.cihazAdi || device.model || 'Cihaz',
+      serial: device.seriNumarasi || '',
+      category: getDeviceCategory(device),
+      faultReportId: openFaultMap[device.id]?.reportId,
+    }));
+
+    // Sort: faulty first, then maintenance, then healthy
+    const order = { faulty: 0, maintenance: 1, healthy: 2 };
+    deviceItems.sort((a, b) => order[a.category] - order[b.category]);
+
+    setSelectedHospital({
+      hospitalId,
+      hospitalName: hospital.name || hospital.ad || 'Laboratuvar',
+      devices: deviceItems,
+    });
+  }, [hospitalMap, devicesByHospital, openFaultMap, maintenanceSoonDeviceIds]);
+
+  // Handle device click -> navigate
+  const handleDeviceClick = useCallback((device: DeviceListItem) => {
+    if (device.category === 'faulty' && device.faultReportId) {
+      router.push(`/ariza-yonetimi/${device.faultReportId}`);
+    } else {
+      const basePath = panelType === 'teknik_servis'
+        ? '/teknik-servis/islem-formu'
+        : '/aplikasyon-paneli/islem-formu';
+      router.push(`${basePath}/${device.id}`);
+    }
+  }, [panelType, router]);
 
   // Initialize map once
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
     const map = L.map(containerRef.current, {
-      center: ANATOLIA_CENTER,
-      zoom: 11,
-      maxBounds: ANATOLIA_BOUNDS.pad(0.3),
+      center: TURKEY_CENTER,
+      zoom: 6,
+      maxBounds: TURKEY_BOUNDS.pad(0.5),
       maxBoundsViscosity: 0.8,
-      minZoom: 10,
+      minZoom: 5,
       maxZoom: 17,
       zoomControl: false,
       attributionControl: false,
@@ -194,6 +418,10 @@ export default function DeviceMapPanel({
     };
   }, []);
 
+  // Store handleHospitalClick in ref so Leaflet event handlers can access latest version
+  const handleHospitalClickRef = useRef(handleHospitalClick);
+  handleHospitalClickRef.current = handleHospitalClick;
+
   // Update markers when data changes
   useEffect(() => {
     const map = mapRef.current;
@@ -202,72 +430,61 @@ export default function DeviceMapPanel({
 
     layerGroup.clearLayers();
 
-    const hospitalIcon = createHospitalIcon();
     const bounds = L.latLngBounds([]);
 
-    hospitalMap.forEach((hospital, hospitalId) => {
+    hospitalSummaries.forEach((summary) => {
+      const { hospital } = summary;
       const lat = hospital.lat!;
       const lng = hospital.lng!;
       const pos: [number, number] = [lat, lng];
       bounds.extend(pos);
 
-      const devices = devicesByHospital.get(hospitalId) || [];
-      const healthyCount = devices.filter((d) => !getDeviceFaultType(d)).length;
-      const faultyCount = devices.length - healthyCount;
+      if (summary.total === 0) return;
 
-      // Hospital marker
-      const hospitalMarker = L.marker(pos, { icon: hospitalIcon, zIndexOffset: 1000 });
-      hospitalMarker.bindTooltip(
-        `<div style="font-weight:600;font-size:13px;margin-bottom:2px">${hospital.name || hospital.ad || 'Laboratuvar'}</div>
-         <div style="font-size:11px;color:#666">${devices.length} cihaz · ${healthyCount} sağlıklı${faultyCount > 0 ? ` · ${faultyCount} arızalı` : ''}</div>`,
-        { direction: 'top', offset: L.point(0, -18), className: 'device-map-tooltip' }
-      );
-      hospitalMarker.addTo(layerGroup);
+      const icon = createSummaryIcon(summary);
+      const marker = L.marker(pos, { icon, zIndexOffset: 1000 });
 
-      // Device dots arranged in a circle around the hospital
-      if (devices.length > 0) {
-        const radius = 0.003 + devices.length * 0.0004;
-        devices.forEach((device, idx) => {
-          const angle = (2 * Math.PI * idx) / devices.length - Math.PI / 2;
-          const dLat = lat + radius * Math.sin(angle);
-          const dLng = lng + radius * 1.4 * Math.cos(angle);
-
-          const faultType = getDeviceFaultType(device);
-          let color = '#4ADE80'; // green - healthy
-          if (faultType) {
-            color = faultType === panelType ? '#EF4444' : '#F59E0B'; // red=own, orange=other
-          }
-
-          const deviceName = device.cihazAdi || device.model || 'Cihaz';
-          const deviceSerial = device.seriNumarasi || '';
-
-          const dot = L.marker([dLat, dLng], {
-            icon: createCircleIcon(color),
-            zIndexOffset: 500,
-          });
-          dot.bindTooltip(
-            `<div style="font-weight:600;font-size:12px">${deviceName}</div>
-             ${deviceSerial ? `<div style="font-size:11px;color:#888">${deviceSerial}</div>` : ''}
-             <div style="font-size:11px;margin-top:2px;color:${color};font-weight:500">${
-              !faultType
-                ? 'Sağlıklı'
-                : faultType === 'teknik_servis'
-                  ? 'Arızalı (Teknik Servis)'
-                  : 'Arızalı (Aplikasyon)'
-            }</div>`,
-            { direction: 'top', offset: L.point(0, -8), className: 'device-map-tooltip' }
-          );
-          dot.addTo(layerGroup);
-        });
+      const tooltipParts = [
+        `<div style="font-weight:600;font-size:13px;margin-bottom:4px">${hospital.name || hospital.ad || 'Laboratuvar'}</div>`,
+        `<div style="font-size:11px;color:#666;margin-bottom:2px">Toplam ${summary.total} cihaz</div>`,
+      ];
+      if (summary.healthy > 0) {
+        tooltipParts.push(`<div style="font-size:11px;color:#22c55e;font-weight:500">● ${summary.healthy} Sağlıklı</div>`);
       }
+      if (summary.faulty > 0) {
+        tooltipParts.push(`<div style="font-size:11px;color:#ef4444;font-weight:500">● ${summary.faulty} Arızalı</div>`);
+      }
+      if (summary.maintenanceSoon > 0) {
+        tooltipParts.push(`<div style="font-size:11px;color:#f59e0b;font-weight:500">⚠ ${summary.maintenanceSoon} Bakımı Yaklaşan</div>`);
+      }
+
+      marker.bindTooltip(
+        tooltipParts.join(''),
+        { direction: 'top', offset: L.point(0, -4), className: 'device-map-tooltip' }
+      );
+
+      marker.on('click', () => {
+        handleHospitalClickRef.current(hospital.id);
+      });
+
+      marker.addTo(layerGroup);
     });
 
     if (bounds.isValid()) {
-      map.fitBounds(bounds.pad(0.12));
+      map.fitBounds(bounds.pad(0.15));
     }
-  }, [hospitalMap, devicesByHospital, openFaultMap, panelType]);
+  }, [hospitalSummaries]);
 
   const panelLabel = panelType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+
+  // Group selected hospital devices by category
+  const groupedDevices = useMemo(() => {
+    if (!selectedHospital) return null;
+    const faulty = selectedHospital.devices.filter((d) => d.category === 'faulty');
+    const maintenance = selectedHospital.devices.filter((d) => d.category === 'maintenance');
+    const healthy = selectedHospital.devices.filter((d) => d.category === 'healthy');
+    return { faulty, maintenance, healthy };
+  }, [selectedHospital]);
 
   return (
     <div className="device-map-shell">
@@ -275,30 +492,26 @@ export default function DeviceMapPanel({
       <div className="device-map-header">
         <div>
           <h1 className="device-map-title">{panelLabel} Harita Paneli</h1>
-          <p className="device-map-subtitle">Cihaz durumları · İstanbul Anadolu Yakası</p>
+          <p className="device-map-subtitle">Cihaz durumları · Tüm bölgeler</p>
         </div>
       </div>
 
       {/* Stats bar */}
       <div className="device-map-stats">
         <div className="device-map-stat">
-          <span className="device-map-stat-dot" style={{ background: '#4ADE80' }} />
+          <span className="device-map-stat-dot" style={{ background: '#22c55e' }} />
           <span className="device-map-stat-label">Sağlıklı</span>
           <span className="device-map-stat-value">{stats.healthy}</span>
         </div>
         <div className="device-map-stat">
-          <span className="device-map-stat-dot" style={{ background: '#EF4444' }} />
-          <span className="device-map-stat-label">
-            {panelType === 'teknik_servis' ? 'Teknik Arıza' : 'Aplikasyon Arıza'}
-          </span>
-          <span className="device-map-stat-value">{stats.ownFault}</span>
+          <span className="device-map-stat-dot" style={{ background: '#ef4444' }} />
+          <span className="device-map-stat-label">Arızalı</span>
+          <span className="device-map-stat-value">{stats.faulty}</span>
         </div>
         <div className="device-map-stat">
-          <span className="device-map-stat-dot" style={{ background: '#F59E0B' }} />
-          <span className="device-map-stat-label">
-            {panelType === 'teknik_servis' ? 'Aplikasyon Arıza' : 'Teknik Arıza'}
-          </span>
-          <span className="device-map-stat-value">{stats.otherFault}</span>
+          <span className="device-map-stat-dot device-map-stat-dot-warning" style={{ background: '#f59e0b' }} />
+          <span className="device-map-stat-label">Bakımı Yaklaşan</span>
+          <span className="device-map-stat-value">{stats.maintenanceSoon}</span>
         </div>
         <div className="device-map-stat device-map-stat-total">
           <span className="device-map-stat-label">Toplam</span>
@@ -309,6 +522,106 @@ export default function DeviceMapPanel({
       {/* Map container */}
       <div className="device-map-container">
         <div ref={containerRef} className="device-map-leaflet" />
+
+        {/* Device list popup overlay */}
+        {selectedHospital && groupedDevices && (
+          <div className="device-map-popup-overlay" onClick={() => setSelectedHospital(null)}>
+            <div className="device-map-popup" onClick={(e) => e.stopPropagation()}>
+              {/* Popup header */}
+              <div className="device-map-popup-header">
+                <div>
+                  <h2 className="device-map-popup-title">{selectedHospital.hospitalName}</h2>
+                  <p className="device-map-popup-subtitle">{selectedHospital.devices.length} cihaz</p>
+                </div>
+                <button
+                  className="device-map-popup-close"
+                  onClick={() => setSelectedHospital(null)}
+                  aria-label="Kapat"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Device list */}
+              <div className="device-map-popup-body">
+                {/* Faulty devices */}
+                {groupedDevices.faulty.length > 0 && (
+                  <div className="device-map-popup-section">
+                    <div className="device-map-popup-section-header device-map-popup-section-faulty">
+                      <span className="device-map-popup-section-dot" style={{ background: '#ef4444' }} />
+                      Arızalı Cihazlar ({groupedDevices.faulty.length})
+                    </div>
+                    {groupedDevices.faulty.map((device) => (
+                      <button
+                        key={device.id}
+                        className="device-map-popup-device device-map-popup-device-faulty"
+                        onClick={() => handleDeviceClick(device)}
+                      >
+                        <div className="device-map-popup-device-info">
+                          <span className="device-map-popup-device-name">{device.name}</span>
+                          {device.serial && (
+                            <span className="device-map-popup-device-serial">{device.serial}</span>
+                          )}
+                        </div>
+                        <span className="device-map-popup-device-arrow">→</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Maintenance approaching devices */}
+                {groupedDevices.maintenance.length > 0 && (
+                  <div className="device-map-popup-section">
+                    <div className="device-map-popup-section-header device-map-popup-section-maintenance">
+                      <span className="device-map-popup-section-dot" style={{ background: '#f59e0b' }} />
+                      Bakımı Yaklaşan Cihazlar ({groupedDevices.maintenance.length})
+                    </div>
+                    {groupedDevices.maintenance.map((device) => (
+                      <button
+                        key={device.id}
+                        className="device-map-popup-device device-map-popup-device-maintenance"
+                        onClick={() => handleDeviceClick(device)}
+                      >
+                        <div className="device-map-popup-device-info">
+                          <span className="device-map-popup-device-name">{device.name}</span>
+                          {device.serial && (
+                            <span className="device-map-popup-device-serial">{device.serial}</span>
+                          )}
+                        </div>
+                        <span className="device-map-popup-device-arrow">→</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Healthy devices */}
+                {groupedDevices.healthy.length > 0 && (
+                  <div className="device-map-popup-section">
+                    <div className="device-map-popup-section-header device-map-popup-section-healthy">
+                      <span className="device-map-popup-section-dot" style={{ background: '#22c55e' }} />
+                      Sağlıklı Cihazlar ({groupedDevices.healthy.length})
+                    </div>
+                    {groupedDevices.healthy.map((device) => (
+                      <button
+                        key={device.id}
+                        className="device-map-popup-device device-map-popup-device-healthy"
+                        onClick={() => handleDeviceClick(device)}
+                      >
+                        <div className="device-map-popup-device-info">
+                          <span className="device-map-popup-device-name">{device.name}</span>
+                          {device.serial && (
+                            <span className="device-map-popup-device-serial">{device.serial}</span>
+                          )}
+                        </div>
+                        <span className="device-map-popup-device-arrow">→</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

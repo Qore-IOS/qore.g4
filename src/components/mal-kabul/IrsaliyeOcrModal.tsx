@@ -13,6 +13,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp, where } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface SavedIrsaliyeFile {
   id: string;
@@ -24,6 +26,10 @@ interface SavedIrsaliyeFile {
   uploadedByName: string;
   uploadedAt: Timestamp;
   expiresAt: Timestamp;
+  companyId?: string;
+  locationType?: 'hospital' | 'depot';
+  locationId?: string;
+  locationName?: string;
 }
 
 interface IrsaliyeOcrModalProps {
@@ -31,6 +37,8 @@ interface IrsaliyeOcrModalProps {
   onClose: () => void;
   productCodes: ProductCode[];
   onResults: (results: IrsaliyeParseResult[]) => void;
+  locationType?: 'depot' | 'hospital';
+  locationId?: string;
 }
 
 export default function IrsaliyeOcrModal({
@@ -38,7 +46,10 @@ export default function IrsaliyeOcrModal({
   onClose,
   productCodes,
   onResults,
+  locationType,
+  locationId,
 }: IrsaliyeOcrModalProps) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [processing, setProcessing] = useState(false);
@@ -65,8 +76,13 @@ export default function IrsaliyeOcrModal({
       const files: SavedIrsaliyeFile[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.expiresAt && data.expiresAt.toMillis() > Date.now()) {
-          files.push({ id: docSnap.id, ...data } as SavedIrsaliyeFile);
+        const file = { id: docSnap.id, ...data } as SavedIrsaliyeFile;
+        const inScope = matchesCompanyScope(file, currentCompanyId, isSuperAdmin);
+        const locationMatch = locationType && locationId
+          ? file.locationType === locationType && file.locationId === locationId
+          : true;
+        if (data.expiresAt && data.expiresAt.toMillis() > Date.now() && inScope && locationMatch) {
+          files.push(file);
         }
       });
       setSavedFiles(files);
@@ -76,31 +92,53 @@ export default function IrsaliyeOcrModal({
     });
 
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, currentCompanyId, isSuperAdmin, locationType, locationId]);
 
 
   const processExtractedText = (text: string, source: 'Camera' | 'PDF') => {
     setOcrText(text);
-    const rawItems = parseIrsaliyeText(text, productCodes);
+    (async () => {
+      let rawItems: IrsaliyeParseResult[] = [];
+      try {
+        const aiRes = await fetch('/api/ai/irsaliye-parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            productCodes: productCodes.map((p) => ({ stokKodu: p.stokKodu, stokAdi: p.stokAdi })),
+          }),
+        });
+        const aiData = await aiRes.json().catch(() => ({}));
+        if (Array.isArray(aiData?.parsed) && aiData.parsed.length > 0) {
+          rawItems = aiData.parsed as IrsaliyeParseResult[];
+        }
+      } catch (error) {
+        console.warn('AI irsaliye parse unavailable, falling back local parser:', error);
+      }
 
-    const processedItems = rawItems.map(item => {
-        const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-        return {
-            ...item,
-            productName: product?.stokAdi || "Bilinmeyen Ürün",
-            quantity: item.quantity || 1,
-            unit: "Adet",
-            confidence: product ? 'high' : 'low',
-        };
-    });
+      if (rawItems.length === 0) {
+        rawItems = parseIrsaliyeText(text, productCodes);
+      }
 
-    setDetectedItems((prev: any[]) => [...prev, ...processedItems]);
+      const processedItems = rawItems.map(item => {
+          const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+          return {
+              ...item,
+              productName: product?.stokAdi || "Bilinmeyen Ürün",
+              quantity: item.quantity || 1,
+              unit: "Adet",
+              confidence: product ? 'high' : 'low',
+          };
+      });
 
-    if (processedItems.length === 0) {
-        toast({ title: `${source} tarandı ancak ürün/miktar eşleşmesi bulunamadı.`, variant: "default" });
-    } else {
-        toast({ title: "Başarılı", description: `${processedItems.length} ürün başarıyla ayrıştırıldı.` });
-    }
+      setDetectedItems((prev: any[]) => [...prev, ...processedItems]);
+
+      if (processedItems.length === 0) {
+          toast({ title: `${source} tarandı ancak ürün/miktar eşleşmesi bulunamadı.`, variant: "default" });
+      } else {
+          toast({ title: "Başarılı", description: `${processedItems.length} ürün başarıyla ayrıştırıldı.` });
+      }
+    })();
   };
 
   const handleCapture = async (blob: Blob | null) => {

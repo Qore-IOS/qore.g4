@@ -144,6 +144,8 @@ declare module "@/lib/types" {
     ilce?: string;
     aktif?: boolean;
     consumptionTrackingEnabled?: boolean;
+    manualDeductionEnabled?: boolean;
+    visualDeductionEnabled?: boolean;
     fefoEnabled?: boolean;
     address?: string;
     lat?: number;
@@ -428,6 +430,10 @@ declare module "@/lib/types" {
     imageUrl?: string;
     cihazAdi?: string;
     seriNumarasi?: string;
+    mulkiyet?: string;
+    kurulumTarihi?: string;
+    kurulumPersonelleri?: string;
+    aciklama?: string;
     kod?: string;
     hospitalId?: ID;
     aktif?: boolean;

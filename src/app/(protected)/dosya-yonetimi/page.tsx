@@ -3,6 +3,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
+import { useDepots, useHospitals } from '@/hooks/useFirebaseQueries';
+import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import {
   collection,
   addDoc,
@@ -20,19 +22,17 @@ import { useToast } from '@/hooks/use-toast';
 import { Progress } from '@/components/ui/progress';
 import {
   FileText,
-  Upload,
   Trash2,
   Loader2,
   FileSpreadsheet,
   FolderOpen,
   Clock,
   Download,
-  ArrowLeft,
   FileUp,
   AlertCircle,
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface IrsaliyeDosya {
   id: string;
@@ -45,13 +45,18 @@ interface IrsaliyeDosya {
   uploadedByName: string;
   uploadedAt: Timestamp;
   expiresAt: Timestamp;
+  companyId?: string;
+  locationType?: 'hospital' | 'depot';
+  locationId?: string;
+  locationName?: string;
 }
 
 export default function DosyaYonetimiPage() {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
-  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { data: depots = [] } = useDepots();
+  const { data: hospitals = [] } = useHospitals();
 
   const [dosyalar, setDosyalar] = useState<IrsaliyeDosya[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +64,8 @@ export default function DosyaYonetimiPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [selectedLocationType, setSelectedLocationType] = useState<'hospital' | 'depot' | ''>('');
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
 
   // Listen to irsaliye files in real-time
   useEffect(() => {
@@ -70,7 +77,10 @@ export default function DosyaYonetimiPage() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const files: IrsaliyeDosya[] = [];
       snapshot.forEach((docSnap) => {
-        files.push({ id: docSnap.id, ...docSnap.data() } as IrsaliyeDosya);
+        const file = { id: docSnap.id, ...docSnap.data() } as IrsaliyeDosya;
+        if (matchesCompanyScope(file, currentCompanyId, isSuperAdmin)) {
+          files.push(file);
+        }
       });
       setDosyalar(files);
       setLoading(false);
@@ -80,7 +90,7 @@ export default function DosyaYonetimiPage() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Clean up expired files on mount
   useEffect(() => {
@@ -92,9 +102,13 @@ export default function DosyaYonetimiPage() {
           where('expiresAt', '<=', now)
         );
         const snapshot = await getDocs(expiredQuery);
+        let deletedCount = 0;
 
         for (const docSnap of snapshot.docs) {
           const data = docSnap.data();
+          if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) {
+            continue;
+          }
           try {
             await fetch('/api/storage/delete-file', {
               method: 'POST',
@@ -105,12 +119,13 @@ export default function DosyaYonetimiPage() {
             // File may already be deleted from storage
           }
           await deleteDoc(doc(db, 'irsaliyeDosyalari', docSnap.id));
+          deletedCount += 1;
         }
 
-        if (snapshot.docs.length > 0) {
+        if (deletedCount > 0) {
           toast({
             title: 'Temizlik',
-            description: `${snapshot.docs.length} süresi dolmuş dosya silindi.`,
+            description: `${deletedCount} süresi dolmuş dosya silindi.`,
           });
         }
       } catch (error) {
@@ -119,10 +134,31 @@ export default function DosyaYonetimiPage() {
     };
 
     cleanupExpired();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   const processFile = useCallback(async (file: File) => {
     if (!currentUser) return;
+    if (!selectedLocationType || !selectedLocationId) {
+      toast({
+        title: 'Konum seçimi gerekli',
+        description: 'Yükleme öncesinde dosyanın bağlı olduğu hastane veya depoyu seçin.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const selectedLocationName = selectedLocationType === 'hospital'
+      ? (hospitals.find((h) => h.id === selectedLocationId)?.name || hospitals.find((h) => h.id === selectedLocationId)?.ad || '')
+      : (depots.find((d) => d.id === selectedLocationId)?.name || '');
+
+    if (!selectedLocationName) {
+      toast({
+        title: 'Geçersiz konum',
+        description: 'Seçilen konum bulunamadı. Lütfen tekrar seçin.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     const allowedTypes = [
       'application/pdf',
@@ -182,6 +218,7 @@ export default function DosyaYonetimiPage() {
       const oneWeekLater = Timestamp.fromMillis(now.toMillis() + 7 * 24 * 60 * 60 * 1000);
 
       await addDoc(collection(db, 'irsaliyeDosyalari'), {
+        companyId: normalizeCompanyId(currentCompanyId),
         fileName: file.name,
         fileType,
         fileSize: file.size,
@@ -191,6 +228,9 @@ export default function DosyaYonetimiPage() {
         uploadedByName: currentUserProfile?.displayName || currentUserProfile?.email || 'Bilinmeyen',
         uploadedAt: now,
         expiresAt: oneWeekLater,
+        locationType: selectedLocationType,
+        locationId: selectedLocationId,
+        locationName: selectedLocationName,
       });
 
       setUploadProgress(100);
@@ -209,7 +249,16 @@ export default function DosyaYonetimiPage() {
       });
       setUploading(false);
     }
-  }, [currentUser, currentUserProfile, toast]);
+  }, [
+    currentUser,
+    currentUserProfile,
+    toast,
+    selectedLocationType,
+    selectedLocationId,
+    depots,
+    hospitals,
+    currentCompanyId,
+  ]);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -237,6 +286,14 @@ export default function DosyaYonetimiPage() {
 
   const handleDelete = useCallback(async (dosya: IrsaliyeDosya) => {
     if (!currentUser) return;
+    if (!matchesCompanyScope(dosya, currentCompanyId, isSuperAdmin)) {
+      toast({
+        title: 'Yetkisiz işlem',
+        description: 'Bu dosya için silme yetkiniz bulunmuyor.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setDeleting(dosya.id);
     try {
@@ -264,7 +321,7 @@ export default function DosyaYonetimiPage() {
     } finally {
       setDeleting(null);
     }
-  }, [currentUser, toast]);
+  }, [currentUser, toast, currentCompanyId, isSuperAdmin]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -280,6 +337,12 @@ export default function DosyaYonetimiPage() {
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
     return `${days} gün kaldı`;
   };
+
+  const konumSecenekleri = selectedLocationType === 'hospital' ? hospitals : depots;
+  const gorunenDosyalar =
+    selectedLocationType && selectedLocationId
+      ? dosyalar.filter((d) => d.locationType === selectedLocationType && d.locationId === selectedLocationId)
+      : dosyalar;
 
   return (
     <div className="dashboard-neu-page min-h-screen p-4 md:p-6 lg:p-8">
@@ -318,6 +381,47 @@ export default function DosyaYonetimiPage() {
           </div>
         </div>
 
+        {/* ─── Konum Seçimi ───────────────────────────────── */}
+        <div className="px-6 pb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs font-medium mb-1" style={{ color: 'var(--dashboard-muted)' }}>Konum Türü</p>
+            <Select
+              value={selectedLocationType}
+              onValueChange={(value: 'hospital' | 'depot') => {
+                setSelectedLocationType(value);
+                setSelectedLocationId('');
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Hastane veya depo seçin" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hospital">Hastane</SelectItem>
+                <SelectItem value="depot">Depo</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <p className="text-xs font-medium mb-1" style={{ color: 'var(--dashboard-muted)' }}>Konum</p>
+            <Select
+              value={selectedLocationId}
+              onValueChange={setSelectedLocationId}
+              disabled={!selectedLocationType}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={selectedLocationType ? 'Konum seçin' : 'Önce konum türü seçin'} />
+              </SelectTrigger>
+              <SelectContent>
+                {konumSecenekleri.map((loc: any) => (
+                  <SelectItem key={loc.id} value={loc.id}>
+                    {loc.name || loc.ad}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         {/* ─── Upload Area ────────────────────────────────── */}
         <div className="px-6 pb-4">
           <label
@@ -331,6 +435,7 @@ export default function DosyaYonetimiPage() {
               boxShadow: isDragging ? 'var(--dashboard-pressed)' : 'none',
               transform: isDragging ? 'scale(1.005)' : 'scale(1)',
               pointerEvents: uploading ? 'none' : 'auto',
+              opacity: !selectedLocationType || !selectedLocationId ? 0.65 : 1,
             }}
           >
             {uploading ? (
@@ -370,6 +475,11 @@ export default function DosyaYonetimiPage() {
               disabled={uploading}
             />
           </label>
+          {(!selectedLocationType || !selectedLocationId) && (
+            <p className="mt-2 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+              Dosya yüklemek için önce irsaliyenin bağlı olduğu hastane/depo konumunu seçin.
+            </p>
+          )}
         </div>
 
         {/* ─── File List ──────────────────────────────────── */}
@@ -377,7 +487,7 @@ export default function DosyaYonetimiPage() {
           <div className="px-6 py-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>
               Yüklenen Dosyalar
-              <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--dashboard-muted)' }}>({dosyalar.length})</span>
+              <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--dashboard-muted)' }}>({gorunenDosyalar.length})</span>
             </h3>
           </div>
 
@@ -385,7 +495,7 @@ export default function DosyaYonetimiPage() {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-muted)' }} />
             </div>
-          ) : dosyalar.length === 0 ? (
+          ) : gorunenDosyalar.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-6">
               <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full mb-3">
                 <FolderOpen className="w-6 h-6" style={{ color: 'var(--dashboard-muted)', opacity: 0.5 }} />
@@ -395,7 +505,7 @@ export default function DosyaYonetimiPage() {
             </div>
           ) : (
             <div className="max-h-[400px] overflow-y-auto">
-              {dosyalar.map((dosya) => (
+              {gorunenDosyalar.map((dosya) => (
                 <div
                   key={dosya.id}
                   className="flex items-center justify-between px-6 py-3 transition-colors hover:opacity-80"
@@ -414,6 +524,7 @@ export default function DosyaYonetimiPage() {
                       <div className="flex items-center gap-3 text-xs mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
                         <span>{formatFileSize(dosya.fileSize)}</span>
                         <span className="hidden sm:inline">{dosya.uploadedByName}</span>
+                        <span className="hidden md:inline">{dosya.locationName || 'Konum belirtilmedi'}</span>
                         <span className="flex items-center gap-1">
                           <Clock className="h-3 w-3" />
                           {getRemainingDays(dosya.expiresAt)}

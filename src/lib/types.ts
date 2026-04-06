@@ -64,6 +64,7 @@ export interface Hospital {
   consumptionTrackingEnabled?: boolean; // NEW
   isConsumablesHospital?: boolean; // NEW: For "Hastane Sarf"
   manualDeductionEnabled?: boolean; // NEW: For "Manuel Düşüm"
+  visualDeductionEnabled?: boolean; // NEW: For 3D görsel düşüm
   fefoEnabled?: boolean;
   customProductOrder?: string[]; // Özel ürün sıralama - sipariş toplama ekranında kullanılır
   [k: string]: any;
@@ -297,6 +298,10 @@ export interface Device {
   brand: string;
   model: string;
   imageUrl: string;
+  mulkiyet?: string;
+  kurulumTarihi?: string;
+  kurulumPersonelleri?: string;
+  aciklama?: string;
   arizaDurumu?: 'yok' | 'teknik_servis' | 'aplikasyon';
   sonArizaTarihi?: TimestampLike;
   arizaAciklamasi?: string;
@@ -682,6 +687,8 @@ export interface PersonalStockItem {
   createdAt: Date;
   transferredByUid?: string;   // Transfer eden kişi (lojistik)
   transferredByName?: string;
+  previousOwnerUid?: string;   // Personelden personele transferde önceki sahip
+  previousOwnerName?: string;
   usedAt?: Date;               // Kullanıldığı tarih
   usedOnDeviceId?: string;     // Kullanıldığı cihaz
   usedOnDeviceName?: string;
@@ -768,6 +775,8 @@ export interface PendingReturn {
   sourceDeviceId?: string;
   sourceDeviceName?: string;
   returnType: 'return_to_depot' | 'submit_to_depot'; // return_to_depot = iade (yeni parça), submit_to_depot = teslim (cihazdan çıkan)
+  returnCondition?: 'iyi' | 'miad_gecmis' | 'arizali'; // Parçanın iade durumu
+  returnNote?: string;           // Açıklama (arızalı/miadı geçmiş için zorunlu, iyi için opsiyonel)
   status: 'pending' | 'confirmed';
   requestedAt: Date;
   requestedByUid?: string;
@@ -776,6 +785,8 @@ export interface PendingReturn {
   confirmedByUid?: string;
   confirmedByName?: string;
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
+  returnCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
+  returnConditionNote?: string;
 }
 
 // Transfer row for spare part transfer panel
@@ -804,6 +815,8 @@ export interface YedekParcaDepoStokItem {
   serialNumber?: string;         // Opsiyonel seri numarası
   hucreNumarasi?: string;        // Hücre numarası (1 harf + 4 rakam) - tekil takip
   quantity: number;              // Seri numarasız ürünler için adet
+  partCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
+  partConditionNote?: string;
   cihazGrubu?: string;          // Cihaz ana grubu (kutu, adet, şişe vs.)
   createdAt: Date;
   createdByUid: string;

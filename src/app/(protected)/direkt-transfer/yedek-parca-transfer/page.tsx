@@ -256,10 +256,28 @@ export default function YedekParcaTransferPage() {
   const [poolStockFilter, setPoolStockFilter] = useState<'all' | 'used' | 'unused'>('all');
   const [poolStockPage, setPoolStockPage] = useState(0);
 
+  // Return to depot modal state
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnModalItem, setReturnModalItem] = useState<PersonalStockItem | null>(null);
+  const [returnCondition, setReturnCondition] = useState<'iyi' | 'miad_gecmis' | 'arizali'>('iyi');
+  const [returnNote, setReturnNote] = useState('');
+  const [isReturning, setIsReturning] = useState(false);
+
+  // Personnel-to-personnel transfer modal state
+  const [pTransferModalOpen, setPTransferModalOpen] = useState(false);
+  const [pTransferItem, setPTransferItem] = useState<PersonalStockItem | null>(null);
+  const [pTransferTargetUid, setPTransferTargetUid] = useState('');
+  const [pTransferTargetName, setPTransferTargetName] = useState('');
+  const [pTransferQuantity, setPTransferQuantity] = useState(1);
+  const [pTransferSearchOpen, setPTransferSearchOpen] = useState(false);
+  const [pTransferSearchQuery, setPTransferSearchQuery] = useState('');
+  const [isPersonnelTransferring, setIsPersonnelTransferring] = useState(false);
+
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const isAdmin = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin';
   const isTeknikLojistik = currentUserProfile?.role === 'teknik_lojistik';
+  const canApproveDepotReturns = isAdmin || isTeknikLojistik;
   const isFieldPersonnel = currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const canAccessTransferPanel = !isFieldPersonnel;
 
@@ -1696,6 +1714,10 @@ export default function YedekParcaTransferPage() {
 
   // Confirm pending return
   const confirmPendingReturn = async (pendingReturn: PendingReturn) => {
+    if (!canApproveDepotReturns) {
+      toast({ title: 'Yetki Hatası', description: 'İade onayını yalnızca teknik lojistik veya admin kullanıcıları yapabilir.', variant: 'destructive' });
+      return;
+    }
     try {
       const now = new Date();
 
@@ -1724,6 +1746,8 @@ export default function YedekParcaTransferPage() {
           serialNumber: pendingReturn.serialNumber || '',
           address: '',
           quantity: 1,
+          partCondition: pendingReturn.returnCondition || 'iyi',
+          partConditionNote: pendingReturn.returnConditionNote || null,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -1742,7 +1766,7 @@ export default function YedekParcaTransferPage() {
           quantity: 1,
           relatedPersonnelUid: pendingReturn.ownerUid,
           relatedPersonnelName: pendingReturn.ownerName,
-          notes: `İade teslim alındı: ${pendingReturn.ownerName} -> Depo`,
+          notes: `İade teslim alındı: ${pendingReturn.ownerName} -> Depo (Durum: ${pendingReturn.returnCondition || 'iyi'}${pendingReturn.returnConditionNote ? `, Açıklama: ${pendingReturn.returnConditionNote}` : ''})`,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -1759,6 +1783,7 @@ export default function YedekParcaTransferPage() {
         serialNumber: pendingReturn.serialNumber,
         fromUid: pendingReturn.ownerUid,
         fromName: pendingReturn.ownerName,
+        notes: `İade durumu: ${pendingReturn.returnCondition || 'iyi'}${pendingReturn.returnConditionNote ? ` (${pendingReturn.returnConditionNote})` : ''}`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -1766,7 +1791,7 @@ export default function YedekParcaTransferPage() {
 
       toast({
         title: 'Teslim Alındı',
-        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber || 'Seri No Yok'}) depoya teslim alındı.`,
+        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber || 'Seri No Yok'}) depoya teslim alındı (${pendingReturn.returnCondition || 'iyi'}).`,
       });
 
       setPendingReturns(prev => prev.filter(p => p.id !== pendingReturn.id));
@@ -1776,6 +1801,69 @@ export default function YedekParcaTransferPage() {
     } catch (err) {
       console.error('Error confirming return:', err);
       toast({ title: 'Hata', description: 'İşlem sırasında hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  // Initiate return to depot (by field personnel)
+  const initiateReturn = async () => {
+    if (!returnModalItem) return;
+
+    // Arızalı veya miadı geçmiş ise açıklama zorunlu
+    if ((returnCondition === 'arizali' || returnCondition === 'miad_gecmis') && !returnNote.trim()) {
+      toast({
+        title: 'Açıklama Gerekli',
+        description: returnCondition === 'arizali'
+          ? 'Arızalı parça için arıza açıklaması zorunludur.'
+          : 'Miadı geçmiş parça için açıklama zorunludur.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsReturning(true);
+    try {
+      const now = new Date();
+      await addDoc(collection(db, 'pendingReturns'), withCompanyScope({
+        personalStockId: returnModalItem.id,
+        ownerUid: returnModalItem.ownerUid,
+        ownerName: returnModalItem.ownerName,
+        productCodeId: returnModalItem.productCodeId,
+        stokKodu: returnModalItem.stokKodu,
+        stokAdi: returnModalItem.stokAdi,
+        anaBirim: returnModalItem.anaBirim || 'Adet',
+        serialNumber: returnModalItem.serialNumber || '',
+        source: returnModalItem.source,
+        returnType: 'return_to_depot' as const,
+        returnCondition,
+        ...(returnNote.trim() ? { returnNote: returnNote.trim() } : {}),
+        status: 'pending' as const,
+        requestedAt: Timestamp.fromDate(now),
+        requestedByUid: currentUserProfile?.uid || '',
+        requestedByName: currentUserProfile?.name || '',
+      }, currentCompanyId));
+
+      await updateDoc(doc(db, 'personalStock', returnModalItem.id), {
+        status: 'pending_return',
+      });
+
+      setPersonnelStock(prev =>
+        prev.map(s => s.id === returnModalItem.id ? { ...s, status: 'pending_return' as const } : s)
+      );
+
+      setReturnModalOpen(false);
+      setReturnModalItem(null);
+      setReturnCondition('iyi');
+      setReturnNote('');
+      toast({
+        title: 'İade Talebi Gönderildi',
+        description: `${returnModalItem.stokAdi} için iade talebi lojistik sorumlusuna iletildi.`,
+      });
+      await loadRecentTransferLogs();
+    } catch (err) {
+      console.error('Error initiating return:', err);
+      toast({ title: 'Hata', description: 'İade talebi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsReturning(false);
     }
   };
 
@@ -1907,6 +1995,102 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  // Personnel-to-personnel transfer (owner initiates, target must approve)
+  const sendPersonnelTransfer = async () => {
+    if (!pTransferItem || !pTransferTargetUid || !pTransferTargetName) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen hedef personeli seçin.', variant: 'destructive' });
+      return;
+    }
+    if (pTransferTargetUid === currentUserProfile?.uid) {
+      toast({ title: 'Hata', description: 'Kendinize transfer yapamazsınız.', variant: 'destructive' });
+      return;
+    }
+
+    // Find all in_stock records for same owner + stokKodu
+    const availableItems = personnelStock.filter(
+      s => s.status === 'in_stock' &&
+        s.ownerUid === pTransferItem.ownerUid &&
+        s.stokKodu === pTransferItem.stokKodu
+    );
+    const qty = Math.min(pTransferQuantity, availableItems.length);
+    if (qty < 1) {
+      toast({ title: 'Hata', description: 'Transfer edilecek ürün bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    setIsPersonnelTransferring(true);
+    try {
+      const now = new Date();
+      const batch = writeBatch(db);
+      const itemsToTransfer = availableItems.slice(0, qty);
+
+      for (const si of itemsToTransfer) {
+        batch.update(doc(db, 'personalStock', si.id), {
+          ownerUid: pTransferTargetUid,
+          ownerName: pTransferTargetName,
+          status: 'pending_approval',
+          previousOwnerUid: si.ownerUid,
+          previousOwnerName: si.ownerName,
+          transferredByUid: currentUserProfile?.uid || '',
+          transferredByName: currentUserProfile?.name || '',
+          transferredAt: Timestamp.fromDate(now),
+        });
+      }
+
+      // Transfer log
+      const logRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(logRef, withCompanyScope({
+        action: 'transfer_between_personnel',
+        productCodeId: pTransferItem.productCodeId,
+        stokKodu: pTransferItem.stokKodu,
+        stokAdi: pTransferItem.stokAdi,
+        anaBirim: pTransferItem.anaBirim || 'Adet',
+        serialNumber: pTransferItem.serialNumber || '',
+        quantity: qty,
+        fromUid: pTransferItem.ownerUid,
+        fromName: pTransferItem.ownerName,
+        toUid: pTransferTargetUid,
+        toName: pTransferTargetName,
+        status: 'pending_approval',
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      }, currentCompanyId));
+
+      await batch.commit();
+
+      // Notifications
+      emitSparePartTransfer({
+        actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
+        targetUid: pTransferTargetUid,
+        targetName: pTransferTargetName,
+        items: [{ stokKodu: pTransferItem.stokKodu, stokAdi: pTransferItem.stokAdi, quantity: qty }],
+      }).catch(e => console.error('Personnel transfer notification error:', e));
+
+      toast({
+        title: 'Transfer Gönderildi',
+        description: `${qty} adet ${pTransferItem.stokAdi}, ${pTransferTargetName} personelinin onayına gönderildi.`,
+      });
+
+      setPTransferModalOpen(false);
+      setPTransferItem(null);
+      setPTransferTargetUid('');
+      setPTransferTargetName('');
+      setPTransferQuantity(1);
+      setPTransferSearchQuery('');
+
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      await loadRecentTransferLogs();
+    } catch (err) {
+      console.error('Error sending personnel transfer:', err);
+      toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsPersonnelTransferring(false);
+    }
+  };
+
   const takeOverPersonnelStock = async (item: PersonalStockItem) => {
     if (!currentUserProfile?.uid || !currentUserProfile?.name) {
       toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
@@ -2013,74 +2197,112 @@ export default function YedekParcaTransferPage() {
 
   // Reject pending transfer - return to depot
   const rejectTransfer = async (item: PersonnelStockViewItem) => {
-    const shouldReject = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) transferini reddetmek istediğinize emin misiniz? Ürün depoya geri gönderilecektir.`);
+    const hasPreviousOwner = !!(item as any).previousOwnerUid;
+    const returnLabel = hasPreviousOwner ? `${(item as any).previousOwnerName} adlı personele geri gönderilecektir` : 'depoya geri gönderilecektir';
+    const shouldReject = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) transferini reddetmek istediğinize emin misiniz? Ürün ${returnLabel}.`);
     if (!shouldReject) return;
 
     try {
       const now = new Date();
       const batch = writeBatch(db);
 
-      // Delete from personalStock
-      batch.delete(doc(db, 'personalStock', item.id));
+      if (hasPreviousOwner) {
+        // Return to previous owner (personnel-to-personnel transfer rejected)
+        batch.update(doc(db, 'personalStock', item.id), {
+          ownerUid: (item as any).previousOwnerUid,
+          ownerName: (item as any).previousOwnerName,
+          status: 'in_stock',
+          previousOwnerUid: null,
+          previousOwnerName: null,
+          transferredAt: null,
+        });
 
-      // Add back to depot stock
-      const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
-      batch.set(depoRef, withCompanyScope({
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
-        quantity: 1,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      }, currentCompanyId));
+        const logRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(logRef, withCompanyScope({
+          action: 'transfer_rejected',
+          personalStockId: item.id,
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          fromUid: item.ownerUid,
+          fromName: item.ownerName,
+          toUid: (item as any).previousOwnerUid,
+          toName: (item as any).previousOwnerName,
+          quantity: 1,
+          notes: `Transfer reddedildi: ${item.ownerName} -> ${(item as any).previousOwnerName}`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
 
-      // Transfer log
-      const logRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(logRef, withCompanyScope({
-        action: 'transfer_rejected',
-        personalStockId: item.id,
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        fromUid: item.ownerUid,
-        fromName: item.ownerName,
-        quantity: 1,
-        notes: 'Transfer personel tarafından reddedildi, ürün depoya iade edildi.',
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      }, currentCompanyId));
+        await batch.commit();
 
-      // Depo log
-      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
-        action: 'iade_giris',
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        quantity: 1,
-        relatedPersonnelUid: item.ownerUid,
-        relatedPersonnelName: item.ownerName,
-        notes: `Transfer reddedildi: ${item.ownerName} -> Depo`,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      });
+        toast({
+          title: 'Reddedildi',
+          description: `${item.stokAdi} transferi reddedildi, ürün ${(item as any).previousOwnerName} adlı personele geri gönderildi.`,
+        });
+      } else {
+        // Return to depot (lojistik → personnel transfer rejected)
+        batch.delete(doc(db, 'personalStock', item.id));
 
-      await batch.commit();
+        const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
+        batch.set(depoRef, withCompanyScope({
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
+          quantity: 1,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
 
-      toast({
-        title: 'Reddedildi',
-        description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
-      });
+        const logRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(logRef, withCompanyScope({
+          action: 'transfer_rejected',
+          personalStockId: item.id,
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          fromUid: item.ownerUid,
+          fromName: item.ownerName,
+          quantity: 1,
+          notes: 'Transfer personel tarafından reddedildi, ürün depoya iade edildi.',
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
+
+        const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+        batch.set(depoLogRef, {
+          action: 'iade_giris',
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          quantity: 1,
+          relatedPersonnelUid: item.ownerUid,
+          relatedPersonnelName: item.ownerName,
+          notes: `Transfer reddedildi: ${item.ownerName} -> Depo`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+
+        await batch.commit();
+
+        toast({
+          title: 'Reddedildi',
+          description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
+        });
+      }
 
       if (menuSelection.personnelUid) {
         await fetchPersonnelStock(menuSelection.personnelUid);
@@ -2145,7 +2367,7 @@ export default function YedekParcaTransferPage() {
         {([
           { key: 'transfer' as const, label: 'Transfer', icon: <Send className="w-3 h-3" /> },
           { key: 'borrowed' as const, label: `Borç (${borrowedParts.length})`, icon: <HandCoins className="w-3 h-3" /> },
-          { key: 'pending' as const, label: `İade (${pendingReturns.length})`, icon: <Clock className="w-3 h-3" /> },
+          { key: 'pending' as const, label: `Depoda İade Bekleyenler (${pendingReturns.length})`, icon: <Clock className="w-3 h-3" /> },
           { key: 'history' as const, label: 'Geçmiş', icon: <History className="w-3 h-3" /> },
         ]).map(tab => {
           const isActive = transferTab === tab.key;
@@ -2387,12 +2609,29 @@ export default function YedekParcaTransferPage() {
                   <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: item.returnType === 'return_to_depot' ? 'rgba(22,163,74,.10)' : 'rgba(107,114,128,.10)', color: item.returnType === 'return_to_depot' ? '#16A34A' : 'var(--dashboard-muted)' }}>
                     {item.returnType === 'return_to_depot' ? 'İade (Yeni)' : 'Teslim (Çıkma)'}
                   </span>
+                  {item.returnCondition && (
+                    <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{
+                      background: item.returnCondition === 'iyi' ? 'rgba(22,163,74,.1)' : item.returnCondition === 'miad_gecmis' ? 'rgba(217,119,6,.1)' : 'rgba(185,28,28,.1)',
+                      color: item.returnCondition === 'iyi' ? '#16A34A' : item.returnCondition === 'miad_gecmis' ? '#D97706' : '#B91C1C',
+                    }}>
+                      {item.returnCondition === 'iyi' ? 'İyi' : item.returnCondition === 'miad_gecmis' ? 'Miadı Geçmiş' : 'Arızalı'}
+                    </span>
+                  )}
+                  {(item as any).returnNote && (
+                    <span className="text-[10px] italic" style={{ color: 'var(--dashboard-muted)' }}>— {(item as any).returnNote}</span>
+                  )}
                   <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.requestedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</span>
                 </div>
+                <p className="text-[10px] mt-1" style={{ color: 'var(--dashboard-muted)' }}>
+                  Durum: <span className="font-semibold">{item.returnCondition || 'iyi'}</span>
+                  {item.returnConditionNote ? ` · ${item.returnConditionNote}` : ''}
+                </p>
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
                 {item.imageUrl && <button onClick={() => setPreviewImage(item.imageUrl!)} className="cihaz-tool-item p-1.5"><ImageIcon className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} /></button>}
-                <button onClick={() => confirmPendingReturn(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Teslim Al</button>
+                {canApproveDepotReturns && (
+                  <button onClick={() => confirmPendingReturn(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Teslim Al</button>
+                )}
               </div>
             </article>
           ))}
@@ -2823,16 +3062,33 @@ export default function YedekParcaTransferPage() {
                               <Trash2 className="h-3.5 w-3.5" />
                               Stok Sil
                             </button>
-                          ) : canTakeOver ? (
-                            <button
-                              disabled={takingOverStockId === item.id}
-                              onClick={() => takeOverPersonnelStock(item)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50"
-                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                            >
-                              {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                              Üzerime Al
-                            </button>
+                          ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  const maxQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === item.ownerUid && s.stokKodu === item.stokKodu).length;
+                                  setPTransferItem(item);
+                                  setPTransferQuantity(Math.min(1, maxQty));
+                                  setPTransferTargetUid('');
+                                  setPTransferTargetName('');
+                                  setPTransferSearchQuery('');
+                                  setPTransferModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
+                                style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                              >
+                                <Send className="h-3.5 w-3.5" />
+                                Transfer Et
+                              </button>
+                              <button
+                                onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnNote(''); setReturnModalOpen(true); }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
+                                style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                              >
+                                <Upload className="h-3.5 w-3.5" />
+                                İade Et
+                              </button>
+                            </div>
                           ) : isUsed ? (
                             <span className="text-[11px] text-left inline-block max-w-[220px]" style={{ color: 'var(--dashboard-muted)' }}>
                               {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
@@ -2919,16 +3175,33 @@ export default function YedekParcaTransferPage() {
                           <Trash2 className="h-3 w-3" />
                           Stok Sil
                         </button>
-                      ) : canTakeOver ? (
-                        <button
-                          disabled={takingOverStockId === item.id}
-                          onClick={() => takeOverPersonnelStock(item)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50"
-                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                        >
-                          {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                          Üzerime Al
-                        </button>
+                      ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              const maxQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === item.ownerUid && s.stokKodu === item.stokKodu).length;
+                              setPTransferItem(item);
+                              setPTransferQuantity(Math.min(1, maxQty));
+                              setPTransferTargetUid('');
+                              setPTransferTargetName('');
+                              setPTransferSearchQuery('');
+                              setPTransferModalOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95"
+                            style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                          >
+                            <Send className="h-3 w-3" />
+                            Transfer
+                          </button>
+                          <button
+                            onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnNote(''); setReturnModalOpen(true); }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95"
+                            style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                          >
+                            <Upload className="h-3 w-3" />
+                            İade
+                          </button>
+                        </div>
                       ) : isUsed ? (
                         <span className="text-[10px] text-right max-w-[52%]" style={{ color: 'var(--dashboard-muted)' }}>
                           {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
@@ -3724,6 +3997,212 @@ export default function YedekParcaTransferPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Personele Transfer Et Dialog */}
+      <Dialog open={pTransferModalOpen} onOpenChange={(open) => { if (!isPersonnelTransferring) { setPTransferModalOpen(open); if (!open) { setPTransferItem(null); setPTransferTargetUid(''); setPTransferTargetName(''); setPTransferSearchQuery(''); } } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5" style={{ color: 'var(--dashboard-accent)' }} />
+              Personele Transfer Et
+            </DialogTitle>
+          </DialogHeader>
+          {pTransferItem && (() => {
+            const availableQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === pTransferItem.ownerUid && s.stokKodu === pTransferItem.stokKodu).length;
+            const targetUsers = users.filter(u => u.uid !== pTransferItem.ownerUid);
+            const filteredTargetUsers = pTransferSearchQuery
+              ? targetUsers.filter(u => (u.name || '').toLowerCase().includes(pTransferSearchQuery.toLowerCase()))
+              : targetUsers;
+            return (
+              <div className="space-y-4">
+                <div className="cihaz-pressed p-3 rounded-xl">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>{pTransferItem.stokAdi}</p>
+                  <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                    {pTransferItem.stokKodu}{pTransferItem.serialNumber ? ` • SN: ${pTransferItem.serialNumber}` : ` • Mevcut: ${availableQty} adet`}
+                  </p>
+                </div>
+
+                {/* Target personnel selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Hedef Personel</label>
+                  {pTransferTargetUid ? (
+                    <div className="flex items-center justify-between px-3 py-2 rounded-xl border" style={{ background: 'var(--dashboard-pressed)', borderColor: 'var(--dashboard-stroke)' }}>
+                      <span className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>{pTransferTargetName}</span>
+                      <button onClick={() => { setPTransferTargetUid(''); setPTransferTargetName(''); setPTransferSearchQuery(''); }} className="text-xs px-2 py-0.5 rounded-lg transition-all active:scale-95 hover:bg-black/5" style={{ color: '#B91C1C' }}>Değiştir</button>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--dashboard-stroke)' }}>
+                      <div className="px-3 py-2" style={{ background: 'var(--dashboard-pressed)' }}>
+                        <Input
+                          placeholder="Personel ara..."
+                          value={pTransferSearchQuery}
+                          onChange={(e) => setPTransferSearchQuery(e.target.value)}
+                          className="!border-0 !ring-0 h-8 text-sm bg-transparent px-0"
+                        />
+                      </div>
+                      <div className="max-h-40 overflow-y-auto">
+                        {filteredTargetUsers.length === 0 ? (
+                          <p className="text-xs text-center py-3" style={{ color: 'var(--dashboard-muted)' }}>Personel bulunamadı.</p>
+                        ) : filteredTargetUsers.map(u => (
+                          <button
+                            key={u.uid}
+                            onClick={() => {
+                              setPTransferTargetUid(u.uid);
+                              setPTransferTargetName(u.name || u.uid);
+                              setPTransferSearchQuery('');
+                            }}
+                            className="w-full flex flex-col px-3 py-2 text-left transition-all hover:bg-black/5"
+                            style={{ borderTop: '1px solid var(--dashboard-stroke)' }}
+                          >
+                            <span className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>{u.name}</span>
+                            <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                              {u.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quantity selector — only for non-serial items with multiple units */}
+                {!pTransferItem.serialNumber && availableQty > 1 && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>
+                      Adet <span style={{ color: 'var(--dashboard-muted)', fontWeight: 400 }}>(maks. {availableQty})</span>
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setPTransferQuantity(q => Math.max(1, q - 1))}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center font-bold transition-all active:scale-95"
+                        style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-text)' }}
+                      >−</button>
+                      <span className="text-lg font-bold w-8 text-center" style={{ color: 'var(--dashboard-text)' }}>{pTransferQuantity}</span>
+                      <button
+                        onClick={() => setPTransferQuantity(q => Math.min(availableQty, q + 1))}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center font-bold transition-all active:scale-95"
+                        style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-text)' }}
+                      >+</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <button
+              onClick={() => setPTransferModalOpen(false)}
+              disabled={isPersonnelTransferring}
+              className="cihaz-tool-item px-4 py-2 text-sm"
+              style={{ color: 'var(--dashboard-muted)' }}
+            >
+              Vazgeç
+            </button>
+            <button
+              onClick={sendPersonnelTransfer}
+              disabled={isPersonnelTransferring || !pTransferTargetUid}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all active:scale-95"
+              style={{ background: 'var(--dashboard-accent)' }}
+            >
+              {isPersonnelTransferring && <Loader2 className="w-4 h-4 animate-spin" />}
+              Transferi Gönder
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* İade Et Dialog */}
+      <Dialog open={returnModalOpen} onOpenChange={(open) => { if (!isReturning) { setReturnModalOpen(open); if (!open) { setReturnModalItem(null); setReturnNote(''); } } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" style={{ color: 'var(--dashboard-accent)' }} />
+              Depoya İade
+            </DialogTitle>
+          </DialogHeader>
+          {returnModalItem && (
+            <div className="space-y-4">
+              <div className="cihaz-pressed p-3 rounded-xl">
+                <p className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>{returnModalItem.stokAdi}</p>
+                <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                  {returnModalItem.stokKodu}{returnModalItem.serialNumber ? ` • SN: ${returnModalItem.serialNumber}` : ''}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Parça Durumu</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { value: 'iyi', label: 'İyi', color: '#16A34A', bg: 'rgba(22,163,74,.1)' },
+                    { value: 'miad_gecmis', label: 'Miadı Geçmiş', color: '#D97706', bg: 'rgba(217,119,6,.1)' },
+                    { value: 'arizali', label: 'Arızalı', color: '#B91C1C', bg: 'rgba(185,28,28,.1)' },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setReturnCondition(opt.value); setReturnNote(''); }}
+                      className="px-2 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 border-2"
+                      style={{
+                        background: returnCondition === opt.value ? opt.bg : 'transparent',
+                        color: opt.color,
+                        borderColor: returnCondition === opt.value ? opt.color : 'var(--dashboard-stroke)',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase flex items-center gap-1" style={{ color: 'var(--dashboard-muted)' }}>
+                  {returnCondition === 'arizali' ? 'Arıza Açıklaması' : returnCondition === 'miad_gecmis' ? 'Açıklama' : 'Açıklama (Opsiyonel)'}
+                  {(returnCondition === 'arizali' || returnCondition === 'miad_gecmis') && (
+                    <span className="text-[10px] font-bold" style={{ color: '#B91C1C' }}>*</span>
+                  )}
+                </label>
+                <textarea
+                  value={returnNote}
+                  onChange={(e) => setReturnNote(e.target.value)}
+                  placeholder={
+                    returnCondition === 'arizali'
+                      ? 'Arızanın detayını açıklayın...'
+                      : returnCondition === 'miad_gecmis'
+                      ? 'Miadı geçme durumunu açıklayın...'
+                      : 'Varsa açıklama ekleyebilirsiniz...'
+                  }
+                  rows={3}
+                  className="w-full text-sm resize-none rounded-xl px-3 py-2 !border-0 !ring-0 outline-none"
+                  style={{
+                    background: 'var(--dashboard-pressed)',
+                    color: 'var(--dashboard-text)',
+                    borderColor: (returnCondition === 'arizali' || returnCondition === 'miad_gecmis') && !returnNote.trim()
+                      ? 'rgba(185,28,28,.4)'
+                      : 'var(--dashboard-stroke)',
+                    border: '1.5px solid',
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <button
+              onClick={() => setReturnModalOpen(false)}
+              disabled={isReturning}
+              className="cihaz-tool-item px-4 py-2 text-sm"
+              style={{ color: 'var(--dashboard-muted)' }}
+            >
+              Vazgeç
+            </button>
+            <button
+              onClick={initiateReturn}
+              disabled={isReturning}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all active:scale-95"
+              style={{ background: 'var(--dashboard-accent)' }}
+            >
+              {isReturning && <Loader2 className="w-4 h-4 animate-spin" />}
+              İade Talebini Gönder
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

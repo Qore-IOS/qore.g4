@@ -37,7 +37,6 @@ const ICON_COLORS: Record<string, [string, string]> = {
   'numune-arsivi':         ['#64748b', '#475569'],   // slate
   'cihazdan-cikan-kit':    ['#ef4444', '#dc2626'],   // red
   'is-analizi':            ['#0ea5e9', '#0284c7'],   // sky
-  'verimlilik-hesaplama':  ['#84cc16', '#65a30d'],   // lime
   'total-verimlilik':      ['#d946ef', '#c026d3'],   // fuchsia
   'cihaz-yonetimi-ana':    ['#eab308', '#ca8a04'],   // yellow
   'raporlama':             ['#60a5fa', '#4f46e5'],   // blue-indigo
@@ -78,7 +77,6 @@ const ICON_COLORS: Record<string, [string, string]> = {
   'kullanim-dogrulama':    ['#22c55e', '#16a34a'],   // green
   'mal-kabul-gecmis':      ['#64748b', '#475569'],   // slate
   'siparis-gecmis':        ['#f59e0b', '#d97706'],   // amber
-  'verimlilik-hesaplama-sub': ['#84cc16', '#65a30d'], // lime
   'cost-dashboard':        ['#eab308', '#ca8a04'],   // yellow
   'teknik-servis':         ['#f97316', '#ea580c'],   // orange
   'ariza-yonetimi':        ['#ef4444', '#dc2626'],   // red
@@ -685,7 +683,7 @@ const DockItem = ({
           <TooltipTrigger asChild>
             <motion.div
               ref={(el) => { if (onRefSet) onRefSet(el); (iconRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
-              animate={!isLiquidMode && isHovered ? { scale: 1.1 } : { scale: 1 }}
+              animate={!isLiquidMode && isHovered ? { scale: 2 } : { scale: 1 }}
               className={cn(
                 'dock-item-wrapper flex items-center justify-center cursor-pointer',
                 isActive && item.type === 'nav' && 'active',
@@ -695,7 +693,7 @@ const DockItem = ({
               onClick={(e) => handleNavigate(e, item.href)}
             >
               {customIcon ? (
-                <Image src={getIconSrc(customIcon)} alt={item.label} width={28} height={28} className="dock-item-icon object-contain" />
+                <Image src={getIconSrc(customIcon)} alt={item.label} width={34} height={34} className="dock-item-icon object-contain" />
               ) : (
                 <item.icon className="dock-item-icon" style={iconGradientStyle} />
               )}
@@ -728,7 +726,7 @@ const DockItem = ({
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={!isLiquidMode && isHovered ? { scale: 1.15, y: -4 } : { scale: 1, y: 0 }}
+        animate={!isLiquidMode && isHovered ? { scale: 2, y: -6 } : { scale: 1, y: 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
           isActive && item.type === 'nav' && 'active',
@@ -738,7 +736,7 @@ const DockItem = ({
         onClick={(e) => handleNavigate(e, item.href)}
       >
         {customIcon ? (
-          <Image src={getIconSrc(customIcon)} alt={item.label} width={28} height={28} className="dock-item-icon object-contain" />
+          <Image src={getIconSrc(customIcon)} alt={item.label} width={34} height={34} className="dock-item-icon object-contain" />
         ) : (
           <item.icon className="dock-item-icon" style={iconGradientStyle} />
         )}

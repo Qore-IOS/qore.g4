@@ -23,6 +23,7 @@ import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
+import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
@@ -309,6 +310,9 @@ export default function UrunKullanimPanel() {
   const [manualLotKey, setManualLotKey] = useState('');
   const [manualQuantity, setManualQuantity] = useState(1);
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [mainUnitModels, setMainUnitModels] = useState<Record<string, string>>({});
+  const [visualSearchQuery, setVisualSearchQuery] = useState('');
+  const [selectedLabGroup, setSelectedLabGroup] = useState<string | null>(null);
 
   // Trash bin modal states
   const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
@@ -335,6 +339,25 @@ export default function UrunKullanimPanel() {
     return () => {
       window.removeEventListener('openDeviceFaultModal', handleOpenFaultModal as EventListener);
     };
+  }, []);
+
+  useEffect(() => {
+    const fetchMainUnitModels = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'def_mainUnits'));
+        const modelMap: Record<string, string> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() as any;
+          if (data?.name && data?.modelSvg) {
+            modelMap[String(data.name).trim().toLocaleLowerCase('tr')] = data.modelSvg;
+          }
+        });
+        setMainUnitModels(modelMap);
+      } catch (error) {
+        urunKullanimLogger.warn('Ana birim 3D modelleri yüklenemedi', { error: (error as any)?.message });
+      }
+    };
+    fetchMainUnitModels();
   }, []);
 
 
@@ -1079,6 +1102,83 @@ export default function UrunKullanimPanel() {
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
   }, [labStock, manualProductCode]);
 
+  const listDeductionItems = useMemo(() => {
+    if (!selectedLab?.visualDeductionEnabled) return [];
+    const grouped = new Map<string, {
+      stokKodu: string;
+      stokAdi: string;
+      lotNumarasi: string;
+      miad: string;
+      count: number;
+      anaBirim: string;
+      laboratuvarGrubu: string;
+    }>();
+
+    labStock.forEach((item) => {
+      const product = products.find((p) => p.stokKodu === item.stokKodu);
+      const anaBirim = String(product?.anaBirim || 'Adet');
+      const lotNumarasi = item.lotNumarasi || 'Lotsuz';
+      const miadStr = formatMiad(item.miad);
+      const key = `${item.stokKodu}__${lotNumarasi}__${miadStr}`;
+      const labGrubu = product?.laboratuvarGrubu || 'Diğer';
+
+      const existing = grouped.get(key) || {
+        stokKodu: item.stokKodu,
+        stokAdi: product?.stokAdi || item.stokAdi || item.stokKodu,
+        lotNumarasi,
+        miad: miadStr,
+        count: 0,
+        anaBirim,
+        laboratuvarGrubu: labGrubu,
+      };
+      existing.count += 1;
+      grouped.set(key, existing);
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
+  }, [labStock, products, selectedLab?.visualDeductionEnabled]);
+
+  const labGroupCategories = useMemo(() => {
+    const cats = new Set(listDeductionItems.map(i => i.laboratuvarGrubu));
+    return Array.from(cats).sort((a, b) => {
+      if (a === 'Diğer') return 1;
+      if (b === 'Diğer') return -1;
+      return a.localeCompare(b, 'tr');
+    });
+  }, [listDeductionItems]);
+
+  const filteredListDeductionItems = useMemo(() => {
+    let items = listDeductionItems;
+    if (selectedLabGroup) {
+      items = items.filter(i => i.laboratuvarGrubu === selectedLabGroup);
+    }
+    const q = visualSearchQuery.trim().toLocaleLowerCase('tr');
+    if (q) {
+      items = items.filter((item) =>
+        `${item.stokAdi} ${item.stokKodu} ${item.lotNumarasi}`.toLocaleLowerCase('tr').includes(q)
+      );
+    }
+    return items;
+  }, [listDeductionItems, selectedLabGroup, visualSearchQuery]);
+
+  const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string, miad?: string) => {
+    const item = labStock.find((stockItem) => {
+      const matchCode = stockItem.stokKodu === stokKodu;
+      const matchLot = (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi;
+      if (!miad) return matchCode && matchLot;
+      return matchCode && matchLot && formatMiad(stockItem.miad) === miad;
+    });
+    if (!item) {
+      toast({ title: 'Stok Bulunamadı', description: 'Bu lot için düşülecek stok kalmamış.', variant: 'destructive' });
+      return;
+    }
+    try {
+      await recordConsumption(item);
+    } catch {
+      // recordConsumption kendi toast/log yönetimini yapıyor
+    }
+  }, [labStock, recordConsumption, toast]);
+
   const handleTrashBinSubmit = useCallback(async () => {
     if (!selectedTrashDevice || trashItems.length === 0 || !selectedLab) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen cihaz seçin ve en az bir ürün ekleyin.', variant: 'destructive' });
@@ -1285,8 +1385,93 @@ export default function UrunKullanimPanel() {
 
         {/* Content area - Right 45% aligned */}
         <div className="flex-1 flex">
-          {/* Left spacer - 55% for background object visibility */}
-          <div className="hidden lg:block lg:w-[55%]" />
+          {/* Left spacer/list deduction panel */}
+          <div className="hidden lg:block lg:w-[55%] p-4">
+            {selectedLab?.visualDeductionEnabled && (
+              <div className="h-full frosted-glass-card p-4 overflow-hidden flex flex-col">
+                <div className="frosted-header mb-3">
+                  <span className="font-semibold text-base">Listeli Düşüm</span>
+                </div>
+                {/* Category filter buttons */}
+                {labGroupCategories.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLabGroup(null)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg text-sm font-semibold transition-all border",
+                        !selectedLabGroup
+                          ? "bg-primary text-primary-foreground border-primary shadow-md"
+                          : "bg-white/10 border-white/20 hover:bg-white/20 text-foreground/80"
+                      )}
+                    >
+                      Tümü ({listDeductionItems.length})
+                    </button>
+                    {labGroupCategories.map((cat) => {
+                      const catCount = listDeductionItems.filter(i => i.laboratuvarGrubu === cat).length;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setSelectedLabGroup(prev => prev === cat ? null : cat)}
+                          className={cn(
+                            "px-4 py-2 rounded-lg text-sm font-semibold transition-all border",
+                            selectedLabGroup === cat
+                              ? "bg-primary text-primary-foreground border-primary shadow-md"
+                              : "bg-white/10 border-white/20 hover:bg-white/20 text-foreground/80"
+                          )}
+                        >
+                          {cat} ({catCount})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="mb-3">
+                  <Input
+                    value={visualSearchQuery}
+                    onChange={(e) => setVisualSearchQuery(e.target.value)}
+                    placeholder="Ürün ara (ad, kod, lot)..."
+                    className="bg-white/20 border-white/20 placeholder:text-foreground/60"
+                  />
+                </div>
+                <ScrollArea className="flex-1 min-h-0 pr-2">
+                  <div className="space-y-1">
+                    {filteredListDeductionItems.map((item) => (
+                      <div
+                        key={`${item.stokKodu}-${item.lotNumarasi}`}
+                        className="flex items-center gap-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition-all px-3 py-2"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{item.stokAdi}</p>
+                          <div className="flex items-center gap-3 text-xs text-foreground/60 mt-0.5">
+                            <span>{item.stokKodu}</span>
+                            <span>Lot: {item.lotNumarasi}</span>
+                            {item.miad && item.miad !== '-' && <span>Miad: {item.miad}</span>}
+                            <span className="font-bold text-foreground/90">{item.count} {item.anaBirim}</span>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0 h-8 px-3 text-xs font-semibold"
+                          onClick={() => handleVisualDeduction(item.stokKodu, item.lotNumarasi, item.miad)}
+                        >
+                          <PackageMinus className="h-3.5 w-3.5 mr-1.5" />
+                          Stoktan Düş
+                        </Button>
+                      </div>
+                    ))}
+                    {filteredListDeductionItems.length === 0 && (
+                      <p className="text-sm text-foreground/70 text-center py-4">
+                        {visualSearchQuery || selectedLabGroup ? 'Filtreye uygun ürün bulunamadı.' : 'Seçili laboratuvarda stok bulunmuyor.'}
+                      </p>
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+          </div>
 
           {/* Right content area - 45% with cards */}
           <div className="w-full lg:w-[45%] p-4 flex flex-col gap-3">

@@ -321,7 +321,10 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
               },
             },
           }}
-          className="space-y-3"
+          className={cn(
+            "space-y-0 divide-y",
+            isDark ? "divide-white/10" : "divide-black/10"
+          )}
         >
           {items.map((item, index) => (
             <motion.li
@@ -335,24 +338,24 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
               <button
                 onClick={() => handleItemClick(item)}
                 className={cn(
-                  "w-full text-left px-5 py-4 rounded-2xl transition-all duration-200 flex items-center gap-4",
+                  "w-full text-left px-1 py-4 transition-all duration-200 flex items-center gap-4",
                   isDark
-                    ? "bg-white/5 hover:bg-white/10 border border-white/10 text-white"
-                    : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff] hover:shadow-[2px_2px_4px_#bebebe,-2px_-2px_4px_#ffffff] active:shadow-[inset_4px_4px_8px_#bebebe,inset_-4px_-4px_8px_#ffffff] text-[#333]"
+                    ? "text-white hover:bg-white/5"
+                    : "text-[#333] hover:bg-black/5"
                 )}
               >
                 {mobileIcons[item.key] ? (
                   <Image
                     src={getIconSrc(mobileIcons[item.key])}
                     alt={item.label}
-                    width={20}
-                    height={20}
-                    className="w-5 h-5 shrink-0 object-contain"
+                    width={50}
+                    height={50}
+                    className="w-[50px] h-[50px] shrink-0 object-contain"
                   />
                 ) : item.icon ? (
                   <item.icon
                     className={cn(
-                      "w-5 h-5 shrink-0",
+                      "w-[50px] h-[50px] shrink-0",
                       isDark ? "text-amber-400" : "text-amber-600"
                     )}
                   />

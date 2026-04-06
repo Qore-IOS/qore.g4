@@ -1,6 +1,9 @@
-
 'use client';
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
+import { Loader2, BarChart3 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import type { ProductCode, Currency } from '@/lib/types';
@@ -16,46 +19,32 @@ import { format, eachMonthOfInterval, endOfMonth, isValid, subMonths } from 'dat
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import CostKPICard from '@/components/cost-observation/CostKPICard';
+import TrendChart from '@/components/cost-observation/TrendChart';
+import BrandDistribution from '@/components/cost-observation/BrandDistribution';
+import LocationBreakdown from '@/components/cost-observation/LocationBreakdown';
+import BrandOverviewGrid from '@/components/cost-observation/BrandOverviewGrid';
+import SessionTimeline from '@/components/cost-observation/SessionTimeline';
+import BudgetComparison from '@/components/cost-observation/BudgetComparison';
+import CapitalEfficiency from '@/components/cost-observation/CapitalEfficiency';
+import ExpiryRiskCard from '@/components/cost-observation/ExpiryRiskCard';
+import ProductGroupBreakdown from '@/components/cost-observation/ProductGroupBreakdown';
+import {
+  calculateTotalCostForRange,
+  calculateTurnoverMetrics,
+  getBrandCostBreakdown,
+  getComparisonDeltas,
+  getLocationCostBreakdown,
+  getMonthlyTrend,
+  getProductCostInCurrency,
+  getProductGroupBreakdown,
+  type SayimSession,
+  type TimeRange,
+} from '@/lib/cost-analytics';
 
-// ============================================================================
-// TYPES
-// ============================================================================
-
-interface SayimSessionItem {
-  stokKodu: string;
-  stokAdi: string;
-  marka: string;
-  stokAdedi: number;
-  cihazUstuAdedi: number;
-}
-
-interface SayimSession {
-  id: string;
-  locationType: 'lab' | 'depot';
-  locationId: string;
-  locationName: string;
-  createdAt: any;
-  createdByUid?: string;
-  createdByName?: string;
-  items: SayimSessionItem[];
-  totalBrands: number;
-  totalProducts: number;
-}
-
-const CURRENCY_SYMBOLS: Record<Currency, string> = {
-  EUR: '€',
-  USD: '$',
-  TRY: '₺',
-};
-
+const CURRENCY_SYMBOLS: Record<Currency, string> = { EUR: '€', USD: '$', TRY: '₺' };
 const PRIMARY_API_KEY = 'e69314b14644080788775553';
 const CACHE_TTL = 1000 * 60 * 60;
-
-const PIE_COLORS = [
-  '#F2994A', '#6FCF97', '#56CCF2', '#BB6BD9', '#F2C94C',
-  '#EB5757', '#2F80ED', '#27AE60', '#E2B93B', '#9B51E0',
-  '#219653', '#F2994A', '#828282', '#4F4F4F', '#2D9CDB',
-];
 
 async function fetchExchangeRates(): Promise<Record<Currency, number>> {
   const cacheKey = 'exchange_rates_cache';
@@ -75,18 +64,7 @@ async function fetchExchangeRates(): Promise<Record<Currency, number>> {
     localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
     return rates;
   } catch {
-    try {
-      const res = await fetch(`https://api.frankfurter.app/latest?from=EUR&to=USD,TRY`);
-      if (!res.ok) throw new Error('Backup failed');
-      const data = await res.json();
-      const rates = { EUR: 1, USD: data.rates.USD, TRY: data.rates.TRY };
-      localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
-      return rates;
-    } catch {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) return JSON.parse(cached).data;
-      return { EUR: 1, USD: 1.08, TRY: 38.5 };
-    }
+    return { EUR: 1, USD: 1.08, TRY: 38.5 };
   }
 }
 
@@ -153,8 +131,6 @@ function getLatestPerLocation(sessions: SayimSession[]): SayimSession[] {
 
 interface CostDashboardPanelProps {
   productCodes: ProductCode[];
-  depoStok: any[];
-  tuketimKayitlari: any[];
 }
 
 type TimePeriod = 'latest' | '3m' | '6m' | '12m' | 'all';
@@ -164,22 +140,23 @@ type TimePeriod = 'latest' | '3m' | '6m' | '12m' | 'all';
 // ============================================================================
 
 export default function CostDashboardPanel({ productCodes }: CostDashboardPanelProps) {
+  const router = useRouter();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [rates, setRates] = useState<Record<Currency, number> | null>(null);
   const [currency, setCurrency] = useState<Currency>('TRY');
-  const [isLoading, setIsLoading] = useState(true);
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('12m');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const { currentCompanyId, isSuperAdmin } = useAuth();
 
-  // Fetch exchange rates and sayım sessions
   useEffect(() => {
     const load = async () => {
-      setIsLoading(true);
+      setLoading(true);
       try {
-        const [ratesData, sessionsSnap] = await Promise.all([
+        const [rateData, sessionSnap, depoSnap] = await Promise.all([
           fetchExchangeRates(),
           getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
+          getDocs(collection(db, 'depoStok')),
         ]);
         setRates(ratesData);
         const allSessions = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
@@ -191,15 +168,16 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
           setRates(ratesData);
         } catch {}
       } finally {
-        setIsLoading(false);
+        setLoading(false);
       }
     };
+
     load();
   }, [currentCompanyId, isSuperAdmin]);
 
   const productMap = useMemo(() => {
     const map = new Map<string, ProductCode>();
-    productCodes.forEach(p => map.set(p.stokKodu, p));
+    productCodes.forEach((p) => map.set(p.stokKodu, p));
     return map;
   }, [productCodes]);
 
@@ -403,7 +381,11 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     return products.filter(p => p.cost > 0).sort((a, b) => b.cost - a.cost);
   }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
 
-  // ---- RENDER ----
+  const monthlyBudget = useMemo(() => {
+    const local = Number(localStorage.getItem('cost_dashboard_budget') || 0);
+    if (local > 0) return local;
+    return totalCost * 0.9;
+  }, [totalCost]);
 
   if (isLoading) {
     return (
@@ -462,33 +444,20 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
 
   return (
     <div className="cihaz-shell min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
-
-        {/* ===== HEADER ===== */}
-        <div className="flex items-center justify-between gap-4 mb-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24 space-y-5">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
               <BarChart3 className="h-5 w-5 text-[var(--dashboard-accent)]" />
             </span>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">Maliyet Gözlem</h1>
-              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Sayım verilerine dayalı maliyet analizi</p>
+              <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">Maliyet Gözlem Merkezi</h1>
+              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">CFO görünümü: delta, konsolide toplam, bütçe ve risk analizi</p>
             </div>
           </div>
-
-          {/* Currency switcher */}
           <div className="flex items-center gap-1.5">
-            {(['EUR', 'USD', 'TRY'] as Currency[]).map(cur => (
-              <button
-                key={cur}
-                onClick={() => setCurrency(cur)}
-                className={cn(
-                  'px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200',
-                  currency === cur
-                    ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
-                    : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
-                )}
-              >
+            {(['EUR', 'USD', 'TRY'] as Currency[]).map((cur) => (
+              <button key={cur} onClick={() => setCurrency(cur)} className={`px-3 py-1.5 rounded-xl text-xs font-semibold ${currency === cur ? 'bg-[var(--dashboard-accent)] text-white' : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'}`}>
                 {CURRENCY_SYMBOLS[cur]} {cur}
               </button>
             ))}

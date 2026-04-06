@@ -12,6 +12,8 @@ type NotificationType =
   | 'lab_count_completed'
   | 'fault_opened'
   | 'fault_closed'
+  | 'spare_part_transfer'
+  | 'maliyet_sayim_davet'
   | 'user_request_created'
   | 'user_request_completed'
   | 'custom';

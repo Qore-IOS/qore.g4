@@ -1390,7 +1390,7 @@
 
 /* Dock item styling - Apple-like colorful 3D icons */
 .dock-item-wrapper {
-  @apply w-10 h-10 rounded-xl flex items-center justify-center;
+  @apply w-12 h-12 rounded-xl flex items-center justify-center;
   position: relative;
   transition: background 0.15s ease;
 }
@@ -1427,7 +1427,7 @@
 
 /* Icon sizing - colorful gradient applied inline via style */
 .dock-item-icon {
-  @apply w-5 h-5;
+  @apply w-6 h-6;
   transition: filter 0.15s ease;
 }
 
@@ -1635,11 +1635,198 @@
   border-top-color: var(--dashboard-surface) !important;
 }
 
-/* Dot marker reset */
-.device-map-dot,
+/* Marker reset */
 .device-map-hospital {
   background: transparent !important;
   border: none !important;
+}
+
+/* Warning dot pulsing animation for maintenance approaching */
+.device-map-stat-dot-warning {
+  animation: pulse-warning 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Device list popup overlay */
+.device-map-popup-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+
+.device-map-popup {
+  background: var(--dashboard-surface, #F3F2EF);
+  border: 1px solid var(--dashboard-stroke, rgba(0,0,0,0.06));
+  border-radius: 20px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.08);
+  width: 90%;
+  max-width: 420px;
+  max-height: 75%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.device-map-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--dashboard-stroke, rgba(0,0,0,0.06));
+  flex-shrink: 0;
+}
+
+.device-map-popup-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--dashboard-text);
+  margin: 0;
+}
+
+.device-map-popup-subtitle {
+  font-size: 0.75rem;
+  color: var(--dashboard-muted);
+  margin: 2px 0 0;
+}
+
+.device-map-popup-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: none;
+  background: var(--dashboard-surface-2, #e8ecf1);
+  color: var(--dashboard-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--dashboard-pressed);
+  transition: background 0.15s, color 0.15s;
+}
+
+.device-map-popup-close:hover {
+  background: var(--dashboard-surface, #F3F2EF);
+  color: var(--dashboard-text);
+}
+
+.device-map-popup-body {
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.device-map-popup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.device-map-popup-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 4px 0;
+}
+
+.device-map-popup-section-faulty {
+  color: #ef4444;
+}
+
+.device-map-popup-section-maintenance {
+  color: #f59e0b;
+}
+
+.device-map-popup-section-healthy {
+  color: #22c55e;
+}
+
+.device-map-popup-section-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.device-map-popup-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--dashboard-surface-2, #e8ecf1);
+  border: 1px solid transparent;
+  box-shadow: var(--dashboard-pressed);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+  width: 100%;
+}
+
+.device-map-popup-device:hover {
+  box-shadow: var(--dashboard-raised-soft);
+  border-color: var(--dashboard-stroke, rgba(0,0,0,0.06));
+}
+
+.device-map-popup-device-faulty:hover {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.device-map-popup-device-maintenance:hover {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.device-map-popup-device-healthy:hover {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.device-map-popup-device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.device-map-popup-device-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--dashboard-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-map-popup-device-serial {
+  font-size: 0.72rem;
+  color: var(--dashboard-muted);
+  font-family: monospace;
+}
+
+.device-map-popup-device-arrow {
+  font-size: 14px;
+  color: var(--dashboard-muted);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.device-map-popup-device:hover .device-map-popup-device-arrow {
+  transform: translateX(3px);
 }
 
 /* Responsive */
@@ -1663,6 +1850,10 @@
   }
   .device-map-title {
     font-size: 1.15rem;
+  }
+  .device-map-popup {
+    width: 95%;
+    max-height: 80%;
   }
 }
 

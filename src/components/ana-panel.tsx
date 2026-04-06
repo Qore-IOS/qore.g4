@@ -40,11 +40,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Label } from '@/components/ui/label';
 
 // Icons
-import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download } from 'lucide-react';
+import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
 
 // Firebase
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -58,10 +58,12 @@ import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
 import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
+import BulkBarcodeScanModal, { type BulkScanResultItem } from '@/components/mal-kabul/BulkBarcodeScanModal';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // =============================================================================
@@ -241,6 +243,90 @@ function upsertGroupedRow(
   });
 }
 
+const turkishFold = (value: string) =>
+  (value || '')
+    .toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I')
+    .replace(/Ş/g, 'S')
+    .replace(/Ğ/g, 'G')
+    .replace(/Ü/g, 'U')
+    .replace(/Ö/g, 'O')
+    .replace(/Ç/g, 'C');
+
+const parseDateLike = (raw: string | undefined): string => {
+  if (!raw) return '';
+  const normalized = raw.replace(/[^\d./-]/g, '');
+  const compact = normalized.replace(/[./-]/g, '');
+  if (/^\d{8}$/.test(compact)) {
+    const day = compact.slice(0, 2);
+    const month = compact.slice(2, 4);
+    const year = compact.slice(4, 8);
+    return normalizeMiad(`${day}.${month}.${year}`);
+  }
+  return normalizeMiad(normalized);
+};
+
+function parseLabelText(
+  text: string,
+  productCodes: ProductCode[]
+): { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string } | null {
+  const normalizedText = turkishFold(text);
+  const textByLines = normalizedText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const byCode = productCodes.find((p) => {
+    const code = turkishFold((p.stokKodu || '').trim());
+    if (!code) return false;
+    const escapedCode = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escapedCode}\\b`).test(normalizedText);
+  });
+
+  const byName = !byCode
+    ? productCodes
+        .map((p) => ({
+          product: p,
+          foldedName: turkishFold((p.stokAdi || '').trim()).replace(/[^A-Z0-9 ]/g, ' '),
+        }))
+        .filter(({ foldedName }) => foldedName.length >= 4)
+        .find(({ foldedName }) => normalizedText.includes(foldedName))?.product
+    : null;
+
+  const product = byCode || byName;
+  if (!product?.stokKodu) return null;
+
+  let lotNumarasi = '';
+  const lotKeywordMatch = normalizedText.match(/(?:^|\s)LOT(?:\s*NO|\s*NUMARASI)?\s*[:\-]?\s*([A-Z0-9\-/.]{3,})/i);
+  if (lotKeywordMatch?.[1]) {
+    lotNumarasi = lotKeywordMatch[1].replace(/[^A-Z0-9\-/.]/g, '');
+  } else {
+    const lineWithLot = textByLines.find((line) => line.includes('LOT'));
+    if (lineWithLot) {
+      const fallback = lineWithLot.match(/([A-Z0-9\-/.]{4,})/g)?.pop();
+      if (fallback) lotNumarasi = fallback;
+    }
+  }
+
+  let miad = '';
+  const miadKeywordMatch = normalizedText.match(/(?:MIAD|SKT|STT|SON\s*TUKETIM(?:\s*TARIHI)?)\s*[:\-]?\s*([0-9./-]{6,12})/i);
+  if (miadKeywordMatch?.[1]) {
+    miad = parseDateLike(miadKeywordMatch[1]);
+  } else {
+    const anyDate = normalizedText.match(/\b([0-3]?\d[./-][01]?\d[./-](?:\d{2}|\d{4}))\b/);
+    if (anyDate?.[1]) {
+      miad = parseDateLike(anyDate[1]);
+    }
+  }
+
+  return {
+    stokKodu: product.stokKodu,
+    stokAdi: product.stokAdi || '',
+    lotNumarasi: lotNumarasi || '',
+    miad: miad || '',
+  };
+}
+
 
 interface AnaPanelProps {}
 
@@ -310,7 +396,7 @@ const enqueueSerialHistory = (
 export default function AnaPanel(props: AnaPanelProps) {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   // Use TanStack Query for static data - shared cache, 1 hour stale time
   const { data: depots = [], isLoading: depotsLoading } = useDepots();
@@ -345,6 +431,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
+  const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
   const [showManualInline, setShowManualInline] = useState(false);
@@ -458,6 +546,29 @@ export default function AnaPanel(props: AnaPanelProps) {
     });
     return () => unsub();
   }, [activeSession]);
+
+  useEffect(() => {
+    if (!selectedDepotId) {
+      setPendingIrsaliyeCount(0);
+      return;
+    }
+    const unsub = onSnapshot(
+      query(collection(db, 'irsaliyeDosyalari'), orderBy('uploadedAt', 'desc')),
+      (snapshot) => {
+        let count = 0;
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const inScope = matchesCompanyScope(data, currentCompanyId, isSuperAdmin);
+          const notExpired = data?.expiresAt?.toMillis?.() > Date.now();
+          const depotMatch = data?.locationType === 'depot' && data?.locationId === selectedDepotId;
+          if (inScope && notExpired && depotMatch) count += 1;
+        });
+        setPendingIrsaliyeCount(count);
+      },
+      () => setPendingIrsaliyeCount(0)
+    );
+    return () => unsub();
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
@@ -625,6 +736,47 @@ export default function AnaPanel(props: AnaPanelProps) {
       setIsCameraScannerOpen(false);
     }
   };
+
+  const handleCameraOcrLabelScan = useCallback((ocrText: string) => {
+    const parsed = parseLabelText(ocrText, productCodes);
+    if (!parsed) {
+      flashScanFeedback('error', 'Etiketten ürün kodu/adı tespit edilemedi.');
+      playFeedback(true);
+      return;
+    }
+
+    upsertGroupedRow(
+      setScannedItems,
+      {
+        stokKodu: parsed.stokKodu,
+        stokAdi: parsed.stokAdi,
+        lot: parsed.lotNumarasi,
+        miad: parsed.miad,
+        barkod: `OCR_LABEL:${parsed.stokKodu}:${Date.now()}`,
+      },
+      (r) =>
+        !!(
+          r.isGroup &&
+          r.stokKodu === parsed.stokKodu &&
+          r.lotNumarasi === parsed.lotNumarasi &&
+          r.miad === parsed.miad
+        ),
+      1
+    );
+
+    setLastScannedProduct({
+      stokKodu: parsed.stokKodu,
+      stokAdi: parsed.stokAdi,
+      lotNumarasi: parsed.lotNumarasi,
+      miad: parsed.miad,
+      seriNumarasi: '',
+    } as ScanRow);
+    playFeedback();
+    flashScanFeedback('success', `${parsed.stokAdi || parsed.stokKodu} etiketten listeye eklendi.`);
+    if (!isBatchScanning) {
+      setIsCameraScannerOpen(false);
+    }
+  }, [flashScanFeedback, productCodes, isBatchScanning]);
   
   const handleOcrResults = (results: IrsaliyeParseResult[]) => {
     results.forEach(res => {
@@ -638,6 +790,89 @@ export default function AnaPanel(props: AnaPanelProps) {
             res.quantity
         );
     });
+  };
+
+  const handleBulkBarcodeResults = (items: BulkScanResultItem[]) => {
+    let addedSerial = 0;
+    let addedLot = 0;
+    let addedAdet = 0;
+    let skipped = 0;
+
+    items.forEach((item) => {
+      // Use matched product or try to find by katalogNo
+      const product = item.matchedProduct || productCodes.find(
+        (p) => p.stokKodu === item.katalogNo || (p as any).barcodeNumber === item.katalogNo
+      );
+      if (!product) {
+        skipped++;
+        return;
+      }
+
+      const stokKodu = product.stokKodu;
+      const stokAdi = product.stokAdi || item.urunAdi || '';
+      const lotNumarasi = item.lotNo || '';
+      const miad = item.skt || '';
+      const seriNumarasi = item.seriNo || '';
+      const adet = item.adet || 1;
+
+      // If serial number exists, add as individual serial-tracked item
+      if (seriNumarasi) {
+        // Duplicate check
+        const sessionSerials = scannedSerialsRef.current.get(stokKodu);
+        const depotSerials = existingDepotSerials.get(stokKodu);
+        if (sessionSerials?.has(seriNumarasi) || depotSerials?.has(seriNumarasi)) {
+          skipped++;
+          return;
+        }
+
+        const newItem: ScanRow = {
+          id: generateId(),
+          barkod: item.barkodVerisi || item.katalogNo || 'AI_BULK_SCAN',
+          stokKodu,
+          stokAdi,
+          lotNumarasi,
+          miad,
+          seriNumarasi,
+          rafAdresi: '',
+          irsaliyeNumarasi: '',
+          isSelected: false,
+          timestamp: new Date(),
+          isProcessed: false,
+          adet: 1,
+          isGroup: false,
+          key: `${stokKodu}-${lotNumarasi}-${miad}`,
+          bulkQrAssigned: false,
+        };
+
+        if (!scannedSerialsRef.current.has(stokKodu)) {
+          scannedSerialsRef.current.set(stokKodu, new Set());
+        }
+        scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
+        setScannedItems((prev) => [newItem, ...prev]);
+        addedSerial++;
+        addedAdet++;
+      } else {
+        // No serial - add as lot/quantity grouped item with the detected quantity
+        upsertGroupedRow(
+          setScannedItems,
+          { stokKodu, stokAdi, lot: lotNumarasi, miad, barkod: item.barkodVerisi || 'AI_BULK_SCAN' },
+          (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === lotNumarasi && r.miad === miad),
+          adet
+        );
+        addedLot++;
+        addedAdet += adet;
+      }
+    });
+
+    if (addedAdet > 0) {
+      playFeedback();
+      flashScanFeedback(
+        'success',
+        `AI Toplu Tarama: ${addedAdet} adet urun eklendi (${addedSerial} seri + ${addedLot} grup)${skipped > 0 ? `, ${skipped} atlandı` : ''}.`
+      );
+    } else {
+      flashScanFeedback('error', 'Hicbir urun eslenemedi.');
+    }
   };
 
   const lotCount = useMemo(() => {
@@ -1321,10 +1556,15 @@ export default function AnaPanel(props: AnaPanelProps) {
             </button>
             <button
               onClick={() => setIsOcrModalOpen(true)}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
+              className="cihaz-action-tile relative flex flex-col items-center justify-center gap-1 py-2.5 text-center"
             >
               <ScanLine className="h-4 w-4 text-[var(--dashboard-accent)]" />
               <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
+              {pendingIrsaliyeCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {pendingIrsaliyeCount}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -1490,6 +1730,16 @@ export default function AnaPanel(props: AnaPanelProps) {
                 <span className="sm:hidden">Toplu</span>
               </button>
               <button
+                onClick={() => setIsBulkBarcodeScanOpen(true)}
+                disabled={malKabulIsLoading}
+                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                title="AI ile toplu barkod tarama (fotoğraf çek veya yükle)"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">AI Toplu Tara</span>
+                <span className="sm:hidden">AI</span>
+              </button>
+              <button
                 onClick={clearAllScannedItems}
                 disabled={malKabulIsLoading || scannedItems.length === 0}
                 className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1536,10 +1786,22 @@ export default function AnaPanel(props: AnaPanelProps) {
                 </button>
                 <button
                   onClick={() => setIsOcrModalOpen(true)}
-                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                  className="cihaz-tool-item relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
                 >
                   <ScanLine className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
                   PDF İrsaliye Yükle
+                  {pendingIrsaliyeCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {pendingIrsaliyeCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setIsBulkBarcodeScanOpen(true)}
+                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
+                  AI Toplu Barkod Tara
                 </button>
               </div>
             </div>
@@ -1748,6 +2010,8 @@ export default function AnaPanel(props: AnaPanelProps) {
           }>
             <DynamicCameraBarcodeScanner
               onScanSuccess={handleCameraScanSuccess}
+              enableOcrLabelScan
+              onOcrLabelScan={handleCameraOcrLabelScan}
               onClose={() => isBatchScanning ? setIsBatchScanning(false) : setIsCameraScannerOpen(false)}
             />
           </Suspense>
@@ -1812,6 +2076,18 @@ export default function AnaPanel(props: AnaPanelProps) {
           onClose={() => setIsOcrModalOpen(false)}
           productCodes={productCodes}
           onResults={handleOcrResults}
+          locationType="depot"
+          locationId={selectedDepotId}
+        />
+      )}
+
+      {/* AI Bulk Barcode Scan Modal */}
+      {isBulkBarcodeScanOpen && (
+        <BulkBarcodeScanModal
+          isOpen={isBulkBarcodeScanOpen}
+          onClose={() => setIsBulkBarcodeScanOpen(false)}
+          productCodes={productCodes}
+          onResults={handleBulkBarcodeResults}
         />
       )}
     </div>
