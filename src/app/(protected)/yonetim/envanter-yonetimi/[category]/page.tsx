@@ -371,7 +371,7 @@ export default function AssetCategoryPage() {
 
       {/* ===== ADD/EDIT MODAL ===== */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col cihaz-card-strong !rounded-3xl !p-0 !gap-0 border-0">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto flex flex-col cihaz-card-strong !rounded-3xl !p-0 !gap-0 border-0">
           <div className="px-6 pt-6 pb-4 border-b border-[var(--dashboard-stroke)]">
             <DialogTitle className="text-base font-bold text-[var(--dashboard-text)]">
               {editingAsset.id ? 'Ürün Düzenle' : `Yeni ${categoryName} Ekle`}
