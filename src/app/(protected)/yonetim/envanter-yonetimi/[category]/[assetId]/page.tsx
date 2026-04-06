@@ -7,7 +7,7 @@ import { Loader2, QrCode, Save, UserCheck, ShieldCheck, History, Printer, Downlo
 import { useToast } from '@/hooks/use-toast';
 import { doc, getDoc, collection, getDocs, updateDoc, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 import QRCode from 'qrcode';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/auth-context';
@@ -87,7 +87,7 @@ export default function AssetDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const assetId = Array.isArray(params.assetId) ? params.assetId[0] : params.assetId;
   const categorySlug = Array.isArray(params.category) ? params.category[0] : params.category;
 
@@ -123,6 +123,11 @@ export default function AssetDetailPage() {
         ]);
         if (snap.exists()) {
           const data = { id: snap.id, ...snap.data() } as Asset;
+          if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) {
+            toast({ title: 'Erişim Reddedildi', description: 'Bu ürün şirketinize ait değil.', variant: 'destructive' });
+            router.push(`/yonetim/envanter-yonetimi/${categorySlug}`);
+            return;
+          }
           setAsset(data);
           setNewLocation(data.konum);
           setNewPersonel(data.teslimEdilenPersonel);
