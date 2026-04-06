@@ -13,6 +13,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp, where } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface SavedIrsaliyeFile {
   id: string;
@@ -24,6 +26,10 @@ interface SavedIrsaliyeFile {
   uploadedByName: string;
   uploadedAt: Timestamp;
   expiresAt: Timestamp;
+  companyId?: string;
+  locationType?: 'hospital' | 'depot';
+  locationId?: string;
+  locationName?: string;
 }
 
 interface IrsaliyeOcrModalProps {
@@ -31,6 +37,8 @@ interface IrsaliyeOcrModalProps {
   onClose: () => void;
   productCodes: ProductCode[];
   onResults: (results: IrsaliyeParseResult[]) => void;
+  locationType?: 'depot' | 'hospital';
+  locationId?: string;
 }
 
 export default function IrsaliyeOcrModal({
@@ -38,7 +46,10 @@ export default function IrsaliyeOcrModal({
   onClose,
   productCodes,
   onResults,
+  locationType,
+  locationId,
 }: IrsaliyeOcrModalProps) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [processing, setProcessing] = useState(false);
@@ -65,8 +76,13 @@ export default function IrsaliyeOcrModal({
       const files: SavedIrsaliyeFile[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.expiresAt && data.expiresAt.toMillis() > Date.now()) {
-          files.push({ id: docSnap.id, ...data } as SavedIrsaliyeFile);
+        const file = { id: docSnap.id, ...data } as SavedIrsaliyeFile;
+        const inScope = matchesCompanyScope(file, currentCompanyId, isSuperAdmin);
+        const locationMatch = locationType && locationId
+          ? file.locationType === locationType && file.locationId === locationId
+          : true;
+        if (data.expiresAt && data.expiresAt.toMillis() > Date.now() && inScope && locationMatch) {
+          files.push(file);
         }
       });
       setSavedFiles(files);
@@ -76,7 +92,7 @@ export default function IrsaliyeOcrModal({
     });
 
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, currentCompanyId, isSuperAdmin, locationType, locationId]);
 
 
   const processExtractedText = (text: string, source: 'Camera' | 'PDF') => {
