@@ -1390,7 +1390,7 @@
 
 /* Dock item styling - Apple-like colorful 3D icons */
 .dock-item-wrapper {
-  @apply w-10 h-10 rounded-xl flex items-center justify-center;
+  @apply w-12 h-12 rounded-xl flex items-center justify-center;
   position: relative;
   transition: background 0.15s ease;
 }
@@ -1427,7 +1427,7 @@
 
 /* Icon sizing - colorful gradient applied inline via style */
 .dock-item-icon {
-  @apply w-5 h-5;
+  @apply w-6 h-6;
   transition: filter 0.15s ease;
 }
 
