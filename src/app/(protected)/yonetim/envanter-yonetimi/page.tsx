@@ -571,7 +571,7 @@ export default function EnvanterYonetimiPage() {
                         </div>
                       </Link>
                       {/* Edit / Delete on hover */}
-                      <div className="absolute top-8 -left-1 flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                      <div className="absolute top-8 right-2 flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                         <button
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenModal(category); }}
                           className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface)] shadow-sm flex items-center justify-center text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"

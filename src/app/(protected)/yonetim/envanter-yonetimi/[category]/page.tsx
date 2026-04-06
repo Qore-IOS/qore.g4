@@ -270,12 +270,12 @@ export default function AssetCategoryPage() {
               </Link>
             </div>
             <div className="flex-1 flex items-center justify-center">
-              <div className="relative pl-20 min-h-[76px] flex flex-col justify-center">
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-16 h-16 flex items-center justify-center overflow-visible">
+              <div className="relative pl-32 min-h-[120px] flex flex-col justify-center">
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-28 h-28 flex items-center justify-center overflow-visible">
                   {categoryIcon ? (
-                    <NextImage src={getIconSrc(categoryIcon)} alt="" width={58} height={58} className="object-contain" />
+                    <NextImage src={getIconSrc(categoryIcon)} alt="" width={116} height={116} className="object-contain" />
                   ) : (
-                    <Package className="w-9 h-9 text-[var(--dashboard-muted)]" />
+                    <Package className="w-16 h-16 text-[var(--dashboard-muted)]" />
                   )}
                 </div>
                 <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] capitalize text-center">{categoryName}</h1>
