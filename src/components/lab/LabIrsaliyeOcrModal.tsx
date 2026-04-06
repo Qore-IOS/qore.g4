@@ -88,22 +88,45 @@ export default function LabIrsaliyeOcrModal({
   }, [isOpen, currentCompanyId, isSuperAdmin, locationType, locationId]);
 
   const processExtractedText = (text: string) => {
-    const rawItems = parseIrsaliyeText(text, productCodes);
-    const processedItems = rawItems.map(item => {
-      const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-      return {
-        ...item,
-        productName: product?.stokAdi || 'Bilinmeyen Ürün',
-        quantity: item.quantity || 1,
-        confidence: product ? 'high' : 'low',
-      };
-    });
-    setDetectedItems(prev => [...prev, ...processedItems]);
-    if (processedItems.length === 0) {
-      toast({ title: 'PDF tarandı ancak ürün/miktar eşleşmesi bulunamadı.', variant: 'default' });
-    } else {
-      toast({ title: 'Başarılı', description: `${processedItems.length} ürün başarıyla ayrıştırıldı.` });
-    }
+    (async () => {
+      let rawItems: IrsaliyeParseResult[] = [];
+      try {
+        const aiRes = await fetch('/api/ai/irsaliye-parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            productCodes: productCodes.map((p) => ({ stokKodu: p.stokKodu, stokAdi: p.stokAdi })),
+          }),
+        });
+        const aiData = await aiRes.json().catch(() => ({}));
+        if (Array.isArray(aiData?.parsed) && aiData.parsed.length > 0) {
+          rawItems = aiData.parsed as IrsaliyeParseResult[];
+        }
+      } catch (error) {
+        console.warn('AI irsaliye parse unavailable, falling back local parser:', error);
+      }
+
+      if (rawItems.length === 0) {
+        rawItems = parseIrsaliyeText(text, productCodes);
+      }
+
+      const processedItems = rawItems.map(item => {
+        const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+        return {
+          ...item,
+          productName: product?.stokAdi || 'Bilinmeyen Ürün',
+          quantity: item.quantity || 1,
+          confidence: product ? 'high' : 'low',
+        };
+      });
+      setDetectedItems(prev => [...prev, ...processedItems]);
+      if (processedItems.length === 0) {
+        toast({ title: 'PDF tarandı ancak ürün/miktar eşleşmesi bulunamadı.', variant: 'default' });
+      } else {
+        toast({ title: 'Başarılı', description: `${processedItems.length} ürün başarıyla ayrıştırıldı.` });
+      }
+    })();
   };
 
   const handleSelectSavedFile = async (file: SavedIrsaliyeFile) => {
