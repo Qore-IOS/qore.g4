@@ -19,10 +19,11 @@ import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductC
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
-import { formatMiad } from '@/lib/date';
+import { formatMiad, normalizeMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
+import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
 
 function normalizeKey(key: string): string {
   return key
@@ -119,6 +120,8 @@ export default function LaboratuvarYonetimiPanel() {
   const [isParsingExcel, setIsParsingExcel] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
+  const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Use TanStack Query hooks for data fetching
@@ -539,6 +542,70 @@ export default function LaboratuvarYonetimiPanel() {
     }
   }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
 
+  const handleOcrResults = useCallback(async (
+    results: LabOcrResult[],
+    file: { id: string; storagePath: string; fileName: string }
+  ) => {
+    if (!selectedLabId || results.length === 0) return;
+    setIsOcrProcessing(true);
+    try {
+      const batch = writeBatch(db);
+      let totalDocs = 0;
+
+      for (const item of results) {
+        const product = products.find(p => p.stokKodu === item.stokKodu);
+        if (!product) continue;
+
+        const qty = Math.max(1, item.quantity || 1);
+        for (let i = 0; i < qty; i++) {
+          const ref = doc(collection(db, 'depoStok'));
+          batch.set(ref, {
+            stokKodu: item.stokKodu,
+            stokAdi: product.stokAdi || item.stokKodu,
+            lotNumarasi: item.lot || '',
+            miad: item.miad ? normalizeMiad(item.miad) : '',
+            seriNumarasi: '',
+            isShipped: true,
+            hedefKurumId: selectedLabId,
+            hedefKurum: selectedLabName,
+            eklenmeTarihi: Timestamp.now(),
+            sevkTarihi: Timestamp.now(),
+            kaynak: 'irsaliye_ocr',
+            createdByName: currentUserProfile?.name || currentUserProfile?.email || 'Unknown',
+            createdByUid: currentUserProfile?.uid || null,
+          });
+          totalDocs++;
+        }
+      }
+
+      await batch.commit();
+      await touchStockMetadata();
+      await invalidateDepoStok();
+
+      // Optional cleanup of consumed file
+      await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
+      await fetch('/api/storage/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: file.storagePath }),
+      });
+
+      toast({
+        title: 'Stok girişi tamamlandı',
+        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi.`,
+      });
+    } catch (error: any) {
+      console.error('Lab OCR stock entry error:', error);
+      toast({
+        title: 'Hata',
+        description: error?.message || 'İrsaliye işlenirken hata oluştu.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  }, [selectedLabId, selectedLabName, products, currentUserProfile, toast, invalidateDepoStok]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -588,6 +655,18 @@ export default function LaboratuvarYonetimiPanel() {
                         >
                         {isParsingExcel ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Upload className="mr-2 h-5 w-5" />}
                         Excel ile Stok Ekle
+                    </Button>
+                    <Button
+                        onClick={() => setIsOcrModalOpen(true)}
+                        disabled={!selectedLabId || isOcrProcessing}
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                        >
+                        {isOcrProcessing
+                          ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                          : <FileSpreadsheet className="mr-2 h-5 w-5" />
+                        }
+                        İrsaliye Seç
                     </Button>
                     <input
                       ref={fileInputRef}
@@ -889,6 +968,15 @@ export default function LaboratuvarYonetimiPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <LabIrsaliyeOcrModal
+        isOpen={isOcrModalOpen}
+        onClose={() => setIsOcrModalOpen(false)}
+        productCodes={products}
+        onResults={handleOcrResults}
+        locationType="hospital"
+        locationId={selectedLabId}
+      />
     </div>
   );
 }
