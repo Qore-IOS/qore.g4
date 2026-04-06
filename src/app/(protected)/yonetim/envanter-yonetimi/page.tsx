@@ -555,12 +555,12 @@ export default function EnvanterYonetimiPage() {
                   return (
                     <div key={category.id} className="group relative">
                       <Link href={`/yonetim/envanter-yonetimi/${encodeURIComponent(category.name)}`} className="block">
-                        <div className="cihaz-action-tile relative p-5 flex flex-col items-center text-center min-h-[130px] justify-center">
-                          <div className="w-11 h-11 rounded-2xl bg-[var(--dashboard-surface-2)] flex items-center justify-center mb-3 overflow-hidden">
+                        <div className="cihaz-action-tile relative p-5 pt-12 flex flex-col items-center text-center min-h-[150px] justify-center overflow-visible">
+                          <div className="absolute -top-5 -left-4 w-20 h-20 flex items-center justify-center overflow-visible">
                             {envanterIcons[category.name] ? (
-                              <NextImage src={getIconSrc(envanterIcons[category.name])} alt="" width={28} height={28} className="object-contain" />
+                              <NextImage src={getIconSrc(envanterIcons[category.name])} alt="" width={72} height={72} className="object-contain" />
                             ) : (
-                              <Icon className="w-5 h-5 text-[var(--dashboard-muted)]" />
+                              <Icon className="w-10 h-10 text-[var(--dashboard-muted)]" />
                             )}
                           </div>
                           <p className="text-sm font-semibold text-[var(--dashboard-text)] leading-tight line-clamp-2">{category.name}</p>
@@ -571,7 +571,7 @@ export default function EnvanterYonetimiPage() {
                         </div>
                       </Link>
                       {/* Edit / Delete on hover */}
-                      <div className="absolute top-2 left-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                      <div className="absolute top-8 right-2 flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                         <button
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenModal(category); }}
                           className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface)] shadow-sm flex items-center justify-center text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
